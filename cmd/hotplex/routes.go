@@ -168,6 +168,15 @@ func setupRoutes(
 	adminMux.HandleFunc("DELETE /admin/bots/{name}", adminAPI.HandleDeleteBot)
 	adminMux.HandleFunc("PUT /admin/bots/{name}/config/{file}", adminAPI.HandleWriteAgentConfigFile)
 
+	// Channel default config API (platform-level team defaults). Platforms
+	// without a bot instance — webchat owns dir/webchat/ team defaults but
+	// never appears in the bot registry — need a dedicated entry point that
+	// addresses the dir/{platform}/ layer directly. The literal "platform"
+	// segment is more specific than the {name} wildcard above, so these routes
+	// never collide with the bot-level routes (different segment counts). #796
+	adminMux.HandleFunc("GET /admin/bots/platform/{platform}/config/{file}", adminAPI.HandleGetPlatformAgentConfigFile)
+	adminMux.HandleFunc("PUT /admin/bots/platform/{platform}/config/{file}", adminAPI.HandleWritePlatformAgentConfigFile)
+
 	// API key user management
 	adminMux.HandleFunc("GET /admin/api-keys", adminAPI.HandleAPIKeyUserList)
 	adminMux.HandleFunc("POST /admin/api-keys", adminAPI.HandleAPIKeyUserCreate)

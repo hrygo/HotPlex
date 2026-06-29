@@ -125,6 +125,26 @@ func KnownFiles() []string {
 	return slices.Clone(configFiles)
 }
 
+// knownPlatforms lists platform identifiers that own a platform-level agent
+// config directory (dir/<platform>/). These are first-class platforms whose
+// team-default files resolve through Load/LoadForWorkspace. Order is stable so
+// diagnostics render deterministically.
+var knownPlatforms = []string{"slack", "feishu", "webchat"}
+
+// KnownPlatforms returns the list of recognized platform identifiers for
+// validation and diagnostics. The returned slice is a copy and may be mutated
+// by callers without affecting the package state.
+func KnownPlatforms() []string {
+	return slices.Clone(knownPlatforms)
+}
+
+// IsValidPlatform reports whether platform is a recognized identifier that may
+// own platform-level team-default files (dir/<platform>/). Used by admin
+// channel-config endpoints to reject unknown platforms before path resolution.
+func IsValidPlatform(platform string) bool {
+	return slices.Contains(knownPlatforms, platform)
+}
+
 // shouldExclude reports whether a config file should be skipped from injection.
 // baseName is matched case-insensitively against the exclude list.
 // META-COGNITION.md is never excluded (it is go:embed, always injected outside Load).

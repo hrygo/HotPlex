@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/web"
 )
 
@@ -319,6 +320,101 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 		return
 	}
 	a.log.Info("admin: agent config file written", "bot", name, "file", fileStr, "admin", adminKeyPrefix(r))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleGetPlatformAgentConfigFile reads a single platform-level (channel team
+// default) agent config file, identified by platform rather than a bot name.
+//
+// @Summary      Get channel default agent config file
+// @Description  Returns the content of a single platform-level agent config file (channel team default). Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.
+// @Tags         Admin API
+// @Produce      json
+// @Security     AdminBearerAuth
+// @Param        platform  path  string  true  "Platform identifier"  Enums(webchat,slack,feishu)
+// @Param        file      path  string  true  "Config file name"     Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Success      200  {object}  AgentConfigFile
+// @Failure      400  {object}  ErrorResponse  "Invalid platform or config file name"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
+// @Router       /admin/bots/platform/{platform}/config/{file} [get]
+// GET /admin/bots/platform/{platform}/config/{file}
+func (a *AdminAPI) HandleGetPlatformAgentConfigFile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, ScopeAdminRead) {
+		return
+	}
+	if a.botConfig == nil {
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
+		return
+	}
+	platform := r.PathValue("platform")
+	if !agentconfig.IsValidPlatform(platform) {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid platform %q", platform))
+		return
+	}
+	fileStr := r.PathValue("file")
+	fileName := AgentConfigFileName(fileStr)
+	if !ValidConfigFiles[fileName] {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid config file %q", fileStr))
+		return
+	}
+	result, err := a.botConfig.GetPlatformAgentConfigFile(r.Context(), platform, fileName)
+	if err != nil {
+		respondStoreError(w, a.log, "admin: get platform agent config file", err)
+		return
+	}
+	respondJSON(w, result)
+}
+
+// HandleWritePlatformAgentConfigFile writes content to a single platform-level
+// (channel team default) agent config file.
+//
+// @Summary      Write channel default agent config file
+// @Description  Writes content to a single platform-level agent config file (channel team default). Used for platforms without a bot instance, e.g. webchat. Requires admin:write scope.
+// @Tags         Admin API
+// @Accept       json
+// @Security     AdminBearerAuth
+// @Param        platform  path  string                   true  "Platform identifier"  Enums(webchat,slack,feishu)
+// @Param        file      path  string                   true  "Config file name"     Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Param        body      body  WriteAgentConfigRequest  true  "File content"
+// @Success      204  "File written"
+// @Failure      400  {object}  ErrorResponse  "Invalid platform/config file or write failed"
+// @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Router       /admin/bots/platform/{platform}/config/{file} [put]
+// PUT /admin/bots/platform/{platform}/config/{file}
+func (a *AdminAPI) HandleWritePlatformAgentConfigFile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, ScopeAdminWrite) {
+		return
+	}
+	if a.botConfig == nil {
+		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "bot config provider not available")
+		return
+	}
+	platform := r.PathValue("platform")
+	if !agentconfig.IsValidPlatform(platform) {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid platform %q", platform))
+		return
+	}
+	fileStr := r.PathValue("file")
+	fileName := AgentConfigFileName(fileStr)
+	if !ValidConfigFiles[fileName] {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid config file %q", fileStr))
+		return
+	}
+
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON")
+		return
+	}
+
+	if err := a.botConfig.WritePlatformAgentConfigFile(r.Context(), platform, fileName, body.Content); err != nil {
+		a.log.Error("admin: write platform agent config file", "err", err)
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "write failed")
+		return
+	}
+	a.log.Info("admin: platform agent config file written", "platform", platform, "file", fileStr, "admin", adminKeyPrefix(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 

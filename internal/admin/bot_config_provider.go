@@ -136,4 +136,18 @@ type BotConfigProvider interface {
 	// WriteAgentConfigFile writes content to a single agent config file
 	// for the named bot. The file name must appear in ValidConfigFiles.
 	WriteAgentConfigFile(ctx context.Context, botName string, file AgentConfigFileName, content string) error
+
+	// GetPlatformAgentConfigFile reads a single platform-level (channel team
+	// default) agent config file, identified by platform rather than a bot
+	// name. This addresses the dir/{platform}/ layer directly and does not
+	// require a registered bot — webchat, for example, owns dir/webchat/ team
+	// defaults but has no bot instance in the messaging registry. The platform
+	// must be a recognized identifier (see agentconfig.IsValidPlatform).
+	GetPlatformAgentConfigFile(ctx context.Context, platform string, file AgentConfigFileName) (*AgentConfigFile, error)
+
+	// WritePlatformAgentConfigFile writes content to a single platform-level
+	// agent config file. The platform must be recognized and the file name
+	// must appear in ValidConfigFiles. Writes serve as channel team defaults,
+	// overridden per-workspace by LoadForWorkspace's existing precedence.
+	WritePlatformAgentConfigFile(ctx context.Context, platform string, file AgentConfigFileName, content string) error
 }

@@ -416,6 +416,140 @@
                 }
             }
         },
+        "/admin/bots/platform/{platform}/config/{file}": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Returns the content of a single platform-level agent config file (channel team default). Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Get channel default agent config file",
+                "parameters": [
+                    {
+                        "enum": [
+                            "webchat",
+                            "slack",
+                            "feishu"
+                        ],
+                        "type": "string",
+                        "description": "Platform identifier",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "SOUL.md",
+                            "AGENTS.md",
+                            "SKILLS.md",
+                            "USER.md",
+                            "MEMORY.md"
+                        ],
+                        "type": "string",
+                        "description": "Config file name",
+                        "name": "file",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.AgentConfigFile"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid platform or config file name",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope: need admin:read",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Writes content to a single platform-level agent config file (channel team default). Used for platforms without a bot instance, e.g. webchat. Requires admin:write scope.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Write channel default agent config file",
+                "parameters": [
+                    {
+                        "enum": [
+                            "webchat",
+                            "slack",
+                            "feishu"
+                        ],
+                        "type": "string",
+                        "description": "Platform identifier",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "SOUL.md",
+                            "AGENTS.md",
+                            "SKILLS.md",
+                            "USER.md",
+                            "MEMORY.md"
+                        ],
+                        "type": "string",
+                        "description": "Config file name",
+                        "name": "file",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "File content",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.WriteAgentConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "File written"
+                    },
+                    "400": {
+                        "description": "Invalid platform/config file or write failed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope: need admin:write",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/bots/{name}": {
             "get": {
                 "security": [

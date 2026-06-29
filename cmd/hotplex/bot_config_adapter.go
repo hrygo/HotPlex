@@ -276,6 +276,49 @@ func (a *botConfigAdapter) WriteAgentConfigFile(ctx context.Context, botName str
 	return nil
 }
 
+// GetPlatformAgentConfigFile reads a single platform-level (channel team
+// default) agent config file. Unlike GetAgentConfigFile it addresses the
+// dir/{platform}/ layer directly with an empty botName, so platforms without a
+// bot instance (e.g. webchat) are reachable without consulting the messaging
+// registry. The platform must be a recognized identifier.
+func (a *botConfigAdapter) GetPlatformAgentConfigFile(ctx context.Context, platform string, file admin.AgentConfigFileName) (*admin.AgentConfigFile, error) {
+	if !agentconfig.IsValidPlatform(platform) {
+		return nil, fmt.Errorf("unknown platform %q", platform)
+	}
+
+	// Empty botName: resolveFile skips the bot level and resolves platform →
+	// global, matching LoadForWorkspace's team-default semantics for webchat.
+	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, "")
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, "", excl...)
+	if err != nil {
+		return nil, fmt.Errorf("load platform agent config: %w", err)
+	}
+
+	content := getConfigField(configs, file)
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, "", string(file))
+
+	return &admin.AgentConfigFile{
+		Content: content,
+		Source:  source,
+		Size:    len(content),
+		File:    string(file),
+	}, nil
+}
+
+// WritePlatformAgentConfigFile writes content to a single platform-level
+// agent config file (channel team default). An empty platform-level file lets
+// resolution fall through to the global layer, matching the read semantics.
+func (a *botConfigAdapter) WritePlatformAgentConfigFile(ctx context.Context, platform string, file admin.AgentConfigFileName, content string) error {
+	if !agentconfig.IsValidPlatform(platform) {
+		return fmt.Errorf("unknown platform %q", platform)
+	}
+
+	if err := agentconfig.WriteFile(a.agentConfigDir, platform, "", string(file), content, agentconfig.MaxFileChars); err != nil {
+		return fmt.Errorf("write platform agent config file: %w", err)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
