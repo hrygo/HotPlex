@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { getChannelConfigFile, writeChannelConfigFile } from '@/lib/api/admin-bots';
 import type { AgentConfigFile } from '@/lib/types/admin';
 import { CONFIG_FILES } from './agent-config-file-list';
@@ -21,24 +21,31 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const dirty = content !== savedContent;
 
+  // Request-sequence guard: when the user switches files quickly, a stale
+  // in-flight load must not overwrite the newer file's state.
+  const loadIdRef = useRef(0);
+
   const loadFile = useCallback(async (fileKey: string) => {
     const def = CONFIG_FILES.find((f) => f.key === fileKey);
     if (!def) return;
 
+    const reqId = ++loadIdRef.current;
     setLoading(true);
     setMessage(null);
     try {
       const data = await getChannelConfigFile(platform, def.file);
+      if (reqId !== loadIdRef.current) return; // superseded by a newer switch
       setFileData(data);
       setContent(data.content);
       setSavedContent(data.content);
     } catch (err) {
+      if (reqId !== loadIdRef.current) return;
       setMessage({ type: 'error', text: String(err) });
       setFileData(null);
       setContent('');
       setSavedContent('');
     } finally {
-      setLoading(false);
+      if (reqId === loadIdRef.current) setLoading(false);
     }
   }, [platform]);
 

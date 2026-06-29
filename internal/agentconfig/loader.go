@@ -129,6 +129,11 @@ func KnownFiles() []string {
 // config directory (dir/<platform>/). These are first-class platforms whose
 // team-default files resolve through Load/LoadForWorkspace. Order is stable so
 // diagnostics render deterministically.
+//
+// Single source of truth for valid platforms: when adding one here, also
+// update the duplicated enum in docs/swagger/swagger.json and the @Param
+// Enums(...) annotations in bot_config_handlers.go (OpenAPI can't reference
+// Go vars, so the list is mirrored in three places).
 var knownPlatforms = []string{"slack", "feishu", "webchat"}
 
 // KnownPlatforms returns the list of recognized platform identifiers for
