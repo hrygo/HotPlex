@@ -44,11 +44,18 @@ HotPlex Gateway 采用纵深防御（Defense in Depth）策略，通过七层安
 
 ### 权限模式
 
+Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / OpenCode Server / ACP 四类 Worker 统一映射。空值（默认）= "Worker 默认"：CC/OCS 应用 `bypass`，Codex/ACP 沿用各自 operator 配置。
+
 | 模式 | 行为 | 适用场景 |
 |------|------|---------|
-| `default` | 敏感操作需用户审批 | 生产环境、日常开发 |
-| `plan` | 仅在规划阶段请求权限 | 复杂项目、需要人工审查 |
-| `bypassPermissions` | 所有操作自动批准 | 受信任的自动化场景、CI/CD |
+| `read-only` | 仅规划与只读，不执行写操作 | 代码审查、只读分析 |
+| `workspace` | 自动接受编辑，其他敏感操作仍需审批 | 日常开发 |
+| `auto-edit` | 全自动执行，无需逐项确认 | 受信任的自动化 |
+| `bypass` | 跳过所有权限确认 | CI/CD、沙箱环境 |
+
+权限模式作为 Workspace 属性持久化，通过 WebChat Workspace 设置或 HTTP API 配置；运行时亦可用 `/perm <模式>` 命令临时切换。各档到 Worker 原生参数的映射见[远程开发指南](remote-coding-agent.md)。
+
+> 全局配置项 `worker.default_permission_mode` 当前为 no-op（接受配置但 Gateway 不注入）；真正生效的是 Workspace 级显式 override。
 
 ### 交互超时
 

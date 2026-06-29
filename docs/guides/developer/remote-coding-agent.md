@@ -68,7 +68,24 @@ Claude Code 自主执行大部分操作，但敏感操作需你批准：
 
 **自主**：读文件、搜索代码、对话。**需确认**（5 分钟超时）：Bash 命令、文件写入。回复 `允许`/`allow`/`yes` 批准，`拒绝`/`deny`/`no` 拒绝。
 
-### 修改权限模式
+### 权限模式
+
+Workspace 级 4 档统一权限模式（#789），作为 Workspace 属性持久化，通过 WebChat Workspace 设置或 HTTP API 配置。Gateway 启动 Worker 时按各 Worker 原生参数注入：
+
+| 模式 | Claude Code | Codex（sandbox × approval） | OpenCode Server | ACP |
+|------|-------------|----------------------------|-----------------|-----|
+| `read-only` | `plan` | `read-only` × `untrusted` | `plan` | `approve=false` |
+| `workspace` | `acceptEdits` | `workspace-write` × `on-request` | `acceptEdits` | `approve=false` |
+| `auto-edit` | `auto` | `workspace-write` × `never` | `acceptEdits` | `approve=true` |
+| `bypass` | `--dangerously-skip-permissions` | `danger-full-access` × `never` | `bypassPermissions` | `approve=true` |
+
+空值（默认）= "Worker 默认"：CC/OCS 应用 `bypass`，Codex/ACP 沿用 operator 配置。
+
+> `auto-edit` 档要求较新版本的 Claude Code CLI（支持 `--permission-mode auto`）；`hotplex doctor` 的 `worker.claude_auto_mode` 检查项会探测此能力。
+
+### 运行时切换
+
+会话中可用 `/perm <模式>`（或 `$权限模式`）临时切换当前会话的权限行为（值透传至 Worker）：
 
 ```
 /perm bypassPermissions
