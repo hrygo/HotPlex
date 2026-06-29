@@ -54,10 +54,7 @@ func TestDefaultPermissionMode(t *testing.T) {
 	require.Equal(t, "workspace", Default().Worker.DefaultPermissionMode)
 }
 
-// TestValidateDefaultPermissionMode: r3 (#804) — a typo in default_permission_mode
-// must be rejected at Validate (covers startup + hot-reload, since watcher.go calls
-// Validate before applying). Otherwise the invalid tier falls through every worker
-// switch to its widest default (fail-open).
+// TestValidateDefaultPermissionMode: r3 (#804) — invalid tiers silently fail-open, so Validate must reject them (covers startup + hot-reload).
 func TestValidateDefaultPermissionMode(t *testing.T) {
 	t.Parallel()
 
