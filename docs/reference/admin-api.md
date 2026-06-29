@@ -277,7 +277,7 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 
 > 🛡️ **审计**：PATCH 写操作由 middleware 级 `admin_audit` 统一记录，action = `workspace.permission_mode.update`，actor = uid（Cookie 通道）或 `admin-token`（Bearer），target = `/admin/workspaces/{id}`。
 
-PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQUEST`（body 缺 `permission_mode`）/ `404 WORKSPACE_NOT_FOUND`（id 不存在）/ `409 WORKSPACE_VERSION_MISMATCH`（`updated_at` CAS 冲突，提示重新拉取）。
+PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQUEST`（body 缺 `permission_mode`）/ `404 WORKSPACE_NOT_FOUND`（id 不存在）/ `409 WORKSPACE_VERSION_MISMATCH`（`updated_at` CAS 冲突；或并发更新下 workspace 恰有活跃会话时的 CAS heuristic 误判——本端点只改 `permission_mode`、不动 `work_dir`，活跃会话不真正阻塞，故两种成因都应重新 GET 最新 `updated_at` 后重试，新值仅对新会话生效）。
 
 ## Gateway API 端点
 
