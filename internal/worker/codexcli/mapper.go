@@ -34,10 +34,12 @@ type Mapper struct {
 	// maxTokens source for the get_context_usage control channel.
 	contextWindow int64
 
-	// mu guards lastUsage, model, and contextWindow. trackTokenUsage,
-	// trackedUsageStats, and Reset run in the manager's read goroutine, while
-	// LastContextUsage and SetModel are invoked from worker goroutines
-	// (get_context_usage control channel and thread/start).
+	// mu guards lastUsage, model, contextWindow, and turnID.
+	// trackTokenUsage and trackedUsageStats run in the readNotification
+	// goroutine; Reset runs in the monitorProcess goroutine; LastContextUsage
+	// and SetModel are invoked from worker goroutines (get_context_usage
+	// control channel and thread/start). turnID is read in trackTokenUsage and
+	// written by Reset/turn/started, so it must be accessed under lock.
 	mu sync.Mutex
 }
 
@@ -671,12 +673,13 @@ func (m *Mapper) trackTokenUsage(params json.RawMessage) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Only accept usage for the current turn to prevent stale data.
+	// turnID must be read under lock: Reset() writes it from a different goroutine.
 	if m.turnID != "" && p.TurnID != m.turnID {
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if p.TokenUsage.Last != nil {
 		m.lastUsage = p.TokenUsage.Last
 	}
