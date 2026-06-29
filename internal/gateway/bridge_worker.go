@@ -345,18 +345,23 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 }
 
 // resolveWorkspacePermissionMode returns the effective permission mode tier for a
-// session (issue #789). Only an explicit workspace-level override is force-injected;
-// everything else returns "" so each worker applies its OWN default/config:
+// session (#789, r3 #804). The returned tier is a CEILING on permissiveness — each
+// worker clamps its operator config to never exceed it (codex: most-restrictive of
+// session tier vs cfg.Sandbox/ApprovalMode; ACP: auto_approve gated off for tiers
+// stricter than bypass), so an injected default can tighten but never escalate.
+// Precedence:
 //
 //   - Sessions WITHOUT a workspace (platform/cron: Slack/Feishu/cron-driven) → "".
-//     Injecting the global bypass here would silently upgrade an operator's
-//     restricted codex.sandbox or acp.auto_approve — a security downgrade (#789 P1).
-//     codex permissionModeFromSession("") → ok=false → honors cfg.Sandbox/ApprovalMode;
-//     ACP skips the override; CC/OCS map "" to their own bypass default.
-//   - Workspace with no explicit override → "" (each worker applies its own
-//     default/config; admins set permission_mode explicitly per workspace to tighten
-//     blast radius). NOT injecting the global default keeps this symmetric with the
-//     no-workspace branch and avoids overriding a restricted codex/ACP config (#789 r2 P2).
+//     Each worker applies its OWN default/config (codex honors cfg.Sandbox, ACP
+//     honors cfg.AutoApprove; CC/OCS map "" to their own bypass). Injecting a global
+//     default here would override an operator's restricted codex.sandbox /
+//     acp.auto_approve (#789 P1).
+//   - Workspace with an explicit override → that tier wins.
+//   - Workspace with NO explicit override, or a fetch error → the bridge's global
+//     default (config.worker.default_permission_mode, seeded "workspace" in r3).
+//     Returning the default (not "") on fetch error is fail-closed: for CC/OCS ""
+//     maps to bypass, so an empty degrade would re-open the r2 P1 escalation on a
+//     transient DB outage.
 //
 // ctx note: GetWorkspaceByID uses shutdownCtx rather than a request-scoped ctx because
 // buildWorkerInfo/prepareWorkerInfo intentionally carry no ctx (see #714); the query is
@@ -366,10 +371,14 @@ func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
 	if workspaceID == "" || b.wsStore == nil {
 		return ""
 	}
+	defaultMode, _ := b.defaultPermissionMode.Load().(string)
 	ws, err := b.wsStore.GetWorkspaceByID(b.shutdownCtx, workspaceID)
 	if err != nil {
-		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to worker default", err)
-		return ""
+		// Fail-closed (#804 r3 review): degrade to the bridge default (workspace)
+		// rather than "". For CC/OCS "" maps to bypass, so an empty degrade would
+		// silently escalate a workspace session to full bypass during a DB blip.
+		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to bridge default", err)
+		return defaultMode
 	}
 	// fetch succeeded: clear any prior degrade flag so a future regression warns again
 	// (#749, mirrors resolveWorkspaceOverrides 成功路径的 Delete).
@@ -377,13 +386,7 @@ func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
 	if ws.PermissionMode != "" {
 		return ws.PermissionMode // explicit workspace override wins
 	}
-	// No explicit override: return "" so each worker applies its own default/config,
-	// consistent with the no-workspace branch above. The admin-controlled global
-	// default (worker.default_permission_mode) is NOT injected here — injecting bypass
-	// would override a restricted codex.sandbox / acp.auto_approve for workspace
-	// sessions on those worker types. Admins set permission_mode explicitly per
-	// workspace to tighten blast radius. (#789 review r2 P2)
-	return ""
+	return defaultMode
 }
 
 // warnOverrideDegrade logs a degrading warning at most once per workspaceID per

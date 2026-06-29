@@ -272,6 +272,7 @@ export default function SettingsPage() {
                   {activeTab === 'general' && workspace && currentUser && (
                     <GeneralTab
                       workspace={workspace}
+                      isAdmin={currentUser.role === 'admin'}
                       onUpdated={handleWorkspaceUpdated}
                     />
                   )}

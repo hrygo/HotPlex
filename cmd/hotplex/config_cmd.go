@@ -33,11 +33,22 @@ func newConfigValidateCmd() *cobra.Command {
 				return err
 			}
 
-			warns := cfg.Validate()
+			// Hard errors (Validate) abort — mirrors gateway_run.go, which fatally
+			// rejects these at startup. Advisory warnings (Warnings, e.g. TLS off on
+			// a non-local address) print but never block, so an operator running a
+			// TLS-terminated reverse proxy isn't forced to flip tls_enabled.
+			errs := cfg.Validate()
+			for _, e := range errs {
+				fmt.Fprintf(os.Stderr, "  ✗ %s\n", e)
+			}
+			warns := cfg.Warnings()
 			for _, w := range warns {
 				fmt.Fprintf(os.Stderr, "  ⚠ %s\n", w)
 			}
-
+			if len(errs) > 0 {
+				fmt.Fprintf(os.Stderr, "\nConfiguration INVALID: %d error(s), %d warning(s).\n", len(errs), len(warns))
+				return fmt.Errorf("configuration has %d validation error(s)", len(errs))
+			}
 			if len(warns) > 0 {
 				fmt.Fprintf(os.Stderr, "\nConfiguration loaded with %d warning(s).\n", len(warns))
 			} else {

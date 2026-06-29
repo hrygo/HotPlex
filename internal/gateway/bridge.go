@@ -65,7 +65,7 @@ type Bridge struct {
 	workerEnvBlocklist    []string                 // extra blocklist entries from worker.env_blocklist config
 	cronEnv               []string                 // env vars injected only into cron platform sessions
 	mcpConfigJSON         atomic.Value             // pre-serialized MCP config JSON string; "" = not configured
-	defaultPermissionMode atomic.Value             // worker.PermissionMode* tier maintained via UpdateDefaultPermissionMode + hot-reload. NOT consumed by resolveWorkspacePermissionMode (review r2 P2: injecting a global default would override a restricted operator codex.sandbox / acp.auto_approve); retained for future per-worker-type refinement.
+	defaultPermissionMode atomic.Value             // worker.PermissionMode* tier maintained via UpdateDefaultPermissionMode + hot-reload. Consumed by resolveWorkspacePermissionMode for workspaces with no explicit override (r3 #804); seeded "workspace" by Default().
 	agentConfigExclude    atomic.Value             // map[string][]string: platform → inject_exclude (global default at "" key)
 	wsStore               WorkspaceOverridesReader // per-workspace agent-config overrides resolver (spec ②); nil = Message Channel track
 	warnedOverrides       sync.Map                 // workspaceID → struct{}: dedup override-degrade warnings (#749)
@@ -136,7 +136,8 @@ func (b *Bridge) UpdateMCPConfig(json string) {
 }
 
 // UpdateDefaultPermissionMode atomically updates the global default permission mode
-// tier. Empty/unknown normalizes to bypass. Used by config hot-reload (issue #789).
+// tier. Empty normalizes to workspace (the r3 Default seed); non-empty passes through
+// unchanged — callers must pass a config.Validate'd value. Used by config hot-reload (#789).
 func (b *Bridge) UpdateDefaultPermissionMode(mode string) {
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(mode))
 }

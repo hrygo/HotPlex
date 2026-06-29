@@ -55,7 +55,7 @@ Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / Open
 
 权限模式作为 Workspace 属性持久化，通过 WebChat Workspace 设置或 HTTP API 配置；运行时亦可用 `/perm <模式>` 命令临时切换。各档到 Worker 原生参数的映射见[远程开发指南](remote-coding-agent.md)。
 
-> 全局配置项 `worker.default_permission_mode` 当前为 no-op（接受配置但 Gateway 不注入）；真正生效的是 Workspace 级显式 override。
+> 全局配置项 `worker.default_permission_mode`（缺省 `workspace`）由 bridge 在 workspace 无显式 override 时注入；workspace 级显式 override 优先级更高。运维想全局放开权限须显式设为 `bypass`。
 
 ### 交互超时
 

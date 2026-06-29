@@ -46,6 +46,49 @@ func TestDefault(t *testing.T) {
 	require.False(t, cfg.Messaging.Feishu.Enabled)
 }
 
+// TestDefaultPermissionMode: r3 (#804) — config.worker.default_permission_mode
+// 缺省 "workspace"（r2 的 "bypass" no-op 已退役）。bridge 在 workspace 无显式覆盖时
+// 注入此值；因默认值同档下调，注入即收紧。
+func TestDefaultPermissionMode(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "workspace", Default().Worker.DefaultPermissionMode)
+}
+
+// TestValidateDefaultPermissionMode: r3 (#804) — invalid tiers silently fail-open, so Validate must reject them (covers startup + hot-reload).
+func TestValidateDefaultPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		mode  string
+		valid bool
+	}{
+		{"empty (worker default)", "", true},
+		{"read-only", "read-only", true},
+		{"workspace", "workspace", true},
+		{"auto-edit", "auto-edit", true},
+		{"bypass", "bypass", true},
+		{"typo workspce", "workspce", false},
+		{"uppercase BYPASS (case-sensitive)", "BYPASS", false},
+		{"legacy default", "default", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := *Default()
+			c.Worker.DefaultPermissionMode = tt.mode
+			errs := c.Validate()
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e, "default_permission_mode") {
+					found = true
+				}
+			}
+			require.Equal(t, tt.valid, !found, "errs=%v", errs)
+		})
+	}
+}
+
 func TestConfig_Validate(t *testing.T) {
 	t.Parallel()
 
@@ -66,7 +109,7 @@ func TestConfig_Validate(t *testing.T) {
 				c.Gateway.Addr = ""
 				return c
 			}(),
-			errCnt: 2, // missing addr + TLS warning (empty addr is non-local)
+			errCnt: 1, // missing addr only (TLS advisory moved to Warnings)
 		},
 		{
 			name: "missing db path",
@@ -141,16 +184,16 @@ func TestConfig_Validate(t *testing.T) {
 				c.DB.SQLite.Path = ""
 				return c
 			}(),
-			errCnt: 3, // missing addr + missing path + TLS warning
+			errCnt: 2, // missing addr + missing path (TLS moved to Warnings)
 		},
 		{
-			name: "non-local address TLS warning",
+			name: "non-local address: Validate returns no error (TLS is a warning, see Warnings)",
 			cfg: func() Config {
 				c := *Default()
 				c.Gateway.Addr = ":8888"
 				return c
 			}(),
-			errCnt: 1, // TLS warning for non-local address
+			errCnt: 0,
 		},
 	}
 
@@ -162,6 +205,22 @@ func TestConfig_Validate(t *testing.T) {
 			require.Len(t, errs, tt.errCnt)
 		})
 	}
+}
+
+// TestConfig_Warnings: r3 (#804) split — TLS-off-on-non-local is a non-fatal advisory
+// (operator may run TLS-terminated behind a reverse proxy), surfaced via Warnings not Validate.
+func TestConfig_Warnings(t *testing.T) {
+	t.Parallel()
+	t.Run("non-local + no TLS → advisory", func(t *testing.T) {
+		t.Parallel()
+		c := *Default()
+		c.Gateway.Addr = ":8888"
+		require.Len(t, c.Warnings(), 1)
+	})
+	t.Run("localhost → no advisory", func(t *testing.T) {
+		t.Parallel()
+		require.Empty(t, (*Default()).Warnings())
+	})
 }
 
 func TestExpandEnv(t *testing.T) {

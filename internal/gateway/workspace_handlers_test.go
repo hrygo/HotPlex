@@ -360,6 +360,77 @@ func TestWorkspace_PatchPermissionMode_Persists(t *testing.T) {
 	require.Equal(t, "read-only", got.PermissionMode)
 }
 
+// TestWorkspace_PatchPermissionMode_AdminOnly: r3 (#804) — permission_mode 配置
+// 收归 admin-only。非 admin PATCH 该字段（任意档 + 清空）→ 403 PERMISSION_DENIED
+// （fail-closed）；非 admin PATCH 其他字段不受影响；admin 仍可配。
+func TestWorkspace_PatchPermissionMode_AdminOnly(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+
+	env.createUser(t, "alice", "alicepass1", "user")
+	cookieAlice := env.loginAs(t, "alice", "alicepass1", http.StatusOK)
+	wsAlice := env.createWorkspace(t, cookieAlice, "u-alice", "alice-proj", "pm-admin")
+
+	// 非 admin PATCH permission_mode（任意档 + 清空）→ 403。
+	for _, mode := range []string{"read-only", "workspace", "auto-edit", "bypass", ""} {
+		w := env.patchWorkspace(t, cookieAlice, wsAlice.ID, `{"permission_mode":"`+mode+`"}`)
+		require.Equal(t, http.StatusForbidden, w.Code, "non-admin must not set permission_mode (%q) body=%s", mode, w.Body.String())
+		require.Contains(t, w.Body.String(), "PERMISSION_DENIED")
+	}
+
+	// 非 admin PATCH 其他字段（name）→ 200（permission_mode 门不阻断其他字段）。
+	w := env.patchWorkspace(t, cookieAlice, wsAlice.ID, `{"name":"alice-renamed"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// admin PATCH permission_mode → 200（admin 仍可配，含代改别人的 workspace）。
+	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	w2 := env.patchWorkspace(t, cookieAdmin, wsAlice.ID, `{"permission_mode":"read-only"}`)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+}
+
+// TestWorkspace_CreatePermissionMode_AdminOnly: r3 (#804) — Create 路径同样
+// admin-only。非 admin POST 带 permission_mode → 403；不带 → 200（走默认 workspace）。
+func TestWorkspace_CreatePermissionMode_AdminOnly(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.createUser(t, "alice", "alicepass1", "user")
+	cookieAlice := env.loginAs(t, "alice", "alicepass1", http.StatusOK)
+
+	// 非 admin Create 带 permission_mode → 403。
+	workDir := wsSandboxDir(t, "u-alice", "pm-create")
+	body := []byte(`{"name":"with-perm","work_dir":"` + workDir + `","permission_mode":"bypass"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set("Cookie", cookieAlice)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "PERMISSION_DENIED")
+
+	// 非 admin Create 不带 permission_mode → 200。
+	ws := env.createWorkspace(t, cookieAlice, "u-alice", "no-perm", "pm-create-ok")
+	require.NotEmpty(t, ws.ID)
+}
+
+// TestWorkspace_CreatePermissionMode_AdminExplicitEmpty: r3 (#804) — admin Create
+// 显式传 permission_mode=""（清空回默认）也应通过：ValidatePermissionMode 接受 ""，
+// admin 门放行。补 Create 路径的 "" 盲区（Update 路径已在 PatchPermissionMode_Whitelist 覆盖）。
+func TestWorkspace_CreatePermissionMode_AdminExplicitEmpty(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	workDir := wsSandboxDir(t, "u-admin", "pm-empty")
+	body := []byte(`{"name":"explicit-empty","work_dir":"` + workDir + `","permission_mode":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set("Cookie", cookieAdmin)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var ws session.Workspace
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&ws))
+	require.Equal(t, "", ws.PermissionMode)
+}
+
 // TestWorkspace_JSONWireContract guards the snake_case wire contract consumed by
 // webchat (webchat/lib/api/workspaces.ts). Decode into a raw map — NOT
 // session.Workspace — so the assertion sees the actual on-wire keys. A struct

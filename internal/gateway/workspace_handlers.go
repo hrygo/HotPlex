@@ -98,6 +98,12 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	// explicit override). Validate before construction so an invalid tier is rejected early (issue #789).
 	var permMode string
 	if req.PermissionMode != nil {
+		// r3 (#804): permission_mode is admin-only. Fail-closed 403 before format
+		// validation so a non-admin never learns whether their value was valid.
+		if !h.isAdmin(r, uid) {
+			writeAppError(w, http.StatusForbidden, "PERMISSION_DENIED", "permission_mode can only be configured by admins")
+			return
+		}
 		if err := worker.ValidatePermissionMode(*req.PermissionMode); err != nil {
 			writeAppError(w, http.StatusBadRequest, "INVALID_PERMISSION_MODE", err.Error())
 			return
@@ -196,7 +202,20 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "not found")
 		return
 	}
-	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
+	// Admin authority is needed in two places: the owner check (only when the acting
+	// user isn't the owner) and the permission_mode gate (whenever the field is
+	// present). Memoize so an admin editing another's workspace with permission_mode
+	// pays one idp.Lookup, not two — and an owner editing their own workspace without
+	// permission_mode pays zero.
+	var admin bool
+	var adminResolved bool
+	resolveAdmin := func() bool {
+		if !adminResolved {
+			admin, adminResolved = h.isAdmin(r, uid), true
+		}
+		return admin
+	}
+	if ws.OwnerUserID != uid && !resolveAdmin() {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
 		return
 	}
@@ -265,8 +284,13 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		ws.WorkerPreference = *req.WorkerPreference
 	}
 	if req.PermissionMode != nil {
-		// nil = field omitted (no change); "" = clear to "worker default" (stored as "", no override).
-		// ValidatePermissionMode accepts "" as the valid "worker default" value (issue #789).
+		// r3 (#804): permission_mode is admin-only. nil = field omitted (no change);
+		// "" = clear to default. Fail-closed 403 before format validation; a non-admin
+		// owner can still PATCH other fields (name/work_dir/etc) — only this field is gated.
+		if !resolveAdmin() {
+			writeAppError(w, http.StatusForbidden, "PERMISSION_DENIED", "permission_mode can only be configured by admins")
+			return
+		}
 		if err := worker.ValidatePermissionMode(*req.PermissionMode); err != nil {
 			writeAppError(w, http.StatusBadRequest, "INVALID_PERMISSION_MODE", err.Error())
 			return

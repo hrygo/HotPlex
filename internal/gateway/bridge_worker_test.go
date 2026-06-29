@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/worker"
 )
 
 // testLogger returns a minimal logger for bridge unit tests.
@@ -40,10 +41,16 @@ func (s *stubWSStore) ListAllWorkspaces(_ context.Context) ([]*session.Workspace
 // enough to exercise resolveWorkspaceOverrides without the full dependency graph.
 func newBridgeForOverrideTest(t *testing.T, ws *session.Workspace, err error) *Bridge {
 	t.Helper()
-	return &Bridge{
+	b := &Bridge{
 		log:     testLogger(t),
 		wsStore: &stubWSStore{ws: ws, err: err},
 	}
+	// r3 (#804): resolveWorkspacePermissionMode now consumes the bridge default
+	// when a workspace has no explicit override, mirroring NewBridge (bridge.go).
+	// Seed the r3 production default so tests that hit the no-override branch see
+	// "workspace"; tests needing a different value Store their own.
+	b.defaultPermissionMode.Store(worker.PermissionModeWorkspace)
+	return b
 }
 
 func TestResolveWorkspaceOverrides(t *testing.T) {
@@ -142,31 +149,44 @@ func TestResolveWorkspacePermissionMode(t *testing.T) {
 		require.Equal(t, "read-only", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
-	t.Run("workspace unset returns empty (global default NOT injected, #789 r2 P2)", func(t *testing.T) {
+	t.Run("workspace unset returns bridge default (r3: global default now injected, #804)", func(t *testing.T) {
 		t.Parallel()
-		// No explicit override → "" so each worker applies its own default/config.
-		// The admin global default is intentionally NOT injected here — injecting
-		// bypass would override a restricted codex.sandbox / acp.auto_approve. Admins
-		// set permission_mode explicitly per workspace to tighten blast radius.
+		// r3: a workspace with no explicit override returns the bridge's global
+		// default (config.worker.default_permission_mode). The helper seeds
+		// "workspace" — the r3 production default. Because the default dropped from
+		// bypass→workspace in the same revision that injection was enabled, this is
+		// a tightening (CC acceptEdits, codex workspace-write, ACP approve=false),
+		// not an escalation — see Workspace-Permission-Mode-Admin-Only-Revision-Spec §2.
 		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
-		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+		require.Equal(t, "workspace", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
-	t.Run("custom global default is NOT injected (stays empty, #789 r2 P2)", func(t *testing.T) {
+	t.Run("custom global default is injected for workspace without override (r3, #804)", func(t *testing.T) {
 		t.Parallel()
 		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
-		b.defaultPermissionMode.Store("workspace")
-		// Even with a custom global default configured, a workspace without explicit
-		// override returns "" — default injection would override restricted worker config.
-		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+		b.defaultPermissionMode.Store("read-only")
+		// r3: operators tune config.worker.default_permission_mode (or call
+		// UpdateDefaultPermissionMode); a workspace without explicit override
+		// returns that configured default rather than "".
+		require.Equal(t, "read-only", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
-	t.Run("fetch error degrades to empty, not bypass (#789 P1)", func(t *testing.T) {
+	t.Run("hot-reload default via UpdateDefaultPermissionMode applies to next resolve (r3, #804)", func(t *testing.T) {
 		t.Parallel()
-		// Degrade must NOT inject bypass — keep the worker's own config rather than
-		// silently upgrading a restricted operator setup.
+		b := newBridgeForOverrideTest(t, &session.Workspace{PermissionMode: ""}, nil)
+		require.Equal(t, "workspace", b.resolveWorkspacePermissionMode("ws-1"))
+		b.UpdateDefaultPermissionMode("auto-edit")
+		require.Equal(t, "auto-edit", b.resolveWorkspacePermissionMode("ws-1"))
+	})
+
+	t.Run("fetch error degrades to bridge default, not bypass (r3 #804 fail-closed)", func(t *testing.T) {
+		t.Parallel()
+		// Fail-closed: a transient DB outage must NOT degrade to "" (which CC/OCS
+		// map to bypass, re-opening the r2 P1 escalation). The helper seeds
+		// "workspace" — the r3 bridge default — so a fetch failure keeps the
+		// session bounded at workspace, the same tier a no-override workspace gets.
 		b := newBridgeForOverrideTest(t, nil, errors.New("db down"))
-		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+		require.Equal(t, "workspace", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
 	t.Run("warn dedup: success re-arms warning (#789 P2, mirrors #749)", func(t *testing.T) {

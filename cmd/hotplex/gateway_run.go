@@ -105,9 +105,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	if validationErrs := cfg.Validate(); len(validationErrs) > 0 {
-		for _, ve := range validationErrs {
-			fmt.Fprintf(os.Stderr, "config validation warning: %s\n", ve)
-		}
+		return fmt.Errorf("config validation failed: %v", validationErrs)
+	}
+	for _, w := range cfg.Warnings() {
+		fmt.Fprintf(os.Stderr, "config warning: %s\n", w)
 	}
 
 	// Extract embedded Python scripts to ~/.hotplex/scripts

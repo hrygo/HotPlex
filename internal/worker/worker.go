@@ -231,10 +231,12 @@ type SystemPromptUpdater interface {
 	UpdateSystemPrompt(prompt string)
 }
 
-// PermissionMode tiers (issue #789). The gateway maps each tier to the worker's
-// native permission parameters at startup. Admin picks one per workspace; an empty
-// value means "worker default" (CC/OCS apply bypass; Codex/ACP honor operator config —
-// the admin global default is intentionally NOT injected; see resolveWorkspacePermissionMode).
+// PermissionMode tiers (#789, r3 #804). The gateway maps each tier to the worker's
+// native permission parameters at startup. Admin picks one per workspace. An empty
+// workspace value means "no explicit override" — the bridge then injects its global
+// default (config.worker.default_permission_mode, seeded "workspace" in r3) for
+// workspace sessions, or "" for cron/platform sessions so they honor operator config.
+// See resolveWorkspacePermissionMode for the full precedence.
 // Mapping lives inside each worker (not a central table) — see claudecode/codexcli/
 // opencodeserver/acp workers for the per-runtime translation.
 const (
@@ -267,14 +269,16 @@ func ValidatePermissionMode(mode string) error {
 	return nil
 }
 
-// NormalizePermissionMode returns the effective tier for a (possibly empty) mode:
-// empty → PermissionModeBypass. Valid tiers pass through unchanged. Its only consumer
-// today is NewBridge/UpdateDefaultPermissionMode normalizing the (currently no-op)
-// defaultPermissionMode field; resolveWorkspacePermissionMode does NOT call it —
-// explicit workspace overrides pass through verbatim and empty means "worker default" (#789 r2).
+// NormalizePermissionMode returns the effective tier for a (possibly empty) mode.
+// Empty → PermissionModeWorkspace (the r3 Default() seed). Valid tiers pass through
+// unchanged. Called by NewBridge/UpdateDefaultPermissionMode; consumed via Load by
+// resolveWorkspacePermissionMode, which treats the result as a permissiveness CEILING
+// — each worker clamps its operator config to never exceed it (codexcli takes the
+// more-restrictive of session tier vs cfg.Sandbox/ApprovalMode), so an injected
+// default can tighten but never escalate past operator config.
 func NormalizePermissionMode(mode string) string {
 	if mode == "" {
-		return PermissionModeBypass
+		return PermissionModeWorkspace
 	}
 	return mode
 }
