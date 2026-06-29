@@ -253,6 +253,7 @@ Worker 进程生命周期和环境配置。
 | `pid_dir` | string | `~/.hotplex/.pids` | — | PID 文件存储目录 |
 | `env_blocklist` | []string | `[]` | — | 需要从 Worker 环境中屏蔽的变量前缀列表（带尾部 `_`） |
 | `environment` | []string | 见下方 | — | 注入到所有 Worker 进程的额外环境变量。支持 `${VAR}` 展开，未设置且无默认值的条目被排除 |
+| `default_permission_mode` | string | `workspace` | — | workspace 无显式 override 时 bridge 注入的默认权限模式（r3 #804）。合法值 `read-only`/`workspace`/`auto-edit`/`bypass`/空，空与缺省均归一化为 `workspace`；非法值在启动与热重载时拒绝（防 typo fail-open）。仅 config.yaml 可配置，无 env 绑定 |
 
 **默认 environment**：
 
