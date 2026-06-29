@@ -44,7 +44,7 @@ HotPlex Gateway 采用纵深防御（Defense in Depth）策略，通过七层安
 
 ### 权限模式
 
-Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / OpenCode Server / ACP 四类 Worker 统一映射。空值（默认）= "Worker 默认"：CC/OCS 应用 `bypass`，Codex/ACP 沿用各自 operator 配置。
+Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / OpenCode Server / ACP 四类 Worker 统一映射。空值（默认）= "Worker 默认"：bridge 注入全局 `worker.default_permission_mode`（r3 起缺省 `workspace`），再按各 Worker 映射生效。
 
 | 模式 | 行为 | 适用场景 |
 |------|------|---------|

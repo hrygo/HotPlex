@@ -220,6 +220,8 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 | GET | `/admin/bots/{name}/config` | `admin:read` | 单个 bot 完整配置 |
 | GET | `/admin/bots/{name}/config/{file}` | `admin:read` | 读取 Agent 配置文件（如 SOUL.md、AGENTS.md） |
 | PUT | `/admin/bots/{name}/config/{file}` | `admin:write` | 写入 Agent 配置文件 |
+| GET | `/admin/bots/platform/{platform}/config/{file}` | `admin:read` | 读取**平台级 channel 默认**配置文件（webchat 等，绕过 registry 寻址 `dir/{platform}/` 层） |
+| PUT | `/admin/bots/platform/{platform}/config/{file}` | `admin:write` | 写入平台级 channel 默认配置文件 |
 | GET | `/admin/bots/{name}/preview` | `admin:read` | 预览组装后的系统提示（B+C 通道完整输出） |
 
 **GET /admin/bots** — 返回所有活跃 bot 列表，含 name、platform、worker_type、状态等信息。
@@ -231,6 +233,8 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 **GET /admin/bots/{name}/preview** — 返回该 bot 组装后的完整系统提示，包含 B 通道（directives）和 C 通道（context）内容，便于调试 Agent 人格配置。
 
 **PUT /admin/bots/{name}/config/{file}`** — 写入指定 Agent 配置文件（如 `SOUL.md`、`AGENTS.md`、`USER.md`）。请求体为文件内容，Content-Type 为 `text/plain`。
+
+**GET/PUT /admin/bots/platform/{platform}/config/{file}** — 读写**平台级 channel 默认** Agent 配置文件。`{platform}` 为平台标识（如 `webchat`），绕过 messaging registry 直接寻址 `dir/{platform}/` 层，让无 bot 实例的平台（webchat team-default）获得与消息平台 bot 对等的配置编辑能力。文件白名单与 bot 级端点一致（`SOUL.md`/`AGENTS.md`/`SKILLS.md`/`USER.md`/`MEMORY.md`），复用 `/admin/*` 中间件鉴权（`admin:read`/`admin:write`）与审计。
 
 ### 网关重启
 
