@@ -269,14 +269,15 @@ func ValidatePermissionMode(mode string) error {
 	return nil
 }
 
-// NormalizePermissionMode returns the effective tier for a (possibly empty) mode:
-// empty → PermissionModeBypass (backward-compat fallback when an operator leaves
-// config.worker.default_permission_mode unset). Valid tiers pass through unchanged.
-// Called by NewBridge/UpdateDefaultPermissionMode to normalize the bridge default;
-// resolveWorkspacePermissionMode consumes the result via Load (not by calling this).
+// NormalizePermissionMode returns the effective tier for a (possibly empty) mode.
+// Empty → PermissionModeWorkspace (aligns with the r3 Default() seed): an operator who
+// explicitly sets default_permission_mode: "" must land on the tightened default, not
+// bypass — otherwise the injected bypass would override restricted worker configs and
+// reintroduce the r2 P1 escalation. Valid tiers pass through unchanged. Called by
+// NewBridge/UpdateDefaultPermissionMode; consumed via Load by resolveWorkspacePermissionMode.
 func NormalizePermissionMode(mode string) string {
 	if mode == "" {
-		return PermissionModeBypass
+		return PermissionModeWorkspace
 	}
 	return mode
 }

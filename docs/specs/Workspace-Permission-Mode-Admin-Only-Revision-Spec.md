@@ -118,7 +118,7 @@ r2 在多处注释里标注了"no-op / NOT injected"，r3 需逐一修订：
 | 显式配置过 `permission_mode` 的 workspace | 不变（显式覆盖优先） |
 | cron / 无 workspace session | 不变（注入 `""`） |
 | `SkipPermissions` 别名 | 不变 |
-| 运维 `config.worker.default_permission_mode: ""` | `NormalizePermissionMode` → bypass（向后兼容 fallback） |
+| 运维 `config.worker.default_permission_mode: ""` | `NormalizePermissionMode` → workspace（与 Default 种子一致；r2 的 ""→bypass 回退已退役——显式设空不应重新引入 bypass 注入） |
 | 运维想全局回到 bypass | 显式 `config.worker.default_permission_mode: bypass` 即可（workspace session 全跑 bypass） |
 | 非 admin 已持有 permission_mode 的 workspace | 数据不动；下次该 workspace 起session 按库里值；非 admin 仅失去"改"的权限 |
 
@@ -142,21 +142,21 @@ r2 在多处注释里标注了"no-op / NOT injected"，r3 需逐一修订：
 ## 8. 实施清单
 
 **后端**
-- [ ] `internal/config/config_defaults.go`：`DefaultPermissionMode` `"bypass"` → `"workspace"` + 注释
-- [ ] `internal/gateway/bridge_worker.go`：`resolveWorkspacePermissionMode` 无覆盖分支改返回 `b.defaultPermissionMode.Load().(string)`
-- [ ] `internal/gateway/workspace_handlers.go`：Create + Update 增 admin-only 门（`PERMISSION_DENIED` 403）
-- [ ] `internal/gateway/bridge.go` / `deps.go`：`defaultPermissionMode` 相关注释去 no-op
-- [ ] `internal/config/config_types.go` / `cmd/hotplex/gateway_run.go`：注释去 no-op
-- [ ] `internal/worker/worker.go`：`NormalizePermissionMode` doc 更新 consumer
+- [x] `internal/config/config_defaults.go`：`DefaultPermissionMode` `"bypass"` → `"workspace"` + 注释
+- [x] `internal/gateway/bridge_worker.go`：`resolveWorkspacePermissionMode` 无覆盖分支改返回 `b.defaultPermissionMode.Load().(string)`
+- [x] `internal/gateway/workspace_handlers.go`：Create + Update 增 admin-only 门（`PERMISSION_DENIED` 403）
+- [x] `internal/gateway/bridge.go` / `deps.go`：`defaultPermissionMode` 相关注释去 no-op
+- [x] `internal/config/config_types.go` / `cmd/hotplex/gateway_run.go`：注释去 no-op
+- [x] `internal/worker/worker.go`：`NormalizePermissionMode` doc 更新 consumer
 
 **前端**
-- [ ] `webchat/app/components/chat/settings-modal/general-tab.tsx`：`isAdmin` prop + 非 admin 隐藏控件 + 默认 workspace + options 标签
-- [ ] `webchat/app/settings/page.tsx`：传 `isAdmin` 给 `<GeneralTab>`
+- [x] `webchat/app/components/chat/settings-modal/general-tab.tsx`：`isAdmin` prop + 非 admin 隐藏控件 + 默认 workspace + options 标签
+- [x] `webchat/app/settings/page.tsx`：传 `isAdmin` 给 `<GeneralTab>`
 
 **测试**
-- [ ] config 默认值断言
-- [ ] bridge resolve 三分支（无覆盖/覆盖/无 workspace）+ 热重载
-- [ ] handler admin-only 四象限（非admin传/不传 × Create/Update）
+- [x] config 默认值断言
+- [x] bridge resolve 三分支（无覆盖/覆盖/无 workspace）+ 热重载
+- [x] handler admin-only 四象限（非admin传/不传 × Create/Update）
 
 **文档**
 - [x] `docs/specs/Workspace-Permission-Mode-Spec.md` 顶部加 r3 横幅（r2 正文保留作历史记录，引用本 spec）
