@@ -411,6 +411,26 @@ func TestWorkspace_CreatePermissionMode_AdminOnly(t *testing.T) {
 	require.NotEmpty(t, ws.ID)
 }
 
+// TestWorkspace_CreatePermissionMode_AdminExplicitEmpty: r3 (#804) — admin Create
+// 显式传 permission_mode=""（清空回默认）也应通过：ValidatePermissionMode 接受 ""，
+// admin 门放行。补 Create 路径的 "" 盲区（Update 路径已在 PatchPermissionMode_Whitelist 覆盖）。
+func TestWorkspace_CreatePermissionMode_AdminExplicitEmpty(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	workDir := wsSandboxDir(t, "u-admin", "pm-empty")
+	body := []byte(`{"name":"explicit-empty","work_dir":"` + workDir + `","permission_mode":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set("Cookie", cookieAdmin)
+	w := httptest.NewRecorder()
+	env.wsHandlers.Create(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var ws session.Workspace
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&ws))
+	require.Equal(t, "", ws.PermissionMode)
+}
+
 // TestWorkspace_JSONWireContract guards the snake_case wire contract consumed by
 // webchat (webchat/lib/api/workspaces.ts). Decode into a raw map — NOT
 // session.Workspace — so the assertion sees the actual on-wire keys. A struct
