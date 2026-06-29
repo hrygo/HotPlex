@@ -107,8 +107,8 @@ r2 在多处注释里标注了"no-op / NOT injected"，r3 需逐一修订：
 | `internal/config/config_types.go` | `:475` `DefaultPermissionMode` mapstructure 注释 | 删 "no-op"，改为"workspace 无覆盖时注入；缺省 workspace（r3）" |
 | `cmd/hotplex/gateway_run.go` | `:362` 热重载日志附近 | 无需改逻辑，注释如有"no-op"一并清 |
 | `internal/worker/worker.go` | `:275` `NormalizePermissionMode` doc | consumer 列表追加 `resolveWorkspacePermissionMode` |
-| `docs/specs/Workspace-Permission-Mode-Spec.md` | §5 / §7 / §8 | 改写"全局默认 no-op"语义；§8 补 r3 安全说明（指向本 spec §2） |
-| `docs/reference/admin-api.md` | （当前仓库无此文件） | 若后续建立 admin API 参考，需标注 `permission_mode` admin-only（非 admin 传 → 403 PERMISSION_DENIED） |
+| `docs/specs/Workspace-Permission-Mode-Spec.md` | 顶部 | 加 r3 横幅声明（r2 正文 §5/§7/§8 保留作历史记录，引用本 spec §2），不逐节改写正文 |
+| `docs/reference/admin-api.md` | 错误码表 + Workspace 管理端点 | 补 `PERMISSION_DENIED`（403）错误码 + `permission_mode` admin-only 标注（非 admin 传 → 403） |
 
 ## 6. 向后兼容
 
@@ -159,8 +159,8 @@ r2 在多处注释里标注了"no-op / NOT injected"，r3 需逐一修订：
 - [ ] handler admin-only 四象限（非admin传/不传 × Create/Update）
 
 **文档**
-- [ ] `docs/specs/Workspace-Permission-Mode-Spec.md` §5/§7/§8 修订（标注 r3，引用本 spec）
-- [ ] `docs/reference/admin-api.md`：`permission_mode` admin-only 标注（当前仓库无此文件，建立时补）
+- [x] `docs/specs/Workspace-Permission-Mode-Spec.md` 顶部加 r3 横幅（r2 正文保留作历史记录，引用本 spec）
+- [x] `docs/reference/admin-api.md`：补 `PERMISSION_DENIED` 错误码 + `permission_mode` admin-only 标注
 
 ## 9. 非目标
 

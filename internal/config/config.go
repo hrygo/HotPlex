@@ -110,6 +110,12 @@ func (c *Config) Validate() []string {
 		slog.Warn("config: codex_cli.use_app_server is deprecated, forcing app-server mode")
 		c.Worker.CodexCLI.UseAppServer = true
 	}
+	// r3 (#804): reject typos at the boundary (mirrors worker.ValidatePermissionMode) — an invalid tier falls through every worker switch to its widest default (fail-open).
+	switch c.Worker.DefaultPermissionMode {
+	case "", "read-only", "workspace", "auto-edit", "bypass":
+	default:
+		errs = append(errs, "worker.default_permission_mode must be one of read-only|workspace|auto-edit|bypass (or empty for worker default)")
+	}
 
 	return errs
 }

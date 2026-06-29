@@ -54,6 +54,44 @@ func TestDefaultPermissionMode(t *testing.T) {
 	require.Equal(t, "workspace", Default().Worker.DefaultPermissionMode)
 }
 
+// TestValidateDefaultPermissionMode: r3 (#804) — a typo in default_permission_mode
+// must be rejected at Validate (covers startup + hot-reload, since watcher.go calls
+// Validate before applying). Otherwise the invalid tier falls through every worker
+// switch to its widest default (fail-open).
+func TestValidateDefaultPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		mode  string
+		valid bool
+	}{
+		{"empty (worker default)", "", true},
+		{"read-only", "read-only", true},
+		{"workspace", "workspace", true},
+		{"auto-edit", "auto-edit", true},
+		{"bypass", "bypass", true},
+		{"typo workspce", "workspce", false},
+		{"uppercase BYPASS (case-sensitive)", "BYPASS", false},
+		{"legacy default", "default", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := *Default()
+			c.Worker.DefaultPermissionMode = tt.mode
+			errs := c.Validate()
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e, "default_permission_mode") {
+					found = true
+				}
+			}
+			require.Equal(t, tt.valid, !found, "errs=%v", errs)
+		})
+	}
+}
+
 func TestConfig_Validate(t *testing.T) {
 	t.Parallel()
 

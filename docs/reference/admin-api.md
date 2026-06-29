@@ -310,6 +310,8 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 | PATCH | `/api/workspaces/{id}` | API Key / Cookie | 更新 workspace（乐观并发，见下） |
 | DELETE | `/api/workspaces/{id}` | API Key / Cookie | 删除 workspace |
 
+> 🔒 **`permission_mode` 为 admin-only 字段（r3 #804）**：POST `/api/workspaces` 与 PATCH `/api/workspaces/{id}` 仅 admin 可设置/修改 `permission_mode`。非 admin 请求体携带该字段（含空串清空）一律返回 `403 PERMISSION_DENIED`（`message`: `permission_mode can only be configured by admins`）；非 admin 仍可改 `name` / `work_dir` / `agent_config_overrides` / `worker_preference`。未显式配置的 workspace 由 bridge 注入 `config.worker.default_permission_mode`（缺省 `workspace`）。
+
 > **PATCH 乐观并发（CAS）**：更新基于 `updated_at` 做乐观锁——服务端 `UPDATE ... WHERE id = ? AND updated_at = ?`，调用方缓存的 `updated_at` 不再匹配（被并发修改）时影响 0 行，返回 `409 WORKSPACE_VERSION_MISMATCH`（"workspace concurrently modified, please re-fetch and retry"）。客户端无需在 body 显式传版本字段（先 GET 取最新值再 PATCH），收到 409 后应重新 GET 再重试，避免静默 lost update。
 
 > **PATCH body 字段语义**：`name`、`agent_config_overrides` 传空字符串表示**不更新**（无法通过 PATCH 清空这两项）；`worker_preference` 为指针类型以区分三态——**省略**（字段未传）不更新、**空字符串** `""` 显式清除回默认 worker、**非空**设为指定类型（校验失败返回 `400 INVALID_WORKER_TYPE`）；`work_dir` 为 workspace 级可变字段——**省略/空字符串**不更新，**非空**时校验 owner 沙箱（`403 WORK_DIR_OUTSIDE_SANDBOX`）、值变更须 workspace 无活跃会话（`409 WORKSPACE_NOT_EMPTY`，因 work_dir 进 session key 派生）、且未被该 owner 其他 workspace 占用（`409 WORK_DIR_TAKEN`）后更新（见上）。
@@ -359,6 +361,7 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 | 403 | `WORKSPACE_FORBIDDEN` | 非所有者访问他人 workspace（且非 admin） |
 | 403 | `WORK_DIR_FORBIDDEN` | workspace `work_dir` 命中安全黑名单（系统目录等） |
 | 403 | `WORK_DIR_OUTSIDE_SANDBOX` | workspace `work_dir` 不在 owner 沙箱前缀下 |
+| 403 | `PERMISSION_DENIED` | 非 admin 试图在 workspace Create/Update 设置或修改 `permission_mode`（admin-only 字段，r3 #804） |
 | 404 | `NOT_FOUND` | Session/Cron Job/Invitation 未找到 |
 | 404 | `WORKSPACE_NOT_FOUND` | workspace id 不存在 |
 | 409 | `CONFLICT` | 资源状态冲突 |
