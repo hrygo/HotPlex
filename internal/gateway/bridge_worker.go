@@ -345,18 +345,21 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 }
 
 // resolveWorkspacePermissionMode returns the effective permission mode tier for a
-// session (issue #789). Only an explicit workspace-level override is force-injected;
-// everything else returns "" so each worker applies its OWN default/config:
+// session (#789, r3 #804). Precedence:
 //
 //   - Sessions WITHOUT a workspace (platform/cron: Slack/Feishu/cron-driven) → "".
-//     Injecting the global bypass here would silently upgrade an operator's
-//     restricted codex.sandbox or acp.auto_approve — a security downgrade (#789 P1).
-//     codex permissionModeFromSession("") → ok=false → honors cfg.Sandbox/ApprovalMode;
-//     ACP skips the override; CC/OCS map "" to their own bypass default.
-//   - Workspace with no explicit override → "" (each worker applies its own
-//     default/config; admins set permission_mode explicitly per workspace to tighten
-//     blast radius). NOT injecting the global default keeps this symmetric with the
-//     no-workspace branch and avoids overriding a restricted codex/ACP config (#789 r2 P2).
+//     Each worker applies its OWN default/config: codex permissionModeFromSession("")
+//     → ok=false → honors cfg.Sandbox/ApprovalMode; ACP skips the override; CC/OCS
+//     map "" to their own bypass default. Injecting the global default here would
+//     override an operator's restricted codex.sandbox / acp.auto_approve (#789 P1).
+//   - Workspace with an explicit override → that tier wins.
+//   - Workspace with NO explicit override → the bridge's global default
+//     (config.worker.default_permission_mode, seeded "workspace" in r3). Because the
+//     default dropped from bypass→workspace in the same revision injection was
+//     enabled, this is a tightening across all workers (CC acceptEdits, codex
+//     workspace-write×on-request, ACP approve=false), not an escalation (#804 r3 —
+//     supersedes the #789 r2 P2 "do not inject" stance, which existed only because
+//     the prior default was bypass).
 //
 // ctx note: GetWorkspaceByID uses shutdownCtx rather than a request-scoped ctx because
 // buildWorkerInfo/prepareWorkerInfo intentionally carry no ctx (see #714); the query is
@@ -377,13 +380,13 @@ func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
 	if ws.PermissionMode != "" {
 		return ws.PermissionMode // explicit workspace override wins
 	}
-	// No explicit override: return "" so each worker applies its own default/config,
-	// consistent with the no-workspace branch above. The admin-controlled global
-	// default (worker.default_permission_mode) is NOT injected here — injecting bypass
-	// would override a restricted codex.sandbox / acp.auto_approve for workspace
-	// sessions on those worker types. Admins set permission_mode explicitly per
-	// workspace to tighten blast radius. (#789 review r2 P2)
-	return ""
+	// r3 (#804): no explicit override → return the bridge's global default
+	// (config.worker.default_permission_mode). Because the default dropped from
+	// bypass→workspace in the same revision injection was enabled, this is a
+	// tightening across all workers, not an escalation. The no-workspace branch
+	// above still returns "" so cron/platform sessions honor operator-tuned config.
+	mode, _ := b.defaultPermissionMode.Load().(string)
+	return mode
 }
 
 // warnOverrideDegrade logs a degrading warning at most once per workspaceID per

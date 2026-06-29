@@ -4,6 +4,13 @@
 
 ---
 
+> **⚠️ r3 修订（2026-06-29，issue [#804](https://github.com/hrygo/hotplex/issues/804)）**：本 spec 的以下 r2 语义已被 r3 推翻，详见 [Workspace-Permission-Mode-Admin-Only-Revision-Spec](./Workspace-Permission-Mode-Admin-Only-Revision-Spec.md)：
+> - **§5 配置链路**：`config.worker.default_permission_mode`（缺省 `workspace`）**真正被 bridge 消费** —— workspace 无显式覆盖时注入该默认值（r2 的"全局默认不注入"作废）。因默认值同档下调（bypass→workspace），注入即收紧。
+> - **§7 admin UI**：控件默认选中改为 `workspace`；`permission_mode` 配置收归 **admin-only**（非 admin 传字段 → 403 PERMISSION_DENIED；前端非 admin 隐藏控件）。
+> - **§8 安全说明**：r2"不注入全局 bypass"的动机被 r3 化解（默认值已是 workspace，注入是收紧非提权）。
+>
+> 下方 r2 文案保留作历史记录。
+
 ## 1. 背景与动机
 
 当前 HotPlex 以任意模式启动 Worker 时，四种 Worker 适配器全部默认使用最高权限（bypass）模式：

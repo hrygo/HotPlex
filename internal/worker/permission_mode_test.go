@@ -37,7 +37,9 @@ func TestValidatePermissionMode(t *testing.T) {
 
 func TestNormalizePermissionMode(t *testing.T) {
 	t.Parallel()
-	// NormalizePermissionMode maps "" → bypass (its own contract; the bridge does NOT inject this — #789 r2).
+	// NormalizePermissionMode maps "" → bypass (its own contract). r3 (#804): NewBridge
+	// normalizes the bridge default through this, and resolveWorkspacePermissionMode now
+	// injects that default for workspace sessions with no explicit override.
 	require.Equal(t, PermissionModeBypass, NormalizePermissionMode(""))
 	// Valid tiers pass through unchanged.
 	require.Equal(t, PermissionModeReadOnly, NormalizePermissionMode(PermissionModeReadOnly))

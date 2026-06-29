@@ -17,22 +17,24 @@ const WORKER_OPTIONS: { value: string; label: string }[] = [
   { value: 'acp', label: 'ACP (Any ACP-compatible Agent)' },
 ];
 
-// Workspace permission tier → worker native mapping (issue #789). An empty
-// server value means "worker default" (CC/OCS apply bypass; the select exposes
-// the 4 tiers directly so the chosen blast radius is explicit, not inherited).
+// Workspace permission tier → worker native mapping (#789, r3 #804). An empty
+// server value means "no explicit override" — the bridge injects its global
+// default (workspace) for workspace sessions. The select exposes the 4 tiers
+// directly so the chosen blast radius is explicit, not inherited.
 const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'bypass', label: 'Bypass — Full access (default)' },
+  { value: 'workspace', label: 'Workspace — Edits within workspace (default)' },
   { value: 'auto-edit', label: 'Auto Edit — Auto-approve edits' },
-  { value: 'workspace', label: 'Workspace — Edits within workspace' },
+  { value: 'bypass', label: 'Bypass — Full access' },
   { value: 'read-only', label: 'Read Only — Plan only' },
 ];
 
 interface GeneralTabProps {
   workspace: Workspace;
+  isAdmin: boolean;
   onUpdated?: (ws: Workspace) => void;
 }
 
-export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
+export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
   // Anchor the sandbox by owner_id rather than a hard-coded ~/ prefix: backend
   // ExpandAndAbs stores work_dir as an absolute $HOME path, so the on-disk form
   // differs from the ~/ form used by the create flow. resolveSandboxAnchor reads
@@ -44,7 +46,7 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
 
   const [name, setName] = useState(workspace.name);
   const [worker, setWorker] = useState(workspace.worker_preference || '');
-  const [permMode, setPermMode] = useState(workspace.permission_mode || 'bypass');
+  const [permMode, setPermMode] = useState(workspace.permission_mode || 'workspace');
   const [seg, setSeg] = useState(segBaseline);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
   useEffect(() => {
     setName(workspace.name);
     setWorker(workspace.worker_preference || '');
-    setPermMode(workspace.permission_mode || 'bypass');
+    setPermMode(workspace.permission_mode || 'workspace');
     const a = resolveSandboxAnchor(workspace.work_dir, workspace.owner_user_id);
     setSeg(a?.seg ?? workspace.work_dir);
     setError(null);
@@ -71,7 +73,7 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
   const dirty =
     (name.trim() !== workspace.name && name.trim().length > 0) ||
     worker !== (workspace.worker_preference || '') ||
-    permMode !== (workspace.permission_mode || 'bypass') ||
+    permMode !== (workspace.permission_mode || 'workspace') ||
     (segEditable && seg.trim() !== segBaseline);
 
   const previewSeg = segEditable ? sanitizeWorkspaceDir(seg) : '';
@@ -93,7 +95,10 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
       const updated = await updateWorkspace(workspace.id, {
         name: name.trim(),
         workerPreference: worker,
-        permissionMode: permMode,
+        // r3 (#804): permission_mode is admin-only — non-admins omit the field so the
+        // backend leaves the stored value untouched (sending it would 403). The control
+        // is hidden when !isAdmin.
+        ...(isAdmin ? { permissionMode: permMode } : {}),
         workDir,
       });
       onUpdated?.(updated);
@@ -165,33 +170,37 @@ export function GeneralTab({ workspace, onUpdated }: GeneralTabProps) {
         </p>
       </div>
 
-      {/* Permission Mode Selection (issue #789) */}
-      <div>
-        <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-          Permission Mode
-        </label>
-        <div className="relative">
-          <select
-            value={permMode}
-            onChange={(e) => setPermMode(e.target.value)}
-            className="w-full pl-3.5 pr-10 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all appearance-none cursor-pointer"
-          >
-            {PERMISSION_MODE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[var(--text-faint)]">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+      {/* Permission Mode Selection — admin-only (r3 #804): non-admins cannot
+          configure workspace permission mode; the control is hidden and the field
+          is omitted from the PATCH body so the stored value is preserved. */}
+      {isAdmin && (
+        <div>
+          <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
+            Permission Mode
+          </label>
+          <div className="relative">
+            <select
+              value={permMode}
+              onChange={(e) => setPermMode(e.target.value)}
+              className="w-full pl-3.5 pr-10 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all appearance-none cursor-pointer"
+            >
+              {PERMISSION_MODE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[var(--text-faint)]">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
+          <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
+            Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.
+          </p>
         </div>
-        <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-          Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.
-        </p>
-      </div>
+      )}
 
       {/* Working Directory: sandbox prefix (read-only) + editable segment */}
       <div>

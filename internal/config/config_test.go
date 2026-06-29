@@ -46,6 +46,14 @@ func TestDefault(t *testing.T) {
 	require.False(t, cfg.Messaging.Feishu.Enabled)
 }
 
+// TestDefaultPermissionMode: r3 (#804) — config.worker.default_permission_mode
+// 缺省 "workspace"（r2 的 "bypass" no-op 已退役）。bridge 在 workspace 无显式覆盖时
+// 注入此值；因默认值同档下调，注入即收紧。
+func TestDefaultPermissionMode(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "workspace", Default().Worker.DefaultPermissionMode)
+}
+
 func TestConfig_Validate(t *testing.T) {
 	t.Parallel()
 

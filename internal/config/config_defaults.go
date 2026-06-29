@@ -79,7 +79,7 @@ func Default() *Config {
 				UseAppServer:    true,
 				IdleDrainPeriod: 30 * time.Minute,
 			},
-			DefaultPermissionMode: "bypass", // no-op since #789 r2 P2: accepted but NOT injected by bridge (would override restricted codex/ACP config); retained for future per-worker-type use
+			DefaultPermissionMode: "workspace", // r3 (#804): bridge injects this when a workspace has no explicit override; default tightened from bypass→workspace so injection is a blast-radius reduction, not an escalation
 		},
 		Security: SecurityConfig{
 			APIKeyHeader:    "X-API-Key",
