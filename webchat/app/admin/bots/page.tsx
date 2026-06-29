@@ -5,11 +5,13 @@ import Link from 'next/link';
 import { listBots } from '@/lib/api/admin-bots';
 import type { BotConfigEntry } from '@/lib/types/admin';
 import { BotCard } from '@/components/admin/bot-card';
+import { ChannelConfigEditor } from '@/components/admin/channel-config-editor';
 import { useResource } from '@/hooks/use-resource';
 import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 
 export default function BotsPage() {
   const [query, setQuery] = useState('');
+  const [showChannelDefaults, setShowChannelDefaults] = useState(false);
 
   const { data: bots, loading, error, reload } = useResource<BotConfigEntry[]>(
     () => listBots(),
@@ -81,6 +83,45 @@ export default function BotsPage() {
               + New Bot
             </Link>
           </div>
+        </div>
+
+        {/* Channel defaults — platform-level team configs for channels without
+            a bot instance (webchat owns dir/webchat/ but is never a bot). #796 */}
+        <div className="mb-6 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
+          <button
+            onClick={() => setShowChannelDefaults((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-[var(--text-primary)]">
+                Channel Defaults
+              </span>
+              <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
+                WebChat
+              </span>
+              <span className="text-[11px] text-[var(--text-faint)]">
+                Team defaults for channels without a bot instance
+              </span>
+            </div>
+            <svg
+              className={`flex-shrink-0 text-[var(--text-faint)] transition-transform ${showChannelDefaults ? 'rotate-180' : ''}`}
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {showChannelDefaults && (
+            <div className="px-4 pb-4 pt-3 border-t border-[var(--border-subtle)]">
+              <ChannelConfigEditor platform="webchat" />
+            </div>
+          )}
         </div>
 
         {/* Search */}

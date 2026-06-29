@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/config"
 )
@@ -50,7 +51,7 @@ func (c agentConfigSuffixChecker) Check(_ context.Context) cli.Diagnostic {
 		}
 	}
 
-	platforms := []string{"slack", "feishu", "webchat"}
+	platforms := agentconfig.KnownPlatforms()
 	var deprecated []string
 	for _, e := range entries {
 		if e.IsDir() {

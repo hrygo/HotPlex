@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hrygo/hotplex/internal/admin"
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/assets"
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
@@ -1094,7 +1095,7 @@ func warnDeprecatedSuffixFiles(dir string, log *slog.Logger) {
 	if dir == "" {
 		return
 	}
-	platforms := []string{"slack", "feishu", "webchat"}
+	platforms := agentconfig.KnownPlatforms()
 	bases := []string{"SOUL", "AGENTS", "SKILLS", "USER", "MEMORY"}
 	for _, p := range platforms {
 		for _, b := range bases {

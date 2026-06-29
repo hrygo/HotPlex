@@ -65,6 +65,35 @@ export function writeAgentFile(
 }
 
 // ---------------------------------------------------------------------------
+// Channel Default Config (platform-level team defaults)
+//
+// Platforms without a bot instance (e.g. webchat) own dir/<platform>/ team
+// defaults but never appear in the bot registry. These endpoints address that
+// layer directly, serving as channel-wide defaults overridden per-workspace
+// by LoadForWorkspace. See issue #796.
+// ---------------------------------------------------------------------------
+
+export function getChannelConfigFile(platform: string, file: string): Promise<AgentConfigFile> {
+  return adminFetch<AgentConfigFile>(
+    `/admin/bots/platform/${encodeURIComponent(platform)}/config/${encodeURIComponent(file)}`,
+  );
+}
+
+export function writeChannelConfigFile(
+  platform: string,
+  file: string,
+  content: string,
+): Promise<AgentConfigFile> {
+  return adminFetch<AgentConfigFile>(
+    `/admin/bots/platform/${encodeURIComponent(platform)}/config/${encodeURIComponent(file)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // System Prompt Preview
 // ---------------------------------------------------------------------------
 
