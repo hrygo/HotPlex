@@ -129,6 +129,26 @@ func (s *pgStore) ListAllWorkspaces(ctx context.Context) ([]*Workspace, error) {
 	return out, rows.Err()
 }
 
+// ListAllWorkspacesWithOwner mirrors SQLiteStore.ListAllWorkspacesWithOwner for PG
+// (spec §3.1, issue #807). The query has no bind params, so the rebound text is
+// dialect-identical to the SQLite form; only the store handle differs.
+func (s *pgStore) ListAllWorkspacesWithOwner(ctx context.Context) ([]*AdminWorkspaceView, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["workspaces.list_with_owner"])
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*AdminWorkspaceView
+	for rows.Next() {
+		v, err := scanAdminWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error) {
 	w, err := scanWorkspace(s.db.QueryRowContext(ctx, s.queries["workspaces.get_by_owner_and_workdir"], ownerUserID, workDir))
 	if errors.Is(err, sql.ErrNoRows) {

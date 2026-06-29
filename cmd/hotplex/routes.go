@@ -84,6 +84,7 @@ func setupRoutes(
 		Cron:             cronProvider,
 		BotLister:        &botListerAdapter{registry: messaging.DefaultBotRegistry()},
 		BotConfig:        newBotConfigAdapter(deps.ConfigStore, cfg.AgentConfig.ConfigDir, ""),
+		WorkspaceStore:   deps.WorkspaceStore,
 		Version:          versionString,
 		NewSessionID:     newSessionID,
 		AllowedOriginsFn: corsOriginsFn,
@@ -183,6 +184,13 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserGet)
 	adminMux.HandleFunc("PATCH /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserUpdate)
 	adminMux.HandleFunc("DELETE /admin/api-keys/{id}", adminAPI.HandleAPIKeyUserDelete)
+
+	// Workspace admin console (issue #807): global list (with owner identity) +
+	// inline permission_mode edit. Admin-only via AdminAPI.Middleware; the user
+	// self-service /api/workspaces/* endpoints stay separate (registered below at
+	// /api/workspaces with Authenticator + CSRF, not admin scope).
+	adminMux.HandleFunc("GET /admin/workspaces", adminAPI.HandleListAdminWorkspaces)
+	adminMux.HandleFunc("PATCH /admin/workspaces/{id}", adminAPI.HandleUpdateAdminWorkspacePermissionMode)
 
 	// Documentation
 	if resolved := security.ResolveCSP(security.DefaultDocsCSP, cfg.Security.CSP); security.IsPermissiveCSP(resolved) {

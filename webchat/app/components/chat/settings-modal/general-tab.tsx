@@ -173,14 +173,15 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
         </p>
       </div>
 
-      {/* Permission Mode Selection — admin-only (r3 #804): non-admins cannot
-          configure workspace permission mode; the control is hidden and the field
-          is omitted from the PATCH body so the stored value is preserved. */}
-      {isAdmin && (
-        <div>
-          <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-            Permission Mode
-          </label>
+      {/* Permission Mode — admin-editable select (r3 #804); non-admins see a
+          read-only badge of the current mode (issue #807 §3.6). The field is
+          omitted from the PATCH body when unchanged, so a non-admin save never
+          touches the admin-gated column (r3 would 403 if it did). */}
+      <div>
+        <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
+          Permission Mode
+        </label>
+        {isAdmin ? (
           <div className="relative">
             <select
               value={permMode}
@@ -199,11 +200,18 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
               </svg>
             </div>
           </div>
-          <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-            Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.
-          </p>
-        </div>
-      )}
+        ) : (
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-gold)]" />
+            {workspace.permission_mode === ''
+              ? 'Default (workspace)'
+              : (PERMISSION_MODE_OPTIONS.find((o) => o.value === workspace.permission_mode)?.label ?? workspace.permission_mode)}
+          </div>
+        )}
+        <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
+          Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.
+        </p>
+      </div>
 
       {/* Working Directory: sandbox prefix (read-only) + editable segment */}
       <div>
