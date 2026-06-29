@@ -201,3 +201,42 @@ func TestHandleWritePlatformAgentConfigFile_ProviderError(t *testing.T) {
 	api.HandleWritePlatformAgentConfigFile(w, r)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// TestHandlePlatformAgentConfigFile_AllPlatforms asserts the endpoint serves
+// every recognized platform — not only webchat — making the multi-platform
+// contract explicit rather than implicit. The IsValidPlatform whitelist accepts
+// webchat/slack/feishu; each must round-trip through both verbs. See #796.
+func TestHandlePlatformAgentConfigFile_AllPlatforms(t *testing.T) {
+	t.Parallel()
+
+	platforms := []string{"webchat", "slack", "feishu"}
+	for _, p := range platforms {
+		t.Run(p+"_read", func(t *testing.T) {
+			t.Parallel()
+			prov := &mockBotConfigProvider{}
+			api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
+
+			w, r := newPlatformRequest(t, http.MethodGet, p, "AGENTS.md", ScopeAdminRead, nil)
+			api.HandleGetPlatformAgentConfigFile(w, r)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			require.Equal(t, p, prov.gotPlatform)
+			require.Equal(t, AgentConfigAgents, prov.gotFile)
+		})
+		t.Run(p+"_write", func(t *testing.T) {
+			t.Parallel()
+			prov := &mockBotConfigProvider{}
+			api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
+
+			body, err := json.Marshal(map[string]string{"content": "team default for " + p})
+			require.NoError(t, err)
+			w, r := newPlatformRequest(t, http.MethodPut, p, "AGENTS.md", ScopeAdminWrite, body)
+			api.HandleWritePlatformAgentConfigFile(w, r)
+
+			require.Equal(t, http.StatusNoContent, w.Code)
+			require.Equal(t, p, prov.gotPlatform)
+			require.Equal(t, AgentConfigAgents, prov.gotFile)
+			require.Equal(t, "team default for "+p, prov.gotContent)
+		})
+	}
+}

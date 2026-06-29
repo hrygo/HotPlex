@@ -68,7 +68,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     setActiveFile(key);
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     const def = CONFIG_FILES.find((f) => f.key === activeFile);
     if (!def) return;
 
@@ -86,9 +86,10 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     } finally {
       setSaving(false);
     }
-  };
+  }, [platform, activeFile, content]);
 
-  // Keyboard shortcut: Ctrl/Cmd+S to save
+  // Keyboard shortcut: Ctrl/Cmd+S to save. Depends on the save handler and
+  // editor state so the listener never closes over stale values.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -100,7 +101,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  });
+  }, [handleSave, dirty, saving, loading]);
 
   const currentDef = CONFIG_FILES.find((f) => f.key === activeFile);
   const charCount = content.length;
