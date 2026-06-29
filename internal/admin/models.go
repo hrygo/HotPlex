@@ -29,6 +29,30 @@ type SessionListResponse struct {
 	Offset   int   `json:"offset" example:"0"`
 }
 
+// WorkspaceListResponse is returned by GET /admin/workspaces (issue #807). Each
+// entry is a session.AdminWorkspaceView (workspace row + owner_display_name +
+// owner_username). Schema-only — handlers respond via respondJSON(map[string]any).
+type WorkspaceListResponse struct {
+	Workspaces []any `json:"workspaces"`
+}
+
+// WorkspaceResponse mirrors session.Workspace for the PATCH /admin/workspaces/{id}
+// success schema (issue #807). Defined locally because swaggo indexes types only
+// within the admin package — it cannot resolve cross-package session.Workspace.
+// Runtime serialization is unaffected (handlers return the real *session.Workspace).
+type WorkspaceResponse struct {
+	ID                   string `json:"id" example:"ws-uuid"`
+	OwnerUserID          string `json:"owner_user_id"`
+	Name                 string `json:"name" example:"my-project"`
+	WorkDir              string `json:"work_dir" example:"/home/u/.hotplex/workspaces/uid/my-project"`
+	AgentConfigOverrides string `json:"agent_config_overrides"`
+	WorkerPreference     string `json:"worker_preference"`
+	PermissionMode       string `json:"permission_mode" example:"workspace"`
+	Status               string `json:"status" example:"active"`
+	CreatedAt            int64  `json:"created_at"`
+	UpdatedAt            int64  `json:"updated_at"`
+}
+
 // CreateSessionResponse is returned by POST /admin/sessions.
 type CreateSessionResponse struct {
 	SessionID string `json:"session_id" example:"550e8400-e29b-41d4-a716-446655440000"`

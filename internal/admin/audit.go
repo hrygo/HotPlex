@@ -10,27 +10,28 @@ import (
 // admin_audit slog records. Stable strings — never rename without a consumer
 // audit, log dashboards filter on these.
 const (
-	AuditGatewayRestart     = "gateway.restart"
-	AuditBotCreate          = "bot.create"
-	AuditBotUpdate          = "bot.update"
-	AuditBotDelete          = "bot.delete"
-	AuditAPIKeyCreate       = "apikey.create"
-	AuditAPIKeyUpdate       = "apikey.update"
-	AuditAPIKeyDelete       = "apikey.delete"
-	AuditCronCreate         = "cron.create"
-	AuditCronUpdate         = "cron.update"
-	AuditCronDelete         = "cron.delete"
-	AuditCronTrigger        = "cron.trigger"
-	AuditSessionDelete      = "session.delete"
-	AuditSessionTerminate   = "session.terminate"
-	AuditSessionPatch       = "session.patch"
-	AuditSessionPut         = "session.put"
-	AuditConfigRollback     = "config.rollback"
-	AuditConfigValidate     = "config.validate"
-	AuditMemberStatusUpdate = "member.status.update"
-	AuditInvitationCreate   = "invitation.create"
-	AuditInvitationDelete   = "invitation.delete"
-	AuditAuthDenied         = "auth.denied"
+	AuditGatewayRestart                = "gateway.restart"
+	AuditBotCreate                     = "bot.create"
+	AuditBotUpdate                     = "bot.update"
+	AuditBotDelete                     = "bot.delete"
+	AuditAPIKeyCreate                  = "apikey.create"
+	AuditAPIKeyUpdate                  = "apikey.update"
+	AuditAPIKeyDelete                  = "apikey.delete"
+	AuditCronCreate                    = "cron.create"
+	AuditCronUpdate                    = "cron.update"
+	AuditCronDelete                    = "cron.delete"
+	AuditCronTrigger                   = "cron.trigger"
+	AuditSessionDelete                 = "session.delete"
+	AuditSessionTerminate              = "session.terminate"
+	AuditSessionPatch                  = "session.patch"
+	AuditSessionPut                    = "session.put"
+	AuditConfigRollback                = "config.rollback"
+	AuditConfigValidate                = "config.validate"
+	AuditMemberStatusUpdate            = "member.status.update"
+	AuditInvitationCreate              = "invitation.create"
+	AuditInvitationDelete              = "invitation.delete"
+	AuditWorkspacePermissionModeUpdate = "workspace.permission_mode.update" // issue #807 admin console
+	AuditAuthDenied                    = "auth.denied"
 
 	// AuditResult* — stable "result" field values. Reuse instead of literals so
 	// dashboard filters stay correct (issue #788 review P3).
@@ -97,8 +98,23 @@ func adminActionFor(method, path string) string {
 		return botAction(method)
 	case strings.Contains(path, "/sessions"):
 		return sessionAction(method)
+	case strings.Contains(path, "/workspaces"):
+		return workspaceAction(method)
 	}
 	return method + " " + path
+}
+
+// workspaceAction covers PATCH /admin/workspaces/{id} (issue #807) — the only
+// admin workspace write. GET /admin/workspaces (list) isn't audited
+// (isWriteMethod is false). The /workspaces branch sits last in adminActionFor
+// so it can't shadow the /sessions, /bots, /cron, /api-keys branches above
+// (none of those paths contain "/workspaces" as a substring).
+func workspaceAction(method string) string {
+	switch method {
+	case http.MethodPatch, http.MethodPut:
+		return AuditWorkspacePermissionModeUpdate
+	}
+	return "workspace." + strings.ToLower(method)
 }
 
 func botAction(method string) string {

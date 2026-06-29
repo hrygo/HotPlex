@@ -120,3 +120,23 @@ export interface APIKeyUser {
   created_at?: string;
   updated_at?: string;
 }
+
+// --- Workspace (admin console, issue #807) ---
+
+// AdminWorkspace is the admin console projection of a workspace: the full row
+// plus the owner's readable identity (display_name + username) joined server-side
+// (GET /admin/workspaces). permission_mode "" = no explicit override (config default).
+export interface AdminWorkspace {
+  id: string;
+  owner_user_id: string;
+  owner_display_name: string;
+  owner_username: string;
+  name: string;
+  work_dir: string;
+  agent_config_overrides: string;
+  worker_preference: string;
+  permission_mode: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+}

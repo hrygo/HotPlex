@@ -264,6 +264,25 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 
 **DELETE /admin/api-keys/{id}** — 物理删除映射，同时清除缓存的 resolver 条目。
 
+### Workspace 管理（admin 控制台）
+
+> 🆕 **issue #807** — admin 控制台的 workspace 全局视图。区别于用户自助的 `/api/workspaces/*`（见下文 Gateway API 段）：这两个端点走 admin 双通道鉴权（Bearer + Cookie fallback，强制 `role==admin && status==active`），列出全平台 workspace 并支持 inline 修改 `permission_mode`。
+
+| 方法 | 路径 | Scope | 说明 |
+|------|------|-------|------|
+| GET | `/admin/workspaces` | `admin:read` | 列出所有 workspace（带 owner 可读标识） |
+| PATCH | `/admin/workspaces/{id}` | `admin:write` | 修改单个 workspace 的 `permission_mode` |
+
+**GET /admin/workspaces** — 返回所有 active workspace，`LEFT JOIN users` 带上 owner 可读标识（`owner_display_name` + `owner_username`），admin 无需面对裸 UUID。owner 行缺失时（并发删除窗口）owner 字段回落为空串、workspace 仍返回。响应：`{"workspaces":[{id, owner_user_id, owner_display_name, owner_username, name, work_dir, permission_mode, status, created_at, updated_at, agent_config_overrides, worker_preference}]}`。读操作不审计。
+
+**PATCH /admin/workspaces/{id}** — **仅**接受 `permission_mode` 字段（admin 控制台范围最小化：不暴露 `work_dir`/`name` 修改，避免 admin 误改用户工作目录；这些仍走用户自助 `/api/workspaces/{id}`）。JSON body：`{"permission_mode":"<tier>"}`，`permission_mode` 必须显式提供（缺失返回 `400 BAD_REQUEST`）；值为 4 档之一（`bypass`/`auto-edit`/`workspace`/`read-only`）或空串（清除覆盖，回落 `config.worker.default_permission_mode`，缺省 `workspace`）。返回更新后的 workspace 裸行。
+
+> ⏱️ **生效语义**：写库后**运行中 session 不受影响**（worker 进程已注入权限参数）；新 session（新对话 / `/reset`）初始化时 `resolveWorkspacePermissionMode` 读到新值。UI 标注「对新会话生效」。
+
+> 🛡️ **审计**：PATCH 写操作由 middleware 级 `admin_audit` 统一记录，action = `workspace.permission_mode.update`，actor = uid（Cookie 通道）或 `admin-token`（Bearer），target = `/admin/workspaces/{id}`。
+
+PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQUEST`（body 缺 `permission_mode`）/ `404 WORKSPACE_NOT_FOUND`（id 不存在）/ `409 WORKSPACE_VERSION_MISMATCH`（`updated_at` CAS 冲突；或并发更新下 workspace 恰有活跃会话时的 CAS heuristic 误判——本端点只改 `permission_mode`、不动 `work_dir`，活跃会话不真正阻塞，故两种成因都应重新 GET 最新 `updated_at` 后重试，新值仅对新会话生效）。
+
 ## Gateway API 端点
 
 Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客户端 SDK 和 WebSocket 连接，使用 API Key 认证（非 Bearer Token）。

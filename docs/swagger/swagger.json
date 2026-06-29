@@ -1895,6 +1895,101 @@
                 }
             }
         },
+        "/admin/workspaces": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Returns every workspace across owners with owner display identity. Requires admin:read.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "List all workspaces (admin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.WorkspaceListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope: need admin:read",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/workspaces/{id}": {
+            "patch": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Change a workspace's permission_mode. Admin-only. Affects new sessions only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Update workspace permission mode (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "permission_mode to set",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.updateAdminWorkspaceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.WorkspaceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "INVALID_PERMISSION_MODE / missing permission_mode",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "WORKSPACE_NOT_FOUND",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "WORKSPACE_VERSION_MISMATCH",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/sessions": {
             "get": {
                 "security": [
@@ -3561,12 +3656,69 @@
                 }
             }
         },
+        "admin.WorkspaceListResponse": {
+            "type": "object",
+            "properties": {
+                "workspaces": {
+                    "type": "array",
+                    "items": {}
+                }
+            }
+        },
+        "admin.WorkspaceResponse": {
+            "type": "object",
+            "properties": {
+                "agent_config_overrides": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "ws-uuid"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "my-project"
+                },
+                "owner_user_id": {
+                    "type": "string"
+                },
+                "permission_mode": {
+                    "type": "string",
+                    "example": "workspace"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "active"
+                },
+                "updated_at": {
+                    "type": "integer"
+                },
+                "work_dir": {
+                    "type": "string",
+                    "example": "/home/u/.hotplex/workspaces/uid/my-project"
+                },
+                "worker_preference": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.WriteAgentConfigRequest": {
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
                     "example": "You are a helpful assistant."
+                }
+            }
+        },
+        "admin.updateAdminWorkspaceRequest": {
+            "type": "object",
+            "properties": {
+                "permission_mode": {
+                    "type": "string"
                 }
             }
         }

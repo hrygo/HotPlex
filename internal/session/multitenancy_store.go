@@ -26,6 +26,17 @@ type Workspace struct {
 	UpdatedAt            int64  `json:"updated_at"`
 }
 
+// AdminWorkspaceView is the admin console projection of a workspace with the
+// owner's readable identity joined in (spec §3.1, issue #807). It embeds Workspace
+// so the full row (id/owner/name/work_dir/permission_mode/...) serializes as-is,
+// plus OwnerDisplayName/OwnerUsername so an admin scanning the global list can
+// identify ownership instead of staring at a raw owner_user_id UUID.
+type AdminWorkspaceView struct {
+	Workspace
+	OwnerDisplayName string `json:"owner_display_name"`
+	OwnerUsername    string `json:"owner_username"`
+}
+
 // Invitation is a one-time invite code (spec §6.3).
 // json tags are required: AdminListInvitations responds with the struct
 // directly, so without them the field names serialize as PascalCase and the
@@ -82,6 +93,10 @@ type UserWorkspaceStore interface {
 	GetWorkspaceByID(ctx context.Context, id string) (*Workspace, error)
 	ListWorkspacesByOwner(ctx context.Context, ownerUserID string, limit, offset int) ([]*Workspace, error)
 	ListAllWorkspaces(ctx context.Context) ([]*Workspace, error)
+	// ListAllWorkspacesWithOwner returns all active workspaces joined with owner
+	// identity (display_name + username) for the admin console global view (issue
+	// #807). Distinct from ListAllWorkspaces (bare rows for the startup scan).
+	ListAllWorkspacesWithOwner(ctx context.Context) ([]*AdminWorkspaceView, error)
 	GetWorkspaceByOwnerAndWorkDir(ctx context.Context, ownerUserID, workDir string) (*Workspace, error)
 	UpdateWorkspace(ctx context.Context, w *Workspace, now int64) error
 	DeleteWorkspace(ctx context.Context, id string) error
@@ -155,6 +170,27 @@ func scanWorkspace(sc rowScanner) (*Workspace, error) {
 	w.CreatedAt = createdAt.Int64
 	w.UpdatedAt = updatedAt.Int64
 	return &w, nil
+}
+
+// scanAdminWorkspace scans the workspaces.list_with_owner projection: the 10
+// Workspace columns followed by the two LEFT-JOIN'd owner columns (COALESCE'd to
+// ” in SQL, so plain string — no NullString). Mirrors scanWorkspace's column
+// order for the embedded fields (see workspaces.list_with_owner.sql).
+func scanAdminWorkspace(sc rowScanner) (*AdminWorkspaceView, error) {
+	var v AdminWorkspaceView
+	var overrides, pref, perm sql.NullString
+	var createdAt, updatedAt sql.NullInt64
+	err := sc.Scan(&v.ID, &v.OwnerUserID, &v.Name, &v.WorkDir, &overrides, &pref, &v.Status,
+		&createdAt, &updatedAt, &perm, &v.OwnerDisplayName, &v.OwnerUsername)
+	if err != nil {
+		return nil, err
+	}
+	v.AgentConfigOverrides = overrides.String
+	v.WorkerPreference = pref.String
+	v.PermissionMode = perm.String
+	v.CreatedAt = createdAt.Int64
+	v.UpdatedAt = updatedAt.Int64
+	return &v, nil
 }
 
 func scanInvitation(sc rowScanner) (*Invitation, error) {
@@ -298,6 +334,28 @@ func (s *SQLiteStore) ListAllWorkspaces(ctx context.Context) ([]*Workspace, erro
 			return nil, err
 		}
 		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// ListAllWorkspacesWithOwner returns all active workspaces joined with the owner's
+// readable identity (display_name + username) for the admin console global view
+// (spec §3.1, issue #807). Distinct from ListAllWorkspaces: that returns bare rows
+// for the gateway startup stale-override scan; this carries owner identity so an
+// admin doesn't face raw UUIDs.
+func (s *SQLiteStore) ListAllWorkspacesWithOwner(ctx context.Context) ([]*AdminWorkspaceView, error) {
+	rows, err := s.db.QueryContext(ctx, queries["workspaces.list_with_owner"])
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*AdminWorkspaceView
+	for rows.Next() {
+		v, err := scanAdminWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
 	}
 	return out, rows.Err()
 }

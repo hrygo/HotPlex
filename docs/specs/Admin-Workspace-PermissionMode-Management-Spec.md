@@ -1,6 +1,6 @@
 # Admin 控制台 — Workspace Permission Mode 管理
 
-**状态**: Draft · **日期**: 2026-06-29 · **关联**: [Workspace-Permission-Mode-Spec.md](./Workspace-Permission-Mode-Spec.md)、[Workspace-Permission-Mode-Admin-Only-Revision-Spec.md](./Workspace-Permission-Mode-Admin-Only-Revision-Spec.md)（r3）· **版本目标**: v1.31.x
+**状态**: Implemented · **日期**: 2026-06-29 · **关联 issue**: #807 · **关联**: [Workspace-Permission-Mode-Spec.md](./Workspace-Permission-Mode-Spec.md)、[Workspace-Permission-Mode-Admin-Only-Revision-Spec.md](./Workspace-Permission-Mode-Admin-Only-Revision-Spec.md)（r3）· **版本目标**: v1.31.x
 
 ---
 

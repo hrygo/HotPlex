@@ -14,6 +14,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/web"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -111,6 +112,7 @@ type AdminAPI struct {
 	cron             CronSchedulerProvider
 	botLister        BotListerProvider
 	botConfig        BotConfigProvider
+	wsStore          session.UserWorkspaceStore // Optional: enables /admin/workspaces console (issue #807); nil when multitenancy/webchat disabled
 	logCollector     LogCollector
 	akStore          APIKeyUserStorer // nil when DB resolver not enabled
 	keyValidator     KeyValidator     // nil when not injected
@@ -136,6 +138,7 @@ type Deps struct {
 	Cron             CronSchedulerProvider
 	BotLister        BotListerProvider
 	BotConfig        BotConfigProvider
+	WorkspaceStore   session.UserWorkspaceStore // Optional: enables /admin/workspaces console (issue #807)
 	LogCollector     LogCollector
 	Version          func() string
 	NewSessionID     func() string
@@ -164,6 +167,7 @@ func New(deps Deps) *AdminAPI {
 		cron:          deps.Cron,
 		botLister:     deps.BotLister,
 		botConfig:     deps.BotConfig,
+		wsStore:       deps.WorkspaceStore,
 		logCollector:  lc,
 		keyValidator:  deps.KeyValidator,
 		akStore: func() APIKeyUserStorer {
