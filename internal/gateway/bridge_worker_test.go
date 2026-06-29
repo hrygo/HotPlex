@@ -179,12 +179,14 @@ func TestResolveWorkspacePermissionMode(t *testing.T) {
 		require.Equal(t, "auto-edit", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
-	t.Run("fetch error degrades to empty, not bypass (#789 P1)", func(t *testing.T) {
+	t.Run("fetch error degrades to bridge default, not bypass (r3 #804 fail-closed)", func(t *testing.T) {
 		t.Parallel()
-		// Degrade must NOT inject bypass — keep the worker's own config rather than
-		// silently upgrading a restricted operator setup.
+		// Fail-closed: a transient DB outage must NOT degrade to "" (which CC/OCS
+		// map to bypass, re-opening the r2 P1 escalation). The helper seeds
+		// "workspace" — the r3 bridge default — so a fetch failure keeps the
+		// session bounded at workspace, the same tier a no-override workspace gets.
 		b := newBridgeForOverrideTest(t, nil, errors.New("db down"))
-		require.Equal(t, "", b.resolveWorkspacePermissionMode("ws-1"))
+		require.Equal(t, "workspace", b.resolveWorkspacePermissionMode("ws-1"))
 	})
 
 	t.Run("warn dedup: success re-arms warning (#789 P2, mirrors #749)", func(t *testing.T) {

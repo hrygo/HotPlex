@@ -345,21 +345,23 @@ func (b *Bridge) resolveWorkspaceOverrides(ctx context.Context, workspaceID stri
 }
 
 // resolveWorkspacePermissionMode returns the effective permission mode tier for a
-// session (#789, r3 #804). Precedence:
+// session (#789, r3 #804). The returned tier is a CEILING on permissiveness — each
+// worker clamps its operator config to never exceed it (codex: most-restrictive of
+// session tier vs cfg.Sandbox/ApprovalMode; ACP: auto_approve gated off for tiers
+// stricter than bypass), so an injected default can tighten but never escalate.
+// Precedence:
 //
 //   - Sessions WITHOUT a workspace (platform/cron: Slack/Feishu/cron-driven) → "".
-//     Each worker applies its OWN default/config: codex permissionModeFromSession("")
-//     → ok=false → honors cfg.Sandbox/ApprovalMode; ACP skips the override; CC/OCS
-//     map "" to their own bypass default. Injecting the global default here would
-//     override an operator's restricted codex.sandbox / acp.auto_approve (#789 P1).
+//     Each worker applies its OWN default/config (codex honors cfg.Sandbox, ACP
+//     honors cfg.AutoApprove; CC/OCS map "" to their own bypass). Injecting a global
+//     default here would override an operator's restricted codex.sandbox /
+//     acp.auto_approve (#789 P1).
 //   - Workspace with an explicit override → that tier wins.
-//   - Workspace with NO explicit override → the bridge's global default
-//     (config.worker.default_permission_mode, seeded "workspace" in r3). Because the
-//     default dropped from bypass→workspace in the same revision injection was
-//     enabled, this is a tightening across all workers (CC acceptEdits, codex
-//     workspace-write×on-request, ACP approve=false), not an escalation (#804 r3 —
-//     supersedes the #789 r2 P2 "do not inject" stance, which existed only because
-//     the prior default was bypass).
+//   - Workspace with NO explicit override, or a fetch error → the bridge's global
+//     default (config.worker.default_permission_mode, seeded "workspace" in r3).
+//     Returning the default (not "") on fetch error is fail-closed: for CC/OCS ""
+//     maps to bypass, so an empty degrade would re-open the r2 P1 escalation on a
+//     transient DB outage.
 //
 // ctx note: GetWorkspaceByID uses shutdownCtx rather than a request-scoped ctx because
 // buildWorkerInfo/prepareWorkerInfo intentionally carry no ctx (see #714); the query is
@@ -369,10 +371,14 @@ func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
 	if workspaceID == "" || b.wsStore == nil {
 		return ""
 	}
+	defaultMode, _ := b.defaultPermissionMode.Load().(string)
 	ws, err := b.wsStore.GetWorkspaceByID(b.shutdownCtx, workspaceID)
 	if err != nil {
-		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to worker default", err)
-		return ""
+		// Fail-closed (#804 r3 review): degrade to the bridge default (workspace)
+		// rather than "". For CC/OCS "" maps to bypass, so an empty degrade would
+		// silently escalate a workspace session to full bypass during a DB blip.
+		b.warnOverrideDegrade(workspaceID, "fetch workspace permission_mode failed, degrading to bridge default", err)
+		return defaultMode
 	}
 	// fetch succeeded: clear any prior degrade flag so a future regression warns again
 	// (#749, mirrors resolveWorkspaceOverrides 成功路径的 Delete).
@@ -380,13 +386,7 @@ func (b *Bridge) resolveWorkspacePermissionMode(workspaceID string) string {
 	if ws.PermissionMode != "" {
 		return ws.PermissionMode // explicit workspace override wins
 	}
-	// r3 (#804): no explicit override → return the bridge's global default
-	// (config.worker.default_permission_mode). Because the default dropped from
-	// bypass→workspace in the same revision injection was enabled, this is a
-	// tightening across all workers, not an escalation. The no-workspace branch
-	// above still returns "" so cron/platform sessions honor operator-tuned config.
-	mode, _ := b.defaultPermissionMode.Load().(string)
-	return mode
+	return defaultMode
 }
 
 // warnOverrideDegrade logs a degrading warning at most once per workspaceID per

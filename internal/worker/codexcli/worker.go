@@ -709,6 +709,37 @@ func permissionModeFromSession(mode string) (sandbox, approval string, ok bool) 
 	}
 }
 
+// codexSandboxRank returns a restrictiveness rank for a Codex sandbox mode
+// (higher = more restrictive). Unknown values return 0 so a recognized session
+// tier is always preferred over an unrecognized operator value.
+func codexSandboxRank(s string) int {
+	switch s {
+	case "read-only":
+		return 3
+	case "workspace-write":
+		return 2
+	case "danger-full-access":
+		return 1
+	}
+	return 0
+}
+
+// codexApprovalRank returns a restrictiveness rank for a Codex approval policy
+// (higher = more restrictive). Unknown values return 0.
+func codexApprovalRank(s string) int {
+	switch s {
+	case "untrusted":
+		return 4
+	case "on-request":
+		return 3
+	case "on-failure":
+		return 2
+	case "never":
+		return 1
+	}
+	return 0
+}
+
 // buildThreadStartParams constructs the JSON-RPC params for "thread/start".
 // Shared by Start() and ResetContext() to avoid duplication.
 //
@@ -727,11 +758,19 @@ func buildThreadStartParams(session worker.SessionInfo, cfg Config) map[string]a
 	if session.SkipPermissions {
 		approvalMode = "never"
 	}
-	// Issue #789: a non-empty PermissionMode tier overrides both sandbox and approval
-	// (takes precedence over config defaults and SkipPermissions), mapping the unified
-	// 4 tiers onto Codex's native (sandbox, approvalPolicy) pair.
+	// #789 / r3 #804 review: a non-empty PermissionMode tier (workspace override or
+	// bridge-injected default) is a CEILING on permissiveness — it tightens the
+	// operator's config but never relaxes it. Take the more-restrictive of (operator
+	// config, session tier) per axis, so injecting "workspace" cannot override an
+	// operator's read-only sandbox (the prior unconditional overwrite was an
+	// escalation: it clobbered any cfg.Sandbox stricter than workspace-write).
 	if sb, ap, ok := permissionModeFromSession(session.PermissionMode); ok {
-		sandbox, approvalMode = sb, ap
+		if codexSandboxRank(sb) > codexSandboxRank(sandbox) {
+			sandbox = sb
+		}
+		if codexApprovalRank(ap) > codexApprovalRank(approvalMode) {
+			approvalMode = ap
+		}
 	}
 	params := map[string]any{
 		"cwd":            session.ProjectDir,

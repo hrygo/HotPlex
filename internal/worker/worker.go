@@ -270,11 +270,12 @@ func ValidatePermissionMode(mode string) error {
 }
 
 // NormalizePermissionMode returns the effective tier for a (possibly empty) mode.
-// Empty → PermissionModeWorkspace (aligns with the r3 Default() seed): an operator who
-// explicitly sets default_permission_mode: "" must land on the tightened default, not
-// bypass — otherwise the injected bypass would override restricted worker configs and
-// reintroduce the r2 P1 escalation. Valid tiers pass through unchanged. Called by
-// NewBridge/UpdateDefaultPermissionMode; consumed via Load by resolveWorkspacePermissionMode.
+// Empty → PermissionModeWorkspace (the r3 Default() seed). Valid tiers pass through
+// unchanged. Called by NewBridge/UpdateDefaultPermissionMode; consumed via Load by
+// resolveWorkspacePermissionMode, which treats the result as a permissiveness CEILING
+// — each worker clamps its operator config to never exceed it (codexcli takes the
+// more-restrictive of session tier vs cfg.Sandbox/ApprovalMode), so an injected
+// default can tighten but never escalate past operator config.
 func NormalizePermissionMode(mode string) string {
 	if mode == "" {
 		return PermissionModeWorkspace

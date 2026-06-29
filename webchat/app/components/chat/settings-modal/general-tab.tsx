@@ -97,8 +97,11 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
         workerPreference: worker,
         // r3 (#804): permission_mode is admin-only — non-admins omit the field so the
         // backend leaves the stored value untouched (sending it would 403). The control
-        // is hidden when !isAdmin.
-        ...(isAdmin ? { permissionMode: permMode } : {}),
+        // is hidden when !isAdmin. Admins send it only when actually changed, so a
+        // name-only save doesn't touch the admin-gated field (audit noise / coupling).
+        ...(isAdmin && permMode !== (workspace.permission_mode || 'workspace')
+          ? { permissionMode: permMode }
+          : {}),
         workDir,
       });
       onUpdated?.(updated);

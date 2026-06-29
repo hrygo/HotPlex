@@ -17,18 +17,29 @@
 - **决策 B**：`permission_mode` 的设置/修改权限收归 **admin-only**，非 admin 传该字段 → 403（fail-closed）。
 - **决策 C**：config 默认仅在 **workspace session** 生效；无 workspace session（cron / Slack / Feishu 平台 channel）保持注入 `""`，保留 r2 §8 对操作员受限 Codex/ACP 配置的保护。
 
-## 2. 安全权衡（化解 r2 §8 担忧）
+## 2. 安全权衡（ceiling 语义化解 r2 §8 担忧）
 
-r2 §8 不注入全局默认的核心动机：避免覆盖操作员为受限环境配的 `codex.sandbox=read-only` / `acp.auto_approve=false`。本次把默认值**同时**从 `bypass` 降为 `workspace`，使"注入全局默认"在所有 Worker 上都变为**收紧**而非提权：
+r2 §8 不注入全局默认的核心动机：避免覆盖操作员为受限环境配的 `codex.sandbox=read-only` / `acp.auto_approve=false`。r3 把默认值**同时**从 `bypass` 降为 `workspace`，并把注入语义定义为 **ceiling（权限上限）**：注入值只能**收紧**操作员配置，绝不放宽。
 
-| 场景 | r2 行为（无覆盖） | r3 行为（无覆盖） | 方向 |
+**ceiling 落地点在各 Worker 内部**（`session.PermissionMode` 是 gateway 的意图，Worker 把它与操作员配置取**更严**者）：
+
+| Worker | ceiling 实现 | 例：注入 `workspace` + 操作员 `codex.sandbox=read-only` |
+|---|---|---|
+| CC / OCS | 无独立操作员权限配置，`""`→bypass 即被注入值替换 | `workspace` → acceptEdits（收紧） |
+| **Codex** | `buildThreadStartParams` 取 `max(rank(session tier), rank(cfg.Sandbox/ApprovalMode))` | sandbox 保持 `read-only`（操作员更严，**不提权**）；approval 取更严者 |
+| ACP | `auto_approve` 二值，`workspace`→false 已是严极 | `false`（收紧），不可能从 false 升 true |
+
+| 场景 | r2 行为（无覆盖） | r3 行为（无覆盖，ceiling） | 方向 |
 |---|---|---|---|
 | CC / OCS workspace | `""` → bypass | `workspace` → acceptEdits | 收紧 ✓ |
-| Codex workspace | `""` → 操作员配置（常 danger-full-access） | `workspace` → workspace-write × on-request | 收紧 ✓ |
-| ACP workspace | `""` → 操作员配置（常 approve=true） | `workspace` → approve=false | 收紧 ✓ |
+| Codex workspace（操作员默认 danger-full-access） | `""` → danger-full-access | `workspace` → workspace-write × on-request | 收紧 ✓ |
+| Codex workspace（操作员 read-only） | `""` → read-only | `workspace` ceiling → 仍 read-only | 不变 ✓（ceiling 保护） |
+| ACP workspace | `""` → 操作员配置 | `workspace` → approve=false | 收紧 ✓ |
 | cron / 平台 channel | `""` | `""`（不变） | 不变 ✓ |
 
-**结论**：因默认值同档下调，注入 config 默认不再含提权路径；存量 `permission_mode IS NULL` 的 workspace 升级后自动收紧到 workspace 档。
+**结论**：注入值作为 permissiveness ceiling，由各 Worker clamp——对操作员默认配置是收紧，对操作员更严配置保持不变，**无提权路径**。这正是 r3 review P1（codex 注入 workspace 覆盖 read-only 操作员配置）的修复。
+
+**fail-closed 降级**：`resolveWorkspacePermissionMode` 在 `GetWorkspaceByID` 出错（DB 抖动）时也返回 bridge 默认值（workspace），而非 `""`——对 CC/OCS 而言 `""`→bypass，空降级会在 DB 故障期把 workspace session 静默升到 bypass（r2 P1）。返回默认值即 fail-closed。
 
 ## 3. 核心改动
 
@@ -124,6 +135,8 @@ r2 在多处注释里标注了"no-op / NOT injected"，r3 需逐一修订：
 
 **零数据迁移**：不改 DB schema，不改存量行，纯运行时默认值切换。
 
+> **存量 bypass 残留（已知项，非自动迁移）**：r2 UI 把 `Bypass — Full access (default)` 作为下拉首选项，故升级前打开过 General 选项卡并保存的 workspace 多数存了显式 `permission_mode="bypass"`。r3 的 ceiling 注入只覆盖 `PermissionMode==""` 的 workspace；**显式存了 `bypass` 的 workspace 升级后仍跑 bypass**——r3 收紧不触及它们。运维若要对这些 workspace 也收紧，需由 admin 显式 PATCH 清空（`permission_mode=""`）以回落到 workspace 默认。不做自动数据迁移，因静默改写存储值可能违背 operator 当初的显式选择。
+
 ## 7. 测试策略
 
 | 测试 | 文件 | 断言 |
@@ -162,9 +175,23 @@ r2 在多处注释里标注了"no-op / NOT injected"，r3 需逐一修订：
 - [x] `docs/specs/Workspace-Permission-Mode-Spec.md` 顶部加 r3 横幅（r2 正文保留作历史记录，引用本 spec）
 - [x] `docs/reference/admin-api.md`：补 `PERMISSION_DENIED` 错误码 + `permission_mode` admin-only 标注
 
+### 8.1 r3 code-review 修复（max effort review）
+
+| 修复 | 文件 | 改动 |
+|---|---|---|
+| **P1 codex 提权** | `internal/worker/codexcli/worker.go` | `buildThreadStartParams` 把 session tier 从"无条件覆盖"改为 **ceiling**：`codexSandboxRank`/`codexApprovalRank` 取 `max(rank(session), rank(operator))`，杜绝注入 workspace 覆盖操作员 read-only |
+| **P1 DB 抖动 fail-open** | `internal/gateway/bridge_worker.go` | `GetWorkspaceByID` 出错分支返回 bridge 默认值（workspace）而非 `""`（CC/OCS `""`→bypass），fail-closed |
+| **P2 config validate 误绿** | `cmd/hotplex/config_cmd.go` | `Validate()` 硬错误与 `Warnings()` 拆分：硬错误 `✗` + 非零退出（对齐 `gateway_run`），警告 `⚠` 不阻断 |
+| **P3 webchat 无条件发送 permMode** | `webchat/.../general-tab.tsx` | `permissionMode` 仅在 dirty 时发送，name-only save 不触 admin 门字段 |
+| **P3 Update 重复 isAdmin** | `internal/gateway/workspace_handlers.go` | admin 权威 memoize（`resolveAdmin` 闭包），admin 改他人 workspace 带 permMode 仅 1 次 idp.Lookup |
+| **P3 注释去 stale** | `worker.go` / `bridge_worker.go` | 删 "not an escalation" 伪断言，改为 ceiling 契约描述 |
+
+**新增测试**：`TestBuildThreadStartParams_PermissionCeiling`（4 例：收紧/不提权/空/显式 bypass 不放宽）；`TestResolveWorkspacePermissionMode` 的 fetch-error 用例改为断言降级到默认值。
+
 ## 9. 非目标
 
 - 不改 DB schema（不加列、不改 migration）。
 - 不引入 per-worker-type 默认（`config.worker.default_permission_mode` 仍是单值；r2 §11 留的"按 worker-type 细化"留待将来）。
 - 不改 cron / 平台 channel session 的权限行为。
 - 不做运行时实时切换（启动锁定语义不变）。
+- **不改 `/perm` 运行时命令**：`worker_cmds.go:handleSetPermMode` 是 pre-existing 的运行时 per-session worker IPC（`/perm bypass` / `$perm`），作用于**当前 live session 的 worker 进程**，不落库、不写持久 `Workspace.PermissionMode`。r3 的 admin-only 范围仅覆盖持久字段的 Create/Update（决策 B）；`/perm` 是另一安全边界，其是否收归 admin 留作单独 follow-up，不在本 PR。
