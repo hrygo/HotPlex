@@ -33,7 +33,7 @@ func newConfigValidateCmd() *cobra.Command {
 				return err
 			}
 
-			warns := cfg.Validate()
+			warns := append(cfg.Validate(), cfg.Warnings()...)
 			for _, w := range warns {
 				fmt.Fprintf(os.Stderr, "  ⚠ %s\n", w)
 			}

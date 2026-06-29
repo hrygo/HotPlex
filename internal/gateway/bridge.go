@@ -136,7 +136,8 @@ func (b *Bridge) UpdateMCPConfig(json string) {
 }
 
 // UpdateDefaultPermissionMode atomically updates the global default permission mode
-// tier. Empty/unknown normalizes to bypass. Used by config hot-reload (issue #789).
+// tier. Empty normalizes to workspace (the r3 Default seed); non-empty passes through
+// unchanged — callers must pass a config.Validate'd value. Used by config hot-reload (#789).
 func (b *Bridge) UpdateDefaultPermissionMode(mode string) {
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(mode))
 }

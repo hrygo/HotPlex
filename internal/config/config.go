@@ -95,13 +95,6 @@ func (c *Config) Validate() []string {
 	if c.Pool.MaxMemoryPerUser < 0 {
 		errs = append(errs, "pool.max_memory_per_user must be non-negative")
 	}
-	// Warn (not error) for TLS on non-local address.
-	if !c.Security.TLSEnabled &&
-		!strings.Contains(c.Gateway.Addr, "localhost") &&
-		!strings.Contains(c.Gateway.Addr, "127.0.0.1") &&
-		!strings.Contains(c.Gateway.Addr, "[::1]") {
-		errs = append(errs, "TLS is disabled on non-local address; enable tls_enabled for production")
-	}
 	if c.Log.Format != "" && c.Log.Format != "json" && c.Log.Format != "text" {
 		errs = append(errs, "log.format must be either 'json' or 'text'")
 	}
@@ -118,6 +111,21 @@ func (c *Config) Validate() []string {
 	}
 
 	return errs
+}
+
+// Warnings returns non-fatal deployment advisories (e.g. TLS off on a non-local
+// address). Surfaced at startup and by `hotplex config validate`, but never aborts
+// startup or blocks hot-reload — an operator may intentionally run TLS-terminated
+// behind a reverse proxy. See Validate for hard errors.
+func (c *Config) Warnings() []string {
+	var warns []string
+	if !c.Security.TLSEnabled &&
+		!strings.Contains(c.Gateway.Addr, "localhost") &&
+		!strings.Contains(c.Gateway.Addr, "127.0.0.1") &&
+		!strings.Contains(c.Gateway.Addr, "[::1]") {
+		warns = append(warns, "TLS is disabled on non-local address; enable tls_enabled for production")
+	}
+	return warns
 }
 
 // DefaultConfigPath is the default configuration file path used by the CLI

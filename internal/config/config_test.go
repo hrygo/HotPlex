@@ -109,7 +109,7 @@ func TestConfig_Validate(t *testing.T) {
 				c.Gateway.Addr = ""
 				return c
 			}(),
-			errCnt: 2, // missing addr + TLS warning (empty addr is non-local)
+			errCnt: 1, // missing addr only (TLS advisory moved to Warnings)
 		},
 		{
 			name: "missing db path",
@@ -184,16 +184,16 @@ func TestConfig_Validate(t *testing.T) {
 				c.DB.SQLite.Path = ""
 				return c
 			}(),
-			errCnt: 3, // missing addr + missing path + TLS warning
+			errCnt: 2, // missing addr + missing path (TLS moved to Warnings)
 		},
 		{
-			name: "non-local address TLS warning",
+			name: "non-local address: Validate returns no error (TLS is a warning, see Warnings)",
 			cfg: func() Config {
 				c := *Default()
 				c.Gateway.Addr = ":8888"
 				return c
 			}(),
-			errCnt: 1, // TLS warning for non-local address
+			errCnt: 0,
 		},
 	}
 
@@ -205,6 +205,22 @@ func TestConfig_Validate(t *testing.T) {
 			require.Len(t, errs, tt.errCnt)
 		})
 	}
+}
+
+// TestConfig_Warnings: r3 (#804) split — TLS-off-on-non-local is a non-fatal advisory
+// (operator may run TLS-terminated behind a reverse proxy), surfaced via Warnings not Validate.
+func TestConfig_Warnings(t *testing.T) {
+	t.Parallel()
+	t.Run("non-local + no TLS → advisory", func(t *testing.T) {
+		t.Parallel()
+		c := *Default()
+		c.Gateway.Addr = ":8888"
+		require.Len(t, c.Warnings(), 1)
+	})
+	t.Run("localhost → no advisory", func(t *testing.T) {
+		t.Parallel()
+		require.Empty(t, (*Default()).Warnings())
+	})
 }
 
 func TestExpandEnv(t *testing.T) {
