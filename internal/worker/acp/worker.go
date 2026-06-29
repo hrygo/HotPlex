@@ -817,11 +817,18 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 
 func (w *Worker) handleContextUsage() (map[string]any, error) {
 	snapshot := w.mapper.LastUsage()
-	// Return context usage snapshot; zero values mean no data yet (consistent with OCS).
-	return map[string]any{
+	// ACP context usage is only populated when the agent emits usage_update
+	// notifications (optional in the protocol). ACP exposes no session/info
+	// method to query it, so when the agent does not emit usage_update the
+	// context_fill / context_window stay zero — a documented protocol limit.
+	result := map[string]any{
 		"maxTokens":   snapshot.ContextSize,
 		"totalTokens": snapshot.ContextUsed,
-	}, nil
+	}
+	if snapshot.Model != "" {
+		result["model"] = snapshot.Model
+	}
+	return result, nil
 }
 
 func (w *Worker) handleSetModel(ctx context.Context, body map[string]any) (map[string]any, error) {
@@ -838,6 +845,9 @@ func (w *Worker) handleSetModel(ctx context.Context, body map[string]any) (map[s
 	if err := client.SetSessionModel(ctx, w.GetWorkerSessionID(), modelID); err != nil {
 		return nil, fmt.Errorf("acp: set_model: %w", err)
 	}
+	// Record the model so turn-summary model_name is populated even when the
+	// agent never emits a usage_update carrying a model field.
+	w.mapper.SetModel(modelID)
 	return map[string]any{"model": modelID}, nil
 }
 

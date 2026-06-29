@@ -105,6 +105,26 @@ func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *Code
 	}
 }
 
+// LastContextUsage returns the context usage snapshot tracked from
+// thread/tokenUsage/updated notifications, in the camelCase shape expected by
+// events.MapContextUsageResponse. Delegates to the converter (Mapper).
+//
+// Codex does not expose token usage via thread/read (its Turn payload carries
+// no counts), so the get_context_usage control channel is served from the
+// notification-tracked state instead of a thread/read round-trip.
+func (m *CodexAppServerManager) LastContextUsage() map[string]any {
+	return m.converter.LastContextUsage()
+}
+
+// SetCurrentModel seeds the converter's active model from the thread/start
+// configuration so model_name is populated for normal (non-rerouted) turns.
+// The converter is process-wide (singleton manager), so this reflects the most
+// recently started thread's model — acceptable since a single codex app-server
+// process typically serves one model at a time.
+func (m *CodexAppServerManager) SetCurrentModel(model string) {
+	m.converter.SetModel(model)
+}
+
 // Acquire increments the reference count and starts the process if needed.
 // CrashExitCode returns the OS exit code from the last process crash.
 // Only valid after the crash channel returned by Acquire has been closed.

@@ -163,9 +163,13 @@ func (c *ServerCommander) queryContextUsage(ctx context.Context) (map[string]any
 	contextFill := lastInput + lastCacheRead + lastCacheWrite
 	return map[string]any{
 		"totalTokens": contextFill,
-		"maxTokens":   0,
-		"percentage":  0,
-		"model":       model,
+		// OCS's HTTP API does not expose the model's context window, so fall back
+		// to a static mapping of common models. Unknown models return 0, which
+		// leaves context_pct unset rather than guessing (protocol limit; see
+		// Worker-Turn-Summary-Parity-Spec.md §5).
+		"maxTokens":  contextWindowForModel(model),
+		"percentage": 0,
+		"model":      model,
 		"categories": []map[string]any{
 			{"name": "Input tokens", "tokens": totalInput},
 			{"name": "Output tokens", "tokens": totalOutput},
@@ -174,6 +178,33 @@ func (c *ServerCommander) queryContextUsage(ctx context.Context) (map[string]any
 			{"name": "Cache write", "tokens": totalCacheWrite},
 		},
 	}, nil
+}
+
+// contextWindowForModel returns the known context window size for common
+// models, used as a fallback because OCS's HTTP API does not expose it.
+// Returns 0 for unknown models so context_pct stays unset rather than guessing.
+// Values are best-effort and may lag upstream model changes.
+func contextWindowForModel(model string) int64 {
+	if model == "" {
+		return 0
+	}
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "gpt-4.1"):
+		return 1047576
+	case strings.Contains(m, "gemini"):
+		return 1048576
+	case strings.Contains(m, "gpt-4o"):
+		return 128000
+	case strings.Contains(m, "o1") || strings.Contains(m, "o3") || strings.Contains(m, "o4"):
+		return 200000
+	case strings.Contains(m, "sonnet") || strings.Contains(m, "opus") || strings.Contains(m, "haiku"):
+		return 200000
+	case strings.Contains(m, "deepseek"):
+		return 64000
+	default:
+		return 0
+	}
 }
 
 func (c *ServerCommander) setModel(_ context.Context, body map[string]any) (map[string]any, error) {

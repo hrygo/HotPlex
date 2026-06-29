@@ -3,8 +3,8 @@ type: spec
 tags:
   - project/HotPlex
 date: 2026-06-23
-status: analysis
-progress: 0
+status: implemented
+progress: 100
 related_issues:
   - Turn-Summary-Spec.md (数据流基准)
   - Worker-GAP-Analysis-2026-05-15.md (OCS vs CC 能力差距)
@@ -216,3 +216,49 @@ Worker 产出事件 ──► SessionAccumulator 聚合 ──► snapshot() 注
 - `Worker-GAP-Analysis-2026-05-15.md` — OCS vs CC 能力全景差距
 - `Codex-AppServer-Worker-Spec.md` — codex app-server 协议参考
 - `ACP-Worker-Spec.md` / `ACP-Worker-Enhancement-Spec.md` — ACP 协议参考
+
+---
+
+## 10. 实施记录（2026-06-29）
+
+本节记录实现期对上游协议的确认结果，以及与原方案的偏差。协议事实来自 codex 源码（`codex-rs/app-server-protocol/src/protocol/v2/thread.rs`）、opencode 源码（`~/opencode`）与 ACP client 实现。
+
+### 10.1 协议确认（澄清原 spec 的"待实现时确认"）
+
+| 项 | 原 spec 假设 | 实测结论 |
+|----|------|---------|
+| codex `thread/read` | 暴露 context 用量 | **否**。`Thread.turns[].items` 无 token 计数；usage 仅由 `thread/tokenUsage/updated` 通知承载 |
+| codex `tokenUsage` 结构 | 含 `last`/`total` | 确认。**额外含 `modelContextWindow`**（maxTokens 的唯一可靠来源） |
+| codex cache_creation | 待确认 | **协议不暴露**。`TokenUsageBreakdown` 只有 `cachedInputTokens`(=cache_read)，无 cache-creation 维度 |
+| codex cost | 待确认 | **协议不暴露**。`TokenUsageBreakdown` 无 cost 字段 |
+| ACP `session/info` | 可查 model/context | **不存在**。ACP 无该方法；model 仅来自 `usage_update`(best-effort) 或 `session/set_model` |
+| OCS context window API | 待确认 `/model` 端点 | **不存在**。`context_length` 仅在 LLM provider 层，未通过 HTTP 暴露 |
+
+### 10.2 实施决策与偏差
+
+**codexcli (#776)**
+- **C1** 改为从 `thread/tokenUsage/updated` 通知提取（`last` input+cached 作为 fill，`modelContextWindow` 作为 window），**不走 `thread/read`**（其 Turn 负载无计数）。`ServerCommander.get_context_usage` 经 `manager.LastContextUsage()` 读 mapper 状态。
+- **C2a 保持 `last`（per-turn delta），不改用 `total`**。`SessionAccumulator.mergePerTurnStats` 对 Done stats 做 `TotalInput += usage` 累加，期望 per-turn delta；`total` 已是跨 turn 累计，传入会重复累加导致 `total_input_tok` 虚高。原 spec 建议"优先用 total"在此为**误判**，已纠正。
+- **C2b/C4 协议限制**：codex 不暴露 cache_creation 与 cost，无法产出。已在代码注释标注，不静默归零（字段缺省而非伪造 0）。
+- **C3**：除 `model/rerouted` 外，`worker.startNewThread` 通过 `manager.SetCurrentModel(cfg.Model)` 注入 thread/start 配置的 model，覆盖正常（非 rerouted）对话。
+
+**acp (#777)**
+- **A1**：`buildStats` 写 `model_usage`（CC 格式）。model 来源 `usage_update.model`（best-effort 解析）+ `session/set_model`（worker 记录到 mapper）。未知时不产 model_usage（不猜测）。
+- **A2**：fallback 链 `_meta.claudeCode.toolName → kind → title` 已在 `mapToolCall` 实现；ACP content 不含 tool 名（仅位置/参数），故无 content 解析步骤。
+- **A3**：协议限制——无 `session/info`，context 强依赖 `usage_update`；agent 不发则 context_fill/window 为 0（已注释）。
+
+**opencodeserver (#778)**
+- **O1**：静态映射表 `contextWindowForModel`（Claude 200K / GPT-4o 128K / GPT-4.1·Gemini 1M / o 系列 200K / DeepSeek 64K）。未知模型返回 0（context_pct 保持未设，不伪造）。
+
+### 10.3 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `internal/worker/codexcli/mapper.go` | C1/C2a/C3：trackTokenUsage 解析 modelContextWindow；LastContextUsage/SetModel；trackedUsageStats 携带 contextWindow；mu 保护跨 goroutine |
+| `internal/worker/codexcli/manager.go` | LastContextUsage/SetCurrentModel 委托 converter |
+| `internal/worker/codexcli/commands.go` | get_context_usage 改用 mapper 状态（弃 thread/read） |
+| `internal/worker/codexcli/worker.go` | startNewThread 注入 configured model |
+| `internal/worker/acp/mapper.go` | A1：usageSnapshot.Model；updateUsage 解析 model；buildStats 写 model_usage；SetModel |
+| `internal/worker/acp/worker.go` | handleSetModel 记录 model；handleContextUsage 返回 model + A3 注释 |
+| `internal/worker/opencodeserver/commands.go` | O1：contextWindowForModel 静态映射 |
+| 新增 `*_test.go` ×3 | codexcli/mapper_test、acp/mapper_turnsummary_test、ocs/commands_contextwindow_test |
