@@ -781,7 +781,8 @@ func (m *Mapper) nextSeq() int64 {
 	return m.seq.Add(1)
 }
 
-// Reset clears internal tracking state, called on session end or crash recovery.
+// Reset clears internal tracking state. Kept for direct unit tests; production
+// lifecycle uses CodexAppServerManager.deleteConverter / clearConverters.
 func (m *Mapper) Reset() {
 	m.mu.Lock()
 	m.lastUsage = nil

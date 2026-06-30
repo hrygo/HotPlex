@@ -110,6 +110,8 @@ func (m *CodexAppServerManager) getOrCreateConverter(threadID string) *Mapper {
 	defer m.convMu.Unlock()
 	conv, ok := m.converters[threadID]
 	if !ok {
+		// Empty sessionID is intentional: dispatchNotification assigns the
+		// envelope-level SessionID from subSessions before sending.
 		conv = NewMapper("")
 		m.converters[threadID] = conv
 	}
@@ -344,6 +346,8 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 		m.subSessions = make(map[string]string)
 		m.subMu.Unlock()
 	}
+
+	m.clearConverters()
 }
 
 // IsRunning reports whether the singleton process is currently running.

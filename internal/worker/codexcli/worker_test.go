@@ -2110,14 +2110,14 @@ func TestManager_PerThreadConverterIsolation(t *testing.T) {
 	drain := func(chs ...chan *events.Envelope) {
 		t.Helper()
 		for _, ch := range chs {
+		channel:
 			for {
 				select {
 				case <-ch:
 				default:
-					goto next
+					break channel
 				}
 			}
-		next:
 		}
 	}
 
@@ -2219,13 +2219,7 @@ func TestManager_PerThreadConverterIsolation(t *testing.T) {
 	})
 
 	t.Run("unsubscribe deletes per-thread converter state", func(t *testing.T) {
-		ch := mgr.Subscribe("thread-e", "session-e")
-		defer func() {
-			go func() {
-				for range ch {
-				}
-			}()
-		}()
+		_ = mgr.Subscribe("thread-e", "session-e")
 
 		mgr.SetCurrentModel("thread-e", "gpt-e")
 		require.Equal(t, "gpt-e", mgr.LastContextUsage("thread-e")["model"])
@@ -2238,7 +2232,7 @@ func TestManager_PerThreadConverterIsolation(t *testing.T) {
 		require.Empty(t, mgr.LastContextUsage("nonexistent-thread"))
 	})
 
-	t.Run("monitorProcess crash clears all converters", func(t *testing.T) {
+	t.Run("clearConverters drops all per-thread state", func(t *testing.T) {
 		chA := mgr.Subscribe("thread-f", "session-f")
 		chB := mgr.Subscribe("thread-g", "session-g")
 		defer mgr.Unsubscribe("thread-f")
