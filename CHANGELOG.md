@@ -1,18 +1,38 @@
 # Changelog
 
-## [Unreleased]
+## [1.30.1] - 2026-06-30
+
+### Summary
+
+v1.30.1 是一次 patch 版本更新，聚焦于 **worker 统一化与安全加固**。新增 workspace 权限模式（4 档 x 4 worker 统一映射），补齐 codex/acp/ocs 的 turn summary parity（模型名 + 上下文窗口），以及 admin 后台收口（cookie 通道 / CSRF / 审计 / workspaces 管理）。WebChat 获得亮暗主题系统和 workspace 切换修复。
 
 ### Added
 
 - **Worker**: workspace 权限模式（#789）— admin 可为每个 workspace 指定统一 4 档权限（`read-only` / `workspace` / `auto-edit` / `bypass`），网关在 Worker 启动时映射到各 Worker（CC / Codex CLI / OCS / ACP）的原生权限参数，收紧默认 blast radius。含 migration 022（SQLite + PG nullable 列）、`worker.PermissionMode*` 常量 + `ValidatePermissionMode`、bridge `resolveWorkspacePermissionMode`（仿 `resolveWorkspaceOverrides`）、admin UI 权限分段控件、doctor `claude_auto_mode` 能力检测。
 
+- **Worker**: Turn summary parity for codexcli、ACP、opencodeserver（#776、#777、#778）— workers now report model name + context window in done events, matching claudecode behavior. Messaging session idle transition fixes prevent >30min zombie scanner reaping for Slack/Feishu sessions（#815、#816、#817）.
+
+- **Admin**: Workspaces management console — global workspace list with inline permission_mode editing at `/admin/workspaces`（#807）. Platform-base agent config editing for webchat channels（#806）. Backend restructuring — cookie channel for admin auth, CSRF same-origin enforcement, audit logging for all write operations（#788）.
+
+- **WebChat UI**: Light/dark theme system with localStorage persistence + system preference detection. ThemeToggle component with animated sun/moon icon. i18n bilingual foundation spec（#818）.
+
 ### Changed
 
 - **Worker**: `SessionInfo.PermissionMode` 语义重定义——从旧的 CC 私有 3 档（`default`/`plan`/`auto-accept`）改为统一 4 档（`read-only`/`workspace`/`auto-edit`/`bypass`）。CC `auto-edit` 档用原生 `--permission-mode auto`（强制升级，不回退 `acceptEdits`）。`SkipPermissions` 降级为 `bypass` 的 legacy 别名（生产无赋值点）。
 
+- **Configuration**: permission_mode 收归 admin-only + 默认 workspace（r3）（#805）— `config.worker.default_permission_mode` 从 no-op 转为 bridge 真正消费，缺省 bypass->workspace。非 admin 传 permission_mode 字段 -> 403 fail-closed。
+
+- **Gateway Core**: Messaging session idle transition — worker 完成 turn 后自动转入 IDLE 状态，避免 >30min 僵尸回收误杀飞书/Slack 会话（#815）。Worker LastIO 在每事件刷新防止长时间 turn 被误杀（#815 Fix C）。Codexcli history recovery for zombie-reclaimed sessions（#815 Fix B）。Idle timeout dead-config warning（#817）。
+
+- **WebChat UI**: ChatContainer / Thread / SessionPanel 重构。Next.js 16 flat-config eslint 迁移。CSS 变量主题系统（light/dark tokens）。
+
+### Fixed
+
+- **WebChat UI**: Workspace switching now defaults to most recent session instead of always creating new sessions. Fixed `savedId` blocking auto-create on new workspace（#795）.
+
 ### Security
 
-- **Worker**: bridge 不再无条件注入 `bypass`（#789 review P1 回归修复）。仅当 admin 为 workspace **显式**设置 `permission_mode` 时才注入；否则注入 `""`（"worker default"），让每个 Worker 应用自身默认/操作员配置（CC/OCS→bypass；Codex→`cfg.Sandbox`；ACP→`cfg.AutoApprove`）。fetch 失败同样降级为 `""`，避免静默把受限 operator 配置提权到 bypass。`config.worker.default_permission_mode` 当前为 no-op（已接受 + 热重载，但 bridge 不注入），保留以备将来按 worker-type 细化。
+- **Worker**: bridge 不再无条件注入 `bypass`（#789 review P1 回归修复）。仅当 admin 为 workspace **显式**设置 `permission_mode` 时才注入；否则注入 `""`（"worker default"），让每个 Worker 应用自身默认/操作员配置（CC/OCS->bypass；Codex->`cfg.Sandbox`；ACP->`cfg.AutoApprove`）。fetch 失败同样降级为 `""`，避免静默把受限 operator 配置提权到 bypass。`config.worker.default_permission_mode` 当前为 no-op（已接受 + 热重载，但 bridge 不注入），保留以备将来按 worker-type 细化。
 
 ## [1.30.0] - 2026-06-25
 
