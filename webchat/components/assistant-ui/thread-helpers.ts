@@ -20,11 +20,11 @@ export const messageVariants = {
   visible: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function extractCommand(args: any) { return args?.command || args?.Command || ""; }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function extractFilePath(args: any) { return args?.file_path || args?.path || args?.target_file; }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function extractFileContent(args: any, result: any) { return args?.content || args?.code || (typeof result === "string" ? result : ""); }
 
 export interface Suggestion {

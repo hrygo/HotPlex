@@ -256,7 +256,6 @@ export function useHotPlexRuntime({
     const clientRef = useRef<BrowserHotPlexClient | null>(null);
     const historyLoadingRef = useRef(false);
     const sessionIdRef = useRef(sessionId);
-    sessionIdRef.current = sessionId;
 
     // Welcome suggestions — shown when thread is empty (use prop or default list)
     const suggestions: readonly ThreadSuggestion[] =
@@ -264,11 +263,15 @@ export function useHotPlexRuntime({
 
     // Stable ref for skills callback — avoids adding to useEffect deps
     const onSkillsChangeRef = useRef(onSkillsChange);
-    onSkillsChangeRef.current = onSkillsChange;
     const onSessionStateChangeRef = useRef(onSessionStateChange);
-    onSessionStateChangeRef.current = onSessionStateChange;
     const onWorkspaceErrorRef = useRef(onWorkspaceError);
-    onWorkspaceErrorRef.current = onWorkspaceError;
+    // Keep latest-value refs in sync with props (read inside effects/callbacks).
+    useEffect(() => {
+        sessionIdRef.current = sessionId;
+        onSkillsChangeRef.current = onSkillsChange;
+        onSessionStateChangeRef.current = onSessionStateChange;
+        onWorkspaceErrorRef.current = onWorkspaceError;
+    });
 
     // Track whether skills have been fetched (only after first turn completes)
     const skillsFetchedRef = useRef(false);
@@ -293,6 +296,7 @@ export function useHotPlexRuntime({
     useEffect(() => {
         if (!sessionId) return;
         sessionIdRef.current = sessionId;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reset pager before fetching history
         setHistoryHasMore(true);
 
         const controller = new AbortController();
@@ -372,7 +376,7 @@ export function useHotPlexRuntime({
                 ]);
             });
         return () => controller.abort();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, [sessionId]);
 
     // Initialize WebSocket client
@@ -1027,6 +1031,7 @@ export function useHotPlexRuntime({
         };
         client.on("elicitationRequest", handleElicitationRequest);
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- connection lifecycle state
         setConnectionState("connecting");
         client
             .connect(sessionId)
@@ -1071,10 +1076,12 @@ export function useHotPlexRuntime({
             client.off("permissionRequest", handlePermissionRequest);
             client.off("questionRequest", handleQuestionRequest);
             client.off("elicitationRequest", handleElicitationRequest);
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- interactionMapRef is a stable singleton map
             interactionMapRef.current.clear();
             client.disconnect();
             clientRef.current = null;
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- connection lifecycle effect; refs/recordTurn intentionally excluded to avoid reconnect churn
     }, [sessionId, workspaceId]);
 
     // Track pending connection-wait state so useEffect cleanup can tear it down
@@ -1217,6 +1224,7 @@ export function useHotPlexRuntime({
                 "Failed to send message. Please check your connection.",
             );
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- stable send action; startTurn is a stable callback
     }, []);
 
     const [isStopping, setIsStopping] = useState(false);
@@ -1429,6 +1437,7 @@ export function useHotPlexRuntime({
             }) as ExternalStoreAdapter<HotPlexMessage> & {
                 connectionState: ConnectionState;
             },
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- connectionState intentionally excluded to avoid memo churn (see comment above)
         [
             isRunning,
             adapterMessages,

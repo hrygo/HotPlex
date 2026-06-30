@@ -15,7 +15,7 @@ import { formatDateTime } from '@/lib/utils/format-time';
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+    <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
       <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1">
         {label}
       </p>
@@ -66,6 +66,7 @@ export default function SessionDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
     loadSession();
   }, [loadSession]);
 

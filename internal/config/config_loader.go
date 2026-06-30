@@ -80,6 +80,7 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("worker.opencode_server.ready_poll_interval")
 	_ = v.BindEnv("worker.opencode_server.http_timeout")
 	_ = v.BindEnv("worker.opencode_server.password")
+	_ = v.BindEnv("worker.opencode_server.context_window")
 	_ = v.BindEnv("security.api_key_header")
 	_ = v.BindEnv("security.cookie_secret")
 	_ = v.BindEnv("security.csp")

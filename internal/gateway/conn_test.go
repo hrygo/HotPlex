@@ -1275,6 +1275,7 @@ type mockBridgeWorker struct {
 	conn       *fakeWorkerConn
 	startErr   error
 	resumeErr  error
+	lastIO     time.Time
 }
 
 func (m *mockBridgeWorker) Type() worker.WorkerType                             { return m.workerType }
@@ -1294,7 +1295,8 @@ func (m *mockBridgeWorker) Kill() error                                         
 func (m *mockBridgeWorker) Wait() (int, error)                                  { return m.exitCode, nil }
 func (m *mockBridgeWorker) Conn() worker.SessionConn                            { return m.conn }
 func (m *mockBridgeWorker) Health() worker.WorkerHealth                         { return worker.WorkerHealth{} }
-func (m *mockBridgeWorker) LastIO() time.Time                                   { return time.Now() }
+func (m *mockBridgeWorker) LastIO() time.Time                                   { return m.lastIO }
+func (m *mockBridgeWorker) SetLastIO(t time.Time)                               { m.lastIO = t }
 func (m *mockBridgeWorker) ResetContext(context.Context) (worker.ResetResult, error) {
 	return worker.ResetResult{}, nil
 }

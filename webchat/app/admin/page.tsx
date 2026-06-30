@@ -135,6 +135,7 @@ export default function DashboardPage() {
 
 	// Initial load
 	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time metrics fetch
 		fetchAllMetrics();
 	}, []);
 
@@ -371,7 +372,7 @@ export default function DashboardPage() {
 										<span className="text-[10px] uppercase tracking-wider font-bold text-[var(--text-faint)] block mb-1">
 											SQLite Database
 										</span>
-										<span className="font-mono text-[var(--text-secondary)] break-all bg-white/5 px-2 py-1 rounded select-all block">
+										<span className="font-mono text-[var(--text-secondary)] break-all bg-white/5 px-2 py-1 rounded-[var(--radius-xs)] select-all block">
 											{metrics.dbPath || 'sqlite.db'}
 										</span>
 									</div>

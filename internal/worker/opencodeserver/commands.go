@@ -18,11 +18,12 @@ import (
 // ServerCommander implements worker.ControlRequester + worker.WorkerCommander for OpenCode Server.
 // Routes worker commands to OpenCode's HTTP REST API.
 type ServerCommander struct {
-	mu           sync.Mutex
-	client       *http.Client
-	baseURL      string
-	sessionID    string
-	pendingModel *ModelRef
+	mu            sync.Mutex
+	client        *http.Client
+	baseURL       string
+	sessionID     string
+	pendingModel  *ModelRef
+	contextWindow int64
 }
 
 // ModelRef stores model selection for subsequent message requests.
@@ -163,9 +164,13 @@ func (c *ServerCommander) queryContextUsage(ctx context.Context) (map[string]any
 	contextFill := lastInput + lastCacheRead + lastCacheWrite
 	return map[string]any{
 		"totalTokens": contextFill,
-		"maxTokens":   0,
-		"percentage":  0,
-		"model":       model,
+		// OCS's HTTP API does not expose the model's context window; use the
+		// configurable fallback (worker.opencode_server.context_window, default 200K).
+		// Set to 0 to leave context_pct unset (protocol limit; see
+		// Worker-Turn-Summary-Parity-Spec.md §5).
+		"maxTokens":  c.contextWindow,
+		"percentage": 0,
+		"model":      model,
 		"categories": []map[string]any{
 			{"name": "Input tokens", "tokens": totalInput},
 			{"name": "Output tokens", "tokens": totalOutput},

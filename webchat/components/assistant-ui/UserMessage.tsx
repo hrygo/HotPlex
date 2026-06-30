@@ -6,7 +6,7 @@ import { MessagePrimitive } from "@assistant-ui/react";
 import { MessageActions } from "./MessageActions";
 import { messageVariants } from "./thread-helpers";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const UserMessage = memo(function UserMessage({ message }: { message: any }) {
   return (
     <motion.div className="group flex items-start justify-end gap-4 mb-8" variants={messageVariants} initial="hidden" animate="visible">
@@ -14,7 +14,7 @@ const UserMessage = memo(function UserMessage({ message }: { message: any }) {
         <div className="msg-user-bubble relative w-fit p-3.5 rounded-[var(--radius-lg)] rounded-tr-[var(--radius-xs)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] shadow-sm">
           <MessagePrimitive.Parts>
             {({ part }) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               const p = part as Record<string, any>;
               if (p?.type === 'text') return <div className="whitespace-pre-wrap break-normal text-[14px] leading-relaxed">{p.text}</div>;
               return null;

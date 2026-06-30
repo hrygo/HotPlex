@@ -42,6 +42,9 @@ type usageSnapshot struct {
 	ContextSize int
 	ContextUsed int
 	Cost        *CostInfo
+	// Model is the active model name, sourced from usage_update (best-effort)
+	// or session/set_model. ACP has no session/info method to query it directly.
+	Model string
 }
 
 // CostInfo holds cost information from usage_update events.
@@ -497,9 +500,10 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 		stats["usage"] = usage
 	}
 
-	// Include accumulated usage_update data (context size, cost).
+	// Include accumulated usage_update data (context size, model, cost).
 	// Cost stored as float64 for compatibility with events.ToFloat64().
 	m.usageMu.Lock()
+	model := m.usage.Model
 	if m.usage.ContextSize > 0 {
 		stats["context_size"] = m.usage.ContextSize
 	}
@@ -510,6 +514,15 @@ func (m *ACPMapper) buildStats(result *PromptResult) map[string]any {
 		stats["total_cost_usd"] = m.usage.Cost.Amount
 	}
 	m.usageMu.Unlock()
+
+	// model_usage (Claude Code format) so SessionAccumulator.mergePerTurnStats can
+	// populate ModelName from the Done stats path. ACP agents do not always
+	// expose the active model; when absent it is left unset rather than guessed.
+	if model != "" {
+		stats["model_usage"] = map[string]any{
+			model: map[string]any{},
+		}
+	}
 
 	return stats
 }
@@ -527,7 +540,10 @@ func (m *ACPMapper) updateUsage(ctx context.Context, raw json.RawMessage) {
 		TotalTokens       int `json:"totalTokens"`
 		ContextSize       int `json:"contextSize"`
 		ContextUsed       int `json:"contextUsed"`
-		Cost              *struct {
+		// Model is optional in ACP usage_update; best-effort (agents that emit
+		// it populate model_name without a session/set_model round-trip).
+		Model string `json:"model"`
+		Cost  *struct {
 			Amount   float64 `json:"amount"`
 			Currency string  `json:"currency"`
 		} `json:"cost"`
@@ -551,6 +567,9 @@ func (m *ACPMapper) updateUsage(ctx context.Context, raw json.RawMessage) {
 	}
 	if u.ContextUsed > 0 {
 		s.ContextUsed = u.ContextUsed
+	}
+	if u.Model != "" {
+		s.Model = u.Model
 	}
 	if u.Cost != nil {
 		if s.Cost == nil {
@@ -585,6 +604,18 @@ func (m *ACPMapper) LastUsage() usageSnapshot {
 		snap.Cost = &cp
 	}
 	return snap
+}
+
+// SetModel records the active model name, sourced from a session/set_model
+// control request. ACP has no session/info method to query the current model,
+// so this is the primary seeding path when usage_update lacks a model field.
+func (m *ACPMapper) SetModel(model string) {
+	if model == "" {
+		return
+	}
+	m.usageMu.Lock()
+	m.usage.Model = model
+	m.usageMu.Unlock()
 }
 
 func extractToolName(raw json.RawMessage) string {

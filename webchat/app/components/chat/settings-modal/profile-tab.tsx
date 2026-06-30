@@ -37,7 +37,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
   return (
     <TabPanel>
       {/* Profile Header Card */}
-      <div className="flex flex-col sm:flex-row items-center gap-4 p-5 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.2)]">
+      <div className="flex flex-col sm:flex-row items-center gap-4 p-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40">
         {/* Large Gradient Avatar */}
         <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-[var(--accent-gold)] to-[rgba(251,191,36,0.3)] flex items-center justify-center text-black font-display font-black text-lg shadow-sm border border-[var(--border-default)]">
           {getInitials(user.display_name || user.username)}
@@ -72,7 +72,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
       {/* Profile Details List */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* User ID Detail Card */}
-        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.1)] flex flex-col justify-between min-h-[80px]">
+        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
             User ID
           </span>
@@ -97,7 +97,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
         </div>
 
         {/* Display Name Card */}
-        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.1)] flex flex-col justify-between min-h-[80px]">
+        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
             Display Name
           </span>
@@ -107,7 +107,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
         </div>
 
         {/* Account Created Card */}
-        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.1)] flex flex-col justify-between min-h-[80px]">
+        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
             Created Time
           </span>
@@ -117,7 +117,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
         </div>
 
         {/* Last Login Card */}
-        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.1)] flex flex-col justify-between min-h-[80px]">
+        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
             Last Login
           </span>

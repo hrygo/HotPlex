@@ -45,7 +45,7 @@ export function useMetrics() {
     turnCount: 0,
   });
 
-  const turnStartRef = useRef<number>(Date.now());
+  const turnStartRef = useRef<number>(0);
 
   const startTurn = useCallback(() => {
     turnStartRef.current = Date.now();

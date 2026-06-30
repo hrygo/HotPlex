@@ -186,6 +186,18 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	sessionID := fc.sessionID
 	workerType := fc.workerType
 
+	// Refresh worker LastIO on activity (issue #815, spec Fix C). Without this,
+	// a long turn (>ExecutionTimeout) is wrongly reaped by the zombie scanner
+	// because LastIO stays frozen at the input time — codex only bumped LastIO
+	// in Input()/startNewThread, not during the turn. Done (turn terminator) is
+	// excluded. SetLastIO lives on base.BaseWorker (not the Worker interface),
+	// hence the type assertion; all real workers embed BaseWorker and satisfy it.
+	if env.Event.Type != events.Done {
+		if lu, ok := w.(interface{ SetLastIO(time.Time) }); ok {
+			lu.SetLastIO(time.Now())
+		}
+	}
+
 	// Handle internal reset events from in-place-reset workers (OCS, ACP).
 	if env.Event.Type == events.KindInternalReset {
 		b.handleInternalReset(env, sessionID, fc)
@@ -246,6 +258,12 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		fc.doneReceived = true
 		b.resetCrashLoop(sessionID)
 		b.reconcileDroppedDeltas(env, fc)
+		// Messaging sessions transition to IDLE on turn completion (Fix A,
+		// issue #815): otherwise they stay RUNNING and get reaped by the 30m
+		// zombie ExecutionTimeout, forcing codex into a fresh-start that loses
+		// ephemeral-thread context. webchat is excluded — it IDLEs on WS close
+		// (conn.go:146), and transitioning here breaks Fast Reconnect.
+		b.maybeTransitionIdleAfterDone(sessionID, fc)
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
@@ -384,6 +402,25 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 				"duration", time.Since(fc.turnStartTime).Round(time.Millisecond),
 				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount.Load())
 		}
+	}
+}
+
+// maybeTransitionIdleAfterDone transitions a messaging session to IDLE after
+// the turn completes (Fix A, issue #815). Without this, messaging sessions
+// remain RUNNING and are reaped by the 30m zombie ExecutionTimeout, forcing
+// codex into a fresh-start that loses ephemeral-thread context.
+//
+// webchat is excluded: it transitions to IDLE on WS close (conn.go:146), and
+// transitioning here would break Fast Reconnect (which requires State==Running
+// per session.md). Empty platform (collector disabled / unidentified) is skipped
+// conservatively to avoid IDLE-ing sessions we can't classify.
+func (b *Bridge) maybeTransitionIdleAfterDone(sessionID string, fc *forwardContext) {
+	if b.sm == nil || fc.sessPlatform == "" || fc.sessPlatform == platformWebChat {
+		return
+	}
+	if err := b.sm.Transition(context.Background(), sessionID, events.StateIdle); err != nil {
+		b.log.Debug("bridge: post-done transition to idle rejected",
+			"session_id", sessionID, "platform", fc.sessPlatform, "err", err)
 	}
 }
 

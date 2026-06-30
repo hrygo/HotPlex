@@ -14,7 +14,7 @@ interface SearchToolProps {
 
 export function SearchTool({ toolName, query, results, status, onToggle }: SearchToolProps) {
   return (
-    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[var(--shadow-md)]">
       {/* Header */}
       <div 
         className={`flex items-center gap-2 px-3 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] ${onToggle ? "cursor-pointer hover:bg-[var(--bg-hover)] transition-colors" : ""}`}
@@ -24,7 +24,7 @@ export function SearchTool({ toolName, query, results, status, onToggle }: Searc
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <span className="text-[11px] font-mono text-[var(--text-secondary)]">
-          {toolName} {query && <span className="text-[var(--accent-gold)] ml-1">"{query}"</span>}
+          {toolName} {query && <span className="text-[var(--accent-gold)] ml-1">&quot;{query}&quot;</span>}
         </span>
         {onToggle && status !== "running" && (
           <div className="ml-auto text-[var(--text-faint)]">

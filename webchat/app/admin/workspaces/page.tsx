@@ -44,6 +44,7 @@ function WorkspaceRow({
 
   // Resync when the row data changes after a list reload (PR #779 pattern).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resync form when row data changes after reload
     setMode(ws.permission_mode || '');
   }, [ws.permission_mode, ws.updated_at]);
 

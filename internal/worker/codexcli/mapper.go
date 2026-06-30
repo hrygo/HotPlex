@@ -16,9 +16,31 @@ type Mapper struct {
 	sessionID string
 	seq       atomic.Int64
 	tracker   *messageTracker
-	lastUsage *CodexTokenUsage // tracked from thread/tokenUsage/updated
-	model     string           // tracked from model/rerouted
-	turnID    string           // current turn ID, used to gate token usage updates
+	// lastUsage tracks the per-turn token usage from thread/tokenUsage/updated
+	// (the "last" breakdown). It is reset on turn/started, so it represents the
+	// current turn's delta — which is what SessionAccumulator.mergePerTurnStats
+	// expects (it does TotalInput += usage, so a per-turn delta accumulates into
+	// a correct cumulative total). The "total" breakdown must NOT be used here:
+	// it is already cumulative across turns, so feeding it to the accumulator's
+	// "+=" would double-count.
+	lastUsage *CodexTokenUsage
+	// model is the active model name, sourced from model/rerouted or seeded by
+	// the configured thread/start model (see SetModel).
+	model string
+	// turnID is the current turn ID, used to gate token usage updates.
+	turnID string
+	// contextWindow is the model context window from
+	// thread/tokenUsage/updated.tokenUsage.modelContextWindow. Used as the
+	// maxTokens source for the get_context_usage control channel.
+	contextWindow int64
+
+	// mu guards lastUsage, model, contextWindow, and turnID.
+	// trackTokenUsage and trackedUsageStats run in the readNotification
+	// goroutine; Reset runs in the monitorProcess goroutine; LastContextUsage
+	// and SetModel are invoked from worker goroutines (get_context_usage
+	// control channel and thread/start). turnID is read in trackTokenUsage and
+	// written by Reset/turn/started, so it must be accessed under lock.
+	mu sync.Mutex
 }
 
 func NewMapper(sessionID string) *Mapper {
@@ -101,8 +123,10 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 	case "warning":
 		return m.mapNotifWarning(params)
 	case "turn/started":
+		m.mu.Lock()
 		m.lastUsage = nil
 		m.turnID = extractTurnID(params)
+		m.mu.Unlock()
 		return nil
 	case "turn/diff/updated":
 		return m.mapNotifDiffUpdated(params)
@@ -640,17 +664,27 @@ func (m *Mapper) trackTokenUsage(params json.RawMessage) {
 		TurnID     string `json:"turnId"`
 		TokenUsage struct {
 			Last *CodexTokenUsage `json:"last"`
+			// modelContextWindow is the model's context window size, emitted by
+			// codex alongside the usage breakdowns. Pointer to detect presence
+			// and distinguish "0" from "absent".
+			ModelContextWindow *int64 `json:"modelContextWindow"`
 		} `json:"tokenUsage"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// Only accept usage for the current turn to prevent stale data.
+	// turnID must be read under lock: Reset() writes it from a different goroutine.
 	if m.turnID != "" && p.TurnID != m.turnID {
 		return
 	}
 	if p.TokenUsage.Last != nil {
 		m.lastUsage = p.TokenUsage.Last
+	}
+	if p.TokenUsage.ModelContextWindow != nil && *p.TokenUsage.ModelContextWindow > 0 {
+		m.contextWindow = *p.TokenUsage.ModelContextWindow
 	}
 }
 
@@ -661,10 +695,14 @@ func (m *Mapper) trackModelRerouted(params json.RawMessage) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.model = p.ToModel
 }
 
 func (m *Mapper) trackedUsageStats() map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.lastUsage == nil && m.model == "" {
 		return nil
 	}
@@ -675,16 +713,66 @@ func (m *Mapper) trackedUsageStats() map[string]any {
 			"output_tokens": int64(m.lastUsage.OutputTokens),
 		}
 		if m.lastUsage.CachedInputTokens > 0 {
+			// Codex's cachedInputTokens maps to Anthropic's cache_read_input_tokens.
+			// cache_creation_input_tokens is intentionally absent: codex's
+			// TokenUsageBreakdown does not expose a cache-creation dimension
+			// (protocol limitation; see Worker-Turn-Summary-Parity-Spec.md §3).
 			usage["cache_read_input_tokens"] = int64(m.lastUsage.CachedInputTokens)
 		}
 		stats["usage"] = usage
 	}
 	if m.model != "" {
+		// Carry contextWindow in model_usage so SessionAccumulator can populate
+		// ContextWindow from the Done stats path (mirrors claudecode's format),
+		// in addition to the get_context_usage control channel.
+		mu := map[string]any{}
+		if m.contextWindow > 0 {
+			mu["contextWindow"] = m.contextWindow
+		}
 		stats["model_usage"] = map[string]any{
-			m.model: map[string]any{},
+			m.model: mu,
 		}
 	}
 	return stats
+}
+
+// SetModel seeds the active model name. Codex only emits model/rerouted when a
+// request is rerouted, so normal conversations would otherwise leave model_name
+// empty. The manager calls this on thread/start with the configured model.
+func (m *Mapper) SetModel(model string) {
+	if model == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.model = model
+}
+
+// LastContextUsage returns context usage for the get_context_usage control
+// channel in the camelCase shape expected by events.MapContextUsageResponse.
+//
+// Sourced entirely from thread/tokenUsage/updated (codex does not expose usage
+// via thread/read — its Turn payload carries no token counts):
+//   - totalTokens: last turn's input + cached input (approximates context fill)
+//   - maxTokens:   tokenUsage.modelContextWindow
+//   - model:       tracked active model
+//
+// Returns an empty map when no usage has been observed yet; the caller
+// (bridge_forward mergeContextUsage) tolerates zero values.
+func (m *Mapper) LastContextUsage() map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := map[string]any{}
+	if m.lastUsage != nil {
+		result["totalTokens"] = m.lastUsage.InputTokens + m.lastUsage.CachedInputTokens
+	}
+	if m.contextWindow > 0 {
+		result["maxTokens"] = m.contextWindow
+	}
+	if m.model != "" {
+		result["model"] = m.model
+	}
+	return result
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -695,10 +783,13 @@ func (m *Mapper) nextSeq() int64 {
 
 // Reset clears internal tracking state, called on session end or crash recovery.
 func (m *Mapper) Reset() {
-	m.tracker.Reset()
+	m.mu.Lock()
 	m.lastUsage = nil
 	m.model = ""
 	m.turnID = ""
+	m.contextWindow = 0
+	m.mu.Unlock()
+	m.tracker.Reset()
 }
 
 func newEnvelope(kind events.Kind, data interface{}, sessionID string, seq int64) *events.Envelope {

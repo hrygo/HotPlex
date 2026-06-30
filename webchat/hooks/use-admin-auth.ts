@@ -28,6 +28,7 @@ export function useAdminAuth(enabled = true) {
     if (!enabled) return; // stay 'checking'; AdminShell re-enables when needed
     const stored = getStoredAdminConnection();
     if (!stored) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- gate: no stored creds → unauthenticated
       setState('unauthenticated');
       return;
     }

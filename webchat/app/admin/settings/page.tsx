@@ -26,6 +26,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const stored = getStoredAdminConnection();
     if (stored) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate form from localStorage on mount
       setUrl(stored.url);
       setToken(stored.token);
       setStatus('connected');
@@ -148,7 +149,7 @@ export default function SettingsPage() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="http://localhost:9999"
-                  className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
+                  className="w-full rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
                 />
               </div>
 
@@ -165,7 +166,7 @@ export default function SettingsPage() {
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="Enter admin token"
-                  className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
+                  className="w-full rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
                 />
               </div>
             </div>

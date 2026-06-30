@@ -41,10 +41,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-base)] px-4">
       <div className="w-full max-w-sm animate-fade-in-up">
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-8 shadow-[var(--shadow-lg)]">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--bg-surface)] p-8 shadow-[var(--shadow-lg)]">
           {/* Header */}
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--accent-gold)]/10">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--accent-gold)]/10">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
@@ -83,7 +83,7 @@ export default function LoginPage() {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="http://localhost:9999"
-                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
               />
             </div>
 
@@ -100,7 +100,7 @@ export default function LoginPage() {
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 placeholder="Enter admin token"
-                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
               />
             </div>
 
@@ -113,7 +113,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={!canSubmit}
-              className="w-full rounded-lg bg-[var(--accent-gold)] px-4 py-2.5 text-sm font-semibold text-black transition-all hover:bg-[var(--accent-gold-bright)] disabled:cursor-not-allowed disabled:opacity-30"
+              className="w-full rounded-[var(--radius-sm)] bg-[var(--accent-gold)] px-4 py-2.5 text-sm font-semibold text-black transition-all hover:bg-[var(--accent-gold-bright)] disabled:cursor-not-allowed disabled:opacity-30"
             >
               {loading ? 'Connecting...' : 'Connect'}
             </button>
@@ -158,7 +158,7 @@ export default function LoginPage() {
             </button>
 
             {showHelp && (
-              <div className="mt-3.5 space-y-3 text-xs text-[var(--text-muted)] animate-[fadeInScale_0.15s_ease-out] bg-[var(--bg-elevated)]/40 border border-[var(--border-subtle)]/40 p-3.5 rounded-lg leading-relaxed">
+              <div className="mt-3.5 space-y-3 text-xs text-[var(--text-muted)] animate-[fadeInScale_0.15s_ease-out] bg-[var(--bg-elevated)]/40 border border-[var(--border-subtle)]/40 p-3.5 rounded-[var(--radius-md)] leading-relaxed">
                 <p>
                   The Admin Token is used to authorize connection to your gateway. It is configured inside your backend environment settings:
                 </p>
@@ -166,19 +166,19 @@ export default function LoginPage() {
                   <div className="flex gap-2 items-start">
                     <span className="text-[var(--accent-gold)] font-bold mt-0.5">•</span>
                     <span>
-                      <strong>Development Mode</strong>: Default value is <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded text-[var(--accent-gold)] border border-[var(--border-subtle)]">admin-token-dev</code>, or read from <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">ADMIN_TOKEN</code> inside local <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">.env</code>.
+                      <strong>Development Mode</strong>: Default value is <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] text-[var(--accent-gold)] border border-[var(--border-subtle)]">admin-token-dev</code>, or read from <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">ADMIN_TOKEN</code> inside local <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">.env</code>.
                     </span>
                   </div>
                   <div className="flex gap-2 items-start">
                     <span className="text-[var(--accent-gold)] font-bold mt-0.5">•</span>
                     <span>
-                      <strong>Production Mode</strong>: Configured via numbered environment variables in your gateway host config (e.g. <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_1</code> ... <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_N</code>) inside <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded border border-[var(--border-subtle)]">.env</code> or system configs.
+                      <strong>Production Mode</strong>: Configured via numbered environment variables in your gateway host config (e.g. <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_1</code> ... <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_N</code>) inside <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">.env</code> or system configs.
                     </span>
                   </div>
                 </div>
                 <div className="pt-2 border-t border-[var(--border-subtle)]/30">
                   <p className="mb-2 font-medium text-[var(--text-primary)]">Generate a secure token using CLI:</p>
-                  <div className="flex items-center justify-between rounded bg-[var(--bg-hover)] p-2 font-mono text-[10px] text-[var(--text-primary)] border border-[var(--border-subtle)]">
+                  <div className="flex items-center justify-between rounded-[var(--radius-sm)] bg-[var(--bg-hover)] p-2 font-mono text-[10px] text-[var(--text-primary)] border border-[var(--border-subtle)]">
                     <code className="select-all">openssl rand -base64 32</code>
                   </div>
                 </div>

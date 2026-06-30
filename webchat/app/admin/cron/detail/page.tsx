@@ -52,7 +52,7 @@ function parseScheduleStr(s: string): CronSchedule | null {
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+    <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
       <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1">
         {label}
       </p>
@@ -120,6 +120,7 @@ export default function CronDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
     loadJob();
   }, [loadJob]);
 
@@ -131,8 +132,9 @@ export default function CronDetailPage() {
       message !== (job.payload?.message ?? '') ||
       maxRuns !== (job.max_runs != null ? String(job.max_runs) : '') ||
       enabled !== job.enabled;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derive dirty flag from form vs loaded job
     setHasChanges(changed);
-  }, [schedule, message, maxRuns, enabled, job, formatScheduleStr]);
+  }, [schedule, message, maxRuns, enabled, job]);
 
   const handleSave = async () => {
     if (!job || !hasChanges) return;
@@ -356,7 +358,7 @@ export default function CronDetailPage() {
             title={enabled ? 'Disable' : 'Enable'}
           >
             <span
-              className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+              className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-[var(--shadow-sm)] transition-transform ${
                 enabled ? 'translate-x-4' : 'translate-x-0.5'
               }`}
             />

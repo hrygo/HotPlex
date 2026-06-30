@@ -112,7 +112,7 @@ export function AgentConfigEditor({
   return (
     <div className="space-y-4">
       {/* Banner */}
-      <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[rgba(24,24,27,0.3)] border border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-2">
+      <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)]/20 border border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-gold)] animate-pulse" />
         <span>
           Overrides stack on top of team defaults. Changes apply to{' '}
@@ -218,7 +218,7 @@ export function AgentConfigEditor({
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                className="w-full h-full p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.4)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] overflow-y-auto"
+                className="w-full h-full p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/60 text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] overflow-y-auto"
                 placeholder={`Edit ${activeDef.file}...`}
                 spellCheck={false}
               />
@@ -229,11 +229,11 @@ export function AgentConfigEditor({
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full h-full p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.4)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] overflow-y-auto"
+                  className="w-full h-full p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/60 text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)] overflow-y-auto"
                   placeholder={`Edit ${activeDef.file}...`}
                   spellCheck={false}
                 />
-                <div className="h-full overflow-y-auto p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.2)]">
+                <div className="h-full overflow-y-auto p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/30">
                   {content ? (
                     <MarkdownText text={content} />
                   ) : (
@@ -244,7 +244,7 @@ export function AgentConfigEditor({
             )}
 
             {viewMode === 'preview' && (
-              <div className="h-full overflow-y-auto p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(9,9,11,0.2)]">
+              <div className="h-full overflow-y-auto p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/30">
                 {content ? (
                   <MarkdownText text={content} />
                 ) : (

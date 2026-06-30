@@ -20,7 +20,7 @@ import { MessageActions } from "./MessageActions";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { getExt, messageVariants, extractCommand, extractFilePath, extractFileContent } from "./thread-helpers";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, allowed: boolean) => void }) {
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const ext = getExt(message);
@@ -38,7 +38,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
         <div className="msg-assistant-body relative space-y-4">
           <MessagePrimitive.Parts>
             {({ part }) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               const p = part as Record<string, any>;
               if (!p || !p.type) return null;
               const isStreaming = ext.status?.type === "running";

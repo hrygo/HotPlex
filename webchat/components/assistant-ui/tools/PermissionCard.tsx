@@ -25,7 +25,7 @@ export function PermissionCard({ toolName, args, status, onRespond, onToggle }: 
 
   return (
     <motion.div
-      className="rounded-[var(--radius-md)] overflow-hidden border border-[rgba(251,191,36,0.2)] my-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
+      className="rounded-[var(--radius-md)] overflow-hidden border border-[rgba(251,191,36,0.2)] my-4 shadow-[var(--shadow-md)]"
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ type: "spring" as const, stiffness: 260, damping: 20 }}

@@ -228,6 +228,10 @@ worker:
     ready_timeout: 10s
     ready_poll_interval: 200ms
     http_timeout: 30s
+    # Fallback context window size (tokens). OCS HTTP API does not expose the
+    # real model context window, so this configurable value feeds context_pct.
+    # Default 200000; set 0 to leave context_pct unset. (spec §5 O1)
+    context_window: 200000
 
   codex_cli:
     # Command to start Codex CLI worker. Default: "codex"

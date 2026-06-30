@@ -297,12 +297,14 @@ type WebChatConfig struct {
 
 // GatewayConfig holds WebSocket gateway settings.
 type GatewayConfig struct {
-	Addr               string        `mapstructure:"addr"`
-	ReadBufferSize     int           `mapstructure:"read_buffer_size"`
-	WriteBufferSize    int           `mapstructure:"write_buffer_size"`
-	PingInterval       time.Duration `mapstructure:"ping_interval"`
-	PongTimeout        time.Duration `mapstructure:"pong_timeout"`
-	WriteTimeout       time.Duration `mapstructure:"write_timeout"`
+	Addr            string        `mapstructure:"addr"`
+	ReadBufferSize  int           `mapstructure:"read_buffer_size"`
+	WriteBufferSize int           `mapstructure:"write_buffer_size"`
+	PingInterval    time.Duration `mapstructure:"ping_interval"`
+	PongTimeout     time.Duration `mapstructure:"pong_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	// Deprecated: unused — session IDLE GC uses Worker.IdleTimeout (issue #817).
+	// Kept for backward compat; a non-default value triggers a startup warning.
 	IdleTimeout        time.Duration `mapstructure:"idle_timeout"`
 	MaxFrameSize       int64         `mapstructure:"max_frame_size"`
 	BroadcastQueueSize int           `mapstructure:"broadcast_queue_size"`
@@ -533,6 +535,7 @@ type OpenCodeServerConfig struct {
 	ReadyTimeout      time.Duration `mapstructure:"ready_timeout"`
 	ReadyPollInterval time.Duration `mapstructure:"ready_poll_interval"`
 	HTTPTimeout       time.Duration `mapstructure:"http_timeout"`
+	ContextWindow     int64         `mapstructure:"context_window"` // fallback context window size; OCS HTTP API does not expose the real value
 }
 
 // ACPConfig holds ACP (Agent Client Protocol) worker settings.

@@ -44,10 +44,14 @@ export function useSkillsCache(sessionId: string | null) {
     sessionId ? loadFromStorage(sessionId) : [],
   );
   const currentIdRef = useRef(sessionId);
-  currentIdRef.current = sessionId;
+  // Keep ref in sync with the latest sessionId (read inside callbacks below).
+  useEffect(() => {
+    currentIdRef.current = sessionId;
+  });
 
   // Reload from storage when session changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reload cache from storage on session change
     setSkills(sessionId ? loadFromStorage(sessionId) : []);
   }, [sessionId]);
 

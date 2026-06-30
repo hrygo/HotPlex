@@ -64,6 +64,7 @@ func Default() *Config {
 				ReadyTimeout:      10 * time.Second,
 				ReadyPollInterval: 200 * time.Millisecond,
 				HTTPTimeout:       30 * time.Second,
+				ContextWindow:     200000, // OCS HTTP API does not expose model context window; configurable fallback (spec §5 O1)
 			},
 			ClaudeCode: ClaudeCodeConfig{
 				Command: "claude",
