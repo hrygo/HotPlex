@@ -186,6 +186,18 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	sessionID := fc.sessionID
 	workerType := fc.workerType
 
+	// Refresh worker LastIO on activity (issue #815, spec Fix C). Without this,
+	// a long turn (>ExecutionTimeout) is wrongly reaped by the zombie scanner
+	// because LastIO stays frozen at the input time — codex only bumped LastIO
+	// in Input()/startNewThread, not during the turn. Done (turn terminator) is
+	// excluded. SetLastIO lives on base.BaseWorker (not the Worker interface),
+	// hence the type assertion; all real workers embed BaseWorker and satisfy it.
+	if env.Event.Type != events.Done {
+		if lu, ok := w.(interface{ SetLastIO(time.Time) }); ok {
+			lu.SetLastIO(time.Now())
+		}
+	}
+
 	// Handle internal reset events from in-place-reset workers (OCS, ACP).
 	if env.Event.Type == events.KindInternalReset {
 		b.handleInternalReset(env, sessionID, fc)

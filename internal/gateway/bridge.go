@@ -840,8 +840,14 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 
 	// Populate conversation history from turns table for context recovery.
 	// Only CodexCLI worker needs this — other workers have native resume.
-	// Skip for fresh sessions (StateCreated) that have zero turns by definition.
-	if si.WorkerType == worker.TypeCodexCLI && si.State != events.StateCreated && b.turnsQuerier != nil {
+	// Fresh sessions (StateCreated) are intentionally NOT skipped: DeriveSessionKey
+	// deterministically reuses the same sessionID for a given chat, so after zombie
+	// reclamation (or gateway restart) re-creates the session record, the turns table
+	// still holds prior turns. Injecting them gives the new codex ephemeral thread
+	// text-level context continuity (issue #815, L3/L4 fallback). QueryTurns returns
+	// empty for genuinely new sessions (different chat → different sessionID), so the
+	// len(turns) > 0 guard below is a no-op there.
+	if si.WorkerType == worker.TypeCodexCLI && b.turnsQuerier != nil {
 		turns, err := b.turnsQuerier.QueryTurns(b.shutdownCtx, sessionID, 50, 0)
 		if err != nil {
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
