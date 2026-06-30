@@ -633,7 +633,7 @@ body {
     font-size: 0.9375rem;
     line-height: 1.6;
     letter-spacing: -0.011em;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-sm);
     position: relative;
     word-break: normal;
     overflow-wrap: normal;
@@ -1076,7 +1076,7 @@ body {
     letter-spacing: 0.08em;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-sm);
 }
 
 .copy-btn:hover {
@@ -1084,7 +1084,7 @@ body {
     border-color: var(--border-bright);
     color: var(--text-primary);
     transform: translateY(-1.5px);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-md);
 }
 
 .copy-btn:active {
