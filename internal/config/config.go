@@ -125,6 +125,12 @@ func (c *Config) Warnings() []string {
 		!strings.Contains(c.Gateway.Addr, "[::1]") {
 		warns = append(warns, "TLS is disabled on non-local address; enable tls_enabled for production")
 	}
+	// gateway.idle_timeout is a dead config (#817): session IDLE GC uses
+	// worker.idle_timeout. Warn only when an operator changed it from the
+	// default, since the change silently has no effect.
+	if c.Gateway.IdleTimeout != 0 && c.Gateway.IdleTimeout != Default().Gateway.IdleTimeout {
+		warns = append(warns, "gateway.idle_timeout is unused (session IDLE GC uses worker.idle_timeout); set worker.idle_timeout instead")
+	}
 	return warns
 }
 

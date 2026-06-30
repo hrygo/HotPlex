@@ -102,7 +102,6 @@
     --amber-border: rgba(217, 119, 6, 0.3);
     --amber-light: rgba(217, 119, 6, 0.08);
 
-    /* Header Background */
     --bg-header: rgba(255, 255, 255, 0.6);
 
     /* Shadows */
@@ -112,6 +111,11 @@
     --shadow-glow: 0 0 20px rgba(217, 119, 6, 0.08);
     --shadow-composer: 0 4px 16px rgba(0, 0, 0, 0.03), 0 1px 4px rgba(0, 0, 0, 0.015);
     --shadow-composer-focus: 0 8px 24px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+:root.light .msg-user-bubble {
+    background: rgba(217, 119, 6, 0.05);
+    border-color: rgba(217, 119, 6, 0.12);
 }
 
 /* Light theme mesh gradient background */
@@ -623,12 +627,17 @@ body {
 /* ============================================================
    Messages
    ============================================================ */
+:root.light {
+    --msg-user-bg: rgba(251, 191, 36, 0.08);
+    --msg-user-border: rgba(251, 191, 36, 0.25);
+}
+
 .msg-user-bubble {
     max-width: 100%;
     border-radius: var(--radius-lg) var(--radius-lg) var(--radius-xs)
         var(--radius-lg);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-default);
+    background: var(--msg-user-bg, rgba(251, 191, 36, 0.06));
+    border: 1px solid var(--msg-user-border, rgba(251, 191, 36, 0.15));
     color: var(--text-primary);
     font-size: 0.9375rem;
     line-height: 1.6;
@@ -638,6 +647,7 @@ body {
     word-break: normal;
     overflow-wrap: normal;
     white-space: pre-wrap;
+    backdrop-filter: blur(12px);
     text-align: left;
     width: fit-content;
     min-width: unset;
@@ -1062,12 +1072,13 @@ body {
 .copy-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 12px;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border-subtle);
     background: var(--bg-glass);
-    backdrop-filter: blur(16px) saturate(200%);
+    backdrop-filter: blur(8px);
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: 10px;
@@ -1077,6 +1088,7 @@ body {
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
     box-shadow: var(--shadow-sm);
+    overflow: hidden;
 }
 
 .copy-btn:hover {
@@ -1092,10 +1104,12 @@ body {
 }
 
 .copy-btn-success {
+    width: auto;
+    padding: 0 10px;
     border-color: rgba(52, 211, 153, 0.4) !important;
     background: rgba(52, 211, 153, 0.08) !important;
     color: var(--accent-emerald) !important;
-    box-shadow: 0 0 20px rgba(52, 211, 153, 0.15) !important;
+    box-shadow: 0 0 15px rgba(52, 211, 153, 0.1) !important;
 }
 
 .copy-btn-shimmer {

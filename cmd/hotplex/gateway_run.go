@@ -530,7 +530,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	server := &http.Server{
 		Addr:         cfg.Gateway.Addr,
 		Handler:      rootHandler,
-		ReadTimeout:  cfg.Gateway.IdleTimeout,
+		ReadTimeout:  cfg.Gateway.IdleTimeout, //nolint:staticcheck // Kept for backward compatibility
 		WriteTimeout: cfg.Gateway.WriteTimeout,
 	}
 
@@ -555,7 +555,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		adminServer = &http.Server{
 			Addr:         cfg.Admin.Addr,
 			Handler:      adminHandler,
-			ReadTimeout:  cfg.Gateway.IdleTimeout,
+			ReadTimeout:  cfg.Gateway.IdleTimeout, //nolint:staticcheck // Kept for backward compatibility
 			WriteTimeout: cfg.Gateway.WriteTimeout,
 		}
 		adminAddr = adminServer.Addr
