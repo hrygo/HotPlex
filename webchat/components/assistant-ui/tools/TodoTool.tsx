@@ -38,7 +38,7 @@ export function TodoTool({ todo, todos, status, onToggle }: TodoToolProps) {
   const progress = tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
 
   return (
-    <div className="rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-default)] my-6 bg-[var(--bg-surface)]/50 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
+    <div className="rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-default)] my-6 bg-[var(--bg-surface)]/50 backdrop-blur-xl shadow-[var(--shadow-md)]">
       {/* Header with Progress Bar */}
       <div 
         className={`px-5 py-4 border-b border-[var(--border-subtle)] bg-gradient-to-r from-[var(--bg-elevated)] to-transparent ${onToggle ? "cursor-pointer hover:bg-white/[0.02] transition-all" : ""}`}

@@ -171,7 +171,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
           {users.map((u) => {
             const isSelf = currentUser?.id === u.id;
             return (
-              <div key={u.id} className="flex items-center justify-between p-3.5 rounded-[var(--radius-md)] bg-[rgba(24,24,27,0.15)] border border-[var(--border-subtle)] gap-4 hover:border-[var(--border-default)] transition-colors">
+              <div key={u.id} className="flex items-center justify-between p-3.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)]/20 border border-[var(--border-subtle)] gap-4 hover:border-[var(--border-default)] transition-colors">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 truncate">
                     <span className="text-sm font-bold text-[var(--text-primary)]">
@@ -217,7 +217,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
             );
           })}
           {users.length === 0 && (
-            <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[rgba(24,24,27,0.1)]">
+            <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
               No users registered in this workspace.
             </p>
           )}
@@ -249,7 +249,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
             const isCopied = copiedInviteId === inv.id;
 
             return (
-              <div key={inv.id} className="flex items-center justify-between p-3.5 rounded-[var(--radius-md)] bg-[rgba(24,24,27,0.15)] border border-[var(--border-subtle)] gap-4 hover:border-[var(--border-default)] transition-colors">
+              <div key={inv.id} className="flex items-center justify-between p-3.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)]/20 border border-[var(--border-subtle)] gap-4 hover:border-[var(--border-default)] transition-colors">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono font-bold text-[var(--text-primary)] select-all truncate bg-[var(--bg-elevated)] border border-[var(--border-subtle)] px-2 py-0.5 rounded">
@@ -302,7 +302,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
             );
           })}
           {invitations.length === 0 && (
-            <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[rgba(24,24,27,0.1)]">
+            <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
               No active invitations. Click 'Generate Invite' to invite team members.
             </p>
           )}

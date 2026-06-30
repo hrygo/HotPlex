@@ -18,7 +18,7 @@ export function FileDiffTool({ toolName, filePath, content, status, onToggle }: 
   const displayPath = filePath || "unknown file";
 
   return (
-    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-subtle)] my-6 shadow-[0_12px_40px_rgba(0,0,0,0.4)] group/diff">
+    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-subtle)] my-6 shadow-[var(--shadow-md)] group/diff">
       {/* File header */}
       <div
         className={`flex items-center gap-3 px-4 py-2.5 bg-[var(--bg-elevated)] border-b border-[var(--border-subtle)] ${onToggle ? "cursor-pointer hover:bg-[var(--bg-hover)] transition-all" : ""}`}

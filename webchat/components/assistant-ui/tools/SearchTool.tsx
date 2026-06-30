@@ -14,7 +14,7 @@ interface SearchToolProps {
 
 export function SearchTool({ toolName, query, results, status, onToggle }: SearchToolProps) {
   return (
-    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[var(--shadow-md)]">
       {/* Header */}
       <div 
         className={`flex items-center gap-2 px-3 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] ${onToggle ? "cursor-pointer hover:bg-[var(--bg-hover)] transition-colors" : ""}`}

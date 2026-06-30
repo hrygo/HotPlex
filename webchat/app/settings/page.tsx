@@ -166,7 +166,7 @@ export default function SettingsPage() {
       <div className="fixed inset-0 z-0 noise-overlay pointer-events-none" />
 
       {/* Top Header Bar */}
-      <header className="relative z-30 h-14 flex items-center px-4 md:px-6 gap-3 border-b border-[var(--border-subtle)] bg-[rgba(9,9,11,0.7)] backdrop-blur-xl sticky top-0">
+      <header className="relative z-30 h-14 flex items-center px-4 md:px-6 gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-header)] backdrop-blur-xl sticky top-0">
         <Link
           href="/"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all text-xs font-bold border border-transparent hover:border-[var(--border-subtle)]"
@@ -188,7 +188,7 @@ export default function SettingsPage() {
           {/* Left Sidebar Navigation */}
           <aside className="w-full md:w-60 shrink-0 flex flex-col gap-5">
             {/* Active Workspace Status Widget */}
-            <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[rgba(24,24,27,0.3)] backdrop-blur-md">
+            <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 backdrop-blur-md">
               <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                 Active Workspace
               </span>
@@ -265,7 +265,7 @@ export default function SettingsPage() {
                 </div>
 
                 {/* Section Content Card */}
-                <div className="relative w-full overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[rgba(12,12,14,0.7)] backdrop-blur-md px-6 py-7 shadow-lg shadow-black/20 min-h-[600px]">
+                <div className="relative w-full overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/70 backdrop-blur-md px-6 py-7 shadow-[var(--shadow-md)] min-h-[600px]">
                   {/* Subtle top amber-gold highlight line for active tab cards */}
                   <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[var(--accent-gold)]/20 to-transparent" />
                   

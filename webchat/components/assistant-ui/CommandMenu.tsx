@@ -97,7 +97,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
   return (
     <div
       style={{ zIndex: 99999, pointerEvents: 'auto' }}
-      className="absolute bottom-full left-0 right-0 mb-2 rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[0_12px_48px_rgba(0,0,0,0.6)] backdrop-blur-2xl overflow-hidden"
+      className="absolute bottom-full left-0 right-0 mb-2 rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-lg)] backdrop-blur-2xl overflow-hidden"
     >
       <div className="px-3 py-2 text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest border-b border-[var(--border-subtle)] flex justify-between items-center bg-[rgba(255,255,255,0.02)]">
         <span>{isSlash ? "System Commands" : "Available Skills"}</span>
