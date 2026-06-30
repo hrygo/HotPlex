@@ -45,7 +45,11 @@ func (a *botConfigAdapter) GetBotConfig(ctx context.Context, name string) (*admi
 
 	attrs := extractBotAttrs(cfg, platform, name)
 	excl := resolveInjectExcludeForAdmin(cfg, platform, name)
-	summary := getAgentConfigSummary(platform, name, a.agentConfigDir, excl...)
+	agentName := name
+	if entry.IsSingleBot {
+		agentName = ""
+	}
+	summary := getAgentConfigSummary(platform, agentName, a.agentConfigDir, excl...)
 
 	return &admin.BotConfigEntry{
 		Name:         entry.Name,
@@ -69,7 +73,11 @@ func (a *botConfigAdapter) ListBotConfigs(ctx context.Context) ([]admin.BotConfi
 		platform := string(e.Platform)
 		attrs := extractBotAttrs(cfg, platform, e.Name)
 		excl := resolveInjectExcludeForAdmin(cfg, platform, e.Name)
-		summary := getAgentConfigSummary(platform, e.Name, a.agentConfigDir, excl...)
+		agentName := e.Name
+		if e.IsSingleBot {
+			agentName = ""
+		}
+		summary := getAgentConfigSummary(platform, agentName, a.agentConfigDir, excl...)
 
 		result = append(result, admin.BotConfigEntry{
 			Name:         e.Name,
@@ -92,13 +100,13 @@ func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName strin
 	}
 
 	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, botName)
-	configs, err := agentconfig.Load(a.agentConfigDir, platform, botName, excl...)
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, agentConfigBotName(botName), excl...)
 	if err != nil {
 		return nil, fmt.Errorf("load agent config: %w", err)
 	}
 
 	content := getConfigField(configs, file)
-	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, botName, string(file))
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, agentConfigBotName(botName), string(file))
 
 	return &admin.AgentConfigFile{
 		Content: content,
@@ -116,7 +124,7 @@ func (a *botConfigAdapter) GetSystemPromptPreview(ctx context.Context, botName s
 	}
 
 	excl := resolveInjectExcludeForAdmin(a.cfgStore.Load(), platform, botName)
-	configs, err := agentconfig.Load(a.agentConfigDir, platform, botName, excl...)
+	configs, err := agentconfig.Load(a.agentConfigDir, platform, agentConfigBotName(botName), excl...)
 	if err != nil {
 		return "", fmt.Errorf("load agent config: %w", err)
 	}
@@ -270,7 +278,7 @@ func (a *botConfigAdapter) WriteAgentConfigFile(ctx context.Context, botName str
 		return fmt.Errorf("bot %q not found in registry", botName)
 	}
 
-	if err := agentconfig.WriteFile(a.agentConfigDir, platform, botName, string(file), content, agentconfig.MaxFileChars); err != nil {
+	if err := agentconfig.WriteFile(a.agentConfigDir, platform, agentConfigBotName(botName), string(file), content, agentconfig.MaxFileChars); err != nil {
 		return fmt.Errorf("write agent config file: %w", err)
 	}
 	return nil
@@ -332,6 +340,18 @@ func resolvePlatformForBot(name string) (platform string, ok bool) {
 		return "", false
 	}
 	return string(entry.Platform), true
+}
+
+// agentConfigBotName returns the botName to pass to agentconfig.Load and
+// friends. Single-bot entries (auto-wrapped from platform-level credentials)
+// keep resolving against the platform-level directory (dir/<platform>/), so
+// they take an empty botName; real multi-bot entries use their own name.
+func agentConfigBotName(name string) string {
+	registry := messaging.DefaultBotRegistry()
+	if entry, ok := registry.GetByName(name); ok && entry.IsSingleBot {
+		return ""
+	}
+	return name
 }
 
 // resolveInjectExcludeForAdmin resolves the inject_exclude list for a bot

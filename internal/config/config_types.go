@@ -216,6 +216,10 @@ type SlackBotConfig struct {
 
 	STTConfig `mapstructure:",squash"`
 	TTSConfig `mapstructure:",squash"`
+
+	// IsSingleBot marks a bot auto-wrapped from platform-level credentials
+	// (single-bot mode). Not loaded from YAML/env — set by normalizeSlackBots.
+	IsSingleBot bool `mapstructure:"-"`
 }
 
 // FeishuConfig holds Feishu WebSocket adapter settings.
@@ -257,6 +261,10 @@ type FeishuBotConfig struct {
 
 	STTConfig `mapstructure:",squash"`
 	TTSConfig `mapstructure:",squash"`
+
+	// IsSingleBot marks a bot auto-wrapped from platform-level credentials
+	// (single-bot mode). Not loaded from YAML/env — set by normalizeFeishuBots.
+	IsSingleBot bool `mapstructure:"-"`
 }
 
 // YuanxinConfig holds Yuanxin Pulsar adapter settings.

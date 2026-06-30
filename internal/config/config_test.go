@@ -943,7 +943,8 @@ func TestNormalizeSlackBots(t *testing.T) {
 		cfg := &SlackConfig{BotToken: "xoxb-aaa", AppToken: "xapp-bbb"}
 		normalizeSlackBots(cfg)
 		require.Len(t, cfg.Bots, 1)
-		require.Equal(t, "", cfg.Bots[0].Name)
+		require.Equal(t, "slack", cfg.Bots[0].Name)
+		require.True(t, cfg.Bots[0].IsSingleBot, "single-bot should be flagged as such")
 		require.Equal(t, "xoxb-aaa", cfg.Bots[0].BotToken)
 		require.Equal(t, "xapp-bbb", cfg.Bots[0].AppToken)
 	})
@@ -960,6 +961,7 @@ func TestNormalizeSlackBots(t *testing.T) {
 		normalizeSlackBots(cfg)
 		require.Len(t, cfg.Bots, 1)
 		require.Equal(t, "bot1", cfg.Bots[0].Name)
+		require.False(t, cfg.Bots[0].IsSingleBot, "explicit bots[] must not be flagged single-bot")
 		require.Equal(t, "xoxb-new", cfg.Bots[0].BotToken)
 	})
 
@@ -979,7 +981,8 @@ func TestNormalizeFeishuBots(t *testing.T) {
 		cfg := &FeishuConfig{AppID: "cli_xxx", AppSecret: "secret"}
 		normalizeFeishuBots(cfg)
 		require.Len(t, cfg.Bots, 1)
-		require.Equal(t, "", cfg.Bots[0].Name)
+		require.Equal(t, "feishu", cfg.Bots[0].Name)
+		require.True(t, cfg.Bots[0].IsSingleBot, "single-bot should be flagged as such")
 		require.Equal(t, "cli_xxx", cfg.Bots[0].AppID)
 		require.Equal(t, "secret", cfg.Bots[0].AppSecret)
 	})
@@ -996,6 +999,7 @@ func TestNormalizeFeishuBots(t *testing.T) {
 		normalizeFeishuBots(cfg)
 		require.Len(t, cfg.Bots, 1)
 		require.Equal(t, "bot1", cfg.Bots[0].Name)
+		require.False(t, cfg.Bots[0].IsSingleBot, "explicit bots[] must not be flagged single-bot")
 	})
 
 	t.Run("empty config produces no bots", func(t *testing.T) {

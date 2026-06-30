@@ -26,6 +26,7 @@ type BotEntry struct {
 	WorkerType  string
 	ACPCommand  string // per-bot ACP agent binary override
 	ConnectedAt time.Time
+	IsSingleBot bool // true if auto-wrapped from platform-level credentials (single-bot mode)
 }
 
 // BotRegistry tracks active bot adapters and bridges.

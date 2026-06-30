@@ -221,7 +221,10 @@ func propagatePlatform(p *MessagingPlatformConfig, msg *MessagingConfig) {
 // normalizeSlackBots resolves SlackConfig to a unified Bots slice.
 // If Bots is already populated, it takes precedence.
 // If Bots is empty but top-level BotToken is set, auto-wraps as a single bot
-// with empty name (single-bot mode → agent-config uses platform-level directory).
+// named "slack" with IsSingleBot=true. The flag tells bot_config_adapter to
+// keep targeting the platform-level agent-config directory (dir/slack/),
+// preserving single-bot mode semantics, while giving the bot a non-empty name
+// for display, routing, and registry lookup.
 func normalizeSlackBots(cfg *SlackConfig) {
 	if len(cfg.Bots) > 0 {
 		return
@@ -230,12 +233,13 @@ func normalizeSlackBots(cfg *SlackConfig) {
 		return
 	}
 	cfg.Bots = []SlackBotConfig{
-		{Name: "", BotToken: cfg.BotToken, AppToken: cfg.AppToken},
+		{Name: "slack", BotToken: cfg.BotToken, AppToken: cfg.AppToken, IsSingleBot: true},
 	}
 }
 
 // normalizeFeishuBots resolves FeishuConfig to a unified Bots slice.
-// Same backward-compat logic as normalizeSlackBots.
+// Same backward-compat logic as normalizeSlackBots: auto-wraps platform-level
+// credentials as a single bot named "feishu" with IsSingleBot=true.
 func normalizeFeishuBots(cfg *FeishuConfig) {
 	if len(cfg.Bots) > 0 {
 		return
@@ -244,7 +248,7 @@ func normalizeFeishuBots(cfg *FeishuConfig) {
 		return
 	}
 	cfg.Bots = []FeishuBotConfig{
-		{Name: "", AppID: cfg.AppID, AppSecret: cfg.AppSecret},
+		{Name: "feishu", AppID: cfg.AppID, AppSecret: cfg.AppSecret, IsSingleBot: true},
 	}
 }
 

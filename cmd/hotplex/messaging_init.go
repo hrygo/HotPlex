@@ -84,10 +84,11 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			for i := range appCfg.Messaging.Slack.Bots {
 				bc := &appCfg.Messaging.Slack.Bots[i]
 				botEntries = append(botEntries, &messaging.BotEntry{
-					Name:       bc.Name,
-					Platform:   pt,
-					WorkerType: bc.WorkerType,
-					Status:     messaging.BotStatusStarting,
+					Name:        bc.Name,
+					Platform:    pt,
+					WorkerType:  bc.WorkerType,
+					Status:      messaging.BotStatusStarting,
+					IsSingleBot: bc.IsSingleBot,
 				})
 			}
 		case messaging.PlatformFeishu:
@@ -99,10 +100,11 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			for i := range appCfg.Messaging.Feishu.Bots {
 				bc := &appCfg.Messaging.Feishu.Bots[i]
 				botEntries = append(botEntries, &messaging.BotEntry{
-					Name:       bc.Name,
-					Platform:   pt,
-					WorkerType: bc.WorkerType,
-					Status:     messaging.BotStatusStarting,
+					Name:        bc.Name,
+					Platform:    pt,
+					WorkerType:  bc.WorkerType,
+					Status:      messaging.BotStatusStarting,
+					IsSingleBot: bc.IsSingleBot,
 				})
 			}
 		case messaging.PlatformYuanxin:
