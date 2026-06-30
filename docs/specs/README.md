@@ -75,6 +75,7 @@
 | 文档 | 描述 | 状态 | 日期 | 进度 |
 |------|------|------|------|------|
 | [WebChat-v2-Revamp-Spec.md](./WebChat-v2-Revamp-Spec.md) | WebChat v2 改版 — 产品愿景与技术路线 | proposed | 2026-04-20 | 0% |
+| [WebChat-i18n-Bilingual-Spec.md](./WebChat-i18n-Bilingual-Spec.md) | WebChat 中英双语切换 — 客户端运行时 i18n 方案（i18next + react-i18next） | proposed | 2026-06-30 | 0% |
 | [TTS-Engine-Spec.md](./TTS-Engine-Spec.md) | TTS 引擎规格 — Edge-TTS + Kokoro 语音合成 | draft | 2026-05-07 | 15% |
 | [2026-04-29-windows-support.md](./2026-04-29-windows-support.md) | Windows 平台支持 — 跨平台兼容规格 | proposed | 2026-04-29 | 30% |
 
