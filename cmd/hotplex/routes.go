@@ -325,11 +325,9 @@ func setupRoutes(
 	// Webchat SPA is NOT registered on the mux directly.
 	// Instead, the caller wraps the mux with a fallback handler below.
 	h := adminAPI.Middleware(adminMux)
-	adminHandler := otelhttp.NewHandler(h, "hotplex-gateway",
+	return otelhttp.NewHandler(h, "hotplex-gateway",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + r.URL.Path
 		}),
 	)
-	mux.Handle("/admin/", adminHandler)
-	return adminHandler
 }
