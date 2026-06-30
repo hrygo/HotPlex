@@ -224,7 +224,7 @@ export default function CronPage() {
                   title={job.enabled ? 'Disable' : 'Enable'}
                 >
                   <span
-                    className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                    className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-[var(--shadow-sm)] transition-transform ${
                       job.enabled ? 'translate-x-4' : 'translate-x-0.5'
                     }`}
                   />

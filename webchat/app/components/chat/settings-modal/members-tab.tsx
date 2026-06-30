@@ -64,6 +64,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     load();
     return () => {
       abortRef.current?.abort();
@@ -244,6 +245,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
         <div className="space-y-2">
           {invitations.map((inv) => {
             const used = !!inv.used_at;
+            // eslint-disable-next-line react-hooks/purity -- expiry fallback vs current time; server-side is_expired takes precedence
             const expired = !used && (inv.is_expired ?? inv.expires_at * 1000 < Date.now());
             const state = used ? 'used' : expired ? 'expired' : 'active';
             const isCopied = copiedInviteId === inv.id;
@@ -303,7 +305,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
           })}
           {invitations.length === 0 && (
             <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
-              No active invitations. Click 'Generate Invite' to invite team members.
+              No active invitations. Click &apos;Generate Invite&apos; to invite team members.
             </p>
           )}
         </div>

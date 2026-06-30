@@ -17,7 +17,7 @@ export default function BotsPage() {
     () => listBots(),
     [],
   );
-  const botList = bots ?? [];
+  const botList = useMemo(() => bots ?? [], [bots]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return botList;

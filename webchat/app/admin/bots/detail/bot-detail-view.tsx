@@ -57,7 +57,7 @@ function TagInput({
 				{value.map((tag, i) => (
 					<span
 						key={i}
-						className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]"
+						className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--radius-sm)] text-xs font-mono bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]"
 					>
 						{tag}
 						<button
@@ -139,7 +139,7 @@ function OverviewEditor({
 					<label className="block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5">
 						Bot ID
 					</label>
-					<div className="px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+					<div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
 						<p className="text-sm text-[var(--text-primary)] font-mono break-all">{bot.bot_id}</p>
 					</div>
 				</div>
@@ -174,7 +174,7 @@ function OverviewEditor({
 					<label className="block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5">
 						Connected At
 					</label>
-					<div className="px-4 py-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+					<div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
 						<p className="text-sm text-[var(--text-primary)]">{bot.connected_at || '—'}</p>
 					</div>
 				</div>
@@ -420,6 +420,7 @@ export function BotDetailView() {
 	useEffect(() => {
 		if (!name) return;
 		let cancelled = false;
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- loading state for async fetch
 		setLoading(true);
 		getBot(name)
 			.then((data: BotConfigEntry) => {

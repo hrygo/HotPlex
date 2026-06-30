@@ -64,6 +64,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
   // and scrollIntoView handles keyboard navigation. A hard cap hides skills.
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset selection on input change
     setSelectedIndex(0);
     scrollToSelected();
   }, [inputValue, scrollToSelected]);
@@ -90,6 +91,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scrollToSelected is a stable DOM helper
   }, [isOpen, filtered, selectedIndex, onSelect, onClose]);
 
   if (!isOpen || filtered.length === 0) return null;

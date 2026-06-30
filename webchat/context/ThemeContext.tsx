@@ -17,6 +17,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const isLight = document.documentElement.classList.contains('light');
+    // Sync the real theme from the DOM on mount. Cannot use a lazy initializer
+    // because document is unavailable during SSR — the effect runs post-hydrate
+    // to avoid a hydration mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThemeState(isLight ? 'light' : 'dark');
 
     // Listen to system preference changes (realtime transition)

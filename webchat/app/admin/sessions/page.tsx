@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { listSessions, terminateSession, deleteSession } from '@/lib/api/admin-sessions';
+import { MetricCard } from '@/components/admin/metric-card';
 import { SessionStatusBadge } from '@/components/admin/session-status-badge';
 import { useAdminUI } from '@/context/admin-ui-context';
 import type { AdminSessionInfo } from '@/lib/types/admin';
@@ -63,6 +64,7 @@ export default function SessionsPage() {
   }, [drawerSession]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
     loadSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -219,7 +221,7 @@ export default function SessionsPage() {
           <button
             onClick={loadSessions}
             disabled={loading}
-            className="self-start md:self-auto inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-all active:scale-95 disabled:opacity-40 shadow-sm"
+            className="self-start md:self-auto inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-all active:scale-95 disabled:opacity-40 shadow-[var(--shadow-sm)]"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -242,97 +244,55 @@ export default function SessionsPage() {
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {/* Card 1: Total */}
-          <div className="relative overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-glass)] backdrop-blur-md p-4 transition-all hover:border-[var(--border-bright)] shadow-md">
-            <div className="absolute top-0 right-0 p-3 opacity-10">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--text-primary)]">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" />
-              </svg>
-            </div>
-            <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
-              Total Sessions
-            </p>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-display font-extrabold text-[var(--text-primary)]">
-                {stats.total}
-              </span>
-              <span className="text-[10px] text-[var(--text-muted)] font-mono">sessions</span>
-            </div>
-            <p className="text-[10px] text-[var(--text-faint)] mt-1.5">Lifetime execution tracks</p>
-          </div>
+          <MetricCard
+            label="Total Sessions"
+            value={stats.total}
+            suffix="sessions"
+            sub="Lifetime execution tracks"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--text-primary)]"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" /></svg>}
+          />
 
           {/* Card 2: Active */}
-          <div className="relative overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-glass)] backdrop-blur-md p-4 transition-all hover:border-[var(--border-bright)] shadow-md">
-            <div className="absolute top-0 right-0 p-3 opacity-15">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--accent-emerald)]">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-              </svg>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--accent-emerald)] opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent-emerald)]"></span>
-              </span>
-              <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
-                Active Engines
-              </p>
-            </div>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-display font-extrabold text-[var(--accent-emerald)]">
-                {stats.active}
-              </span>
-              <span className="text-[10px] text-[var(--text-muted)] font-mono">running</span>
-            </div>
-            <p className="text-[10px] text-[var(--text-faint)] mt-1.5">Consuming worker resources</p>
-          </div>
+          <MetricCard
+            label="Active Engines"
+            value={stats.active}
+            suffix="running"
+            sub="Consuming worker resources"
+            accent="emerald"
+            pulse
+            icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--accent-emerald)]"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>}
+          />
 
           {/* Card 3: Idle */}
-          <div className="relative overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-glass)] backdrop-blur-md p-4 transition-all hover:border-[var(--border-bright)] shadow-md">
-            <div className="absolute top-0 right-0 p-3 opacity-15">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--accent-amber)]">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-              </svg>
-            </div>
-            <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
-              Idle Workers
-            </p>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-display font-extrabold text-[var(--accent-amber)]">
-                {stats.idle}
-              </span>
-              <span className="text-[10px] text-[var(--text-muted)] font-mono">waiting</span>
-            </div>
-            <p className="text-[10px] text-[var(--text-faint)] mt-1.5">Suspended, waiting for input</p>
-          </div>
+          <MetricCard
+            label="Idle Workers"
+            value={stats.idle}
+            suffix="waiting"
+            sub="Suspended, waiting for input"
+            accent="amber"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--accent-amber)]"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>}
+          />
 
           {/* Card 4: Terminated */}
-          <div className="relative overflow-hidden rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-glass)] backdrop-blur-md p-4 transition-all hover:border-[var(--border-bright)] shadow-md">
-            <div className="absolute top-0 right-0 p-3 opacity-10">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--text-muted)]">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
-              </svg>
-            </div>
-            <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
-              Terminated
-            </p>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-display font-extrabold text-[var(--text-muted)]">
-                {stats.terminated}
-              </span>
-              <span className="text-[10px] text-[var(--text-muted)] font-mono">completed</span>
-            </div>
-            <p className="text-[10px] text-[var(--text-faint)] mt-1.5">Safely released & exited</p>
-          </div>
+          <MetricCard
+            label="Terminated"
+            value={stats.terminated}
+            suffix="completed"
+            sub="Safely released & exited"
+            accent="muted"
+            icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--text-muted)]"><path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" /></svg>}
+          />
         </div>
 
         {/* Toolbar Controls */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 mb-6 bg-[var(--bg-glass)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] p-3 backdrop-blur-md shadow-sm">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 mb-6 bg-[var(--bg-glass)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] p-3 backdrop-blur-md shadow-[var(--shadow-sm)]">
           {/* Segmented Tabs Status Filter */}
           <div className="flex flex-wrap items-center gap-1 bg-[var(--bg-base)] border border-[var(--border-subtle)] p-1 rounded-[var(--radius-sm)]">
             <button
               onClick={() => setFilter('all')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'all'
-                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-gold)] shadow-sm'
+                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-gold)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
@@ -342,7 +302,7 @@ export default function SessionsPage() {
               onClick={() => setFilter('running')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'running'
-                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-emerald)] shadow-sm'
+                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-emerald)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
@@ -352,7 +312,7 @@ export default function SessionsPage() {
               onClick={() => setFilter('created')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'created'
-                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-blue)] shadow-sm'
+                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-blue)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
@@ -362,7 +322,7 @@ export default function SessionsPage() {
               onClick={() => setFilter('idle')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'idle'
-                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-amber)] shadow-sm'
+                  ? 'bg-[var(--bg-elevated)] text-[var(--accent-amber)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
@@ -372,7 +332,7 @@ export default function SessionsPage() {
               onClick={() => setFilter('terminated')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'terminated'
-                  ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)] shadow-sm'
+                  ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)] shadow-[var(--shadow-sm)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
@@ -437,7 +397,7 @@ export default function SessionsPage() {
 
         {/* Loading Spinner */}
         {loading && sessions.length === 0 && (
-          <div className="flex items-center justify-center py-32 bg-[var(--bg-glass)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] backdrop-blur-md shadow-md">
+          <div className="flex items-center justify-center py-32 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]">
             <div className="flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
               <span className="text-xs font-medium text-[var(--text-muted)] animate-pulse">Loading execution registry...</span>
@@ -447,7 +407,7 @@ export default function SessionsPage() {
 
         {/* Error Callout */}
         {error && (
-          <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] p-4 shadow-sm mb-6">
+          <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.15)] p-4 shadow-[var(--shadow-sm)] mb-6">
             <div className="flex items-center justify-between">
               <div className="flex gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="var(--accent-coral)" className="w-4 h-4 mt-0.5">
@@ -467,7 +427,7 @@ export default function SessionsPage() {
 
         {/* Empty State */}
         {!loading && !error && sorted.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center bg-[var(--bg-glass)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] backdrop-blur-md shadow-md">
+          <div className="flex flex-col items-center justify-center py-24 text-center bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
@@ -506,7 +466,7 @@ export default function SessionsPage() {
 
         {/* Interactive Grid Table */}
         {!loading && !error && sorted.length > 0 && (
-          <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-glass)] backdrop-blur-md shadow-lg overflow-hidden animate-[fadeInScale_0.15s_ease-out]">
+          <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden animate-[fadeInScale_0.15s_ease-out]">
             {/* Grid Header */}
             <div
               className={`grid ${gridCols} gap-3 px-5 py-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] items-center`}
@@ -564,7 +524,7 @@ export default function SessionsPage() {
                         </span>
                         <button
                           onClick={(e) => handleCopyId(e, session.id)}
-                          className="text-[var(--text-faint)] hover:text-[var(--accent-gold)] p-0.5 rounded transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          className="text-[var(--text-faint)] hover:text-[var(--accent-gold)] p-0.5 rounded-[var(--radius-sm)] transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                           title="Copy session ID"
                         >
                           {copyIdFeedback === session.id ? (
@@ -724,7 +684,7 @@ export default function SessionsPage() {
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
                 
                 {/* ID with interactive Copy button */}
-                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-glass)] border border-[var(--border-subtle)]">
+                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
                   <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                     Full Session ID
                   </span>
@@ -743,13 +703,13 @@ export default function SessionsPage() {
 
                 {/* Info key-value block grid */}
                 <div className="grid grid-cols-2 gap-3.5">
-                  <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-glass)] border border-[var(--border-subtle)]">
+                  <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                       Execution State
                     </span>
                     <SessionStatusBadge state={drawerSession.state} />
                   </div>
-                  <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-glass)] border border-[var(--border-subtle)]">
+                  <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                       Total turns
                     </span>
@@ -759,7 +719,7 @@ export default function SessionsPage() {
                   </div>
                 </div>
 
-                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-glass)] border border-[var(--border-subtle)] space-y-3.5">
+                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                       Worker engine type
@@ -786,7 +746,7 @@ export default function SessionsPage() {
                   </div>
                 </div>
 
-                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-glass)] border border-[var(--border-subtle)] space-y-3.5">
+                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                       Started At

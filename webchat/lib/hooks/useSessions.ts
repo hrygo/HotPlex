@@ -65,9 +65,12 @@ export function useSessions({
   const [isOpen, setIsOpen] = useState(false);
 
   const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
   const initialRef = useRef(initialSessionId);
-  initialRef.current = initialSessionId;
+  // Keep refs in sync with latest props (read inside callbacks below).
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+    initialRef.current = initialSessionId;
+  });
 
   const isCreating = useRef(false);
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
@@ -157,6 +160,7 @@ export function useSessions({
   // cancels the previous in-flight refresh on a rapid switch.
   useEffect(() => {
     const ctrl = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset selection before refetching on workspace switch
     setActiveSession(null);
     if (workspaceId) {
       refreshSessions(ctrl.signal);

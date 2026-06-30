@@ -37,6 +37,7 @@ export function BotConfigEditor({ botName }: { botName: string }) {
   }, [botName]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load file content on active file change
     loadFile(activeFile);
   }, [activeFile, loadFile]);
 

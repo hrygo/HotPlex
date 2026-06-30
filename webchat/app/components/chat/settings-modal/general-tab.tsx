@@ -57,6 +57,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
 
   // Resync when the workspace prop changes (e.g. after a parent re-fetch).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resync form when workspace prop changes
     setName(workspace.name);
     setWorker(workspace.worker_preference || '');
     setPermMode(workspace.permission_mode || 'workspace');

@@ -160,6 +160,7 @@ export default function ChatContainer() {
     }, []);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
         loadWorkspaces();
     }, [loadWorkspaces]);
 

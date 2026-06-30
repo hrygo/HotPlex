@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function CopyButton({ message, onCopy }: { message: any; onCopy?: () => void }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
@@ -15,7 +15,7 @@ export function CopyButton({ message, onCopy }: { message: any; onCopy?: () => v
     if (typeof message.content === 'string') {
       text = message.content;
     } else if (Array.isArray(message.content)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       text = message.content.map((p: any) => p.text || "").filter(Boolean).join("\n\n");
     }
 

@@ -26,7 +26,7 @@ export function useResource<T>(fetcher: () => Promise<T>, deps: unknown[] = []):
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo -- deps are a generic parameter, not a static literal
   }, deps);
 
   useEffect(() => {

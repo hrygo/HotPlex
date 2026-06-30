@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -36,6 +37,8 @@
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.9",
     "typescript": "^6.0.3"
   }
 }

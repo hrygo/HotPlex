@@ -144,7 +144,10 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
   React.useEffect(() => {
     if (!composingRef.current) {
       setLocalText(text || "");
-      if (!text) setMenuOpen(false);
+      if (!text) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- close menu when external text cleared
+        setMenuOpen(false);
+      }
     }
   }, [text]);
 

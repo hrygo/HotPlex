@@ -75,6 +75,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
     load();
   }, [load]);
 
@@ -84,7 +85,10 @@ export default function SettingsPage() {
     const hasTab = (id: TabId) =>
       id === 'general' || id === 'ai' || id === 'profile' ||
       (id === 'members' && currentUser?.role === 'admin');
-    if (!hasTab(activeTab)) setActiveTab('general');
+    if (!hasTab(activeTab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- fall back when active tab left the list
+      setActiveTab('general');
+    }
   }, [activeTab, currentUser?.role]);
 
   const handleWorkspaceUpdated = useCallback((ws: Workspace) => {

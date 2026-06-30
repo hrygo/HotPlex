@@ -108,6 +108,7 @@ function InnerLoginPage() {
   useEffect(() => {
     const code = searchParams.get('invite');
     if (code) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync ?invite= from URL into local form state
       setInviteCode(code);
       setActiveTab('register');
     }
@@ -166,7 +167,7 @@ function InnerLoginPage() {
 
   const handleOAuthLogin = (providerName: string) => {
     setLoading(true);
-    window.location.href = `${httpBase()}/api/auth/oauth/${providerName}/login`;
+    window.location.assign(`${httpBase()}/api/auth/oauth/${providerName}/login`);
   };
 
   if (bootstrapped === null) {
