@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.30.2] - 2026-06-30
+
+### Summary
+
+v1.30.2 是一次 patch 版本更新，聚焦于 **codexcli 并发安全与 admin 面板可用性修复**。修复共享 app-server 模式下并发 codex session 互相覆盖 model / context window / lastUsage 的严重并发数据竞争（#813），并修复 v1.30.1 引入的三处 admin 面板回归：SPA 路由被主 mux 拦截导致面板不可访问、single-bot 模式 bot 详情页落到 "No bot name specified"、cookie-admin 通道暴露无意义的 Connection 设置入口。
+
+### Fixed
+
+- **Worker (codexcli)**: 并发 codex session 共享 app-server 时互相覆盖 model / context window / lastUsage（#813）— 用 threadID-keyed map 替换进程级单一 converter，`LastContextUsage` 与 `SetCurrentModel` 现按 threadID 隔离；Unsubscribe 与 monitorProcess 清理 per-thread mapper，避免跨 subscribe 周期与进程崩溃后的状态泄漏。含跨线程隔离、Unsubscribe 删除状态、monitorProcess 全量清理、未知 thread 返回空、10-goroutine `-race` 回归测试。
+
+- **Admin**: SPA admin 面板通过 gateway 端口（8888）无法访问（v1.30.1 `c97f0c98` 回归）— 撤销在主 gateway mux 末尾挂载 `/admin/` 的改动，`/admin/*` 重新 fall through 到 webchat SPA fallback；admin API 仍由独立 admin server（9999）提供。
+
+- **Admin**: single-bot 模式（env-only 平台级 `BOT_TOKEN` / `APP_ID`，无 YAML `bots` 列表）下 bot 卡片链接与详情页落到 "No bot name specified"，导致该模式 bot 在 admin 面板完全不可访问 — `normalizeSlackBots` / `normalizeFeishuBots` 为 single-bot 设 `Name = 平台名`（slack / feishu，保证 `GetByName` 全局唯一）+ `IsSingleBot = true`；`BotEntry` 透传 `IsSingleBot`；新增 `agentConfigBotName()` 对 single-bot 传空 botName 给 agentconfig，保留 `dir/<platform>/` 平台级目录语义与向后兼容。
+
+### Changed
+
+- **Admin**: cookie-admin（内嵌 webchat，经 chat session 鉴权）隐藏 Admin Connection 设置入口 — 该通道无独立 admin token 可配置，`/admin/settings` 对其无意义。AdminShell 按鉴权通道传入 `showConnectionSettings`：cookie-admin 隐藏，admin-token（standalone）保留；AdminNav 相应过滤 `/admin/settings` 导航条目。
+
 ## [1.30.1] - 2026-06-30
 
 ### Summary
