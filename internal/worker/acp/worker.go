@@ -189,6 +189,14 @@ type Worker struct {
 	jsonSchema         string
 	jsonSchemaInjected atomic.Bool
 
+	// pendingHistory stores ConversationHistory from SessionInfo when the ACP
+	// agent's loadSession fails (historyLost). It is injected as a text prefix
+	// on the first user prompt so the new ACP session gets text-level context
+	// continuity (issue #816, B-acp). Native loadSession is preferred; this is
+	// the fallback only. Guarded by Mu; historyInjected gates one-shot injection.
+	pendingHistory  []worker.ConversationTurn
+	historyInjected atomic.Bool
+
 	// mcpServers caches the parsed MCP servers from Start() so Clear() can reuse them.
 	mcpServers []any
 
@@ -439,6 +447,16 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.SetWorkerSessionID(acpSessID)
 
+	// B-acp (#816): when loadSession failed (historyLost), seed pendingHistory
+	// from SessionInfo.ConversationHistory so the first prompt carries text-level
+	// context continuity into the new ACP session.
+	if historyLost && len(session.ConversationHistory) > 0 {
+		w.Mu.Lock()
+		w.pendingHistory = session.ConversationHistory
+		w.historyInjected.Store(false)
+		w.Mu.Unlock()
+	}
+
 	// Record handshake latency.
 	observability.ACPHandshakeDuration().Record(ctx, time.Since(now).Seconds())
 
@@ -503,6 +521,10 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		content = fmt.Sprintf("[JSON SCHEMA]\n%s\n[/JSON SCHEMA]\n\n%s", w.jsonSchema, content)
 	}
 
+	// B-acp (#816): inject conversation history on the first prompt when
+	// loadSession failed (text-level fallback). No-op when pendingHistory is empty.
+	content = w.injectHistoryPrefix(content)
+
 	// Cache input for crash recovery (InputRecoverer).
 	conn.lastInput.Store(&content)
 
@@ -565,6 +587,51 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 }
 
 // ─── Resume ───────────────────────────────────────────────────────────────────
+
+// injectHistoryPrefix prepends conversation history to the first user prompt
+// when the ACP agent's loadSession failed (historyLost). After injection,
+// pendingHistory is cleared. ACP's native LoadSession is preferred — this is
+// the text-level fallback for when the agent's session state is gone (B-acp,
+// issue #816). Mirrors codex's injectHistoryPrefix.
+func (w *Worker) injectHistoryPrefix(content string) string {
+	if w.historyInjected.Load() {
+		return content
+	}
+	w.Mu.Lock()
+	if len(w.pendingHistory) == 0 {
+		w.Mu.Unlock()
+		return content
+	}
+	if !w.historyInjected.CompareAndSwap(false, true) {
+		w.Mu.Unlock()
+		return content
+	}
+	history := w.pendingHistory
+	w.pendingHistory = nil
+	w.Mu.Unlock()
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString("CONVERSATION_HISTORY_RECOVERY_START\n")
+	sb.WriteString("Below is the conversation history from a previous session that could not be restored via loadSession. ")
+	sb.WriteString("Use it as context to maintain continuity.\n\n")
+	for _, turn := range history {
+		switch turn.Role {
+		case "user":
+			sb.WriteString("[User]: ")
+		case "assistant":
+			sb.WriteString("[Assistant]: ")
+		default:
+			continue
+		}
+		sb.WriteString(turn.Content)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("CONVERSATION_HISTORY_RECOVERY_END\n")
+	sb.WriteString("---\n\n")
+	sb.WriteString(content)
+	return sb.String()
+}
 
 func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	return w.Start(ctx, session)
