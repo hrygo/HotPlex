@@ -785,13 +785,13 @@ body {
 
 .btn-primary {
     background: var(--accent-gold);
-    color: #000;
+    color: var(--text-contrast);
 }
 
 .btn-primary:hover:not(:disabled) {
     background: var(--accent-gold-bright);
     transform: scale(1.05);
-    box-shadow: 0 0 20px rgba(251, 191, 36, 0.25);
+    box-shadow: var(--shadow-glow);
 }
 
 .btn-primary:active:not(:disabled) {

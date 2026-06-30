@@ -160,7 +160,7 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
               </ThreadPrimitive.ScrollToBottom>
             </div>
 
-            <ComposerPrimitive.Root className="composer-root shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
+            <ComposerPrimitive.Root className="composer-root shadow-[var(--shadow-lg)]">
             <div className="composer-input-row">
               <ComposerPrimitive.Input
                 className="composer-input"
