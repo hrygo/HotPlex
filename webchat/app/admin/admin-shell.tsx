@@ -28,13 +28,15 @@ function CheckingSpinner() {
 function AdminLayout({
   children,
   onLogout,
+  showConnectionSettings,
 }: {
   children: React.ReactNode;
   onLogout: () => void;
+  showConnectionSettings: boolean;
 }) {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-base)]">
-      <AdminNav onLogout={onLogout} />
+      <AdminNav onLogout={onLogout} showConnectionSettings={showConnectionSettings} />
       <main className="flex-1 overflow-y-auto">{children}</main>
     </div>
   );
@@ -88,7 +90,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       return null;
     }
     // "Logout" in the embedded scenario = leave the admin console, return to chat.
-    return <AdminLayout onLogout={() => router.replace('/')}>{children}</AdminLayout>;
+    return <AdminLayout showConnectionSettings={false} onLogout={() => router.replace('/')}>{children}</AdminLayout>;
   }
 
   // No chat session: standalone admin-token channel (remote operations).
@@ -105,6 +107,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     }
     return (
       <AdminLayout
+        showConnectionSettings={true}
         onLogout={() => {
           tokenLogout();
           router.replace('/admin/login');

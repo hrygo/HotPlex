@@ -5,6 +5,10 @@ import { usePathname } from 'next/navigation';
 
 interface AdminNavProps {
   onLogout: () => void;
+  // Admin Connection (/admin/settings) only matters for the standalone
+  // admin-token channel (remote operations). Hidden for cookie-admins, who
+  // authenticate via the chat session and have no token to configure.
+  showConnectionSettings?: boolean;
 }
 
 const NAV_ITEMS = [
@@ -81,13 +85,17 @@ const NAV_ITEMS = [
   },
 ];
 
-export function AdminNav({ onLogout }: AdminNavProps) {
+export function AdminNav({ onLogout, showConnectionSettings = false }: AdminNavProps) {
   const pathname = usePathname();
 
   const isActive = (href: string, exact: boolean) => {
     if (exact) return pathname === href;
     return pathname.startsWith(href);
   };
+
+  const items = showConnectionSettings
+    ? NAV_ITEMS
+    : NAV_ITEMS.filter((i) => i.href !== '/admin/settings');
 
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]">
@@ -101,7 +109,7 @@ export function AdminNav({ onLogout }: AdminNavProps) {
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3">
-        {NAV_ITEMS.map((item) => {
+        {items.map((item) => {
           const active = isActive(item.href, item.exact);
           return (
             <Link
