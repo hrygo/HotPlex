@@ -535,6 +535,7 @@ type OpenCodeServerConfig struct {
 	ReadyTimeout      time.Duration `mapstructure:"ready_timeout"`
 	ReadyPollInterval time.Duration `mapstructure:"ready_poll_interval"`
 	HTTPTimeout       time.Duration `mapstructure:"http_timeout"`
+	ContextWindow     int64         `mapstructure:"context_window"` // fallback context window size; OCS HTTP API does not expose the real value
 }
 
 // ACPConfig holds ACP (Agent Client Protocol) worker settings.

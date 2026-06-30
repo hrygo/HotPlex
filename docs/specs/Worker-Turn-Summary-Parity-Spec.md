@@ -248,7 +248,7 @@ Worker 产出事件 ──► SessionAccumulator 聚合 ──► snapshot() 注
 - **A3**：协议限制——无 `session/info`，context 强依赖 `usage_update`；agent 不发则 context_fill/window 为 0（已注释）。
 
 **opencodeserver (#778)**
-- **O1**：静态映射表 `contextWindowForModel`（Claude 200K / GPT-4o 128K / GPT-4.1·Gemini 1M / o 系列 200K / DeepSeek 64K）。未知模型返回 0（context_pct 保持未设，不伪造）。
+- **O1**：可配置 fallback `worker.opencode_server.context_window`（默认 200K，`config_defaults.go`，env `HOTPLEX_WORKER_OPENCODE_SERVER_CONTEXT_WINDOW`）。OCS HTTP API 不暴露模型窗口，故弃用静态映射表 `contextWindowForModel`（不可枚举且会过期），改单一可配置默认值；设为 0 则 context_pct 保持未设（不伪造）。
 
 ### 10.3 改动文件
 

@@ -679,9 +679,10 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session wo
 func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) {
 	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt, session)
 	w.cmd = &ServerCommander{
-		client:    w.client,
-		baseURL:   w.httpAddr,
-		sessionID: serverSessionID,
+		client:        w.client,
+		baseURL:       w.httpAddr,
+		sessionID:     serverSessionID,
+		contextWindow: w.singleton.cfg.ContextWindow,
 	}
 	if err := w.applyPermissions(ctx, session); err != nil {
 		w.Log.Warn("opencodeserver: failed to set permissions", "session_id", serverSessionID, "err", err)

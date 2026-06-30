@@ -9,33 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestContextWindowForModel(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		model string
-		want  int64
-	}{
-		{"anthropic/claude-sonnet-4-6", 200000},
-		{"anthropic/claude-opus-4-6", 200000},
-		{"anthropic/claude-3-5-haiku-20241022", 200000},
-		{"openai/gpt-4o", 128000},
-		{"openai/gpt-4.1", 1047576},
-		{"google/gemini-2.5-pro", 1048576},
-		{"openai/o3-mini", 200000},
-		{"deepseek/deepseek-chat", 64000},
-		{"unknown/future-model-9", 0}, // unknown → 0, never guessed
-		{"", 0},
-		{"Anthropic/Claude-Sonnet-4", 200000}, // case-insensitive
-	}
-	for _, tc := range cases {
-		got := contextWindowForModel(tc.model)
-		require.Equal(t, tc.want, got, "model=%q", tc.model)
-	}
-}
-
-// O1: queryContextUsage returns a non-zero maxTokens for known models (sourced
-// from the static map, since OCS's HTTP API does not expose context window).
-func TestServerCommanderQueryContextUsage_ContextWindow(t *testing.T) {
+// O1: queryContextUsage returns maxTokens from the configurable fallback
+// (worker.opencode_server.context_window), independent of model — OCS's HTTP
+// API does not expose the real context window.
+func TestServerCommanderQueryContextUsage_ContextWindowFromConfig(t *testing.T) {
 	t.Parallel()
 	c, _ := newTestCommander(t, func(w http.ResponseWriter, _ *http.Request) {
 		messages := []any{
@@ -48,15 +25,16 @@ func TestServerCommanderQueryContextUsage_ContextWindow(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(messages)
 	})
+	c.contextWindow = 200000
 
 	resp, err := c.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.NoError(t, err)
-	require.EqualValues(t, 200000, resp["maxTokens"], "known model must map to its context window")
+	require.EqualValues(t, 200000, resp["maxTokens"], "maxTokens must mirror configured context_window regardless of model")
 }
 
-// O1: unknown models leave maxTokens at 0 — context_pct stays unset rather
+// O1: context_window=0 leaves maxTokens at 0 — context_pct stays unset rather
 // than silently reporting a fabricated window.
-func TestServerCommanderQueryContextUsage_UnknownModelZeroWindow(t *testing.T) {
+func TestServerCommanderQueryContextUsage_ZeroWindowUnset(t *testing.T) {
 	t.Parallel()
 	c, _ := newTestCommander(t, func(w http.ResponseWriter, _ *http.Request) {
 		messages := []any{
@@ -69,8 +47,9 @@ func TestServerCommanderQueryContextUsage_UnknownModelZeroWindow(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(messages)
 	})
+	c.contextWindow = 0
 
 	resp, err := c.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.NoError(t, err)
-	require.EqualValues(t, 0, resp["maxTokens"], "unknown model must not guess a window")
+	require.EqualValues(t, 0, resp["maxTokens"], "zero context_window must not fabricate a window")
 }
