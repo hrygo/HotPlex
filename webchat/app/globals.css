@@ -55,6 +55,8 @@
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
     --shadow-glow: 0 0 20px rgba(251, 191, 36, 0.1);
+    --shadow-composer: 0 8px 24px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.15);
+    --shadow-composer-focus: 0 12px 32px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.2);
 
     /* Typography */
     --font-body: var(--font-inter), system-ui, sans-serif;
@@ -108,6 +110,8 @@
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
     --shadow-glow: 0 0 20px rgba(217, 119, 6, 0.08);
+    --shadow-composer: 0 4px 16px rgba(0, 0, 0, 0.03), 0 1px 4px rgba(0, 0, 0, 0.015);
+    --shadow-composer-focus: 0 8px 24px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 /* Light theme mesh gradient background */
@@ -697,7 +701,7 @@ body {
     background: var(--bg-surface);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-lg);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-composer);
     /* Only animate border, box-shadow for perf — avoid 'all' which triggers layout recalc */
     transition:
         border-color 0.2s ease,
@@ -736,8 +740,8 @@ body {
 .composer-root:focus-within {
     border-color: var(--amber-border);
     box-shadow:
-        0 0 0 4px rgba(251, 191, 36, 0.06),
-        0 12px 40px rgba(0, 0, 0, 0.5);
+        0 0 0 4px var(--accent-gold-glow),
+        var(--shadow-composer-focus);
 }
 
 .composer-root:focus-within::after {
