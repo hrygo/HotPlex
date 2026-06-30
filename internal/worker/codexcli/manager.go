@@ -84,8 +84,8 @@ type CodexAppServerManager struct {
 	// cancel cancels the background readNotifications goroutine.
 	cancel context.CancelFunc
 
-	// converter maps JSON-RPC notification methods + params to AEP envelopes.
-	converter *Mapper
+	convMu     sync.Mutex
+	converters map[string]*Mapper
 
 	idleTimer *time.Timer
 	pgid      int // cached PGID from proc.Manager, set in startProcessLocked
@@ -101,28 +101,50 @@ func NewCodexAppServerManager(log *slog.Logger, cfg config.CodexCLIConfig) *Code
 		crashCh:     make(chan struct{}),
 		subscribers: make(map[string]chan *events.Envelope),
 		subSessions: make(map[string]string),
-		converter:   NewMapper(""),
+		converters:  make(map[string]*Mapper),
 	}
 }
 
-// LastContextUsage returns the context usage snapshot tracked from
-// thread/tokenUsage/updated notifications, in the camelCase shape expected by
-// events.MapContextUsageResponse. Delegates to the converter (Mapper).
-//
-// Codex does not expose token usage via thread/read (its Turn payload carries
-// no counts), so the get_context_usage control channel is served from the
-// notification-tracked state instead of a thread/read round-trip.
-func (m *CodexAppServerManager) LastContextUsage() map[string]any {
-	return m.converter.LastContextUsage()
+func (m *CodexAppServerManager) getOrCreateConverter(threadID string) *Mapper {
+	m.convMu.Lock()
+	defer m.convMu.Unlock()
+	conv, ok := m.converters[threadID]
+	if !ok {
+		conv = NewMapper("")
+		m.converters[threadID] = conv
+	}
+	return conv
 }
 
-// SetCurrentModel seeds the converter's active model from the thread/start
-// configuration so model_name is populated for normal (non-rerouted) turns.
-// The converter is process-wide (singleton manager), so this reflects the most
-// recently started thread's model — acceptable since a single codex app-server
-// process typically serves one model at a time.
-func (m *CodexAppServerManager) SetCurrentModel(model string) {
-	m.converter.SetModel(model)
+func (m *CodexAppServerManager) getConverter(threadID string) *Mapper {
+	m.convMu.Lock()
+	defer m.convMu.Unlock()
+	return m.converters[threadID]
+}
+
+func (m *CodexAppServerManager) deleteConverter(threadID string) {
+	m.convMu.Lock()
+	defer m.convMu.Unlock()
+	delete(m.converters, threadID)
+}
+
+func (m *CodexAppServerManager) clearConverters() {
+	m.convMu.Lock()
+	defer m.convMu.Unlock()
+	m.converters = make(map[string]*Mapper)
+}
+
+func (m *CodexAppServerManager) LastContextUsage(threadID string) map[string]any {
+	conv := m.getConverter(threadID)
+	if conv == nil {
+		return map[string]any{}
+	}
+	return conv.LastContextUsage()
+}
+
+func (m *CodexAppServerManager) SetCurrentModel(threadID, model string) {
+	conv := m.getOrCreateConverter(threadID)
+	conv.SetModel(model)
 }
 
 // Acquire increments the reference count and starts the process if needed.
@@ -205,13 +227,14 @@ func (m *CodexAppServerManager) Subscribe(threadID, sessionID string) chan *even
 // call to ensure the channel is eventually cleaned up by monitorProcess.
 func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 	m.subMu.Lock()
-	defer m.subMu.Unlock()
-
 	if _, ok := m.subscribers[threadID]; ok {
 		delete(m.subscribers, threadID)
 		delete(m.subSessions, threadID)
 		m.log.Debug("codex-app-server: unsubscribed", "thread_id", threadID)
 	}
+	m.subMu.Unlock()
+
+	m.deleteConverter(threadID)
 }
 
 // Call sends a JSON-RPC request to the app-server process and waits for a response.
@@ -920,7 +943,8 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 		return
 	}
 
-	envs := m.converter.MapNotification(notif.Method, notif.Params)
+	conv := m.getOrCreateConverter(params.ThreadID)
+	envs := conv.MapNotification(notif.Method, notif.Params)
 	for _, env := range envs {
 		if env != nil {
 			env.SessionID = sessionID
@@ -996,7 +1020,7 @@ func (m *CodexAppServerManager) monitorProcess() {
 	m.mu.Unlock()
 
 	if wasRunning {
-		m.converter.Reset()
+		m.clearConverters()
 		m.subsClosed.Store(true)
 		m.subMu.Lock()
 		for id, ch := range m.subscribers {

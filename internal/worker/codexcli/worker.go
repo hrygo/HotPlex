@@ -356,9 +356,7 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 	w.origSession = session
 	w.recvCh = w.manager.Subscribe(result.Thread.ID, session.SessionID)
 	w.commands = NewServerCommander(w.manager, result.Thread.ID)
-	// Seed the converter's model so model_name is populated for normal
-	// (non-rerouted) turns. No-op when no model is configured.
-	w.manager.SetCurrentModel(cfg.Model)
+	w.manager.SetCurrentModel(result.Thread.ID, cfg.Model)
 	w.conn = &appConn{
 		userID:    session.UserID,
 		sessionID: session.SessionID,

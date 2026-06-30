@@ -144,11 +144,11 @@ func TestMapper_Reset_ClearsTrackedState(t *testing.T) {
 	require.Empty(t, m.LastContextUsage(), "Reset must clear all context-usage state")
 }
 
-// Manager delegates context-usage snapshot + model seeding to the converter.
 func TestManager_ContextUsage_DelegatesToConverter(t *testing.T) {
 	t.Parallel()
 	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{})
-	require.Empty(t, mgr.LastContextUsage(), "fresh manager has no usage")
-	mgr.SetCurrentModel("gpt-5.1-codex")
-	require.Equal(t, "gpt-5.1-codex", mgr.LastContextUsage()["model"])
+	mgr.Subscribe("thr-delegate", "sess-delegate")
+	require.Empty(t, mgr.LastContextUsage("thr-delegate"), "fresh manager has no usage")
+	mgr.SetCurrentModel("thr-delegate", "gpt-5.1-codex")
+	require.Equal(t, "gpt-5.1-codex", mgr.LastContextUsage("thr-delegate")["model"])
 }

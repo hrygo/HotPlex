@@ -19,10 +19,7 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 	case "set_model":
 		return nil, fmt.Errorf("codexcli: set_model not supported")
 	case "get_context_usage":
-		// thread/read does not carry token usage — codex's Turn payload has no
-		// token counts. Context usage (fill, window, model) is tracked from
-		// thread/tokenUsage/updated notifications; see Mapper.LastContextUsage.
-		return sc.manager.LastContextUsage(), nil
+		return sc.manager.LastContextUsage(sc.threadID), nil
 	case "mcp_status":
 		resp, err := sc.manager.ListMCPServerStatus()
 		if err != nil {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2098,4 +2099,208 @@ func TestInjectHistoryPrefixPreservesSentinelContent(t *testing.T) {
 	require.Contains(t, result, "CONVERSATION_HISTORY_END also preserved")
 	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_START`, result)
 	require.Regexp(t, `CONVERSATION_HISTORY_[0-9a-f]{8}_END`, result)
+}
+
+// ─── Per-Thread Converter Isolation Tests (#813) ─────────────────────────
+
+func TestManager_PerThreadConverterIsolation(t *testing.T) {
+	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+	mgr := NewCodexAppServerManager(slog.Default(), cfg)
+
+	drain := func(chs ...chan *events.Envelope) {
+		t.Helper()
+		for _, ch := range chs {
+			for {
+				select {
+				case <-ch:
+				default:
+					goto next
+				}
+			}
+		next:
+		}
+	}
+
+	t.Run("context usage isolated by threadID", func(t *testing.T) {
+		chA := mgr.Subscribe("thread-a", "session-a")
+		chB := mgr.Subscribe("thread-b", "session-b")
+		defer mgr.Unsubscribe("thread-a")
+		defer mgr.Unsubscribe("thread-b")
+		drain(chA, chB)
+
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "turn/started",
+			Params:  json.RawMessage(`{"threadId":"thread-a","turn":{"id":"turn-a"}}`),
+		})
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "thread/tokenUsage/updated",
+			Params: json.RawMessage(`{"threadId":"thread-a","turnId":"turn-a","tokenUsage":` +
+				`{"last":{"inputTokens":100,"outputTokens":50,"cachedInputTokens":10},"modelContextWindow":8000}}`),
+		})
+
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "turn/started",
+			Params:  json.RawMessage(`{"threadId":"thread-b","turn":{"id":"turn-b"}}`),
+		})
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "thread/tokenUsage/updated",
+			Params: json.RawMessage(`{"threadId":"thread-b","turnId":"turn-b","tokenUsage":` +
+				`{"last":{"inputTokens":200,"outputTokens":100},"modelContextWindow":16000}}`),
+		})
+
+		cuA := mgr.LastContextUsage("thread-a")
+		require.Equal(t, 110, cuA["totalTokens"], "thread-a totalTokens")
+		require.Equal(t, int64(8000), cuA["maxTokens"], "thread-a maxTokens")
+
+		cuB := mgr.LastContextUsage("thread-b")
+		require.Equal(t, 200, cuB["totalTokens"], "thread-b totalTokens")
+		require.Equal(t, int64(16000), cuB["maxTokens"], "thread-b maxTokens")
+	})
+
+	t.Run("model is scoped to threadID", func(t *testing.T) {
+		chA := mgr.Subscribe("thread-a", "session-a")
+		chB := mgr.Subscribe("thread-b", "session-b")
+		defer mgr.Unsubscribe("thread-a")
+		defer mgr.Unsubscribe("thread-b")
+		drain(chA, chB)
+
+		mgr.SetCurrentModel("thread-a", "gpt-a")
+		mgr.SetCurrentModel("thread-b", "gpt-b")
+
+		require.Equal(t, "gpt-a", mgr.LastContextUsage("thread-a")["model"])
+		require.Equal(t, "gpt-b", mgr.LastContextUsage("thread-b")["model"])
+
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "model/rerouted",
+			Params:  json.RawMessage(`{"threadId":"thread-a","toModel":"rerouted-a"}`),
+		})
+		require.Equal(t, "rerouted-a", mgr.LastContextUsage("thread-a")["model"])
+		require.Equal(t, "gpt-b", mgr.LastContextUsage("thread-b")["model"])
+	})
+
+	t.Run("turnID gating does not cross threads", func(t *testing.T) {
+		chA := mgr.Subscribe("thread-c", "session-c")
+		chB := mgr.Subscribe("thread-d", "session-d")
+		defer mgr.Unsubscribe("thread-c")
+		defer mgr.Unsubscribe("thread-d")
+		drain(chA, chB)
+
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "turn/started",
+			Params:  json.RawMessage(`{"threadId":"thread-c","turn":{"id":"shared-turn"}}`),
+		})
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "turn/started",
+			Params:  json.RawMessage(`{"threadId":"thread-d","turn":{"id":"shared-turn"}}`),
+		})
+
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "thread/tokenUsage/updated",
+			Params: json.RawMessage(`{"threadId":"thread-c","turnId":"shared-turn","tokenUsage":` +
+				`{"last":{"inputTokens":111,"outputTokens":11},"modelContextWindow":1000}}`),
+		})
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  "thread/tokenUsage/updated",
+			Params: json.RawMessage(`{"threadId":"thread-d","turnId":"shared-turn","tokenUsage":` +
+				`{"last":{"inputTokens":222,"outputTokens":22},"modelContextWindow":2000}}`),
+		})
+
+		require.Equal(t, 111, mgr.LastContextUsage("thread-c")["totalTokens"])
+		require.Equal(t, 222, mgr.LastContextUsage("thread-d")["totalTokens"])
+	})
+
+	t.Run("unsubscribe deletes per-thread converter state", func(t *testing.T) {
+		ch := mgr.Subscribe("thread-e", "session-e")
+		defer func() {
+			go func() {
+				for range ch {
+				}
+			}()
+		}()
+
+		mgr.SetCurrentModel("thread-e", "gpt-e")
+		require.Equal(t, "gpt-e", mgr.LastContextUsage("thread-e")["model"])
+
+		mgr.Unsubscribe("thread-e")
+		require.Empty(t, mgr.LastContextUsage("thread-e"), "unsubscribe must drop converter state")
+	})
+
+	t.Run("unknown thread returns empty context usage", func(t *testing.T) {
+		require.Empty(t, mgr.LastContextUsage("nonexistent-thread"))
+	})
+
+	t.Run("monitorProcess crash clears all converters", func(t *testing.T) {
+		chA := mgr.Subscribe("thread-f", "session-f")
+		chB := mgr.Subscribe("thread-g", "session-g")
+		defer mgr.Unsubscribe("thread-f")
+		defer mgr.Unsubscribe("thread-g")
+		drain(chA, chB)
+
+		mgr.SetCurrentModel("thread-f", "gpt-f")
+		mgr.SetCurrentModel("thread-g", "gpt-g")
+		require.Equal(t, "gpt-f", mgr.LastContextUsage("thread-f")["model"])
+		require.Equal(t, "gpt-g", mgr.LastContextUsage("thread-g")["model"])
+
+		mgr.clearConverters()
+
+		require.Empty(t, mgr.LastContextUsage("thread-f"))
+		require.Empty(t, mgr.LastContextUsage("thread-g"))
+	})
+
+	t.Run("concurrent dispatch no data race", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping race test in short mode")
+		}
+
+		var chs []chan *events.Envelope
+		for i := range 5 {
+			ch := mgr.Subscribe(fmt.Sprintf("race-thread-%d", i), fmt.Sprintf("race-session-%d", i))
+			chs = append(chs, ch)
+		}
+		defer func() {
+			for i := range 5 {
+				mgr.Unsubscribe(fmt.Sprintf("race-thread-%d", i))
+			}
+		}()
+		drain(chs...)
+
+		var wg sync.WaitGroup
+		for i := range 10 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				threadID := fmt.Sprintf("race-thread-%d", idx%5)
+				turnID := fmt.Sprintf("turn-%d", idx)
+				mgr.dispatchNotification(&JSONRPCNotification{
+					JSONRPC: "2.0",
+					Method:  "turn/started",
+					Params:  json.RawMessage(fmt.Sprintf(`{"threadId":%q,"turn":{"id":%q}}`, threadID, turnID)),
+				})
+				mgr.dispatchNotification(&JSONRPCNotification{
+					JSONRPC: "2.0",
+					Method:  "thread/tokenUsage/updated",
+					Params: json.RawMessage(fmt.Sprintf(
+						`{"threadId":%q,"turnId":%q,"tokenUsage":{"last":{"inputTokens":%d,"outputTokens":1},"modelContextWindow":%d}}`,
+						threadID, turnID, idx*10, 1000+idx)),
+				})
+			}(i)
+		}
+		wg.Wait()
+
+		for i := range 5 {
+			threadID := fmt.Sprintf("race-thread-%d", i)
+			cu := mgr.LastContextUsage(threadID)
+			require.NotNil(t, cu)
+			require.GreaterOrEqual(t, cu["totalTokens"], i*10)
+		}
+	})
 }
