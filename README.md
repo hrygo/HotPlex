@@ -33,6 +33,7 @@
 
 ### 📱 Multi-Platform Delivery
 - 🌍 **Write Once, Deploy Anywhere** — Bridge agents to **Slack** (Socket Mode), **Feishu** (WebSocket), and **Web** with zero agent code changes. Each adapter provides platform-native streaming, slash commands, and interaction management.
+- 🎙️ **Voice Input & Summary** — Seamless integration with platform voice messages (Speech-to-Text via Feishu API or local STT) and auto-synthesized summaries back to users (Text-to-Speech via Microsoft Edge-TTS or localized CPU-friendly MOSS-TTS sidecar).
 - ⏰ **AI-Native Cron Scheduler** — Agents autonomously create scheduled tasks from natural language ("remind me in 30m"). Supports cron expressions, fixed intervals, and one-shot schedules with lifecycle controls (`max_runs`, `expires_at`), attached session injection, and automatic result delivery.
 - 💬 **Embedded Web Chat & Admin UI** — A single binary serves the AEP gateway, a Next.js SPA web chat, and an admin dashboard for bot management, API keys, and session monitoring — all out of the box.
 
@@ -183,7 +184,9 @@ func main() {
 | Key                         | Default                      | Description                                    |
 | :-------------------------- | :--------------------------- | :--------------------------------------------- |
 | `agent_config.enabled`      | `true`                       | Enable agent personality/context injection     |
-| `tts.enabled`               | `true`                       | Enable Edge-TTS voice reply (voice-in → voice-out) |
+| `messaging.tts_enabled`     | `true`                       | Enable voice reply (voice-in → voice-out)      |
+| `messaging.tts_provider`    | `edge+moss`                  | TTS provider: `edge` (Edge-TTS), `moss` (MOSS CPU), `edge+moss` |
+| `messaging.stt_provider`    | `local`                      | STT provider: `local` (local command), `feishu` (Feishu API), `feishu+local` |
 | `brain.enabled`             | `false`                      | Enable Brain LLM orchestration (auto-discovers keys from worker configs)  |
 | `webchat.enabled`           | `true`                       | Serve embedded webchat SPA from gateway        |
 | `worker.auto_retry.enabled` | `true`                       | Intelligent LLM retry with exponential backoff |
