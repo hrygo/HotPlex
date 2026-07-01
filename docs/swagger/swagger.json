@@ -11,7 +11,7 @@
             "name": "Apache 2.0",
             "url": "https://github.com/hrygo/hotplex/blob/main/LICENSE"
         },
-        "version": "1.30.2"
+        "version": "1.30.3"
     },
     "host": "localhost:8888",
     "basePath": "/",
@@ -2055,7 +2055,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Creates a new AI agent session. workspace_id and client_session_id are required. The workspace must be owned by the caller (403 WORKSPACE_FORBIDDEN otherwise). work_dir is taken from the workspace (immutable). Session id is UUIDv5 derived from (userID, workerType, clientKey, workspaceID, workDir) — 方案3.",
+                "description": "Creates a new AI agent session. client_session_id is required. workspace_id is optional: omit it for legacy/platform/cron integrations (work_dir falls back to query param or config default); pass it on the WebChat multi-tenant track (caller must own it, 403 WORKSPACE_FORBIDDEN otherwise; work_dir taken from workspace, immutable). Session id is UUIDv5 derived from (userID, workerType, clientKey, workspaceID, workDir) — 方案3.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2068,10 +2068,9 @@
                 "summary": "Create session",
                 "parameters": [
                     {
-                        "description": "Workspace ID (caller must own it)",
+                        "description": "Workspace ID (optional; required only on WebChat multi-tenant track, caller must own it)",
                         "name": "workspace_id",
                         "in": "body",
-                        "required": true,
                         "schema": {
                             "type": "string"
                         }
@@ -2111,7 +2110,7 @@
                         }
                     },
                     "400": {
-                        "description": "Missing client_session_id or workspace_id",
+                        "description": "Missing client_session_id",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
@@ -2451,6 +2450,40 @@
                     },
                     "500": {
                         "description": "Failed to get history",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/workers": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns a list of all registered worker types and whether their binaries are installed in the host's PATH.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Gateway API"
+                ],
+                "summary": "List worker installation status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/gateway.WorkerInstallationStatus"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
@@ -3718,6 +3751,20 @@
             "type": "object",
             "properties": {
                 "permission_mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "gateway.WorkerInstallationStatus": {
+            "type": "object",
+            "properties": {
+                "installed": {
+                    "type": "boolean"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }

@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.30.3] - 2026-07-01
+
+### Summary
+
+v1.30.3 是一次 patch 版本更新，聚焦于 **兼容性修复与构建链解封**，并附带一项改善 Worker 选择体验的轻量功能。① 恢复 v1.29.0 的 REST CreateSession 兼容性——v1.30 引入的 workspace_id 硬必填导致企业级 REST 集成升级后 400 "workspace_id is required"；② 对齐 admin create 与 gateway start 的 --config 默认值，避免 admin 写库与网关读库不一致；③ 解封 pnpm 11 构建链（trustLockfile），消除新依赖发布后 24h 的 supply-chain 验证阻塞。此外新增 `GET /api/workers` 端点，WebChat 创建会话时只列出实际安装的 Worker 引擎，避免误选未安装引擎。
+
+### Added
+
+- **Gateway Core**: `GET /api/workers` 端点 — 返回所有注册 worker 类型（claude_code / opencode_server / codex_cli / acp）及其二进制在主机 PATH 的安装状态（`installed` + `path`）。WebChat `NewSessionModal` 据此动态只列出已安装引擎，默认选第一个可用 worker，避免选未安装 worker 导致启动失败。
+
+- **CLI**: doctor 的 `worker_binary` checker 升级 — 从硬编码仅查 claude / opencode 两项，改为按 config 遍历全部 4 种 worker 命令检查安装状态，doctor 诊断覆盖面与实际支持的 worker 对齐。
+
+### Fixed
+
+- **Gateway Core**: REST CreateSession `workspace_id` 放宽为可选，恢复 v1.29.0 兼容（#825）— v1.30 引入的硬必填（`44f461ff`，PR #746）导致企业级 REST 集成升级后 400 "workspace_id is required"。现与 WS init（`conn.go:334`）、ListSessions（`api.go:89`）对齐为可选语义：传则走多租户归属校验，不传则恢复 legacy 行为（work_dir 取 query / config 默认值，session key workspaceID 维度为空）。零客户端改动恢复兼容。
+
+- **CLI**: `admin create --config` 默认值与 `gateway start` 对齐（#826）— 此前 admin 命令 `--config` 默认为空字符串，不传时加载内置默认配置而非 `~/.hotplex/config.yaml`，导致 admin 写入的数据库与网关读取的数据库不一致。改为统一 `config.DefaultConfigPath`。
+
+- **WebChat UI**: 解封 pnpm 11 构建链（#822）— pnpm 11 默认启用 `minimumReleaseAge=1440`（24h），在 `--frozen-lockfile` 下锁定精确版本，新发布的传递依赖（如 typescript-eslint@8.62.1）无法回退到旧版本，触发 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`，阻塞 `make build` 约 24h。通过 `trustLockfile=true`（跳过对已审查 lockfile 的二次校验）+ 固定 `pnpm@11.4.0`（CI 与本地一致）修复。
+
+### Changed
+
+- **Configuration**: 补齐 `opencode_server.context_window` 配置项文档（`docs/reference/configuration.md`）— turn summary parity（#776/#777/#778）为 OCS worker 引入的 YAML 配置（默认 200000）+ `HOTPLEX_WORKER_OPENCODE_SERVER_CONTEXT_WINDOW` env fallback 此前遗漏，现与代码同步。
+
 ## [1.30.2] - 2026-06-30
 
 ### Summary
