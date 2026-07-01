@@ -3,7 +3,6 @@ package feishu
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime/debug"
 	"time"
 
@@ -15,17 +14,10 @@ import (
 )
 
 func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
-	// Temporarily redirect os.Stdout to silence noisy default logger from Lark SDK
-	oldStdout := os.Stdout
-	if devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0); err == nil {
-		os.Stdout = devNull
-		defer func() {
-			os.Stdout = oldStdout
-			_ = devNull.Close()
-		}()
-	}
+	d := dispatcher.NewEventDispatcher("", "")
+	d.Config.Logger = SlogLogger{Logger: a.Log}
 
-	return dispatcher.NewEventDispatcher("", "").
+	return d.
 		// Callbacks are dispatched before message events in the EventDispatcher
 		// (Do() checks callbackType2CallbackHandler before eventType2EventHandler),
 		// so register card action handlers first to mirror that priority order.
