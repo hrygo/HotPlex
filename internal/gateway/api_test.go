@@ -291,17 +291,23 @@ func TestCreateSession_MissingClientSessionID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "client_session_id is required")
 }
 
-func TestCreateSession_MissingWorkspaceID(t *testing.T) {
+// 方案 1（issue #824）：workspace_id 可选。不传时走 legacy 路径（v1.29.0 契约），
+// 必须返回 200，不得回退到 400 "workspace_id is required"。
+func TestCreateSession_LegacyNoWorkspace(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)
 	bridge := new(mockAPIBridge)
 	api := newTestAPI(t, sm, bridge)
 
+	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
+	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
+
 	w := httptest.NewRecorder()
 	api.CreateSession(w, authedReq("POST", "/api/sessions?client_session_id=c1", nil))
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "workspace_id is required")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "session_id")
+	bridge.AssertExpectations(t)
 }
 
 func TestCreateSession_WorkspaceForbidden(t *testing.T) {

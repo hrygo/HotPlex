@@ -162,17 +162,17 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 // CreateSession creates a new AI agent session bound to a workspace (WebChat multi-tenant, spec ①).
 //
 // @Summary      Create session
-// @Description  Creates a new AI agent session. workspace_id and client_session_id are required. The workspace must be owned by the caller (403 WORKSPACE_FORBIDDEN otherwise). work_dir is taken from the workspace (immutable). Session id is UUIDv5 derived from (userID, workerType, clientKey, workspaceID, workDir) — 方案3.
+// @Description  Creates a new AI agent session. client_session_id is required. workspace_id is optional: omit it for legacy/platform/cron integrations (work_dir falls back to query param or config default); pass it on the WebChat multi-tenant track (caller must own it, 403 WORKSPACE_FORBIDDEN otherwise; work_dir taken from workspace, immutable). Session id is UUIDv5 derived from (userID, workerType, clientKey, workspaceID, workDir) — 方案3.
 // @Tags         Gateway API
 // @Accept       json
 // @Produce      json
 // @Security     ApiKeyAuth
-// @Param        workspace_id      body     string  true   "Workspace ID (caller must own it)"
+// @Param        workspace_id      body     string  false  "Workspace ID (optional; required only on WebChat multi-tenant track, caller must own it)"
 // @Param        client_session_id body     string  true   "Client-provided session identifier (max 256 chars)"
 // @Param        title             body     string  false  "Human-readable session title"
 // @Param        worker_type       body     string  false  "Worker type"      default(claudecode)
 // @Success      200  {object}  admin.GatewayCreateSessionResponse
-// @Failure      400  {object}  admin.ErrorResponse  "Missing client_session_id or workspace_id"
+// @Failure      400  {object}  admin.ErrorResponse  "Missing client_session_id"
 // @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
 // @Failure      403  {object}  admin.ErrorResponse  "WORKSPACE_FORBIDDEN: not your workspace"
 // @Failure      404  {object}  admin.ErrorResponse  "WORKSPACE_NOT_FOUND"
@@ -234,36 +234,56 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// workspace_id is mandatory on the WebChat multi-tenant track (spec ①): it
-	// anchors the session key (方案3) and supplies the immutable work_dir.
-	if workspaceID == "" {
-		writeAppError(w, http.StatusBadRequest, "BAD_REQUEST", "workspace_id is required")
-		return
-	}
-	if g.wsStore == nil {
-		g.log.Error("gateway: workspace store not configured", "method", r.Method, "path", r.URL.Path)
-		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "workspace store unavailable")
-		return
-	}
-	ws, err := g.wsStore.GetWorkspaceByID(r.Context(), workspaceID)
-	if err != nil {
-		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace not found")
-		return
-	}
-	if ws.OwnerUserID != userID {
-		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "ownership required")
-		return
+	// workspace_id 可选（对齐 WS init conn.go:334-368 与 ListSessions api.go:89-90）：
+	// 传了走多租户归属校验，work_dir 取自 workspace；不传则恢复 v1.29.0 legacy
+	// 行为——work_dir 取 query work_dir 或 config 默认值，session key 的
+	// workspaceID 维度为空。平台/cron/第三方 REST 集成无需 workspace 仍可建会话。
+	var ws *session.Workspace
+	var sessionWorkspaceID string
+	if workspaceID != "" {
+		if g.wsStore == nil {
+			g.log.Error("gateway: workspace store not configured", "method", r.Method, "path", r.URL.Path)
+			writeAppError(w, http.StatusInternalServerError, "INTERNAL", "workspace store unavailable")
+			return
+		}
+		var wsErr error
+		ws, wsErr = g.wsStore.GetWorkspaceByID(r.Context(), workspaceID)
+		if wsErr != nil {
+			writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace not found")
+			return
+		}
+		if ws.OwnerUserID != userID {
+			writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "ownership required")
+			return
+		}
+		sessionWorkspaceID = ws.ID
 	}
 
-	// work_dir is session-immutable and sourced from the workspace (spec §6.2).
-	// The workspace itself may change work_dir via the admin Update endpoint
-	// (guarded against active sessions), but once a session is bound its work_dir
-	// is fixed — it enters DeriveSessionKey.
-	workDir := ws.WorkDir
-	if err := security.ValidateWorkDir(workDir); err != nil {
-		g.log.Error("workspace workDir failed validation", "method", r.Method, "path", r.URL.Path, "workspace_id", workspaceID, "err", err)
-		writeAppError(w, http.StatusInternalServerError, "INVALID_WORK_DIR", "workspace work_dir is invalid")
-		return
+	// work_dir resolution.
+	// Workspace track: session-immutable, sourced from the workspace (spec §6.2).
+	// Legacy track: client-provided query param or config default (v1.29.0 behavior).
+	var workDir string
+	if ws != nil {
+		workDir = ws.WorkDir
+		if err := security.ValidateWorkDir(workDir); err != nil {
+			g.log.Error("workspace workDir failed validation", "method", r.Method, "path", r.URL.Path, "workspace_id", workspaceID, "err", err)
+			writeAppError(w, http.StatusInternalServerError, "INVALID_WORK_DIR", "workspace work_dir is invalid")
+			return
+		}
+	} else {
+		workDir = strings.TrimSpace(r.URL.Query().Get("work_dir"))
+		if workDir == "" {
+			workDir = g.cfgStore.Load().Worker.DefaultWorkDir
+		}
+		if workDir != "" {
+			expanded, err := validateAndExpandWorkDir(workDir)
+			if err != nil {
+				g.log.Warn("gateway: create session invalid work_dir", "method", r.Method, "path", r.URL.Path, "work_dir", workDir, "err", err)
+				writeAppError(w, http.StatusBadRequest, "INVALID_WORK_DIR", err.Error())
+				return
+			}
+			workDir = expanded
+		}
 	}
 
 	// worker_type resolution: body/query > workspace.WorkerPreference > default.
@@ -283,7 +303,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// stale row written before that gate existed (spec ①-②), or a bypass write
 	// (migration/manual SQL), could hold an unvalidated value. Re-validate and
 	// degrade to the default rather than failing late at worker launch (review P2).
-	if wt == "" {
+	if wt == "" && ws != nil {
 		if pref := worker.WorkerType(ws.WorkerPreference); pref != "" {
 			if err := worker.ValidateType(pref); err == nil {
 				wt = pref
@@ -298,8 +318,10 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Session key 方案3: workspace_id participates in the UUIDv5 hash (spec §7).
-	// Same (userID, wt, clientKey, workspaceID, workDir) → same session id.
-	id := session.DeriveSessionKey(userID, wt, clientSessionID, ws.ID, workDir)
+	// Legacy track leaves sessionWorkspaceID empty — same derivation shape as
+	// the WS path when initData.WorkspaceID is absent. Same (userID, wt,
+	// clientKey, workspaceID, workDir) → same session id.
+	id := session.DeriveSessionKey(userID, wt, clientSessionID, sessionWorkspaceID, workDir)
 
 	// Default userID after derivation — bridge expects non-empty.
 	if userID == "" {
@@ -326,7 +348,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		Platform:    platformWebChat,
 		Title:       title,
 		ClientKey:   clientSessionID,
-		WorkspaceID: ws.ID,
+		WorkspaceID: sessionWorkspaceID,
 	}); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to create session")
