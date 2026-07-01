@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { WorkerIcon } from "@/components/icons";
+import { getWorkers, WorkerInstallationStatus } from "@/lib/api/sessions";
 
 interface WorkerOption {
   id: string;
@@ -24,7 +25,33 @@ interface NewSessionModalProps {
 
 export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
   const [title, setTitle] = useState("");
-  const [selectedWorker, setSelectedWorker] = useState("claude_code");
+  const [selectedWorker, setSelectedWorker] = useState("");
+  const [workers, setWorkers] = useState<WorkerInstallationStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getWorkers()
+      .then((data) => {
+        if (!active) return;
+        setWorkers(data);
+        const firstInstalled = data.find((w) => w.installed);
+        if (firstInstalled) {
+          setSelectedWorker(firstInstalled.type);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error("Failed to fetch workers", err);
+        setError("Failed to load worker engines");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const trimmedTitle = title.trim();
 
@@ -89,29 +116,53 @@ export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
           <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
             Worker Engine
           </label>
-          <div className="grid grid-cols-2 gap-2">
-            {WORKER_OPTIONS.map((w) => (
-              <button
-                key={w.id}
-                onClick={() => setSelectedWorker(w.id)}
-                className={`p-3 rounded-[var(--radius-md)] border text-left transition-all active:scale-[0.98] ${
-                  selectedWorker === w.id
-                    ? "bg-[var(--amber-light)] border-[var(--amber-border)] shadow-[0_0_20px_rgba(251,191,36,0.08)]"
-                    : "bg-[var(--bg-elevated)] border-[var(--border-default)] hover:border-[var(--border-bright)] hover:bg-[var(--bg-hover)]"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <WorkerIcon type={w.id} className={`w-4 h-4 ${selectedWorker === w.id ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} />
-                  <span className={`text-xs font-bold whitespace-nowrap ${selectedWorker === w.id ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
-                    {w.name}
-                  </span>
+          {loading ? (
+            <div className="flex items-center justify-center py-6 text-xs text-[var(--text-muted)] font-mono">
+              <span className="animate-pulse">Loading worker engines...</span>
+            </div>
+          ) : error ? (
+            <div className="text-xs text-[var(--text-danger)] font-mono p-3 rounded-[var(--radius-md)] bg-[var(--bg-danger-subtle)] border border-[var(--border-danger)] w-full text-center">
+              {error}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 w-full">
+                {workers.map((w) => {
+                  const meta = WORKER_OPTIONS.find((opt) => opt.id === w.type);
+                  if (!meta) return null;
+                  return (
+                    <button
+                      key={w.type}
+                      disabled={!w.installed}
+                      onClick={() => setSelectedWorker(w.type)}
+                      className={`p-3 rounded-[var(--radius-md)] border text-left transition-all relative ${
+                        !w.installed
+                          ? "opacity-50 cursor-not-allowed bg-[var(--bg-disabled)] border-[var(--border-subtle)]"
+                          : selectedWorker === w.type
+                          ? "bg-[var(--amber-light)] border-[var(--amber-border)] shadow-[0_0_20px_rgba(251,191,36,0.08)] active:scale-[0.98]"
+                          : "bg-[var(--bg-elevated)] border-[var(--border-default)] hover:border-[var(--border-bright)] hover:bg-[var(--bg-hover)] active:scale-[0.98]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <WorkerIcon type={w.type} className={`w-4 h-4 ${!w.installed ? "text-[var(--text-disabled)]" : selectedWorker === w.type ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} />
+                        <span className={`text-xs font-bold whitespace-nowrap ${!w.installed ? "text-[var(--text-disabled)]" : selectedWorker === w.type ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                          {meta.name}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-faint)] whitespace-nowrap">
+                        {w.installed ? meta.description : "Not installed on server"}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+              {workers.length > 0 && !workers.some(w => w.installed) && (
+                <div className="text-[10px] text-[var(--text-danger)] mt-2 font-mono bg-[rgba(239,68,68,0.1)] p-2 rounded border border-[rgba(239,68,68,0.2)] w-full">
+                  All worker engines are unavailable. Please install at least one worker CLI on the server.
                 </div>
-                <p className="text-[10px] text-[var(--text-faint)] whitespace-nowrap">
-                  {w.description}
-                </p>
-              </button>
-            ))}
-          </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Work Directory — removed: work_dir is immutable, derived from the workspace (spec §6.2). */}
@@ -126,7 +177,8 @@ export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
           </button>
           <button
             onClick={handleConfirm}
-            className="px-6 py-2 rounded-[var(--radius-md)] bg-[var(--accent-gold)] text-black text-xs font-bold transition-all hover:bg-[var(--accent-gold-bright)] active:scale-[0.98] shadow-[0_4px_16px_rgba(251,191,36,0.15)]"
+            disabled={loading || !selectedWorker}
+            className="px-6 py-2 rounded-[var(--radius-md)] bg-[var(--accent-gold)] text-black text-xs font-bold transition-all hover:bg-[var(--accent-gold-bright)] active:scale-[0.98] shadow-[0_4px_16px_rgba(251,191,36,0.15)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Start Session
           </button>

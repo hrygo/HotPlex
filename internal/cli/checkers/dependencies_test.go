@@ -11,8 +11,8 @@ import (
 )
 
 func TestWorkerBinaryChecker(t *testing.T) {
-	t.Parallel()
-
+	// workerBinaryChecker.Check() -> loadConfig() reads the package-level
+	// configPath; cannot t.Parallel (see config_test.go:17, security_test.go:12).
 	c := workerBinaryChecker{}
 	d := c.Check(context.Background())
 

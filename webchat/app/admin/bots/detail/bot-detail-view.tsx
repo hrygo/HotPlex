@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { getBot, deleteBot, updateBot } from '@/lib/api/admin-bots';
+import { getWorkers, WorkerInstallationStatus } from '@/lib/api/sessions';
 import { BotConfigEditor } from '@/components/admin/bot-config-editor';
 import { DeleteButton } from '@/components/admin/delete-button';
 import { SystemPromptPreview } from '@/components/admin/system-prompt-preview';
@@ -107,6 +108,19 @@ function OverviewEditor({
 	const cfg = bot.config;
 	const [workerType, setWorkerType] = useState<WorkerType>((cfg?.worker_type as WorkerType) || 'claude_code');
 	const [workDir, setWorkDir] = useState(cfg?.work_dir ?? '');
+	const [workers, setWorkers] = useState<WorkerInstallationStatus[]>([]);
+
+	useEffect(() => {
+		let active = true;
+		getWorkers()
+			.then((data) => {
+				if (active) setWorkers(data);
+			})
+			.catch((err) => console.error("Failed to fetch workers", err));
+		return () => {
+			active = false;
+		};
+	}, []);
 	const [saving, setSaving] = useState(false);
 	const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -150,10 +164,19 @@ function OverviewEditor({
 							Worker Type
 						</label>
 						<select value={workerType} onChange={(e) => setWorkerType(e.target.value as WorkerType)} className={selectClass}>
-							<option value="claude_code">claude_code</option>
-							<option value="opencode_server">opencode_server</option>
-							<option value="codex_cli">codex_cli</option>
-							<option value="acp">acp (ACP)</option>
+							{workers.map((w) => (
+								<option key={w.type} value={w.type}>
+									{w.type}{!w.installed ? " (Not Installed)" : ""}
+								</option>
+							))}
+							{workers.length === 0 && (
+								<>
+									<option value="claude_code">claude_code</option>
+									<option value="opencode_server">opencode_server</option>
+									<option value="codex_cli">codex_cli</option>
+									<option value="acp">acp (ACP)</option>
+								</>
+							)}
 						</select>
 					</div>
 					<div>

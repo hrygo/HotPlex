@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/config"
@@ -15,31 +16,87 @@ type workerBinaryChecker struct{}
 func (c workerBinaryChecker) Name() string     { return "dependencies.worker_binary" }
 func (c workerBinaryChecker) Category() string { return "dependencies" }
 func (c workerBinaryChecker) Check(ctx context.Context) cli.Diagnostic {
-	claude, errClaude := exec.LookPath("claude")
-	opencode, errOpenCode := exec.LookPath("opencode")
+	cfg, err := loadConfig()
+	if err != nil {
+		return cli.Diagnostic{
+			Name:     c.Name(),
+			Category: c.Category(),
+			Status:   cli.StatusFail,
+			Message:  "Failed to load config for worker binary check",
+			Detail:   err.Error(),
+		}
+	}
 
-	if errClaude == nil {
+	if cfg == nil {
+		cfg = config.Default()
+	}
+
+	type checkTarget struct {
+		name   string
+		cmdStr string
+	}
+	targets := []checkTarget{
+		{"claude_code", cfg.Worker.ClaudeCode.Command},
+		{"opencode_server", cfg.Worker.OpenCodeServer.Command},
+		{"codex_cli", cfg.Worker.CodexCLI.Command},
+		{"acp", cfg.Worker.ACP.Command},
+	}
+
+	var installed []string
+	var missing []string
+
+	for _, target := range targets {
+		name := target.name
+		cmdStr := target.cmdStr
+		if cmdStr == "" {
+			switch name {
+			case "claude_code":
+				cmdStr = "claude"
+			case "opencode_server":
+				cmdStr = "opencode"
+			case "codex_cli":
+				cmdStr = "codex"
+			case "acp":
+				cmdStr = "hermes"
+			}
+		}
+
+		parts := strings.Fields(cmdStr)
+		var binary string
+		if len(parts) > 0 {
+			binary = parts[0]
+		}
+
+		if binary != "" {
+			if _, err := exec.LookPath(binary); err == nil {
+				installed = append(installed, name)
+			} else {
+				missing = append(missing, name)
+			}
+		} else {
+			missing = append(missing, name)
+		}
+	}
+
+	if len(installed) > 0 {
+		msg := "Installed workers: " + strings.Join(installed, ", ")
+		if len(missing) > 0 {
+			msg += ". Missing: " + strings.Join(missing, ", ")
+		}
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
 			Status:   cli.StatusPass,
-			Message:  "Claude Code found: " + claude,
+			Message:  msg,
 		}
 	}
-	if errOpenCode == nil {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusPass,
-			Message:  "OpenCode found: " + opencode,
-		}
-	}
+
 	return cli.Diagnostic{
 		Name:     c.Name(),
 		Category: c.Category(),
 		Status:   cli.StatusFail,
-		Message:  "No worker binary found (claude or opencode)",
-		FixHint:  "Install Claude Code (npm install -g @anthropic-ai/claude-code) or OpenCode",
+		Message:  "No worker binary found. Missing: " + strings.Join(missing, ", "),
+		FixHint:  "Install at least one worker CLI (e.g. claude-code, opencode, codex, hermes) and ensure it is in PATH.",
 	}
 }
 

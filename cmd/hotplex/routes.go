@@ -53,11 +53,13 @@ func setupRoutes(
 	mux.Handle("POST /api/sessions/{id}/cd", corsMw(http.HandlerFunc(gatewayAPI.SwitchWorkDir)))
 	mux.Handle("GET /api/sessions/{id}/history", corsMw(http.HandlerFunc(gatewayAPI.GetHistory)))
 	mux.Handle("GET /api/sessions/{id}/events", corsMw(http.HandlerFunc(gatewayAPI.GetEvents)))
+	mux.Handle("GET /api/workers", corsMw(http.HandlerFunc(gatewayAPI.ListWorkers)))
 	mux.Handle("OPTIONS /api/sessions", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	mux.Handle("OPTIONS /api/sessions/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	mux.Handle("OPTIONS /api/sessions/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	mux.Handle("OPTIONS /api/sessions/{id}/history", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	mux.Handle("OPTIONS /api/sessions/{id}/events", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	mux.Handle("OPTIONS /api/workers", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 
 	mux.Handle("GET /ws", hub.HandleHTTP(auth, handler, bridge, deps.CookieAuth))
 

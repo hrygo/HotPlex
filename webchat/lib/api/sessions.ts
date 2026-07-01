@@ -178,3 +178,21 @@ export function stateLabel(state: SessionState): string {
   };
   return map[state] ?? state;
 }
+
+export interface WorkerInstallationStatus {
+  type: string;
+  installed: boolean;
+  path?: string;
+}
+
+export async function getWorkers(signal?: AbortSignal): Promise<WorkerInstallationStatus[]> {
+  const url = `${BASE}/api/workers`;
+  const res = await fetch(url, {
+    headers: withAuth({ 'Content-Type': 'application/json' }),
+    ...authOpts(),
+    signal,
+  });
+  throwIfAuthError('getWorkers', res.status);
+  if (!res.ok) throw new Error(await extractApiError(res, `getWorkers failed: ${res.status}`));
+  return res.json();
+}

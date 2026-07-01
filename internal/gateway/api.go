@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -632,4 +633,86 @@ func (g *GatewayAPI) GetEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, page)
+}
+
+// WorkerInstallationStatus represents the installation status of a worker binary.
+type WorkerInstallationStatus struct {
+	Type      string `json:"type"`
+	Installed bool   `json:"installed"`
+	Path      string `json:"path,omitempty"`
+}
+
+// ListWorkers returns a list of all registered worker types and their installation status.
+//
+// @Summary      List worker installation status
+// @Description  Returns a list of all registered worker types and whether their binaries are installed in the host's PATH.
+// @Tags         Gateway API
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Success      200  {array}  WorkerInstallationStatus
+// @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
+// @Router       /api/workers [get]
+func (g *GatewayAPI) ListWorkers(w http.ResponseWriter, r *http.Request) {
+	_, _, err := g.auth.AuthenticateRequest(r)
+	if err != nil {
+		g.log.Warn("gateway: list workers auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
+		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
+		return
+	}
+
+	cfg := g.cfgStore.Load()
+	workerCommands := map[worker.WorkerType]string{
+		worker.TypeClaudeCode:  cfg.Worker.ClaudeCode.Command,
+		worker.TypeOpenCodeSrv: cfg.Worker.OpenCodeServer.Command,
+		worker.TypeCodexCLI:    cfg.Worker.CodexCLI.Command,
+		worker.TypeACP:         cfg.Worker.ACP.Command,
+	}
+
+	knownTypes := []worker.WorkerType{
+		worker.TypeClaudeCode,
+		worker.TypeOpenCodeSrv,
+		worker.TypeCodexCLI,
+		worker.TypeACP,
+	}
+
+	var statusList []WorkerInstallationStatus
+	for _, wt := range knownTypes {
+		cmdStr := workerCommands[wt]
+		if cmdStr == "" {
+			switch wt {
+			case worker.TypeClaudeCode:
+				cmdStr = "claude"
+			case worker.TypeOpenCodeSrv:
+				cmdStr = "opencode"
+			case worker.TypeCodexCLI:
+				cmdStr = "codex"
+			case worker.TypeACP:
+				cmdStr = "hermes"
+			}
+		}
+
+		parts := strings.Fields(cmdStr)
+		var binary string
+		if len(parts) > 0 {
+			binary = parts[0]
+		}
+
+		installed := false
+		path := ""
+		if binary != "" {
+			p, err := exec.LookPath(binary)
+			if err == nil {
+				installed = true
+				path = p
+			}
+		}
+
+		statusList = append(statusList, WorkerInstallationStatus{
+			Type:      string(wt),
+			Installed: installed,
+			Path:      path,
+		})
+	}
+
+	respondJSON(w, statusList)
 }

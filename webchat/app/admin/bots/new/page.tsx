@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBot } from '@/lib/api/admin-bots';
+import { getWorkers, WorkerInstallationStatus } from '@/lib/api/sessions';
 
 type Platform = 'feishu' | 'slack';
 type WorkerType = 'claude_code' | 'opencode_server' | 'codex_cli' | 'acp';
@@ -62,6 +63,19 @@ const labelClass =
 export default function NewBotPage() {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(INITIAL);
+  const [workers, setWorkers] = useState<WorkerInstallationStatus[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    getWorkers()
+      .then((data) => {
+        if (active) setWorkers(data);
+      })
+      .catch((err) => console.error("Failed to fetch workers", err));
+    return () => {
+      active = false;
+    };
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
@@ -308,10 +322,19 @@ export default function NewBotPage() {
                 onChange={(e) => set('worker_type', e.target.value as WorkerType)}
                 className={selectClass}
               >
-                <option value="claude_code">claude_code</option>
-                <option value="opencode_server">opencode_server</option>
-                <option value="codex_cli">codex_cli</option>
-                <option value="acp">acp (ACP)</option>
+                {workers.map((w) => (
+                  <option key={w.type} value={w.type}>
+                    {w.type}{!w.installed ? " (Not Installed)" : ""}
+                  </option>
+                ))}
+                {workers.length === 0 && (
+                  <>
+                    <option value="claude_code">claude_code</option>
+                    <option value="opencode_server">opencode_server</option>
+                    <option value="codex_cli">codex_cli</option>
+                    <option value="acp">acp (ACP)</option>
+                  </>
+                )}
               </select>
             </div>
 

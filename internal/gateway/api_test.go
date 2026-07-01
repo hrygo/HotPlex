@@ -252,6 +252,7 @@ func setupMux(api *GatewayAPI) *http.ServeMux {
 	mux.HandleFunc("DELETE /api/sessions/{id}", api.DeleteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/cd", api.SwitchWorkDir)
 	mux.HandleFunc("GET /api/sessions/{id}/history", api.GetHistory)
+	mux.HandleFunc("GET /api/workers", api.ListWorkers)
 	return mux
 }
 
@@ -886,4 +887,35 @@ func TestGetHistory_NilTurnsStore(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Empty(t, resp.Records)
 	require.False(t, resp.HasMore)
+}
+
+func TestListWorkers(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	api := newTestAPI(t, sm, bridge)
+
+	// X-API-Key auth setup
+	auth := newTestAuth(t)
+	api.auth = auth
+
+	mux := setupMux(api)
+	w := httptest.NewRecorder()
+	r := authedReq("GET", "/api/workers", nil)
+	mux.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp []WorkerInstallationStatus
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp, 4)
+
+	types := make(map[string]bool)
+	for _, ws := range resp {
+		types[ws.Type] = true
+	}
+	require.True(t, types["claude_code"])
+	require.True(t, types["opencode_server"])
+	require.True(t, types["codex_cli"])
+	require.True(t, types["acp"])
 }
