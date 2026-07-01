@@ -14,9 +14,9 @@ interface WorkerOption {
 
 const WORKER_OPTIONS: WorkerOption[] = [
   { id: "claude_code", name: "Claude Code", description: "Anthropic coding agent" },
-  { id: "opencode_server", name: "OpenCode", description: "Server-based code agent" },
+  { id: "opencode_server", name: "OpenCode Server", description: "Open-source self-hosted developer agent" },
   { id: "codex_cli", name: "Codex CLI", description: "OpenAI coding agent" },
-  { id: "acp", name: "ACP", description: "JSON-RPC agent protocol" },
+  { id: "acp", name: "ACP Agent", description: "Generic JSON-RPC agent protocol" },
 ];
 
 interface NewSessionModalProps {
@@ -149,7 +149,7 @@ export function NewSessionModal({ onConfirm, onCancel }: NewSessionModalProps) {
                       <div className="flex items-center gap-2 mb-1">
                         <WorkerIcon type={w.type} className={`w-4 h-4 ${!w.installed ? "text-[var(--text-disabled)]" : selectedWorker === w.type ? "text-[var(--accent-gold)]" : "text-[var(--text-muted)]"}`} />
                         <span className={`text-xs font-bold whitespace-nowrap ${!w.installed ? "text-[var(--text-disabled)]" : selectedWorker === w.type ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
-                          {meta.name}
+                          {t('chat:worker.name.' + w.type, { defaultValue: meta.name })}
                         </span>
                       </div>
                       <p className="text-[10px] text-[var(--text-faint)] whitespace-nowrap">

@@ -74,13 +74,13 @@
       "claude_code": "Claude Code",
       "opencode_server": "OpenCode Server",
       "codex_cli": "Codex CLI",
-      "acp": "ACP 通用 Agent"
+      "acp": "ACP Agent"
     },
     "description": {
       "claude_code": "Anthropic 智能编码 Agent",
-      "opencode_server": "服务器端代码 Agent",
+      "opencode_server": "开源自托管智能开发 Agent",
       "codex_cli": "OpenAI 智能编码 Agent",
-      "acp": "ACP 通用 Agent 协议"
+      "acp": "通用 JSON-RPC Agent 协议"
     }
   },
   "settings": {

@@ -74,13 +74,13 @@
       "claude_code": "Claude Code",
       "opencode_server": "OpenCode Server",
       "codex_cli": "Codex CLI",
-      "acp": "ACP (Any ACP-compatible Agent)"
+      "acp": "ACP Agent"
     },
     "description": {
       "claude_code": "Anthropic coding agent",
-      "opencode_server": "Server-based code agent",
+      "opencode_server": "Open-source self-hosted developer agent",
       "codex_cli": "OpenAI coding agent",
-      "acp": "JSON-RPC agent protocol"
+      "acp": "Generic JSON-RPC agent protocol"
     }
   },
   "settings": {
