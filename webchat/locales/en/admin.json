@@ -71,6 +71,7 @@
     "cron": "Cron",
     "api_keys": "API Keys",
     "admin_connection": "Admin Connection",
+    "back_to_chat": "Back to Chat",
     "logout": "Logout"
   },
   "bots": {

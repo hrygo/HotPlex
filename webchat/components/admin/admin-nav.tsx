@@ -124,6 +124,17 @@ export function AdminNav({ onLogout, showConnectionSettings = false }: AdminNavP
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3">
+        <Link
+          href="/"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors mb-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+          </svg>
+          {t('admin:nav.back_to_chat', { defaultValue: 'Back to Chat' })}
+        </Link>
+        <div className="h-px bg-[var(--border-subtle)] my-2 mx-3" />
+
         {items.map((item) => {
           const active = isActive(item.href, item.exact);
           return (

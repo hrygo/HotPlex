@@ -71,6 +71,7 @@
     "cron": "定时任务",
     "api_keys": "API 密钥",
     "admin_connection": "管理连接",
+    "back_to_chat": "返回聊天",
     "logout": "退出登录"
   },
   "bots": {
