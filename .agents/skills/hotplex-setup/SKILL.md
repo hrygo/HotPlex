@@ -5,7 +5,7 @@ description: HotPlex 生产环境安装、配置、部署与故障排查。以 `
 
 # HotPlex 生产环境安装指引
 
-以 `hotplex doctor` 为诊断核心。**先诊断再行动**——不要手动逐项检查依赖，doctor 集成了 25 个 checker（9 个 category），让它先跑。
+以 `hotplex doctor` 为诊断核心。**先诊断再行动**——不要手动逐项检查依赖，doctor 集成了 26 个 checker（10 个 category），让它先跑。
 
 整个流程幂等，重复运行只处理缺失项。
 
@@ -37,6 +37,7 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/hrygo/hotplex/main/scri
 ```bash
 git clone https://github.com/hrygo/hotplex.git && cd hotplex
 make quickstart    # check-tools + build + test-short
+hotplex install    # 安装二进制到 PATH（默认 ~/.local/bin，source 构建后推荐执行）
 ```
 
 ### 1.3 首次配置向导
@@ -46,7 +47,7 @@ hotplex onboard              # 交互式（推荐首次）
 hotplex onboard --non-interactive --enable-slack --slack-allow-from U0XXXXX  # CI/自动化
 ```
 
-onboard 自动处理：平台凭据、Worker 选择、config.yaml/.env 生成、Agent 配置模板、STT/TTS 检查。
+onboard 自动处理：平台凭据、Worker 选择、config.yaml/.env 生成、Agent 配置模板、STT/TTS 检查、系统服务安装（可选）、二进制安装到 PATH。
 
 ---
 
@@ -106,6 +107,7 @@ hotplex doctor --json
 | agent_config | `suffix_deprecated` | 废弃文件名 | 重命名为子目录格式 |
 | | `directory_structure` | 非标准文件 | 移除 |
 | | `global_files` | 全局级影响所有 Bot | 考虑平台级/Bot 级 |
+| worker | `claude_auto_mode` | Claude Code CLI 不支持 `--permission-mode auto`（issue #789） | `npm install -g @anthropic-ai/claude-code@latest`。仅 Warn 级，不影响其他 permission tier |
 
 ### 自动修复
 
