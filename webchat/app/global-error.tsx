@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import i18n from '@/lib/i18n/config';
 
 export default function GlobalError({
   error,
@@ -18,7 +19,7 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <html>
+    <html lang={i18n.language || 'zh-CN'}>
       <body>
         <div style={{
           display: 'flex',
@@ -30,9 +31,11 @@ export default function GlobalError({
           color: '#e5e5e5',
           fontFamily: 'system-ui, sans-serif',
         }}>
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Something went wrong</h2>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
+            {i18n.t('errors:title', { defaultValue: 'Something went wrong' })}
+          </h2>
           <p style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1.5rem' }}>
-            {error.message || 'An unexpected error occurred.'}
+            {error.message || i18n.t('errors:unexpected', { defaultValue: 'An unexpected error occurred.' })}
           </p>
           <button
             onClick={reset}
@@ -46,7 +49,7 @@ export default function GlobalError({
               cursor: 'pointer',
             }}
           >
-            Try Again
+            {i18n.t('errors:retry', { defaultValue: 'Try Again' })}
           </button>
         </div>
       </body>
