@@ -78,6 +78,26 @@ func writeAll(w io.Writer, lines ...string) {
 	}
 }
 
+func formatBannerURL(tty bool, scheme, addr, path string) string {
+	if addr == "" {
+		return ""
+	}
+	host := addr
+	switch {
+	case strings.HasPrefix(host, ":"):
+		host = "127.0.0.1" + host
+	case host == "0.0.0.0":
+		host = "127.0.0.1"
+	case strings.HasPrefix(host, "0.0.0.0:"):
+		host = "127.0.0.1" + host[7:]
+	}
+	url := scheme + "://" + host + path
+	if tty {
+		return "\033[38;2;100;149;237m" + url + ansiReset
+	}
+	return url
+}
+
 func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPath string) {
 	tty := output.IsTTY(out)
 
@@ -137,20 +157,7 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 	}
 
 	formatURL := func(scheme, addr, path string) string {
-		if addr == "" {
-			return ""
-		}
-		host := addr
-		if strings.HasPrefix(host, ":") {
-			host = "127.0.0.1" + host
-		} else if strings.HasPrefix(host, "0.0.0.0:") {
-			host = "127.0.0.1" + host[7:]
-		}
-		url := scheme + "://" + host + path
-		if tty {
-			return "\033[38;2;100;149;237m" + url + ansiReset // Cornflower blue
-		}
-		return url
+		return formatBannerURL(tty, scheme, addr, path)
 	}
 
 	wsScheme := "ws"
