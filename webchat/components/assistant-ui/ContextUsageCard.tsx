@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import type { ContextUsageData } from '@/lib/ai-sdk-transport/client/types';
+import { useTranslation } from 'react-i18next';
 
 type Severity = 'comfortable' | 'moderate' | 'high' | 'critical';
 
@@ -50,6 +51,7 @@ const severityConfig: Record<Severity, { color: string; bg: string; border: stri
 };
 
 export function ContextUsageCard({ data }: { data: ContextUsageData }) {
+  const { t } = useTranslation(['chat', 'common']);
   const severity = getSeverity(data.percentage);
   const cfg = severityConfig[severity];
   const pct = Math.max(0, Math.min(100, data.percentage));
@@ -60,10 +62,10 @@ export function ContextUsageCard({ data }: { data: ContextUsageData }) {
     .slice(0, 3);
 
   const extras: string[] = [];
-  if (data.skills && data.skills.total > 0) extras.push(`${data.skills.total} skills`);
-  if (data.memory_files) extras.push(`${data.memory_files} memory`);
+  if (data.skills && data.skills.total > 0) extras.push(`${data.skills.total} ${t('chat:context.category.skills', { defaultValue: 'skills' })}`);
+  if (data.memory_files) extras.push(`${data.memory_files} ${t('chat:context.category.memory', { defaultValue: 'memory' })}`);
   if (data.mcp_tools) extras.push(`${data.mcp_tools} MCP`);
-  if (data.agents) extras.push(`${data.agents} agents`);
+  if (data.agents) extras.push(`${data.agents} ${t('chat:context.category.agents', { defaultValue: 'agents' })}`);
 
   return (
     <motion.div
@@ -81,7 +83,7 @@ export function ContextUsageCard({ data }: { data: ContextUsageData }) {
             style={{ background: cfg.color, boxShadow: `0 0 6px ${cfg.color}` }}
           />
           <span className="text-[11px] font-mono font-bold tracking-wider uppercase" style={{ color: cfg.color }}>
-            Context {cfg.label}
+            {t('chat:context.label')} {t(('chat:context.usage.' + severity) as any, { defaultValue: cfg.label })}
           </span>
         </div>
         {data.model && (
@@ -127,7 +129,7 @@ export function ContextUsageCard({ data }: { data: ContextUsageData }) {
       {cfg.tip && (
         <div className="px-4 pb-3">
           <span className="text-[10px] font-mono" style={{ color: cfg.color }}>
-            {cfg.tip}
+            {t('chat:context.tip.' + severity, { defaultValue: cfg.tip })}
           </span>
         </div>
       )}

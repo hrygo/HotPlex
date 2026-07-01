@@ -30,6 +30,8 @@ import {
 import { buildWorkspaceWorkDir } from "@/lib/utils/workspace-path";
 import { logout, getMe, type User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/errors";
+import { useTranslation } from "react-i18next";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 // Clear all hotplex workspace/session selection state from localStorage.
 // Called on logout so a different account logging into the same browser does
@@ -106,6 +108,7 @@ function ChatInterface({
 
 export default function ChatContainer() {
     const router = useRouter();
+    const { t } = useTranslation(['chat', 'common']);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [showNewModal, setShowNewModal] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
@@ -262,7 +265,7 @@ export default function ChatContainer() {
                 <button
                     onClick={() => setSidebarOpen(!sidebarOpen)}
                     className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95"
-                    title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+                    title={sidebarOpen ? t("chat:action.collapse_sidebar") : t("chat:action.expand_sidebar")}
                 >
                     <svg
                         className="w-5 h-5"
@@ -289,7 +292,7 @@ export default function ChatContainer() {
                             {(activeWorkspace?.name || "?").slice(0, 2)}
                         </span>
                         <span className="truncate max-w-[140px]">
-                            {activeWorkspace?.name || "Workspace"}
+                            {activeWorkspace?.name || t("chat:label.workspace")}
                         </span>
                         <svg
                             className={`w-4 h-4 text-[var(--text-muted)] transition-transform ${wsDropdownOpen ? "rotate-180" : ""}`}
@@ -313,7 +316,7 @@ export default function ChatContainer() {
                             />
                             <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50">
                                 <p className="px-3 py-1 text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest">
-                                    Workspaces
+                                    {t("chat:title.workspaces")}
                                 </p>
                                 {workspaces.map((ws) => {
                                     const isActive =
@@ -370,7 +373,7 @@ export default function ChatContainer() {
                                         />
                                     </svg>
                                     <span className="font-medium">
-                                        New Workspace
+                                        {t("chat:action.new_workspace")}
                                     </span>
                                 </button>
                             </div>
@@ -385,10 +388,10 @@ export default function ChatContainer() {
                     />
                     <span className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-wider">
                         {sessionsLoading
-                            ? "PREPARING"
+                            ? t("chat:status.preparing")
                             : sessionError
-                              ? "ERROR"
-                              : "ACTIVE"}{" "}
+                              ? t("chat:status.error")
+                              : t("chat:status.active")}{" "}
                         · {workerLabel}
                     </span>
                 </div>
@@ -414,16 +417,15 @@ export default function ChatContainer() {
                             {sessionError}
                         </span>
                     )}
-                    <ThemeToggle />
                     <a
                         href={`${httpBase()}/docs/`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 hover:bg-[var(--accent-gold)] hover:text-black rounded-full transition-all font-bold text-[10px] uppercase tracking-wider"
-                        title="Documentation"
+                        className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none"
+                        title={t("chat:action.docs")}
                     >
                         <svg
-                            className="w-3.5 h-3.5"
+                            className="w-5 h-5"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -431,12 +433,13 @@ export default function ChatContainer() {
                             <path
                                 strokeLinecap="round"
                                 strokeLinejoin="round"
-                                strokeWidth={2.5}
+                                strokeWidth={2}
                                 d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
                             />
                         </svg>
-                        <span className="hidden md:inline">Docs</span>
                     </a>
+                    <LanguageSwitcher />
+                    <ThemeToggle />
                     {/* Settings — full /settings page (Phase 3, moved out of modal). Red dot on session expiry (PR #779 review P3-7). */}
                     <button
                         onClick={() => {
@@ -449,8 +452,8 @@ export default function ChatContainer() {
                         className={`relative p-2 rounded-lg transition-all ${authError ? "text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}
                         title={
                             authError
-                                ? "Session expired — please re-login to access Settings"
-                                : "Settings"
+                                ? t("chat:status.session_expired_settings")
+                                : t("chat:label.settings")
                         }
                     >
                         {authError && (
@@ -477,10 +480,10 @@ export default function ChatContainer() {
                         </svg>
                     </button>
                     {/* Logout */}
-                    <button
+                     <button
                         onClick={handleLogout}
-                        className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-coral)] hover:bg-[var(--bg-hover)] rounded-lg transition-all"
-                        title="Log Out"
+                        className="p-2 text-[var(--text-muted)] hover:text-[var(--accent-coral)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none"
+                        title={t("chat:action.logout")}
                     >
                         <svg
                             className="w-5 h-5"
@@ -527,7 +530,7 @@ export default function ChatContainer() {
                                     />
                                 </div>
                                 <p className="text-sm font-medium text-[var(--text-muted)] animate-pulse">
-                                    Starting new session...
+                                    {t("chat:status.starting_session")}
                                 </p>
                             </div>
                         ) : !activeSessionId ? (
@@ -536,20 +539,18 @@ export default function ChatContainer() {
                                     <BrandIcon size={60} />
                                 </div>
                                 <h2 className="text-xl font-display font-bold text-[var(--text-primary)] mb-3">
-                                    Empower Your Coding
+                                    {t("chat:welcome.title")}
                                 </h2>
                                 <p className="text-sm text-[var(--text-muted)] max-w-sm mb-10 leading-relaxed">
-                                    Select an existing session from the sidebar
-                                    or start a new high-fidelity coding
-                                    conversation.
+                                    {t("chat:welcome.subtitle")}
                                 </p>
                                 <button
                                     onClick={handleCreateNew}
                                     className="px-8 py-3 rounded-full bg-[var(--accent-gold)] text-black text-sm font-bold shadow-[0_8px_32px_rgba(251,191,36,0.15)] hover:scale-105 active:scale-95 transition-all"
                                 >
                                     {sessions.length === 0
-                                        ? "Start Your First Project"
-                                        : "New Chat"}
+                                        ? t("chat:action.start_first_project")
+                                        : t("chat:action.new_chat")}
                                 </button>
                             </div>
                         ) : (

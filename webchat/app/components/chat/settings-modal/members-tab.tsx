@@ -12,6 +12,7 @@ import {
   type Invitation,
 } from '@/lib/api/auth';
 import { TabPanel } from './tab-panel';
+import { useTranslation } from 'react-i18next';
 
 const DEFAULT_INVITE_TTL = 7 * 24 * 3600; // 7 days, matches backend default
 
@@ -20,6 +21,7 @@ interface MembersTabProps {
 }
 
 export function MembersTab({ currentUser }: MembersTabProps) {
+  const { t } = useTranslation(['chat', 'common']);
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +77,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
 
   const handleToggleUser = async (user: User) => {
     if (currentUser?.id === user.id && user.status === 'active') {
-      if (!window.confirm('Disable your own account? You will be logged out immediately and unable to sign back in.')) {
+      if (!window.confirm(t('chat:settings.confirm.disable_self'))) {
         return;
       }
     }
@@ -88,10 +90,10 @@ export function MembersTab({ currentUser }: MembersTabProps) {
         window.location.replace('/login');
         return;
       }
-      flash('ok', `Status updated: ${user.username} is now ${next}`);
+      flash('ok', t('chat:settings.success.status_updated', { username: user.username, status: t(('common:status.' + next) as any) }));
       load();
     } catch (err) {
-      flash('err', err instanceof Error ? err.message : 'Update failed');
+      flash('err', err instanceof Error ? err.message : t('chat:settings.error.update_failed'));
     } finally {
       setBusyUserId(null);
     }
@@ -100,20 +102,20 @@ export function MembersTab({ currentUser }: MembersTabProps) {
   const handleCreateInvitation = async () => {
     try {
       await adminCreateInvitation('user', DEFAULT_INVITE_TTL);
-      flash('ok', 'New invitation code generated.');
+      flash('ok', t('chat:settings.success.invite_generated'));
       load();
     } catch (err) {
-      flash('err', err instanceof Error ? err.message : 'Create failed');
+      flash('err', err instanceof Error ? err.message : t('chat:settings.error.create_failed'));
     }
   };
 
   const handleDeleteInvitation = async (id: string) => {
     try {
       await adminDeleteInvitation(id);
-      flash('ok', 'Invitation code deleted.');
+      flash('ok', t('chat:settings.success.invite_deleted'));
       load();
     } catch (err) {
-      flash('err', err instanceof Error ? err.message : 'Delete failed');
+      flash('err', err instanceof Error ? err.message : t('chat:settings.error.delete_failed'));
     }
   };
 
@@ -137,7 +139,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
         <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
-        <span>Error: {error}</span>
+        <span>{t('common:status.error')}: {error}</span>
       </div>
     );
   }
@@ -166,7 +168,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
       {/* Users Section */}
       <section>
         <h3 className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest mb-3">
-          Registered Team Users ({users.length})
+          {t('chat:settings.title.registered_users', { count: users.length })}
         </h3>
         <div className="space-y-2">
           {users.map((u) => {
@@ -180,21 +182,22 @@ export function MembersTab({ currentUser }: MembersTabProps) {
                     </span>
                     {isSelf && (
                       <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] uppercase tracking-wider border border-[var(--accent-gold)]/15">
-                        You
+                        {t('chat:label.you')}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-[10px] text-[var(--text-muted)] font-mono">
-                    <span className="capitalize">{u.role}</span>
+                    <span className="capitalize">{t(('common:role.' + u.role) as any, { defaultValue: u.role })}</span>
                     <span>·</span>
                     <div className="flex items-center gap-1">
                       <span className={`w-1 h-1 rounded-full ${u.status === 'active' ? 'bg-[var(--accent-emerald)]' : 'bg-[var(--accent-coral)]'}`} />
-                      <span className="capitalize">{u.status}</span>
+                      <span className="capitalize">{t(('common:status.' + u.status) as any, { defaultValue: u.status })}</span>
                     </div>
                   </div>
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => handleToggleUser(u)}
                   disabled={busyUserId !== null}
                   className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
@@ -209,9 +212,9 @@ export function MembersTab({ currentUser }: MembersTabProps) {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                   ) : u.status === 'active' ? (
-                    'Disable'
+                    t('common:action.disable')
                   ) : (
-                    'Enable'
+                    t('common:action.enable')
                   )}
                 </button>
               </div>
@@ -219,7 +222,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
           })}
           {users.length === 0 && (
             <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
-              No users registered in this workspace.
+              {t('chat:settings.text.no_users')}
             </p>
           )}
         </div>
@@ -229,16 +232,17 @@ export function MembersTab({ currentUser }: MembersTabProps) {
       <section className="pt-2">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest">
-            Invite Codes ({invitations.length})
+            {t('chat:settings.title.invite_codes', { count: invitations.length })}
           </h3>
           <button
+            type="button"
             onClick={handleCreateInvitation}
             className="px-3 py-1.5 rounded-lg bg-[var(--accent-gold)] text-black text-[10px] font-bold hover:bg-[var(--accent-gold-bright)] transition-all cursor-pointer shadow-sm flex items-center gap-1 active:scale-[0.98]"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
             </svg>
-            Generate Invite
+            {t('chat:settings.action.generate_invite')}
           </button>
         </div>
 
@@ -258,8 +262,9 @@ export function MembersTab({ currentUser }: MembersTabProps) {
                       {inv.code}
                     </span>
                     <button
+                      type="button"
                       onClick={() => handleCopyInvite(inv.id, inv.code)}
-                      title="Copy Code"
+                      title={t('chat:settings.action.copy_code')}
                       className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all cursor-pointer border border-transparent hover:border-[var(--border-subtle)]"
                     >
                       {isCopied ? (
@@ -274,7 +279,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
                     </button>
                   </div>
                   <div className="flex items-center gap-2 mt-1.5 text-[10px] text-[var(--text-muted)] font-mono">
-                    <span className="capitalize">{inv.role}</span>
+                    <span className="capitalize">{t(('common:role.' + inv.role) as any, { defaultValue: inv.role })}</span>
                     <span>·</span>
                     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide border ${
                       state === 'active'
@@ -283,29 +288,30 @@ export function MembersTab({ currentUser }: MembersTabProps) {
                         ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] border-[var(--accent-emerald)]/15'
                         : 'bg-[var(--accent-coral)]/10 text-[var(--accent-coral)] border-[var(--accent-coral)]/15'
                     }`}>
-                      {state}
+                      {t(('chat:settings.invite_state.' + state) as any, { defaultValue: state })}
                     </span>
                     {!used && !expired && (
                       <>
                         <span>·</span>
-                        <span>Expires {new Date(inv.expires_at * 1000).toLocaleDateString()}</span>
+                        <span>{t('chat:settings.text.expires', { date: new Date(inv.expires_at * 1000).toLocaleDateString() })}</span>
                       </>
                     )}
                   </div>
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => handleDeleteInvitation(inv.id)}
                   className="px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-[var(--text-muted)] hover:text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10 border border-transparent hover:border-[var(--accent-coral)]/15 transition-all flex-shrink-0 cursor-pointer active:scale-[0.98]"
                 >
-                  Delete
+                  {t('common:action.delete')}
                 </button>
               </div>
             );
           })}
           {invitations.length === 0 && (
             <p className="text-xs text-[var(--text-muted)] py-4 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
-              No active invitations. Click &apos;Generate Invite&apos; to invite team members.
+              {t('chat:settings.text.no_invitations')}
             </p>
           )}
         </div>

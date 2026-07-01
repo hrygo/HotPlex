@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { getChannelConfigFile, writeChannelConfigFile } from '@/lib/api/admin-bots';
 import type { AgentConfigFile } from '@/lib/types/admin';
 import { CONFIG_FILES } from './agent-config-file-list';
+import { useTranslation } from 'react-i18next';
 
 /**
  * ChannelConfigEditor edits platform-level (channel team-default) agent config
@@ -12,6 +13,7 @@ import { CONFIG_FILES } from './agent-config-file-list';
  * but addresses the dir/<platform>/ layer directly. See issue #796.
  */
 export function ChannelConfigEditor({ platform }: { platform: string }) {
+  const { t } = useTranslation();
   const [activeFile, setActiveFile] = useState<string>('soul');
   const [fileData, setFileData] = useState<AgentConfigFile | null>(null);
   const [content, setContent] = useState('');
@@ -20,6 +22,28 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const dirty = content !== savedContent;
+
+  const getFileLabel = (key: string) => {
+    switch (key) {
+      case 'soul': return t('admin:bots.config_files.soul.label', { defaultValue: 'Soul' });
+      case 'agents': return t('admin:bots.config_files.agents.label', { defaultValue: 'Agents' });
+      case 'skills': return t('admin:bots.config_files.skills.label', { defaultValue: 'Skills' });
+      case 'user': return t('admin:bots.config_files.user.label', { defaultValue: 'User' });
+      case 'memory': return t('admin:bots.config_files.memory.label', { defaultValue: 'Memory' });
+      default: return key;
+    }
+  };
+
+  const getFileDescription = (key: string) => {
+    switch (key) {
+      case 'soul': return t('admin:bots.config_files.soul.description', { defaultValue: 'Persona & identity' });
+      case 'agents': return t('admin:bots.config_files.agents.description', { defaultValue: 'Behavior rules' });
+      case 'skills': return t('admin:bots.config_files.skills.description', { defaultValue: 'Capabilities' });
+      case 'user': return t('admin:bots.config_files.user.description', { defaultValue: 'User preferences' });
+      case 'memory': return t('admin:bots.config_files.memory.description', { defaultValue: 'Persistent context' });
+      default: return '';
+    }
+  };
 
   // Request-sequence guard: when the user switches files quickly, a stale
   // in-flight load must not overwrite the newer file's state.
@@ -69,7 +93,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     if (key === activeFile) return;
 
     if (dirty) {
-      if (!window.confirm('You have unsaved changes. Discard them and switch file?')) {
+      if (!window.confirm(t('admin:bots.editor.confirm_discard', { defaultValue: 'You have unsaved changes. Discard them and switch file?' }))) {
         return;
       }
     }
@@ -85,7 +109,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     try {
       await writeChannelConfigFile(platform, def.file, content);
       setSavedContent(content);
-      setMessage({ type: 'success', text: 'Saved successfully' });
+      setMessage({ type: 'success', text: t('admin:bots.editor.save_success', { defaultValue: 'Saved successfully' }) });
       const data = await getChannelConfigFile(platform, def.file);
       setFileData(data);
       setTimeout(() => setMessage(null), 3000);
@@ -94,7 +118,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     } finally {
       setSaving(false);
     }
-  }, [platform, activeFile, content]);
+  }, [platform, activeFile, content, t]);
 
   // Keyboard shortcut: Ctrl/Cmd+S to save. Depends on the save handler and
   // editor state so the listener never closes over stale values.
@@ -119,9 +143,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     <div className="flex flex-col gap-3">
       {/* Channel-default banner */}
       <div className="px-3 py-2 rounded-lg bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)]">
-        Editing <span className="font-mono text-[var(--text-secondary)]">{platform}/</span> channel
-        team defaults. These apply to every {platform} workspace unless overridden per-workspace in
-        Settings &rarr; AI.
+        {t('admin:bots.editor.channel_defaults_banner', { platform, defaultValue: `Editing ${platform}/ channel team defaults. These apply to every ${platform} workspace unless overridden per-workspace in Settings → AI.` })}
       </div>
 
       <div className="flex gap-4">
@@ -132,6 +154,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
             return (
               <button
                 key={def.key}
+                type="button"
                 onClick={() => handleSwitchFile(def.key)}
                 className={`w-full text-left px-3 py-2.5 rounded-xl transition-all text-sm ${
                   isActive
@@ -139,9 +162,9 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
                     : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-transparent'
                 }`}
               >
-                <span className="font-semibold block">{def.label}</span>
+                <span className="font-semibold block">{getFileLabel(def.key)}</span>
                 <span className="text-[10px] text-[var(--text-faint)] block mt-0.5">
-                  {def.description}
+                  {getFileDescription(def.key)}
                 </span>
               </button>
             );
@@ -165,21 +188,22 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
                     charWarning ? 'text-[var(--accent-coral)]' : 'text-[var(--text-faint)]'
                   }`}
                 >
-                  {charCount.toLocaleString()} chars
+                  {t('admin:bots.editor.chars', { count: charCount, defaultValue: `${charCount.toLocaleString()} chars` })}
                   {charWarning && ' (> 8000)'}
                 </span>
                 {dirty && (
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--accent-gold)]/15 text-[var(--accent-gold)]">
-                    unsaved
+                    {t('admin:bots.editor.unsaved', { defaultValue: 'unsaved' })}
                   </span>
                 )}
               </div>
               <button
+                type="button"
                 onClick={handleSave}
                 disabled={saving || loading || !dirty}
                 className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)]"
               >
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? t('common:action.saving', { defaultValue: 'Saving...' }) : t('common:action.save', { defaultValue: 'Save' })}
               </button>
             </div>
           )}
@@ -207,15 +231,15 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               className="flex-1 w-full min-h-[600px] p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--border-active)] transition-colors placeholder:text-[var(--text-faint)]"
-              placeholder={currentDef ? `Edit ${currentDef.file}...` : ''}
+              placeholder={currentDef ? t('admin:bots.editor.placeholder_edit', { file: currentDef.file, defaultValue: `Edit ${currentDef.file}...` }) : ''}
               spellCheck={false}
             />
           )}
 
           {/* Footer hint */}
           <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-faint)]">
-            <span>Ctrl+S to save</span>
-            {dirty && <span>Changes not saved</span>}
+            <span>{t('admin:bots.editor.ctrl_s_hint', { defaultValue: 'Ctrl+S to save' })}</span>
+            {dirty && <span>{t('admin:bots.editor.not_saved_hint', { defaultValue: 'Changes not saved' })}</span>}
           </div>
         </div>
       </div>

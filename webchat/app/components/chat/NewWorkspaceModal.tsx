@@ -2,6 +2,7 @@
 
 import { NewWorkspaceForm } from './NewWorkspaceForm';
 import type { Workspace } from '@/lib/api/workspaces';
+import { useTranslation } from 'react-i18next';
 
 interface NewWorkspaceModalProps {
   uid: string;
@@ -10,6 +11,7 @@ interface NewWorkspaceModalProps {
 }
 
 export function NewWorkspaceModal({ uid, onClose, onCreated }: NewWorkspaceModalProps) {
+  const { t } = useTranslation(['chat', 'common']);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -20,11 +22,11 @@ export function NewWorkspaceModal({ uid, onClose, onCreated }: NewWorkspaceModal
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-[var(--text-primary)]">New Workspace</h2>
+          <h2 className="text-sm font-bold text-[var(--text-primary)]">{t('chat:action.new_workspace')}</h2>
           <button
             onClick={onClose}
             className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            aria-label="Close"
+            aria-label={t('common:action.close')}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

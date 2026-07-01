@@ -11,37 +11,12 @@ import { GeneralTab } from '@/app/components/chat/settings-modal/general-tab';
 import { AIConfigTab } from '@/app/components/chat/settings-modal/ai-config-tab';
 import { ProfileTab } from '@/app/components/chat/settings-modal/profile-tab';
 import { MembersTab } from '@/app/components/chat/settings-modal/members-tab';
+import { useTranslation } from 'react-i18next';
 
 type TabId = 'general' | 'ai' | 'profile' | 'members';
 
-const getTabHeading = (tab: TabId) => {
-  switch (tab) {
-    case 'general':
-      return {
-        title: 'General Settings',
-        description: 'Manage your workspace name, directories, and main operational settings.',
-      };
-    case 'ai':
-      return {
-        title: 'AI Configuration',
-        description: 'Configure your preferred worker engines and custom prompt rules.',
-      };
-    case 'profile':
-      return {
-        title: 'Personal Profile',
-        description: 'View your account credentials, roles, and session information.',
-      };
-    case 'members':
-      return {
-        title: 'Member Management',
-        description: 'Invite new users, manage active team accounts, and update permissions.',
-      };
-    default:
-      return { title: 'Settings', description: '' };
-  }
-};
-
 export default function SettingsPage() {
+  const { t } = useTranslation(['chat', 'auth', 'common']);
   const router = useRouter();
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -97,11 +72,11 @@ export default function SettingsPage() {
 
   const navigationGroups = [
     {
-      title: 'Workspace Settings',
+      title: t('chat:settings.group.workspace'),
       items: [
         {
           id: 'general' as TabId,
-          label: 'General',
+          label: t('chat:settings.tab.general'),
           icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
@@ -110,7 +85,7 @@ export default function SettingsPage() {
         },
         {
           id: 'ai' as TabId,
-          label: 'AI Config',
+          label: t('chat:settings.tab.ai'),
           icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -119,7 +94,7 @@ export default function SettingsPage() {
         },
         {
           id: 'members' as TabId,
-          label: 'Members',
+          label: t('chat:settings.tab.members'),
           icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -130,11 +105,11 @@ export default function SettingsPage() {
       ],
     },
     {
-      title: 'Personal Settings',
+      title: t('chat:settings.group.personal'),
       items: [
         {
           id: 'profile' as TabId,
-          label: 'Profile',
+          label: t('chat:settings.tab.profile'),
           icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -149,19 +124,37 @@ export default function SettingsPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-base)]">
         <div className="text-center p-8 max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] backdrop-blur-xl shadow-xl">
-          <p className="text-sm text-[var(--accent-coral)] mb-4 font-bold">Session expired — please re-login.</p>
+          <p className="text-sm text-[var(--accent-coral)] mb-4 font-bold">{t('chat:status.session_expired_settings')}</p>
           <button
+            type="button"
             onClick={() => router.replace('/login')}
             className="w-full px-4 py-2.5 rounded-lg bg-[var(--accent-gold)] text-black text-xs font-bold transition-all hover:bg-[var(--accent-gold-bright)] active:scale-[0.98]"
           >
-            Go to Login
+            {t('auth:button.sign_in')}
           </button>
         </div>
       </div>
     );
   }
 
-  const tabHeading = getTabHeading(activeTab);
+  const tabHeading = {
+    general: {
+      title: t('chat:settings.heading.general.title', { defaultValue: 'General Settings' }),
+      description: t('chat:settings.heading.general.desc', { defaultValue: 'Manage your workspace name, directories, and main operational settings.' }),
+    },
+    ai: {
+      title: t('chat:settings.heading.ai.title', { defaultValue: 'AI Configuration' }),
+      description: t('chat:settings.heading.ai.desc', { defaultValue: 'Configure your preferred worker engines and custom prompt rules.' }),
+    },
+    profile: {
+      title: t('chat:settings.heading.profile.title', { defaultValue: 'Personal Profile' }),
+      description: t('chat:settings.heading.profile.desc', { defaultValue: 'View your account credentials, roles, and session information.' }),
+    },
+    members: {
+      title: t('chat:settings.heading.members.title', { defaultValue: 'Member Management' }),
+      description: t('chat:settings.heading.members.desc', { defaultValue: 'Invite new users, manage active team accounts, and update permissions.' }),
+    },
+  }[activeTab] || { title: t('chat:label.settings'), description: '' };
 
   return (
     <div className="h-screen overflow-y-scroll [scrollbar-gutter:stable] bg-[var(--bg-base)] text-[var(--text-primary)] flex flex-col">
@@ -178,11 +171,11 @@ export default function SettingsPage() {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
-          Back to Chat
+          {t('chat:settings.action.back_to_chat', { defaultValue: 'Back to Chat' })}
         </Link>
         <div className="flex-1 flex items-center justify-center gap-2 pr-12 md:pr-24">
           <BrandIcon size={18} />
-          <span className="font-display font-bold text-sm tracking-tight">Settings</span>
+          <span className="font-display font-bold text-sm tracking-tight">{t('chat:label.settings')}</span>
         </div>
       </header>
 
@@ -194,12 +187,12 @@ export default function SettingsPage() {
             {/* Active Workspace Status Widget */}
             <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 backdrop-blur-md">
               <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                Active Workspace
+                {t('chat:settings.label.active_workspace')}
               </span>
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-emerald)] animate-pulse" />
                 <span className="text-xs font-bold text-[var(--text-primary)] truncate">
-                  {workspace?.name ?? (loading ? 'Loading…' : 'No workspace selected')}
+                  {workspace?.name ?? (loading ? t('common:status.loading') : t('chat:settings.error.no_workspace_selected'))}
                 </span>
               </div>
             </div>
@@ -225,6 +218,7 @@ export default function SettingsPage() {
                         return (
                           <button
                             key={item.id}
+                            type="button"
                             onClick={() => {
                               setActiveTab(item.id);
                               window.scrollTo(0, 0);
@@ -296,15 +290,15 @@ export default function SettingsPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
                       </div>
-                      <p className="text-sm text-[var(--text-secondary)] font-bold">No Active Workspace</p>
+                      <p className="text-sm text-[var(--text-secondary)] font-bold">{t('chat:settings.error.no_active_workspace')}</p>
                       <p className="text-xs text-[var(--text-muted)] mt-1 max-w-sm mx-auto">
-                        This tab requires an active workspace connection. Return to the chat page to select or create a workspace.
+                        {t('chat:settings.desc.no_active_workspace')}
                       </p>
                       <Link
                         href="/"
                         className="inline-block mt-4 px-4 py-2 rounded-lg bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-xs font-bold text-[var(--accent-gold)] hover:bg-[var(--bg-active)] transition-all"
                       >
-                        Return to Chat
+                        {t('chat:settings.action.back_to_chat', { defaultValue: 'Back to Chat' })}
                       </Link>
                     </div>
                   )}

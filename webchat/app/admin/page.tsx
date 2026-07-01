@@ -7,6 +7,7 @@ import { listCronJobs } from '@/lib/api/admin-cron';
 import { MetricCard } from '@/components/admin/metric-card';
 import { adminFetch } from '@/lib/api/admin-client';
 import { useAdminUI } from '@/context/admin-ui-context';
+import { useTranslation } from 'react-i18next';
 
 interface DashboardMetrics {
 	botsTotal: number;
@@ -23,6 +24,7 @@ interface DashboardMetrics {
 }
 
 export default function DashboardPage() {
+	const { t } = useTranslation();
 	const { showToast, confirm } = useAdminUI();
 
 	const [metrics, setMetrics] = useState<DashboardMetrics>({
@@ -118,7 +120,7 @@ export default function DashboardPage() {
 			if (allFailed) {
 				const firstErr = botsRes.reason;
 				setError(
-					firstErr instanceof Error ? firstErr.message : 'Gateway unreachable',
+					firstErr instanceof Error ? firstErr.message : t('admin:dashboard.error.unreachable', { defaultValue: 'Gateway unreachable' }),
 				);
 				m.gatewayOnline = false;
 				setUptime(null);
@@ -126,7 +128,7 @@ export default function DashboardPage() {
 
 			setMetrics(m);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+			setError(err instanceof Error ? err.message : t('admin:dashboard.error.load_failed', { defaultValue: 'Failed to load dashboard' }));
 			setUptime(null);
 		} finally {
 			setLoading(false);
@@ -149,17 +151,17 @@ export default function DashboardPage() {
 	}, [uptime, metrics.gatewayOnline, isRestarting]);
 
 	const formatUptime = (seconds: number | null): string => {
-		if (seconds === null || seconds < 0) return 'Offline';
+		if (seconds === null || seconds < 0) return t('admin:dashboard.offline', { defaultValue: 'Offline' });
 		const d = Math.floor(seconds / (3600 * 24));
 		const h = Math.floor((seconds % (3600 * 24)) / 3600);
 		const m = Math.floor((seconds % 3600) / 60);
 		const s = seconds % 60;
 
 		const parts = [];
-		if (d > 0) parts.push(`${d}d`);
-		if (h > 0) parts.push(`${h}h`);
-		if (m > 0) parts.push(`${m}m`);
-		parts.push(`${s}s`);
+		if (d > 0) parts.push(`${d}${t('admin:dashboard.uptime.days', { defaultValue: 'd' })}`);
+		if (h > 0) parts.push(`${h}${t('admin:dashboard.uptime.hours', { defaultValue: 'h' })}`);
+		if (m > 0) parts.push(`${m}${t('admin:dashboard.uptime.minutes', { defaultValue: 'm' })}`);
+		parts.push(`${s}${t('admin:dashboard.uptime.seconds', { defaultValue: 's' })}`);
 		return parts.join(' ');
 	};
 
@@ -178,7 +180,7 @@ export default function DashboardPage() {
 				const data = await adminFetch<{ status: string }>('/admin/health');
 				if (data.status === 'healthy' || data.status === 'degraded') {
 					setRestartStep('completed');
-					showToast('Gateway successfully restarted and recovered!', 'success');
+					showToast(t('admin:dashboard.success.restarted', { defaultValue: 'Gateway successfully restarted and recovered!' }), 'success');
 					setTimeout(() => {
 						setIsRestarting(false);
 						setRestartStep('idle');
@@ -195,7 +197,7 @@ export default function DashboardPage() {
 		}
 
 		setRestartStep('failed');
-		showToast('Gateway restart polling timed out.', 'error');
+		showToast(t('admin:dashboard.error.timeout', { defaultValue: 'Gateway restart polling timed out.' }), 'error');
 		setTimeout(() => {
 			setIsRestarting(false);
 			setRestartStep('idle');
@@ -206,11 +208,11 @@ export default function DashboardPage() {
 	// Gateway trigger function
 	const handleRestartGateway = async () => {
 		const confirmed = await confirm(
-			'Restart HotPlex Gateway?',
-			'This will safely fork a detached process helper, flush existing HTTP connections, reload configuration, and reboot. Active WebSocket clients will temporarily disconnect.',
+			t('admin:dashboard.confirm.restart_title', { defaultValue: 'Restart HotPlex Gateway?' }),
+			t('admin:dashboard.confirm.restart_body', { defaultValue: 'This will safely fork a detached process helper, flush existing HTTP connections, reload configuration, and reboot. Active WebSocket clients will temporarily disconnect.' }),
 			{
-				confirmLabel: 'Restart Gateway',
-				cancelLabel: 'Cancel',
+				confirmLabel: t('admin:dashboard.action.restart', { defaultValue: 'Restart Gateway' }),
+				cancelLabel: t('common:action.cancel', { defaultValue: 'Cancel' }),
 				destructive: true,
 			}
 		);
@@ -226,7 +228,7 @@ export default function DashboardPage() {
 				method: 'POST',
 			});
 
-			showToast('Restart command acknowledged. Waiting for offline drop...', 'info');
+			showToast(t('admin:dashboard.status.acknowledged', { defaultValue: 'Restart command acknowledged. Waiting for offline drop...' }), 'info');
 
 			// Wait for gateway to terminate
 			setRestartStep('offline');
@@ -238,7 +240,7 @@ export default function DashboardPage() {
 		} catch (err) {
 			setIsRestarting(false);
 			setRestartStep('idle');
-			showToast(err instanceof Error ? err.message : 'Restart request failed', 'error');
+			showToast(err instanceof Error ? err.message : t('admin:dashboard.error.restart_failed', { defaultValue: 'Restart request failed' }), 'error');
 		}
 	};
 
@@ -249,20 +251,21 @@ export default function DashboardPage() {
 				<div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
 					<div>
 						<h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
-							Dashboard
+							{t('admin:dashboard.title', { defaultValue: 'Dashboard' })}
 						</h1>
 						<p className="mt-1 text-sm text-[var(--text-muted)]">
-							Gateway overview and system status
+							{t('admin:dashboard.subtitle', { defaultValue: 'Gateway overview and system status' })}
 						</p>
 					</div>
 
 					{!isRestarting && (
 						<button
+							type="button"
 							onClick={handleRestartGateway}
 							disabled={loading || !metrics.gatewayOnline}
 							className="px-4 py-2 text-xs font-semibold rounded-[var(--radius-md)] border border-[var(--accent-gold)]/40 bg-[var(--bg-glass)] text-[var(--accent-gold)] hover:bg-[var(--accent-gold)] hover:text-[var(--text-contrast)] disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[var(--shadow-glow)] transition-all duration-300"
 						>
-							Restart Go Gateway
+							{t('admin:dashboard.action.restart_gateway', { defaultValue: 'Restart Go Gateway' })}
 						</button>
 					)}
 				</div>
@@ -281,11 +284,11 @@ export default function DashboardPage() {
 							<div className="flex items-center gap-3">
 								<div className="w-2.5 h-2.5 rounded-full bg-[var(--accent-gold)] animate-pulse" />
 								<h2 className="text-sm font-display font-bold text-[var(--text-primary)]">
-									Gateway Reboot Lifecycle
+									{t('admin:dashboard.lifecycle.title', { defaultValue: 'Gateway Reboot Lifecycle' })}
 								</h2>
 							</div>
 							<span className="text-[10px] font-mono text-[var(--text-faint)]">
-								PGID Restart Handler Active
+								{t('admin:dashboard.lifecycle.pgid_active', { defaultValue: 'PGID Restart Handler Active' })}
 							</span>
 						</div>
 
@@ -296,9 +299,9 @@ export default function DashboardPage() {
 									? 'border-[var(--accent-gold)] bg-white/5'
 									: 'border-[var(--border-subtle)] opacity-60'
 							}`}>
-								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">Step 1</span>
-								<span className="text-xs font-semibold text-[var(--text-primary)] mt-1">Initiating Handshake</span>
-								<p className="text-[10px] text-[var(--text-muted)] mt-1">Triggering POST /restart...</p>
+								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">{t('admin:dashboard.lifecycle.step1', { defaultValue: 'Step 1' })}</span>
+								<span className="text-xs font-semibold text-[var(--text-primary)] mt-1">{t('admin:dashboard.lifecycle.step1_title', { defaultValue: 'Initiating Handshake' })}</span>
+								<p className="text-[10px] text-[var(--text-muted)] mt-1">{t('admin:dashboard.lifecycle.step1_desc', { defaultValue: 'Triggering POST /restart...' })}</p>
 							</div>
 
 							{/* Step 2 */}
@@ -307,9 +310,9 @@ export default function DashboardPage() {
 									? 'border-[var(--accent-gold)] bg-white/5'
 									: 'border-[var(--border-subtle)] opacity-60'
 							}`}>
-								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">Step 2</span>
-								<span className="text-xs font-semibold text-[var(--text-primary)] mt-1">Connection Drop</span>
-								<p className="text-[10px] text-[var(--text-muted)] mt-1">Gracefully flushing sockets...</p>
+								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">{t('admin:dashboard.lifecycle.step2', { defaultValue: 'Step 2' })}</span>
+								<span className="text-xs font-semibold text-[var(--text-primary)] mt-1">{t('admin:dashboard.lifecycle.step2_title', { defaultValue: 'Connection Drop' })}</span>
+								<p className="text-[10px] text-[var(--text-muted)] mt-1">{t('admin:dashboard.lifecycle.step2_desc', { defaultValue: 'Gracefully flushing sockets...' })}</p>
 							</div>
 
 							{/* Step 3 */}
@@ -318,11 +321,11 @@ export default function DashboardPage() {
 									? 'border-[var(--accent-gold)] bg-white/5 animate-pulse'
 									: 'border-[var(--border-subtle)] opacity-60'
 							}`}>
-								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">Step 3</span>
+								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">{t('admin:dashboard.lifecycle.step3', { defaultValue: 'Step 3' })}</span>
 								<span className="text-xs font-semibold text-[var(--text-primary)] mt-1">
-									Polling Health {pollingAttempts > 0 && `(x${pollingAttempts})`}
+									{t('admin:dashboard.lifecycle.step3_title', { defaultValue: 'Polling Health' })} {pollingAttempts > 0 && `(x${pollingAttempts})`}
 								</span>
-								<p className="text-[10px] text-[var(--text-muted)] mt-1">Backing off recovery checks...</p>
+								<p className="text-[10px] text-[var(--text-muted)] mt-1">{t('admin:dashboard.lifecycle.step3_desc', { defaultValue: 'Backing off recovery checks...' })}</p>
 							</div>
 
 							{/* Step 4 */}
@@ -331,9 +334,9 @@ export default function DashboardPage() {
 									? 'border-[var(--accent-emerald)] bg-white/5'
 									: 'border-[var(--border-subtle)] opacity-60'
 							}`}>
-								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">Step 4</span>
-								<span className="text-xs font-semibold text-[var(--accent-emerald)] mt-1">Gateway Online</span>
-								<p className="text-[10px] text-[var(--text-muted)] mt-1">Dashboard metrics synced.</p>
+								<span className="text-[10px] uppercase font-bold text-[var(--text-faint)]">{t('admin:dashboard.lifecycle.step4', { defaultValue: 'Step 4' })}</span>
+								<span className="text-xs font-semibold text-[var(--accent-emerald)] mt-1">{t('admin:dashboard.lifecycle.step4_title', { defaultValue: 'Gateway Online' })}</span>
+								<p className="text-[10px] text-[var(--text-muted)] mt-1">{t('admin:dashboard.lifecycle.step4_desc', { defaultValue: 'Dashboard metrics synced.' })}</p>
 							</div>
 						</div>
 					</div>
@@ -346,10 +349,10 @@ export default function DashboardPage() {
 							{/* Live Ticking Uptime view */}
 							<div className="flex flex-col gap-1">
 								<span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-									Gateway Live Uptime
+									{t('admin:dashboard.uptime.label', { defaultValue: 'Gateway Live Uptime' })}
 								</span>
 								<span className="text-4xl font-display font-bold text-[var(--text-primary)] tracking-tight tabular-nums">
-									{metrics.gatewayOnline ? formatUptime(uptime) : 'Offline'}
+									{metrics.gatewayOnline ? formatUptime(uptime) : t('admin:dashboard.offline', { defaultValue: 'Offline' })}
 								</span>
 								<span className="text-xs text-[var(--text-muted)] flex items-center gap-2 mt-1">
 									<span className={`w-2 h-2 rounded-full inline-block ${
@@ -360,8 +363,8 @@ export default function DashboardPage() {
 											: 'bg-[var(--accent-coral)]'
 									}`} />
 									{metrics.gatewayOnline
-										? `Active (Version ${metrics.version})`
-										: 'Unreachable'}
+										? t('admin:dashboard.uptime.active', { version: metrics.version, defaultValue: `Active (Version ${metrics.version})` })
+										: t('admin:dashboard.uptime.unreachable', { defaultValue: 'Unreachable' })}
 								</span>
 							</div>
 
@@ -370,7 +373,7 @@ export default function DashboardPage() {
 								<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
 									<div>
 										<span className="text-[10px] uppercase tracking-wider font-bold text-[var(--text-faint)] block mb-1">
-											SQLite Database
+											{t('admin:dashboard.database.sqlite_label', { defaultValue: 'SQLite Database' })}
 										</span>
 										<span className="font-mono text-[var(--text-secondary)] break-all bg-white/5 px-2 py-1 rounded-[var(--radius-xs)] select-all block">
 											{metrics.dbPath || 'sqlite.db'}
@@ -379,14 +382,14 @@ export default function DashboardPage() {
 
 									<div>
 										<span className="text-[10px] uppercase tracking-wider font-bold text-[var(--text-faint)] block mb-1">
-											Database Store Status
+											{t('admin:dashboard.database.status_label', { defaultValue: 'Database Store Status' })}
 										</span>
 										<span className={`font-semibold ${
 											metrics.dbStatus === 'healthy'
 												? 'text-[var(--accent-emerald)]'
 												: 'text-[var(--accent-gold)]'
 										}`}>
-											{metrics.dbStatus === 'healthy' ? 'Healthy (SQLite Core)' : 'Degraded / Standby'}
+											{metrics.dbStatus === 'healthy' ? t('admin:dashboard.database.healthy', { defaultValue: 'Healthy (SQLite Core)' }) : t('admin:dashboard.database.degraded', { defaultValue: 'Degraded / Standby' })}
 										</span>
 									</div>
 								</div>
@@ -401,7 +404,7 @@ export default function DashboardPage() {
 						<div className="flex flex-col items-center gap-3">
 							<div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
 							<span className="text-xs text-[var(--text-faint)]">
-								Loading dashboard...
+								{t('admin:dashboard.loading', { defaultValue: 'Loading dashboard...' })}
 							</span>
 						</div>
 					</div>
@@ -412,23 +415,23 @@ export default function DashboardPage() {
 					<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
 						{/* Bots card */}
 						<MetricCard
-							label="Active Agents / Bots"
+							label={t('admin:dashboard.metrics.bots_label', { defaultValue: 'Active Agents / Bots' })}
 							value={metrics.botsTotal}
-							sub={`${metrics.botsConnected} connected, ${metrics.botsDisconnected} standby`}
+							sub={t('admin:dashboard.metrics.bots_sub', { count: metrics.botsConnected, standby: metrics.botsDisconnected, defaultValue: `${metrics.botsConnected} connected, ${metrics.botsDisconnected} standby` })}
 						/>
 
 						{/* Sessions card */}
 						<MetricCard
-							label="WebSocket Sessions"
+							label={t('admin:dashboard.metrics.sessions_label', { defaultValue: 'WebSocket Sessions' })}
 							value={metrics.sessionsActive}
-							sub={`${metrics.sessionsActive} active of ${metrics.sessionsTotal} total`}
+							sub={t('admin:dashboard.metrics.sessions_sub', { active: metrics.sessionsActive, total: metrics.sessionsTotal, defaultValue: `${metrics.sessionsActive} active of ${metrics.sessionsTotal} total` })}
 						/>
 
 						{/* Cron Jobs card */}
 						<MetricCard
-							label="Scheduled Jobs (Cron)"
+							label={t('admin:dashboard.metrics.cron_label', { defaultValue: 'Scheduled Jobs (Cron)' })}
 							value={metrics.cronTotal}
-							sub={`${metrics.cronEnabled} scheduler loops enabled`}
+							sub={t('admin:dashboard.metrics.cron_sub', { count: metrics.cronEnabled, defaultValue: `${metrics.cronEnabled} scheduler loops enabled` })}
 						/>
 					</div>
 				)}

@@ -1,0 +1,208 @@
+{
+  "action": {
+    "collapse_sidebar": "折叠侧边栏",
+    "expand_sidebar": "展开侧边栏",
+    "new_workspace": "新建工作区",
+    "new_chat": "开启新对话",
+    "docs": "文档",
+    "logout": "退出登录",
+    "start_first_project": "开始你的第一个项目",
+    "delete_session": "删除会话",
+    "create_workspace": "创建工作区",
+    "copy_user_id": "复制用户 ID",
+    "admin_dashboard": "管理员后台",
+    "start_session": "开始会话"
+  },
+  "label": {
+    "workspace": "工作区",
+    "workspace_name": "工作区名称",
+    "directory_optional": "目录（可选）",
+    "docs": "文档",
+    "settings": "设置",
+    "admin": "管理员后台",
+    "admin_subtitle": "仪表盘与设置",
+    "turns": "轮对话",
+    "session_name_optional": "会话名称（可选）",
+    "worker_engine": "Worker 引擎",
+    "user_id": "用户 ID",
+    "display_name": "显示名称",
+    "created_time": "创建时间",
+    "last_login": "最后登录",
+    "you": "你自己"
+  },
+  "placeholder": {
+    "workspace_name": "我的项目",
+    "directory_optional": "留空则使用项目名称",
+    "search": "搜索历史...",
+    "session_name": "例如：修复 HotPlex Bug"
+  },
+  "title": {
+    "workspaces": "工作区列表",
+    "recent_conversations": "最近会话",
+    "new_session": "新会话"
+  },
+  "text": {
+    "path": "路径",
+    "configure_env": "配置您的编码环境",
+    "not_installed": "服务器上未安装",
+    "not_configured": "未配置",
+    "no_results": "没有找到对话"
+  },
+  "status": {
+    "preparing": "准备中",
+    "error": "错误",
+    "active": "激活",
+    "session_expired_settings": "会话已过期 — 请重新登录以访问设置",
+    "starting_session": "正在开启新会话...",
+    "loading_workers": "正在加载 Worker 引擎...",
+    "created": "已创建",
+    "running": "运行中",
+    "idle": "空闲",
+    "terminated": "已终止",
+    "deleted": "已删除"
+  },
+  "welcome": {
+    "title": "设计、重构并维护你的项目",
+    "subtitle": "从侧边栏选择一个已有会话，或开启一个新的高保真编码对话。",
+    "tagline": "次世代自主编码工作区"
+  },
+  "error": {
+    "no_workers": "所有 Worker 引擎均不可用。请在服务器上安装至少一个 Worker 命令行工具。"
+  },
+  "worker": {
+    "name": {
+      "claude_code": "Claude Code",
+      "opencode_server": "OpenCode Server",
+      "codex_cli": "Codex CLI",
+      "acp": "ACP 通用 Agent"
+    },
+    "description": {
+      "claude_code": "Anthropic 智能编码 Agent",
+      "opencode_server": "服务器端代码 Agent",
+      "codex_cli": "OpenAI 智能编码 Agent",
+      "acp": "ACP 通用 Agent 协议"
+    }
+  },
+  "settings": {
+    "group": {
+      "workspace": "工作区设置",
+      "personal": "个人设置"
+    },
+    "tab": {
+      "general": "常规",
+      "ai": "AI 配置",
+      "members": "成员",
+      "profile": "个人资料"
+    },
+    "heading": {
+      "general": {
+        "title": "常规设置",
+        "desc": "管理您的工作区名称、目录和主要运行设置。"
+      },
+      "ai": {
+        "title": "AI 配置",
+        "desc": "配置您偏好的 Worker 引擎以及自定义提示规则。"
+      },
+      "profile": {
+        "title": "个人资料",
+        "desc": "查看您的账户凭证、角色和会话信息。"
+      },
+      "members": {
+        "title": "成员管理",
+        "desc": "邀请新成员、管理已启用的团队账号并更新权限。"
+      }
+    },
+    "action": {
+      "save": "保存修改",
+      "saving": "正在保存修改...",
+      "back_to_chat": "返回对话",
+      "generate_invite": "生成邀请码",
+      "copy_code": "复制邀请码"
+    },
+    "label": {
+      "worker_preference": "首选 Worker 引擎",
+      "permission_mode": "权限模式",
+      "working_directory": "工作目录",
+      "active_workspace": "当前工作区"
+    },
+    "desc": {
+      "workspace_name": "工作区的显示名称，用于工作区切换栏及页眉。",
+      "worker_preference": "选择在此工作区中启动新会话时使用的 Agent 程序。已有会话将保留其当前的引擎配置。",
+      "permission_mode": "控制新会话的“爆炸半径”：Agent 在编辑文件或运行命令时的自动化审批强度。仅对新会话生效，已有会话保持不变。",
+      "working_directory": "CLI 代理 Agent 在本地读取、写入和执行文件时的工作目录。会话执行时继承此设置，无法在单次会话中单独更改。",
+      "no_active_workspace": "此标签页需要有处于激活状态的工作区连接。返回聊天页面选择或创建一个工作区。"
+    },
+    "success": {
+      "saved": "工作区配置保存成功。",
+      "status_updated": "状态已更新：成员 {{username}} 当前状态为 {{status}}",
+      "invite_generated": "已成功生成新的邀请码。",
+      "invite_deleted": "已成功删除邀请码。"
+    },
+    "error": {
+      "modified_elsewhere": "工作区配置已被其他用户或会话修改 — 已刷新为最新状态，请重试。",
+      "save_failed": "保存失败",
+      "non_standard_path": "此工作区使用了用户沙箱外部的非标准路径，无法在此处进行编辑。",
+      "update_failed": "更新失败",
+      "create_failed": "生成失败",
+      "delete_failed": "删除失败",
+      "no_workspace_selected": "未选择工作区",
+      "no_active_workspace": "无当前工作区"
+    },
+    "confirm": {
+      "disable_self": "确定要禁用您自己的账户吗？您将立即被注销登录，且无法再次登录。"
+    },
+    "title": {
+      "registered_users": "已注册团队成员 ({{count}})",
+      "invite_codes": "邀请码列表 ({{count}})"
+    },
+    "text": {
+      "expires": "到期时间 {{date}}",
+      "no_users": "当前工作区无注册用户。",
+      "no_invitations": "当前无有效邀请码。请点击“生成邀请码”来邀请新的团队成员。"
+    },
+    "invite_state": {
+      "active": "激活",
+      "used": "已使用",
+      "expired": "已过期"
+    },
+    "worker": {
+      "default": "默认（继承团队全局设置）"
+    },
+    "permission": {
+      "default": "默认（workspace）",
+      "workspace": "工作区限制（Workspace） — 仅能在工作区范围内修改文件（默认）",
+      "auto-edit": "自动编辑（Auto Edit） — 自动审批所有代码修改",
+      "bypass": "全通行（Bypass） — 完整命令行与文件访问权限",
+      "read-only": "只读模式（Read Only） — 仅出具规划，不修改文件"
+    }
+  },
+  "context": {
+    "label": "上下文",
+    "category": {
+      "skills": "技能",
+      "memory": "记忆",
+      "agents": "代理"
+    },
+    "usage": {
+      "comfortable": "充足",
+      "moderate": "适中",
+      "high": "偏高",
+      "critical": "极高"
+    },
+    "tip": {
+      "comfortable": "",
+      "moderate": "",
+      "high": "建议使用 /compact 命令释放空间",
+      "critical": "上下文即将填满 — 请使用 /compact 或 /reset 释放"
+    }
+  },
+  "tool": {
+    "terminal": {
+      "title": "SHELL",
+      "live": "实时",
+      "processed": "已处理",
+      "more_lines": "+ 还有 {{count}} 行",
+      "awaiting_response": "正在等待终端响应..."
+    }
+  }
+}

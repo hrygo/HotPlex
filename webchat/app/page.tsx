@@ -5,16 +5,18 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { BrandIcon } from "@/components/icons";
 import { getMe } from "@/lib/api/auth";
+import { useTranslation } from "react-i18next";
 
 const ChatUI = dynamic(
     () => import("./components/chat/ChatContainer.assistant-ui"),
     {
         ssr: false,
-        loading: () => <LoadingScreen text="Initialising..." />,
+        loading: () => <LoadingScreen textKey="auth:text.initialising" defaultText="Initialising..." />,
     },
 );
 
-function LoadingScreen({ text }: { text: string }) {
+function LoadingScreen({ textKey, defaultText }: { textKey: string; defaultText: string }) {
+    const { t } = useTranslation(['auth', 'common']);
     return (
         <div className="flex flex-col h-screen bg-[var(--bg-base)]">
             <header className="app-header bg-[var(--bg-header)] backdrop-blur-xl">
@@ -26,7 +28,7 @@ function LoadingScreen({ text }: { text: string }) {
                                 HotPlex AI
                             </h1>
                             <p className="text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-widest">
-                                {text}
+                                {t(textKey, { defaultValue: defaultText })}
                             </p>
                         </div>
                     </div>
@@ -42,7 +44,7 @@ function LoadingScreen({ text }: { text: string }) {
                     <div className="flex items-center gap-3 px-4 py-2 rounded-full glass-dark">
                         <div className="w-4 h-4 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
                         <span className="text-xs font-bold tracking-tight text-[var(--text-secondary)]">
-                            CONNECTING TO GATEWAY
+                            {t("auth:text.connecting")}
                         </span>
                     </div>
                 </div>
@@ -52,6 +54,7 @@ function LoadingScreen({ text }: { text: string }) {
 }
 
 function OnboardingWelcome({ onClose }: { onClose: () => void }) {
+    const { t } = useTranslation(['auth', 'common']);
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div className="w-full max-w-lg rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-7 shadow-[var(--shadow-lg)] animate-fade-in-up">
@@ -61,10 +64,10 @@ function OnboardingWelcome({ onClose }: { onClose: () => void }) {
                     </div>
                     <div>
                         <h2 className="font-display text-lg font-black text-[var(--text-primary)]">
-                            欢迎来到 HotPlex
+                            {t("auth:onboarding.welcome")}
                         </h2>
                         <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider">
-                            几步开始你的第一次对话
+                            {t("auth:onboarding.subtitle")}
                         </p>
                     </div>
                 </div>
@@ -73,19 +76,19 @@ function OnboardingWelcome({ onClose }: { onClose: () => void }) {
                         <span className="font-bold text-[var(--accent-gold)]">
                             1.
                         </span>{" "}
-                        在设置中创建你的第一个 workspace(工作目录)
+                        {t("auth:onboarding.step1")}
                     </li>
                     <li>
                         <span className="font-bold text-[var(--accent-gold)]">
                             2.
                         </span>{" "}
-                        选择 worker 类型(claude_code / codex 等)
+                        {t("auth:onboarding.step2")}
                     </li>
                     <li>
                         <span className="font-bold text-[var(--accent-gold)]">
                             3.
                         </span>{" "}
-                        在对话框输入任务,开始编码
+                        {t("auth:onboarding.step3")}
                     </li>
                 </ol>
                 <button
@@ -93,7 +96,7 @@ function OnboardingWelcome({ onClose }: { onClose: () => void }) {
                     onClick={onClose}
                     className="mt-6 w-full rounded-lg bg-[var(--accent-gold)] px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-black hover:bg-[var(--accent-gold-bright)]"
                 >
-                    开始使用
+                    {t("auth:button.start")}
                 </button>
             </div>
         </div>
@@ -142,7 +145,7 @@ function InnerPage() {
     }, [router, authError, firstLogin]);
 
     if (checking) {
-        return <LoadingScreen text="Verifying authentication..." />;
+        return <LoadingScreen textKey="auth:text.verifying" defaultText="Verifying authentication..." />;
     }
 
     return (
@@ -157,7 +160,7 @@ function InnerPage() {
 
 export default function Page() {
     return (
-        <Suspense fallback={<LoadingScreen text="Loading app..." />}>
+        <Suspense fallback={<LoadingScreen textKey="auth:text.loading" defaultText="Loading app..." />}>
             <InnerPage />
         </Suspense>
     );

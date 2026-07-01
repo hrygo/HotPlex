@@ -3,6 +3,7 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { I18nProvider } from "@/lib/i18n/client";
 
 const inter = localFont({
     src: [
@@ -128,6 +129,8 @@ export default function RootLayout({
                     document.documentElement.classList.add('light');
                     document.documentElement.classList.remove('dark');
                   }
+                  var savedLng = localStorage.getItem('hotplex.locale') || 'zh-CN';
+                  document.documentElement.lang = savedLng;
                 } catch (e) {}
               })();
             `,
@@ -135,9 +138,11 @@ export default function RootLayout({
                 />
             </head>
             <body>
-                <NuqsAdapter>
-                    <ThemeProvider>{children}</ThemeProvider>
-                </NuqsAdapter>
+                <I18nProvider>
+                    <NuqsAdapter>
+                        <ThemeProvider>{children}</ThemeProvider>
+                    </NuqsAdapter>
+                </I18nProvider>
             </body>
         </html>
     );

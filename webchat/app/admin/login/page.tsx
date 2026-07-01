@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { adminUrl } from '@/lib/config';
+import { useTranslation } from 'react-i18next';
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const [url, setUrl] = useState(adminUrl);
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,10 +29,10 @@ export default function LoginPage() {
         window.location.replace('/admin');
         return;
       } else {
-        setError('Connection failed. Check the URL and token.');
+        setError(t('admin:settings.error.connection_failed', { defaultValue: 'Connection failed. Check the URL and token.' }));
       }
     } catch {
-      setError('Connection failed. Check the URL and token.');
+      setError(t('admin:settings.error.connection_failed', { defaultValue: 'Connection failed. Check the URL and token.' }));
     } finally {
       setLoading(false);
     }
@@ -61,10 +63,10 @@ export default function LoginPage() {
               </svg>
             </div>
             <h1 className="font-[family-name:var(--font-display)] text-xl font-bold text-[var(--text-primary)]">
-              HotPlex Admin
+              {t('admin:nav.title', { defaultValue: 'HotPlex Admin' })}
             </h1>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Connect to your gateway
+              {t('admin:login.subtitle', { defaultValue: 'Connect to your gateway' })}
             </p>
           </div>
 
@@ -75,7 +77,7 @@ export default function LoginPage() {
                 htmlFor="admin-url"
                 className="mb-1.5 block text-xs font-medium text-[var(--text-muted)]"
               >
-                Admin URL
+                {t('admin:settings.labels.url', { defaultValue: 'Admin URL' })}
               </label>
               <input
                 id="admin-url"
@@ -92,14 +94,14 @@ export default function LoginPage() {
                 htmlFor="admin-token"
                 className="mb-1.5 block text-xs font-medium text-[var(--text-muted)]"
               >
-                Admin Token
+                {t('admin:settings.labels.token', { defaultValue: 'Admin Token' })}
               </label>
               <input
                 id="admin-token"
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder="Enter admin token"
+                placeholder={t('admin:settings.placeholder.token', { defaultValue: 'Enter admin token' })}
                 className="w-full rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20"
               />
             </div>
@@ -115,7 +117,7 @@ export default function LoginPage() {
               disabled={!canSubmit}
               className="w-full rounded-[var(--radius-sm)] bg-[var(--accent-gold)] px-4 py-2.5 text-sm font-semibold text-black transition-all hover:bg-[var(--accent-gold-bright)] disabled:cursor-not-allowed disabled:opacity-30"
             >
-              {loading ? 'Connecting...' : 'Connect'}
+              {loading ? t('admin:login.connecting', { defaultValue: 'Connecting...' }) : t('admin:login.connect', { defaultValue: 'Connect' })}
             </button>
           </form>
 
@@ -141,7 +143,7 @@ export default function LoginPage() {
                     d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"
                   />
                 </svg>
-                How to set or get Admin Token?
+                {t('admin:login.help.title', { defaultValue: 'How to set or get Admin Token?' })}
               </span>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -160,24 +162,28 @@ export default function LoginPage() {
             {showHelp && (
               <div className="mt-3.5 space-y-3 text-xs text-[var(--text-muted)] animate-[fadeInScale_0.15s_ease-out] bg-[var(--bg-elevated)]/40 border border-[var(--border-subtle)]/40 p-3.5 rounded-[var(--radius-md)] leading-relaxed">
                 <p>
-                  The Admin Token is used to authorize connection to your gateway. It is configured inside your backend environment settings:
+                  {t('admin:login.help.desc', { defaultValue: 'The Admin Token is used to authorize connection to your gateway. It is configured inside your backend environment settings:' })}
                 </p>
                 <div className="space-y-2">
                   <div className="flex gap-2 items-start">
                     <span className="text-[var(--accent-gold)] font-bold mt-0.5">•</span>
-                    <span>
-                      <strong>Development Mode</strong>: Default value is <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] text-[var(--accent-gold)] border border-[var(--border-subtle)]">admin-token-dev</code>, or read from <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">ADMIN_TOKEN</code> inside local <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">.env</code>.
-                    </span>
+                    <span dangerouslySetInnerHTML={{
+                      __html: t('admin:login.help.dev_html', {
+                        defaultValue: '<strong>Development Mode</strong>: Default value is <code class="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] text-[var(--accent-gold)] border border-[var(--border-subtle)]">admin-token-dev</code>, or read from <code class="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">ADMIN_TOKEN</code> inside local <code class="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">.env</code>.'
+                      })
+                    }} />
                   </div>
                   <div className="flex gap-2 items-start">
                     <span className="text-[var(--accent-gold)] font-bold mt-0.5">•</span>
-                    <span>
-                      <strong>Production Mode</strong>: Configured via numbered environment variables in your gateway host config (e.g. <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_1</code> ... <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_N</code>) inside <code className="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">.env</code> or system configs.
-                    </span>
+                    <span dangerouslySetInnerHTML={{
+                      __html: t('admin:login.help.prod_html', {
+                        defaultValue: '<strong>Production Mode</strong>: Configured via numbered environment variables in your gateway host config (e.g. <code class="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_1</code> ... <code class="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">HOTPLEX_ADMIN_TOKEN_N</code>) inside <code class="font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]">.env</code> or system configs.'
+                      })
+                    }} />
                   </div>
                 </div>
                 <div className="pt-2 border-t border-[var(--border-subtle)]/30">
-                  <p className="mb-2 font-medium text-[var(--text-primary)]">Generate a secure token using CLI:</p>
+                  <p className="mb-2 font-medium text-[var(--text-primary)]">{t('admin:login.help.generate_hint', { defaultValue: 'Generate a secure token using CLI:' })}</p>
                   <div className="flex items-center justify-between rounded-[var(--radius-sm)] bg-[var(--bg-hover)] p-2 font-mono text-[10px] text-[var(--text-primary)] border border-[var(--border-subtle)]">
                     <code className="select-all">openssl rand -base64 32</code>
                   </div>

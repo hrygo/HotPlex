@@ -7,6 +7,7 @@ import {
     type SessionInfo,
 } from "@/lib/api/sessions";
 import { WORKER_DISPLAY, WorkerIcon } from "@/components/icons";
+import { useTranslation } from "react-i18next";
 
 function getDisplayTitle(session: SessionInfo): string {
     return session.title || session.id.slice(0, 8);
@@ -23,6 +24,7 @@ function SessionRow({
     onSelect: () => void;
     onDelete: () => void;
 }) {
+    const { t } = useTranslation(['chat', 'common']);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const displayTitle = getDisplayTitle(session);
     const workerName =
@@ -84,7 +86,7 @@ function SessionRow({
                                     d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
                                 />
                             </svg>
-                            <span>{session.turn_count} turns</span>
+                            <span>{session.turn_count} {t('chat:label.turns')}</span>
                         </div>
                     )}
                 </div>
@@ -107,7 +109,7 @@ function SessionRow({
                             <span
                                 className={`text-[11px] font-bold ${isActive ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}
                             >
-                                {stateLabel(session.state)}
+                                {t('chat:status.' + session.state, { defaultValue: stateLabel(session.state) })}
                             </span>
                         </div>
                         <span className="text-[10px] text-[var(--text-faint)] opacity-40">
@@ -124,32 +126,35 @@ function SessionRow({
                         {confirmDelete ? (
                             <div className="flex items-center gap-2 animate-fade-in">
                                 <button
+                                    type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         onDelete();
                                     }}
                                     className="text-[10px] font-bold text-[var(--accent-coral)] hover:underline"
                                 >
-                                    Confirm
+                                    {t('common:action.confirm')}
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         setConfirmDelete(false);
                                     }}
                                     className="text-[10px] font-bold text-[var(--text-faint)] hover:text-[var(--text-secondary)]"
                                 >
-                                    Cancel
+                                    {t('common:action.cancel')}
                                 </button>
                             </div>
                         ) : (
                             <button
+                                type="button"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setConfirmDelete(true);
                                 }}
                                 className="opacity-0 group-hover:opacity-100 p-1.5 rounded-[var(--radius-sm)] text-[var(--text-faint)] hover:text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10 transition-all transform hover:scale-110"
-                                title="Delete session"
+                                title={t('chat:action.delete_session')}
                             >
                                 <svg
                                     className="w-3.5 h-3.5"
@@ -192,6 +197,7 @@ export function SessionPanel({
     onDelete,
     currentUserRole,
 }: SessionPanelProps) {
+    const { t } = useTranslation(['chat', 'common']);
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredSessions = useMemo(
@@ -237,7 +243,7 @@ export function SessionPanel({
                             />
                         </svg>
                     )}
-                    {isLoading ? "Creating..." : "New Chat"}
+                    {isLoading ? t("common:action.creating") : t("chat:action.new_chat")}
                 </button>
             </div>
 
@@ -261,7 +267,7 @@ export function SessionPanel({
                         id="session-search"
                         name="session-search"
                         type="text"
-                        placeholder="Search history..."
+                        placeholder={t("chat:placeholder.search")}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full bg-[var(--bg-elevated)] border border-transparent rounded-xl pl-9 pr-4 py-2 text-xs text-[var(--text-primary)] focus:bg-[var(--bg-surface)] focus:border-[var(--border-bright)] transition-all placeholder:text-[var(--text-faint)]"
@@ -272,7 +278,7 @@ export function SessionPanel({
             {/* List */}
             <div className="flex-1 overflow-y-auto px-2 pb-6 custom-scrollbar">
                 <div className="px-3 mb-2 text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest">
-                    Recent Conversations
+                    {t("chat:title.recent_conversations")}
                 </div>
 
                 <div className="space-y-1 session-list-cascade">
@@ -289,7 +295,7 @@ export function SessionPanel({
                     {filteredSessions.length === 0 && !isLoading && (
                         <div className="px-3 py-8 text-center">
                             <p className="text-[11px] text-[var(--text-faint)]">
-                                No results found
+                                {t("chat:text.no_results")}
                             </p>
                         </div>
                     )}
@@ -308,7 +314,7 @@ export function SessionPanel({
                     <a
                         href="/admin"
                         className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all duration-200 group/admin"
-                        title="Admin Dashboard"
+                        title={t("chat:action.admin_dashboard")}
                     >
                         <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-[var(--bg-elevated)] group-hover/admin:bg-[var(--accent-gold)]/15 transition-colors duration-200">
                             <svg
@@ -333,10 +339,10 @@ export function SessionPanel({
                         </div>
                         <div className="flex flex-col">
                             <span className="text-[11px] font-semibold leading-tight">
-                                Admin
+                                {t("chat:label.admin")}
                             </span>
                             <span className="text-[9px] text-[var(--text-faint)] leading-tight">
-                                Dashboard & Settings
+                                {t("chat:label.admin_subtitle")}
                             </span>
                         </div>
                     </a>

@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { ToolName } from "@/lib/tool-categories";
+import { useTranslation } from "react-i18next";
 
 interface PermissionCardProps {
   toolName: string;
@@ -12,13 +13,14 @@ interface PermissionCardProps {
 }
 
 export function PermissionCard({ toolName, args, status, onRespond, onToggle }: PermissionCardProps) {
+  const { t } = useTranslation();
   const isElicitation = toolName === ToolName.Elicitation;
   const isPermission = toolName === ToolName.AskPermission || toolName === ToolName.Confirm;
   const title = isElicitation
-    ? "Action Required"
+    ? t('chat:tool.permission.action_required', { defaultValue: 'Action Required' })
     : isPermission
-    ? "Permission Request"
-    : "Confirmation";
+    ? t('chat:tool.permission.permission_request', { defaultValue: 'Permission Request' })
+    : t('chat:tool.permission.confirmation', { defaultValue: 'Confirmation' });
 
   const description = args?.message || args?.prompt || args?.description || "";
   const command = args?.command || args?.tool || "";
@@ -68,11 +70,11 @@ export function PermissionCard({ toolName, args, status, onRespond, onToggle }: 
       {/* Actions — only show when awaiting response */}
       {status === "running" && (
         <div className="flex items-center gap-2 px-4 py-3 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
-          <button onClick={() => onRespond?.(true)} className="flex-1 py-2 rounded-[var(--radius-sm)] bg-[var(--accent-emerald)] text-black font-bold text-xs transition-all hover:opacity-90 active:scale-[0.98]">
-            Approve
+          <button type="button" onClick={() => onRespond?.(true)} className="flex-1 py-2 rounded-[var(--radius-sm)] bg-[var(--accent-emerald)] text-black font-bold text-xs transition-all hover:opacity-90 active:scale-[0.98]">
+            {t('common:action.approve', { defaultValue: 'Approve' })}
           </button>
-          <button onClick={() => onRespond?.(false)} className="flex-1 py-2 rounded-[var(--radius-sm)] bg-[var(--accent-coral)] text-white font-bold text-xs transition-all hover:opacity-90 active:scale-[0.98]">
-            Reject
+          <button type="button" onClick={() => onRespond?.(false)} className="flex-1 py-2 rounded-[var(--radius-sm)] bg-[var(--accent-coral)] text-white font-bold text-xs transition-all hover:opacity-90 active:scale-[0.98]">
+            {t('common:action.reject', { defaultValue: 'Reject' })}
           </button>
         </div>
       )}
@@ -82,7 +84,7 @@ export function PermissionCard({ toolName, args, status, onRespond, onToggle }: 
           <svg className="w-3.5 h-3.5 text-[var(--accent-emerald)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
-          <span className="text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-wider">Responded</span>
+          <span className="text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-wider">{t('chat:tool.permission.responded', { defaultValue: 'Responded' })}</span>
         </div>
       )}
     </motion.div>

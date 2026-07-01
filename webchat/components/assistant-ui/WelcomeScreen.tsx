@@ -2,8 +2,10 @@
 
 import { BrandIcon } from "@/components/icons";
 import type { Suggestion } from "./thread-helpers";
+import { useTranslation } from "react-i18next";
 
 export function WelcomeScreen({ suggestions, onSuggestionClick }: { suggestions?: readonly Suggestion[]; onSuggestionClick?: (prompt: string) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <div className="relative mb-10 flex items-center justify-center">
@@ -22,7 +24,7 @@ export function WelcomeScreen({ suggestions, onSuggestionClick }: { suggestions?
       </div>
       <h1 className="text-5xl font-display font-bold tracking-tight mb-4 text-[var(--text-primary)]">HotPlex</h1>
       <p className="text-xl text-[var(--text-muted)] font-medium max-w-lg mx-auto leading-relaxed">
-        Next-generation autonomous workspace.
+        {t('chat:welcome.tagline', { defaultValue: 'Next-generation autonomous workspace.' })}
       </p>
       {suggestions && suggestions.length > 0 && (
         <div className="flex flex-wrap justify-center gap-3 mt-8 max-w-2xl">

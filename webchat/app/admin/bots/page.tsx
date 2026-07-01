@@ -8,8 +8,10 @@ import { BotCard } from '@/components/admin/bot-card';
 import { ChannelConfigEditor } from '@/components/admin/channel-config-editor';
 import { useResource } from '@/hooks/use-resource';
 import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
+import { useTranslation } from 'react-i18next';
 
 export default function BotsPage() {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [showChannelDefaults, setShowChannelDefaults] = useState(false);
 
@@ -38,7 +40,9 @@ export default function BotsPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">Bots</h1>
+            <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
+              {t('admin:bots.title', { defaultValue: 'Bots' })}
+            </h1>
             {!loading && !error && (
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
@@ -46,7 +50,7 @@ export default function BotsPage() {
                 </span>
                 {onlineCount > 0 && (
                   <span className="text-[11px] font-mono text-[var(--accent-emerald)] px-2 py-0.5 rounded-full bg-[rgba(16,185,129,0.08)]">
-                    {onlineCount} online
+                    {t('admin:bots.online_count', { count: onlineCount, defaultValue: `${onlineCount} online` })}
                   </span>
                 )}
               </div>
@@ -54,6 +58,7 @@ export default function BotsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={reload}
               disabled={loading}
               className="inline-flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
@@ -80,7 +85,7 @@ export default function BotsPage() {
               href="/admin/bots/new"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
             >
-              + New Bot
+              {t('admin:bots.action.new_bot', { defaultValue: '+ New Bot' })}
             </Link>
           </div>
         </div>
@@ -89,18 +94,19 @@ export default function BotsPage() {
             a bot instance (webchat owns dir/webchat/ but is never a bot). #796 */}
         <div className="mb-6 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
           <button
+            type="button"
             onClick={() => setShowChannelDefaults((v) => !v)}
             className="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors"
           >
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-[var(--text-primary)]">
-                Channel Defaults
+                {t('admin:bots.defaults.title', { defaultValue: 'Channel Defaults' })}
               </span>
               <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
                 WebChat
               </span>
               <span className="text-[11px] text-[var(--text-faint)]">
-                Team defaults for channels without a bot instance
+                {t('admin:bots.defaults.subtitle', { defaultValue: 'Team defaults for channels without a bot instance' })}
               </span>
             </div>
             <svg
@@ -143,13 +149,14 @@ export default function BotsPage() {
             </svg>
             <input
               type="text"
-              placeholder="Search by name, platform, or bot ID..."
+              placeholder={t('admin:bots.placeholder.search', { defaultValue: 'Search by name, platform, or bot ID...' })}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors"
             />
             {query && (
               <button
+                type="button"
                 onClick={() => setQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)] hover:text-[var(--text-secondary)]"
               >
@@ -163,7 +170,7 @@ export default function BotsPage() {
         )}
 
         {/* Loading */}
-        {loading && <LoadingState label="Loading bots..." />}
+        {loading && <LoadingState label={t('admin:bots.loading', { defaultValue: 'Loading bots...' })} />}
 
         {/* Error */}
         {error && <ErrorState message={error} onRetry={reload} />}
@@ -171,14 +178,14 @@ export default function BotsPage() {
         {/* Empty state */}
         {!loading && !error && botList.length === 0 && (
           <EmptyState
-            title="No bots configured"
-            description="Create your first bot to connect a messaging platform."
+            title={t('admin:bots.empty.title', { defaultValue: 'No bots configured' })}
+            description={t('admin:bots.empty.description', { defaultValue: 'Create your first bot to connect a messaging platform.' })}
             action={
               <Link
                 href="/admin/bots/new"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
               >
-                + New Bot
+                {t('admin:bots.action.new_bot', { defaultValue: '+ New Bot' })}
               </Link>
             }
           />
@@ -188,13 +195,14 @@ export default function BotsPage() {
         {!loading && !error && botList.length > 0 && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-sm text-[var(--text-muted)] mb-1">
-              No bots matching &ldquo;{query}&rdquo;
+              {t('admin:bots.search_no_results', { query, defaultValue: `No bots matching "${query}"` })}
             </p>
             <button
+              type="button"
               onClick={() => setQuery('')}
               className="text-xs text-[var(--accent-gold)] hover:underline"
             >
-              Clear search
+              {t('admin:bots.action.clear_search', { defaultValue: 'Clear search' })}
             </button>
           </div>
         )}

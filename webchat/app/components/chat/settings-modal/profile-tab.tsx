@@ -3,12 +3,14 @@
 import { useState, useRef, useEffect } from 'react';
 import type { User } from '@/lib/api/auth';
 import { TabPanel } from './tab-panel';
+import { useTranslation } from 'react-i18next';
 
 interface ProfileTabProps {
   user: User;
 }
 
 export function ProfileTab({ user }: ProfileTabProps) {
+  const { t } = useTranslation(['chat', 'common']);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,7 +56,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
                 ? 'bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] border border-[var(--accent-gold)]/20' 
                 : 'bg-[var(--bg-hover)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
             }`}>
-              {user.role}
+              {t('common:role.' + user.role, { defaultValue: user.role })}
             </span>
           </div>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">@{user.username}</p>
@@ -64,7 +66,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
           <span className={`w-1.5 h-1.5 rounded-full ${user.status === 'active' ? 'bg-[var(--accent-emerald)]' : 'bg-[var(--accent-coral)]'} animate-pulse`} />
           <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-            {user.status}
+            {t('common:status.' + user.status, { defaultValue: user.status })}
           </span>
         </div>
       </div>
@@ -74,13 +76,14 @@ export function ProfileTab({ user }: ProfileTabProps) {
         {/* User ID Detail Card */}
         <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
-            User ID
+            {t('chat:label.user_id')}
           </span>
           <div className="flex items-center justify-between gap-2 mt-1">
             <span className="text-xs font-mono text-[var(--text-muted)] truncate select-all">{user.id}</span>
             <button
+              type="button"
               onClick={handleCopyUserId}
-              title="Copy User ID"
+              title={t('chat:action.copy_user_id')}
               className="p-1 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
             >
               {copied ? (
@@ -99,17 +102,17 @@ export function ProfileTab({ user }: ProfileTabProps) {
         {/* Display Name Card */}
         <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
-            Display Name
+            {t('chat:label.display_name')}
           </span>
           <span className="text-xs font-bold text-[var(--text-primary)] mt-1 truncate">
-            {user.display_name || 'Not configured'}
+            {user.display_name || t('chat:text.not_configured')}
           </span>
         </div>
 
         {/* Account Created Card */}
         <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
-            Created Time
+            {t('chat:label.created_time')}
           </span>
           <span className="text-xs font-bold text-[var(--text-primary)] mt-1 truncate">
             {formattedCreated}
@@ -119,7 +122,7 @@ export function ProfileTab({ user }: ProfileTabProps) {
         {/* Last Login Card */}
         <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/20 flex flex-col justify-between min-h-[80px]">
           <span className="text-[9px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-1">
-            Last Login
+            {t('chat:label.last_login')}
           </span>
           <span className="text-xs font-bold text-[var(--text-primary)] mt-1 truncate">
             {formattedLogin}
