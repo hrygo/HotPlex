@@ -145,6 +145,20 @@ func TestSlogLogger_Error(t *testing.T) {
 	require.Contains(t, got, "error message")
 }
 
+// TestSlogLoggerNilLoggerNoPanic guards against nil *slog.Logger deref panic
+// (PR #828 review P2). SlogLogger is a public type with new call sites; a nil
+// embedded logger must not panic.
+func TestSlogLoggerNilLoggerNoPanic(t *testing.T) {
+	t.Parallel()
+	s := SlogLogger{}
+	require.NotPanics(t, func() {
+		s.Debug(context.Background(), "debug")
+		s.Info(context.Background(), "info")
+		s.Warn(context.Background(), "warn")
+		s.Error(context.Background(), "error")
+	})
+}
+
 // captureWriter implements io.Writer for slog handler.
 type captureWriter struct {
 	s *string

@@ -81,31 +81,38 @@ var sdkReconnectSilent = []string{
 // to reduce log noise — failures still surface via Warn/Error level.
 type SlogLogger struct{ *slog.Logger }
 
+func (s SlogLogger) logger() *slog.Logger {
+	if s.Logger == nil {
+		return slog.Default()
+	}
+	return s.Logger
+}
+
 func (s SlogLogger) Debug(_ context.Context, args ...any) {
 	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelDebug, msg)
+	s.logger().Log(context.Background(), slog.LevelDebug, msg)
 }
 func (s SlogLogger) Info(_ context.Context, args ...any) {
 	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelInfo, msg)
+	s.logger().Log(context.Background(), slog.LevelInfo, msg)
 }
 func (s SlogLogger) Warn(_ context.Context, args ...any) {
 	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelWarn, msg)
+	s.logger().Log(context.Background(), slog.LevelWarn, msg)
 }
 func (s SlogLogger) Error(_ context.Context, args ...any) {
 	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelError, msg)
+	s.logger().Log(context.Background(), slog.LevelError, msg)
 }
