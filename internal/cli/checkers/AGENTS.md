@@ -1,20 +1,21 @@
 # checkers — Diagnostic Checks for `hotplex doctor`
 
 ## OVERVIEW
-25 self-registering diagnostic checks across 9 categories. Each check implements `cli.Checker`, returns a single `cli.Diagnostic`, and registers itself in `init()` via `cli.DefaultRegistry.Register`. Powers `hotplex doctor [--fix]`.
+26 self-registering diagnostic checks across 10 categories. Each check implements `cli.Checker`, returns a single `cli.Diagnostic`, and registers itself in `init()` via `cli.DefaultRegistry.Register`. Powers `hotplex doctor [--fix]`.
 
 ## STRUCTURE
 ```
 checkers/
   config.go          # 5 config.* checks: exists, syntax, required, values, env_vars
   agentconfig.go     # 3 agent_config checks: suffix_deprecated, directory_structure, global_files
-  dependencies.go    # 2 checks: worker_binary, sqlite_path
-  environment.go     # 3 checks: go_version, os_arch, build_tools
-  messaging.go       # 3 checks: slack_creds, feishu_creds, multi_bot_config
-  runtime.go         # 4 checks: disk_space, port_available, orphan_pids, data_dir_writable
-  security.go        # 3 checks: admin_token, file_permissions, env_in_git
-  stt.go             # 1 check: stt.runtime (Python deps, ONNX model)
-  tts.go             # 1 check: tts.runtime (Edge-TTS, ffmpeg)
+  dependencies.go    # 2 dependencies.* checks: worker_binary, sqlite_path
+  environment.go     # 3 environment.* checks: go_version, os_arch, build_tools
+  messaging.go       # 3 messaging.* checks: slack_creds, feishu_creds, multi_bot_config
+  runtime.go         # 4 runtime.* checks: disk_space, port_available, orphan_pids, data_dir_writable
+  security.go        # 3 security.* checks: admin_token, file_permissions, env_in_git
+  permission_mode.go # 1 worker.* check: claude_auto_mode (issue #789, warn-level capability probe)
+  stt.go             # 1 stt.runtime check (Python deps, ONNX model)
+  tts.go             # 1 tts.runtime check (Edge-TTS, ffmpeg)
   disk_unix.go       # syscall.Statfs for disk_space (build: darwin/linux)
   disk_windows.go    # GetDiskFreeSpaceEx for disk_space (build: windows)
   *_test.go          # table-driven, one per checker file
@@ -48,7 +49,7 @@ func init() { cli.DefaultRegistry.Register(configExistsChecker{}) }
 
 **Name / Category convention**
 - Name: `<category>.<check>` dotted lowercase (e.g. `runtime.port_available`).
-- Category: one of `config`, `agent_config`, `dependencies`, `environment`, `messaging`, `runtime`, `security`, `stt`, `tts`.
+- Category: one of `config`, `agent_config`, `dependencies`, `environment`, `messaging`, `runtime`, `security`, `stt`, `tts`, `worker`.
 
 **FixFunc discipline**
 - Set `FixHint` (human text) on every Warn/Fail; set `FixFunc` only when an idempotent auto-fix exists. `doctor --fix` invokes FixFunc and ignores the returned error path on success.
