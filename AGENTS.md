@@ -57,6 +57,23 @@
 - **XML 安全**: 强制开启 **XML Sanitizer**，对保留标签进行 HTML 转义预防注入
 - **Windows 注入**: 强制使用 **临时文件注入**（`--append-system-prompt-file`），严禁使用内联参数防止 cmd.exe 截断
 
+### 双语国际化规范
+
+- **多语言框架**: 前端（`webchat/`）基于 `react-i18next` + `i18next` 实现了完备的中英文双语国际化支持。默认语言为 `zh-CN`。
+- **禁止硬编码**: 任何用户界面（UI）展示文本、提示、表单校验、占位符及错误信息**绝对禁止硬编码**中文或英文。所有文本必须提取并托管在 `webchat/locales/` 的 JSON 资源文件中。
+- **属性同步对齐**: 新增或修改任何文案时，**必须同时且同步**修改 `webchat/locales/zh-CN/` 和 `webchat/locales/en/` 下对应的 JSON 文件。属性键值（Keys）必须完全一致，防止切换语言时因缺失键而展示默认翻译或占位符。
+- **命名空间分类**: 翻译按业务领域划分不同的 Namespace：
+  - `common.json` — 全局通用、公共按钮、布局标签等。
+  - `chat.json` — 智能问答、会话界面、命令提示、工作区管理。
+  - `admin.json` — 后台管理面板（Bot 配置、Cron 任务、会话指标、设置等）。
+  - `auth.json` — 登录、用户认证、注销相关页面。
+  - `errors.json` — 系统级别与通用的前端错误提示。
+- **调用规范**:
+  - React 组件/Hook 内：统一使用 `const { t } = useTranslation('namespace')` 导入，并通过 `{t('key')}` 调用。
+  - 非组件/全局 JS 上下文：直接导入配置实例，使用 `import i18n from '@/lib/i18n/config'; i18n.t('namespace:key')`。
+  - 动态替换：禁止使用字符串加号拼接做国际化文本，统一在 JSON 翻译文件中定义 `{{param}}` 插值，通过 `t('key', { param: val })` 动态传入。
+  - 语言切换：统一使用 `@/lib/i18n/use-language` 进行，状态保存在 LocalStorage 键 `hotplex.locale` 中。
+
 ---
 
 ## 项目结构
