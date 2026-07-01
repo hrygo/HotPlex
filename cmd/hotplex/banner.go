@@ -15,10 +15,6 @@ import (
 const (
 	ansiReset = "\033[0m"
 	ansiBold  = "\033[1m"
-	ansiCyan  = "\033[36m"
-	ansiDim   = "\033[2m"
-	ansiGreen = "\033[32m"
-	ansiRed   = "\033[31m"
 )
 
 //go:embed banner_art.txt

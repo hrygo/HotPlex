@@ -377,6 +377,7 @@
   "api_keys": {
     "title": "API 密钥",
     "key_count": "{{count}} 个密钥",
+    "key_count_plural": "{{count}} 个密钥",
     "loading": "正在加载 API 密钥...",
     "action": {
       "create": "创建密钥",
