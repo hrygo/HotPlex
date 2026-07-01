@@ -33,7 +33,7 @@
 
 ### 📱 Multi-Platform Delivery
 - 🌍 **Write Once, Deploy Anywhere** — Bridge agents to **Slack** (Socket Mode), **Feishu** (WebSocket), and **Web** with zero agent code changes. Each adapter provides platform-native streaming, slash commands, and interaction management.
-- 🎙️ **Voice Input & Summary** — Seamless integration with platform voice messages (Speech-to-Text via Feishu API or local STT) and auto-synthesized summaries back to users (Text-to-Speech via Microsoft Edge-TTS or localized CPU-friendly MOSS-TTS sidecar).
+- 🎙️ **Voice Input & Summary** — Seamless integration with platform voice messages (Speech-to-Text supporting both optional cloud-based Feishu STT API and fully localized, offline custom speech recognition commands) and auto-synthesized summaries back to users (Text-to-Speech via Microsoft Edge-TTS or localized CPU-friendly MOSS-TTS sidecar).
 - ⏰ **AI-Native Cron Scheduler** — Agents autonomously create scheduled tasks from natural language ("remind me in 30m"). Supports cron expressions, fixed intervals, and one-shot schedules with lifecycle controls (`max_runs`, `expires_at`), attached session injection, and automatic result delivery.
 - 💬 **Embedded Web Chat & Admin UI** — A single binary serves the AEP gateway, a Next.js SPA web chat, and an admin dashboard for bot management, API keys, and session monitoring — all out of the box.
 
