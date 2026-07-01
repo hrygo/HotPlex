@@ -27,11 +27,13 @@ https://open.feishu.cn/app/cli_a954eab23678dbb5/auth?q=speech_to_text:speech&op_
 ### 安装 Python 包
 ```bash
 # 国际用户
-pip3 install -U funasr-onnx modelscope
+pip3 install -U funasr-onnx onnxruntime onnx modelscope
 
 # 中国用户（推荐镜像加速）
-pip3 install -U funasr-onnx modelscope -i https://mirror.sjtu.edu.cn/pypi/web/simple
+pip3 install -U funasr-onnx onnxruntime onnx modelscope -i https://mirror.sjtu.edu.cn/pypi/web/simple
 ```
+
+> `onnxruntime` 与 `onnx` 是 funasr-onnx 执行 ONNX 推理的必需后端，`hotplex onboard` 的自动安装步骤同样包含这两个包。
 
 ### 下载 SenseVoice 模型
 ```bash

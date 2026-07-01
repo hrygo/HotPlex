@@ -34,9 +34,9 @@ Voice input → STT (transcription) → AI response → TTS summary → Synthesi
 | python3 | MOSS-TTS-Nano sidecar 进程 | `tts_provider=moss` 或 `edge+moss` |
 | MOSS 模型文件 | 本地推理权重 | `tts_provider=moss` 或 `edge+moss` |
 
-## Edge TTS（默认，零额外依赖）
+## Edge TTS（主引擎，零额外依赖）
 
-Edge TTS 使用微软免费云端服务，只需 `ffmpeg` 即可。无需本地 GPU 或模型文件。
+Edge TTS 使用微软免费云端服务，只需 `ffmpeg` 即可。无需本地 GPU 或模型文件。在 `edge+moss`（出厂默认）配置下作为主引擎，MOSS 仅为降级回退。
 
 ### 可用语音
 
@@ -58,9 +58,9 @@ ffmpeg -version | head -1  # Edge TTS 的唯一依赖
 
 MOSS-TTS-Nano 是 OpenMOSS 的开源 CPU 语音合成方案。HotPlex 通过 sidecar 模式运行：Gateway 启动 `python3 <modelDir>/app_onnx.py` 作为子进程，通过 HTTP API 通信。
 
-**是否需要安装？**
-- `tts_provider: edge`（默认）→ **不需要**
-- `tts_provider: moss` 或 `edge+moss` → **需要**
+**是否需要安装 MOSS？**
+- `tts_provider: edge` → **不需要**（纯 Edge，无本地回退）
+- `tts_provider: moss` 或 `edge+moss`（出厂默认）→ **需要**
 
 **磁盘空间**：约 3GB（torch ~2GB + ONNX 模型 ~1GB + Python 脚本 ~200KB）
 
@@ -178,7 +178,7 @@ curl -X POST http://127.0.0.1:18083/api/generate \
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `tts_enabled` | `true` | 是否启用 TTS |
-| `tts_provider` | `edge` | 语音引擎（`edge` / `moss` / `edge+moss`） |
+| `tts_provider` | `edge+moss` | 语音引擎（`edge` / `moss` / `edge+moss`，出厂默认 `edge+moss`） |
 | `tts_voice` | `zh-CN-XiaoxiaoNeural` | Edge TTS 语音名称 |
 | `tts_max_chars` | `150` | Summary 最大字符数（约 37 秒语音，飞书 60 秒限制内） |
 | `tts_moss_model_dir` | `~/.hotplex/models/moss-tts-nano` | MOSS 模型目录 |
