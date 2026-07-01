@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
@@ -22,7 +23,7 @@ func newAdminCmd() *cobra.Command {
 		Use:   "admin",
 		Short: "用户与账号管理（bootstrap admin 等）",
 	}
-	cmd.PersistentFlags().String("config", "", "配置文件路径（默认 ~/.hotplex/config.yaml）")
+	cmd.PersistentFlags().String("config", config.DefaultConfigPath, "配置文件路径（默认 ~/.hotplex/config.yaml）")
 
 	create := &cobra.Command{
 		Use:   "create",
