@@ -204,6 +204,14 @@ security:
 worker:
   max_lifetime: 24h
   idle_timeout: 60m
+
+messaging:
+  worker_type: "claude_code"
+  stt_provider: "local"        # local (custom command), feishu (cloud), feishu+local
+  stt_local_cmd: "python3 ~/.hotplex/scripts/stt_server.py"
+  tts_enabled: true
+  tts_provider: "edge+moss"    # edge (Edge TTS), moss (local CPU), edge+moss (fallback)
+  tts_voice: "zh-CN-XiaoxiaoNeural"
 ```
 
 ### Default Ports

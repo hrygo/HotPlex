@@ -16,7 +16,7 @@ Voice input → STT (transcription) → AI response → TTS summary → Synthesi
    - **飞书**：`ffmpeg → Opus`（24kHz mono，飞书要求 opus 格式上传）
    - **Slack**：`ffmpeg → MP3`（24kHz mono，Slack 原生支持 MP3 内联播放）
 
-**当前默认**：`tts_enabled: true`, `tts_provider: edge`, `max_chars: 150`
+**当前默认**：`tts_enabled: true`, `tts_provider: edge+moss`, `max_chars: 150`
 
 ## TTS 提供商
 

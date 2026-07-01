@@ -885,7 +885,7 @@ func stepSTTCheck(configPath string, reader *bufio.Reader) StepResult {
 }
 
 func installSTTDeps() error {
-	cmd := exec.Command("python3", "-m", "pip", "install", "--quiet", "funasr-onnx", "modelscope")
+	cmd := exec.Command("python3", "-m", "pip", "install", "--quiet", "funasr-onnx", "onnxruntime", "onnx", "modelscope")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
