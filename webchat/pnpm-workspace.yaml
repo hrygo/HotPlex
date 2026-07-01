@@ -1,2 +1,17 @@
+# Build-script approvals (pnpm v11 strictDepBuilds default).
+# sharp: required by Next.js for image optimization — allow.
+# unrs-resolver: optional native (Rust) eslint import resolver; the JS fallback
+#   works fine for `next build`, so skip its postinstall.
 allowBuilds:
   sharp: true
+  unrs-resolver: false
+
+# pnpm 11 enables minimumReleaseAge=1440 (24h) by default. Under --frozen-lockfile
+# the lockfile pins exact versions, so a freshly-published transitive dep (e.g.
+# typescript-eslint@8.62.1) cannot fall back to an older version and fails the
+# supply-chain verification pass (ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION),
+# blocking install/build for ~24h after every such release. trustLockfile=true
+# (requires pnpm >= 11.3) skips that re-verification of the loaded lockfile,
+# which is reviewed on origin/main (trusted base). See
+# https://pnpm.io/settings#trustLockfile
+trustLockfile: true

@@ -295,6 +295,7 @@ LLM Provider 返回临时错误（429、529、400 等）时的自动重试配置
 | `ready_timeout` | duration | `10s` | `HOTPLEX_WORKER_OPENCODE_SERVER_READY_TIMEOUT` | 进程就绪等待超时 |
 | `ready_poll_interval` | duration | `200ms` | `HOTPLEX_WORKER_OPENCODE_SERVER_READY_POLL_INTERVAL` | 就绪状态轮询间隔 |
 | `http_timeout` | duration | `30s` | `HOTPLEX_WORKER_OPENCODE_SERVER_HTTP_TIMEOUT` | HTTP 请求超时 |
+| `context_window` | int | `200000` | `HOTPLEX_WORKER_OPENCODE_SERVER_CONTEXT_WINDOW` | OCS fallback context window（token 数）。OCS HTTP API 不暴露真实模型 context window，此可配置值喂给 `context_pct`；设 `0` 则不设置 `context_pct`（spec §5 O1，turn summary parity #776） |
 
 #### 3.7.5 codex_cli — Codex CLI Worker
 
@@ -790,6 +791,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_WORKER_OPENCODE_SERVER_READY_TIMEOUT` | `worker.opencode_server.ready_timeout` | `10s` |
 | `HOTPLEX_WORKER_OPENCODE_SERVER_READY_POLL_INTERVAL` | `worker.opencode_server.ready_poll_interval` | `200ms` |
 | `HOTPLEX_WORKER_OPENCODE_SERVER_HTTP_TIMEOUT` | `worker.opencode_server.http_timeout` | `30s` |
+| `HOTPLEX_WORKER_OPENCODE_SERVER_CONTEXT_WINDOW` | `worker.opencode_server.context_window` | `200000` |
 | `HOTPLEX_WORKER_AUTO_RETRY_ENABLED` | `worker.auto_retry.enabled` | `true` |
 | `HOTPLEX_WORKER_AUTO_RETRY_MAX_RETRIES` | `worker.auto_retry.max_retries` | `9` |
 | `HOTPLEX_WORKER_CODEX_CLI_COMMAND` | `worker.codex_cli.command` | `codex` |
