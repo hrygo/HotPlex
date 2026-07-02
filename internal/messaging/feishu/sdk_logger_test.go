@@ -145,6 +145,102 @@ func TestSlogLogger_Error(t *testing.T) {
 	require.Contains(t, got, "error message")
 }
 
+// ─── Level-specific filtering ──────────────────────────────────────────────────
+//
+// sdkLogFilter silences routine heartbeat/reconnect messages at Debug/Info level.
+// sdkWarnFilter does NOT silence them at Warn/Error level — failures must surface.
+
+func TestSlogLogger_DebugSilencesHeartbeat(t *testing.T) {
+	t.Parallel()
+	var got string
+	h := slog.NewTextHandler(&captureWriter{&got}, &slog.HandlerOptions{Level: slog.LevelDebug})
+	l := SlogLogger{Logger: slog.New(h)}
+
+	l.Debug(context.Background(), "ping success from server")
+	require.Empty(t, got, "Debug should silence 'ping success'")
+
+	got = ""
+	l.Debug(context.Background(), "receive pong from endpoint")
+	require.Empty(t, got, "Debug should silence 'receive pong'")
+
+	got = ""
+	l.Debug(context.Background(), "disconnected to wss://example.com/ws")
+	require.Empty(t, got, "Debug should silence 'disconnected to wss://'")
+
+	got = ""
+	l.Debug(context.Background(), "trying to reconnect: attempt 1")
+	require.Empty(t, got, "Debug should silence 'trying to reconnect:'")
+}
+
+func TestSlogLogger_InfoSilencesHeartbeat(t *testing.T) {
+	t.Parallel()
+	var got string
+	h := slog.NewTextHandler(&captureWriter{&got}, &slog.HandlerOptions{Level: slog.LevelInfo})
+	l := SlogLogger{Logger: slog.New(h)}
+
+	l.Info(context.Background(), "ping success from server")
+	require.Empty(t, got, "Info should silence 'ping success'")
+
+	got = ""
+	l.Info(context.Background(), "disconnected to wss://example.com/ws")
+	require.Empty(t, got, "Info should silence 'disconnected to wss://'")
+}
+
+func TestSlogLogger_WarnDoesNotSilenceHeartbeat(t *testing.T) {
+	t.Parallel()
+	var got1, got2 string
+	h1 := slog.NewTextHandler(&captureWriter{&got1}, nil)
+	h2 := slog.NewTextHandler(&captureWriter{&got2}, nil)
+	l1 := SlogLogger{Logger: slog.New(h1)}
+	l2 := SlogLogger{Logger: slog.New(h2)}
+
+	l1.Warn(context.Background(), "ping success with latency 30ms")
+	require.Contains(t, got1, "ping success",
+		"Warn should NOT silence routine heartbeat messages")
+
+	l2.Warn(context.Background(), "disconnected to wss://example.com/ws")
+	require.Contains(t, got2, "disconnected to wss://",
+		"Warn should NOT silence reconnection messages")
+}
+
+func TestSlogLogger_ErrorDoesNotSilenceHeartbeat(t *testing.T) {
+	t.Parallel()
+	var got1, got2 string
+	h1 := slog.NewTextHandler(&captureWriter{&got1}, nil)
+	h2 := slog.NewTextHandler(&captureWriter{&got2}, nil)
+	l1 := SlogLogger{Logger: slog.New(h1)}
+	l2 := SlogLogger{Logger: slog.New(h2)}
+
+	l1.Error(context.Background(), "ping success after timeout")
+	require.Contains(t, got1, "ping success",
+		"Error should NOT silence routine heartbeat messages")
+
+	l2.Error(context.Background(), "trying to reconnect: attempt 3")
+	require.Contains(t, got2, "trying to reconnect:",
+		"Error should NOT silence reconnection messages")
+}
+
+func TestSlogLogger_WarnAndErrorCleanReceiveMsgFailed(t *testing.T) {
+	t.Parallel()
+	var got1, got2 string
+	h1 := slog.NewTextHandler(&captureWriter{&got1}, nil)
+	h2 := slog.NewTextHandler(&captureWriter{&got2}, nil)
+	l1 := SlogLogger{Logger: slog.New(h1)}
+	l2 := SlogLogger{Logger: slog.New(h2)}
+
+	l1.Warn(context.Background(), "receive message failed, err: something broke")
+	require.Contains(t, got1, "receive message failed")
+	require.Contains(t, got1, "(connection reset by peer)")
+	require.NotContains(t, got1, "something broke",
+		"Warn should clean 'receive message failed'")
+
+	l2.Error(context.Background(), "receive message failed, err: timeout")
+	require.Contains(t, got2, "receive message failed")
+	require.Contains(t, got2, "(connection reset by peer)")
+	require.NotContains(t, got2, "timeout",
+		"Error should clean 'receive message failed'")
+}
+
 // TestSlogLoggerNilLoggerNoPanic guards against nil *slog.Logger deref panic
 // (PR #828 review P2). SlogLogger is a public type with new call sites; a nil
 // embedded logger must not panic.

@@ -44,6 +44,27 @@ func sdkLogFilter(msg string) string {
 	return msg
 }
 
+// sdkWarnFilter applies the same truncation and message cleanup as sdkLogFilter
+// but does NOT silence routine heartbeat (ping/pong) or reconnection messages.
+// This ensures Warn/Error level logs always surface failures — the original
+// comment on sdkDebugSilent says "Failures still surface via Warn/Error level".
+func sdkWarnFilter(msg string) string {
+	// Improve "receive message failed" error readability.
+	if strings.Contains(msg, "receive message failed") {
+		msg = strings.Split(msg, ", err:")[0] + " (connection reset by peer)"
+	}
+	// Truncate oversized messages.
+	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
+		runes := []rune(msg)
+		if maxDebugMsgLen > 1 {
+			msg = string(runes[:maxDebugMsgLen-1]) + "…"
+		} else {
+			msg = string(runes[:maxDebugMsgLen])
+		}
+	}
+	return msg
+}
+
 const maxDebugMsgLen = 400
 
 // sensitiveParamRe matches sensitive=VALUE patterns and captures the key=
@@ -106,14 +127,14 @@ func (s SlogLogger) Info(_ context.Context, args ...any) {
 	s.logger().Log(context.Background(), slog.LevelInfo, msg)
 }
 func (s SlogLogger) Warn(_ context.Context, args ...any) {
-	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	msg := sdkWarnFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
 	s.logger().Log(context.Background(), slog.LevelWarn, msg)
 }
 func (s SlogLogger) Error(_ context.Context, args ...any) {
-	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	msg := sdkWarnFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
