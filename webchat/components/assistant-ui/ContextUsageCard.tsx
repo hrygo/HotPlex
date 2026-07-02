@@ -72,7 +72,7 @@ export function ContextUsageCard({ data }: { data: ContextUsageData }) {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.2, 0, 0, 1] }}
-      className="my-2 rounded-xl overflow-hidden"
+      className="my-2 rounded-[var(--radius-md)] overflow-hidden"
       style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
     >
       {/* Header: severity dot + label */}

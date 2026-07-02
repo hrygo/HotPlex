@@ -63,7 +63,7 @@ export function AgentConfigFileList({
             key={def.key}
             onClick={() => onSelect(def.key)}
             title={`${fileLabel}: ${fileDesc}`}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all text-xs font-bold border cursor-pointer select-none ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-[var(--radius-sm)] transition-all text-xs font-bold border cursor-pointer select-none ${
               isActive
                 ? 'bg-[var(--bg-active)] border-[rgba(251,191,36,0.15)] text-[var(--accent-gold)]'
                 : 'bg-transparent border-transparent hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'

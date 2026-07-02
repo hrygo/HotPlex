@@ -24,7 +24,7 @@ export function LanguageSwitcher({ variant = "icon" }: { variant?: "icon" | "inl
             key={lng}
             type="button"
             onClick={() => void changeLanguage(lng)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold transition-all ${
               locale === lng
                 ? "bg-[var(--accent-gold)] text-black"
                 : "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-bright)]"
@@ -43,7 +43,7 @@ export function LanguageSwitcher({ variant = "icon" }: { variant?: "icon" | "inl
     <button
       type="button"
       onClick={handleToggle}
-      className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none ${
+      className={`p-2 rounded-[var(--radius-sm)] transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none ${
         locale === 'zh-CN'
           ? 'text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] hover:bg-[var(--bg-hover)]'
           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'

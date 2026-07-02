@@ -136,7 +136,7 @@ export function BotConfigEditor({ botName }: { botName: string }) {
               key={def.key}
               type="button"
               onClick={() => handleSwitchFile(def.key)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl transition-all text-sm ${
+              className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all text-sm ${
                 isActive
                   ? 'bg-[var(--bg-active)] border border-[var(--border-active)] text-[var(--accent-gold)]'
                   : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-transparent'
@@ -181,7 +181,7 @@ export function BotConfigEditor({ botName }: { botName: string }) {
               type="button"
               onClick={handleSave}
               disabled={saving || loading || !dirty}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)]"
+              className="px-4 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)]"
             >
               {saving ? t('common:action.saving', { defaultValue: 'Saving...' }) : t('common:action.save', { defaultValue: 'Save' })}
             </button>
@@ -203,14 +203,14 @@ export function BotConfigEditor({ botName }: { botName: string }) {
 
         {/* Textarea */}
         {loading ? (
-          <div className="flex-1 flex items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+          <div className="flex-1 flex items-center justify-center rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
             <div className="w-5 h-5 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            className="flex-1 w-full min-h-[600px] p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--border-active)] transition-colors placeholder:text-[var(--text-faint)]"
+            className="flex-1 w-full min-h-[600px] p-4 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] font-mono text-sm leading-relaxed resize-none focus:outline-none focus:border-[var(--border-active)] transition-colors placeholder:text-[var(--text-faint)]"
             placeholder={currentDef ? t('admin:bots.editor.placeholder_edit', { file: currentDef.file, defaultValue: `Edit ${currentDef.file}...` }) : ''}
             spellCheck={false}
           />
