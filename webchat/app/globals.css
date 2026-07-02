@@ -850,14 +850,23 @@ a:not(:disabled):active,
 .composer-input {
     flex: 1;
     background: transparent;
-    border: none;
-    outline: none;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
     resize: none;
     padding: 0.5rem 0;
     font-size: 0.9375rem;
     color: var(--text-primary);
     max-height: 200px;
     transition: padding-left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-input:focus,
+.composer-input:focus-visible,
+.composer-input:active {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 .composer-root:focus-within .composer-input {
