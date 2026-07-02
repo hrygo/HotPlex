@@ -1498,29 +1498,10 @@ a:not(:disabled):active,
 /* ============================================================
    Session Search Input
    ============================================================ */
-.session-search-input {
-    width: 100%;
-    background: var(--bg-elevated);
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
-    padding-left: 2.25rem;
-    padding-right: 1rem;
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--text-primary);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    outline: none !important;
-}
-
-.session-search-input::placeholder {
-    color: var(--text-faint);
-}
-
 .session-search-input:focus,
 .session-search-input:focus-visible {
-    background: var(--bg-surface);
-    border-color: rgba(251, 191, 36, 0.35);
-    box-shadow: 0 0 0 2px var(--accent-gold-glow);
+    background-color: var(--bg-surface) !important;
+    border-color: rgba(251, 191, 36, 0.35) !important;
+    box-shadow: 0 0 0 2px var(--accent-gold-glow) !important;
     outline: none !important;
 }
