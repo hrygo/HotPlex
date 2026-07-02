@@ -19,7 +19,7 @@ export function AgentTool({ description, prompt, subagent_type, run_in_backgroun
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-default)] my-6 bg-[var(--bg-surface)]/40 backdrop-blur-md shadow-[var(--shadow-md)] transition-all duration-500 hover:shadow-[var(--shadow-lg)]">
+    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-6 bg-[var(--bg-surface)]/40 backdrop-blur-md shadow-[var(--shadow-md)] transition-all duration-500 hover:shadow-[var(--shadow-lg)]">
       {/* Header */}
       <div 
         className={`px-5 py-4 bg-gradient-to-r from-[var(--bg-elevated)] to-transparent border-b border-white/[0.05] flex items-center justify-between ${onToggle ? "cursor-pointer hover:bg-white/[0.02] transition-all" : ""}`}

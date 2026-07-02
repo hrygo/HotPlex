@@ -17,7 +17,7 @@ export function CompactToolTab({ toolName, summary, status, onClick }: CompactTo
     <motion.div
       onClick={onClick}
       className={`
-        group flex items-center gap-3 px-4 h-8 mb-2 rounded-xl cursor-pointer
+        group flex items-center gap-3 px-4 h-8 mb-2 rounded-[var(--radius-md)] cursor-pointer
         border transition-all duration-300 backdrop-blur-md
         ${isError 
           ? "bg-[var(--accent-coral)]/5 border-[var(--accent-coral)]/20 hover:bg-[var(--accent-coral)]/10" 
