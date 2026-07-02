@@ -94,9 +94,9 @@ db:
 
 security:
   # SameSite attribute for session cookie.
-  # Options: "none" (default, required for HTTPS cross-origin), "lax" (allows HTTP intranet/LAN deployments), "strict", "default".
+  # Options: "lax" (default, allows HTTP intranet/LAN deployments), "none" (required for HTTPS cross-origin), "strict", "default".
   # Can be overridden by HOTPLEX_SECURITY_COOKIE_SAME_SITE env var.
-  cookie_same_site: "none"
+  cookie_same_site: "lax"
   api_key_header: "X-API-Key"
   # APIKeys must be provided via HOTPLEX_SECURITY_API_KEY_1..N env vars
   api_keys: []

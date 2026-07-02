@@ -65,7 +65,7 @@ func NewCookieAuth(configuredSecret string) (*CookieAuth, error) {
 		return &CookieAuth{
 			secret:   secretBytes,
 			maxAge:   cookieMaxAge,
-			sameSite: http.SameSiteNoneMode,
+			sameSite: http.SameSiteLaxMode,
 		}, nil
 	}
 
@@ -103,13 +103,13 @@ func NewCookieAuth(configuredSecret string) (*CookieAuth, error) {
 	return &CookieAuth{
 		secret:   secretBytes,
 		maxAge:   cookieMaxAge,
-		sameSite: http.SameSiteNoneMode,
+		sameSite: http.SameSiteLaxMode,
 	}, nil
 }
 
 // SetSameSite configures the SameSite attribute for the session cookies.
 // Supported values: "lax", "strict", "none", "default" (case-insensitive).
-// Defaults to SameSite=None to preserve same-origin webchat compatibility.
+// Defaults to SameSite=Lax to preserve intranet plain HTTP compatibility.
 func (c *CookieAuth) SetSameSite(mode string) {
 	switch strings.ToLower(mode) {
 	case "lax":
@@ -121,7 +121,7 @@ func (c *CookieAuth) SetSameSite(mode string) {
 	case "default":
 		c.sameSite = http.SameSiteDefaultMode
 	default:
-		c.sameSite = http.SameSiteNoneMode
+		c.sameSite = http.SameSiteLaxMode
 	}
 }
 

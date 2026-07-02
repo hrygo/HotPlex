@@ -436,6 +436,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		cookieAuth = ca
 		auth.SetCookieAuth(ca)
 		log.Info("gateway: webchat cookie auth enabled")
+		if strings.EqualFold(cfg.Security.CookieSameSite, "lax") || strings.EqualFold(cfg.Security.CookieSameSite, "strict") || cfg.Security.CookieSameSite == "" {
+			log.Warn("gateway: CookieSameSite is set to Lax/Strict (or default); cross-origin requests from other domains will not carry authentication cookies. For cross-origin HTTPS deployments, configure to 'none'")
+		}
 	}
 
 	// OAuth manager: created when SSO providers are configured (spec ④).

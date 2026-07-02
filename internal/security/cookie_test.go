@@ -30,7 +30,7 @@ func TestCookieAuthSignVerify(t *testing.T) {
 	require.Len(t, cookies, 1)
 	require.Equal(t, cookieName, cookies[0].Name)
 	require.True(t, cookies[0].HttpOnly)
-	require.Equal(t, http.SameSiteNoneMode, cookies[0].SameSite)
+	require.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
 
 	// Verify the cookie in a new request.
 	r2 := httptest.NewRequest("GET", "/", nil)
@@ -172,7 +172,7 @@ func TestCookieSecureFlagLoopback(t *testing.T) {
 		cookies := w.Result().Cookies()
 		require.Len(t, cookies, 1)
 		require.True(t, cookies[0].Secure, "Secure should be true for loopback host %q", host)
-		require.Equal(t, http.SameSiteNoneMode, cookies[0].SameSite)
+		require.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
 	}
 }
 
@@ -267,8 +267,8 @@ func TestCookieAuthSameSiteConfig(t *testing.T) {
 		{"strict", http.SameSiteStrictMode},
 		{"none", http.SameSiteNoneMode},
 		{"LAX", http.SameSiteLaxMode},
-		{"invalid", http.SameSiteNoneMode}, // Default fallback
-		{"", http.SameSiteNoneMode},        // Default fallback
+		{"invalid", http.SameSiteLaxMode}, // Default fallback
+		{"", http.SameSiteLaxMode},        // Default fallback
 	}
 
 	for _, tc := range tests {
