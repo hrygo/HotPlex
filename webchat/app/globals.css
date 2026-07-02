@@ -180,6 +180,111 @@ body {
 }
 
 /* ============================================================
+   Interactive Cursor & Feedback Reset — Premium UX Integration
+   ============================================================ */
+
+/* 1. Global Outline & Keyboard Focus Ring */
+button:focus,
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[role="link"]:focus-visible,
+[role="tab"]:focus-visible {
+    outline: 2px solid var(--accent-gold);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--accent-gold-glow);
+}
+
+/* 2. Interactive Pointers (Default to hand cursor) */
+button,
+a,
+select,
+summary,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+input[type="checkbox"],
+input[type="radio"],
+input[type="file"]::-webkit-file-upload-button,
+input[type="file"]::file-selector-button,
+[role="button"],
+[role="link"],
+[role="tab"],
+.cursor-pointer-reset {
+    cursor: pointer;
+}
+
+/* 3. Text Editing Pointers */
+input[type="text"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+textarea {
+    cursor: text;
+}
+
+/* 4. Disabled State Normalization
+   We keep pointer-events active on the container level so the not-allowed cursor is displayed properly.
+   We lower opacity and apply the not-allowed cursor. Custom click handlers must inspect disabled state. */
+:disabled,
+[disabled],
+[aria-disabled="true"],
+.disabled-reset {
+    cursor: not-allowed !important;
+    opacity: 0.45 !important;
+}
+
+/* 5. Smooth Transitions & Active Press Feedback */
+button:not(:disabled),
+a:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+.btn-icon:not(:disabled),
+.btn-primary:not(:disabled) {
+    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1),
+                background-color 0.2s cubic-bezier(0.2, 0, 0, 1),
+                border-color 0.2s cubic-bezier(0.2, 0, 0, 1),
+                box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1),
+                color 0.2s cubic-bezier(0.2, 0, 0, 1),
+                opacity 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+button:not(:disabled):active,
+a:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active,
+.btn-icon:not(:disabled):active,
+.btn-primary:not(:disabled):active {
+    transform: scale(0.97);
+}
+
+/* Helper for card hover lift and active press scale */
+.hover-lift {
+    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1),
+                box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1),
+                border-color 0.2s cubic-bezier(0.2, 0, 0, 1),
+                background-color 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+.hover-lift:hover:not(:disabled) {
+    transform: translateY(-2px);
+}
+.hover-lift:active:not(:disabled) {
+    transform: translateY(-1px) scale(0.99);
+}
+
+/* ============================================================
    Background Effects — Mesh Gradient + Noise
    ============================================================ */
 .bg-mesh {
