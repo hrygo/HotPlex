@@ -817,14 +817,17 @@ a:not(:disabled):active,
     border: 1px solid var(--border-default);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-composer);
-    /* Only animate border, box-shadow for perf — avoid 'all' which triggers layout recalc */
+    /* Only animate border, box-shadow, transform, background for perf — avoid layout recalcs */
     transition:
-        border-color 0.2s ease,
-        box-shadow 0.2s ease;
+        border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+        box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+        transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+        background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     display: flex;
     flex-direction: column;
     backdrop-filter: blur(24px) saturate(200%);
     position: relative;
+    transform: translateY(0) scale(1);
 }
 
 .composer-root::after {
@@ -835,9 +838,9 @@ a:not(:disabled):active,
     padding: 1px;
     background: linear-gradient(
         135deg,
-        rgba(251, 191, 36, 0.2),
-        transparent,
-        rgba(52, 211, 153, 0.1)
+        rgba(251, 191, 36, 0.25),
+        transparent 60%,
+        rgba(52, 211, 153, 0.15)
     );
     -webkit-mask:
         linear-gradient(#fff 0 0) content-box,
@@ -849,18 +852,27 @@ a:not(:disabled):active,
     mask-composite: exclude;
     pointer-events: none;
     opacity: 0.5;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .composer-root:focus-within {
-    border-color: var(--amber-border);
+    border-color: rgba(251, 191, 36, 0.6);
+    background-color: var(--bg-surface-hover);
+    transform: translateY(-3px) scale(1.006);
     box-shadow:
+        0 8px 30px rgba(0, 0, 0, 0.2),
         0 0 0 4px var(--accent-gold-glow),
         var(--shadow-composer-focus);
 }
 
 .composer-root:focus-within::after {
     opacity: 1;
+    background: linear-gradient(
+        135deg,
+        var(--accent-gold),
+        rgba(251, 191, 36, 0.3) 50%,
+        rgba(245, 158, 11, 0.8)
+    );
 }
 
 .composer-input-row {
@@ -880,6 +892,11 @@ a:not(:disabled):active,
     font-size: 0.9375rem;
     color: var(--text-primary);
     max-height: 200px;
+    transition: padding-left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-root:focus-within .composer-input {
+    padding-left: 2px;
 }
 
 .composer-input::placeholder {
@@ -905,6 +922,15 @@ a:not(:disabled):active,
 .btn-primary {
     background: var(--accent-gold);
     color: var(--text-contrast);
+}
+
+.btn-primary:not(:disabled) {
+    animation: composer-bounce-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes composer-bounce-in {
+    0% { transform: scale(0.85); }
+    100% { transform: scale(1); }
 }
 
 .btn-primary:hover:not(:disabled) {

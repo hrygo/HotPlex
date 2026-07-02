@@ -76,14 +76,14 @@ export function FileDiffTool({ toolName, filePath, content, status, onToggle }: 
 
       {/* Running skeleton */}
       {status === "running" && !content && (
-        <div className="bg-[#08080a] p-8">
+        <div className="bg-[var(--bg-base)] p-8">
           <ToolLoadingSkeleton color="var(--accent-blue)" label="Synthesizing file patch..." />
         </div>
       )}
 
       {/* Code content */}
       {content && (
-        <div className="bg-[#08080a] max-h-[400px] overflow-y-auto scrollbar-thin">
+        <div className="bg-[var(--bg-base)] max-h-[400px] overflow-y-auto scrollbar-thin">
           <table className="w-full border-collapse">
             <tbody>
               {lines.map((line, i) => {
@@ -92,7 +92,7 @@ export function FileDiffTool({ toolName, filePath, content, status, onToggle }: 
                 return (
                   <tr key={i} className={`font-mono text-[13px] leading-relaxed transition-colors ${isAdd ? "bg-[var(--accent-emerald)]/[0.08] hover:bg-[var(--accent-emerald)]/[0.12]" :
                       isDel ? "bg-[var(--accent-coral)]/[0.08] hover:bg-[var(--accent-coral)]/[0.12]" :
-                        "hover:bg-white/[0.02]"
+                        "hover:bg-[var(--bg-hover)]"
                     }`}>
                     <td className="px-4 py-0.5 text-right text-[var(--text-faint)] select-none w-[1%] whitespace-nowrap opacity-30 font-mono text-[11px]">
                       {i + 1}

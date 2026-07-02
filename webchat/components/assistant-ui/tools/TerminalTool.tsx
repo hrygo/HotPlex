@@ -70,7 +70,7 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
       </div>
 
       {/* Command */}
-      <div className="px-5 py-3.5 bg-[#08080a] border-b border-[var(--border-subtle)]/50">
+      <div className="px-5 py-3.5 bg-[var(--bg-base)] border-b border-[var(--border-subtle)]/50">
         <div className="flex items-start gap-3">
           <span className="text-[var(--accent-emerald)] font-mono text-[14px] font-bold select-none leading-[21px] flex-shrink-0">❯</span>
           <code className="font-mono text-[14px] text-[var(--text-primary)] leading-[21px] break-all">
@@ -88,7 +88,7 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
 
       {/* Output */}
       {output && (
-        <div className="bg-[#08080a] px-5 py-4 max-h-[500px] overflow-y-auto scrollbar-thin">
+        <div className="bg-[var(--bg-base)] px-5 py-4 max-h-[500px] overflow-y-auto scrollbar-thin">
           <div className="space-y-1">
             {displayLines.map((line, i) => (
               <div
@@ -115,7 +115,7 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
 
       {/* Running skeleton */}
       {status === "running" && !output && (
-        <div className="bg-[#08080a] p-8 border-t border-[var(--border-subtle)]/30">
+        <div className="bg-[var(--bg-base)] p-8 border-t border-[var(--border-subtle)]/30">
           <ToolLoadingSkeleton color="var(--accent-emerald)" label={t('chat:tool.terminal.awaiting_response', { defaultValue: 'Awaiting response from shell...' })} />
         </div>
       )}
