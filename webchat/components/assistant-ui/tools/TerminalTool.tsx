@@ -104,17 +104,17 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
           {lines.length > MAX_VISIBLE_LINES && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="mt-4 text-[11px] font-mono font-bold text-[var(--accent-gold)] hover:text-[var(--accent-gold)]/80 transition-colors uppercase tracking-wider flex items-center gap-2"
+              className="mt-4 text-[11px] font-mono font-bold text-[var(--accent-emerald)] hover:text-[var(--accent-emerald)]/80 transition-colors uppercase tracking-wider flex items-center gap-2"
             >
               {expanded ? (
                 <>
                   <span>- {t('chat:tool.terminal.collapse_lines', { defaultValue: 'Collapse output' })}</span>
-                  <div className="flex-1 h-[1px] bg-[var(--accent-gold)]/20" />
+                  <div className="flex-1 h-[1px] bg-[var(--accent-emerald)]/20" />
                 </>
               ) : (
                 <>
                   <span>+ {t('chat:tool.terminal.more_lines', { count: lines.length - MAX_VISIBLE_LINES, defaultValue: `+ ${lines.length - MAX_VISIBLE_LINES} more lines` })}</span>
-                  <div className="flex-1 h-[1px] bg-[var(--accent-gold)]/20" />
+                  <div className="flex-1 h-[1px] bg-[var(--accent-emerald)]/20" />
                 </>
               )}
             </button>
