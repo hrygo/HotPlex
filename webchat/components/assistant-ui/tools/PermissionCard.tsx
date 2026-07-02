@@ -57,7 +57,7 @@ export function PermissionCard({ toolName, args, status, onRespond, onToggle }: 
       {/* Body */}
       <div className="px-4 py-3 bg-[var(--bg-surface)]">
         {command && (
-          <div className="mb-2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[#0c0c0f] border border-[var(--border-subtle)]">
+          <div className="mb-2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--bg-base)] border border-[var(--border-subtle)]">
             <span className="font-mono text-[12px] text-[var(--accent-emerald)] select-none mr-1.5">$</span>
             <span className="font-mono text-[12px] text-[var(--text-primary)]">{command}</span>
           </div>

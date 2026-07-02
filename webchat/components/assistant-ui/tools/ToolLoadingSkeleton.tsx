@@ -12,7 +12,7 @@ export function ToolLoadingSkeleton({
   label = "Loading...",
 }: ToolLoadingSkeletonProps) {
   return (
-    <div className="bg-[#0c0c0f] px-4 py-4 flex items-center gap-3">
+    <div className="bg-[var(--bg-base)] px-4 py-4 flex items-center gap-3">
       <motion.div
         className="flex gap-1"
         animate={{ opacity: [0.3, 1, 0.3] }}

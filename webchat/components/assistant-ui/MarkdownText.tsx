@@ -37,7 +37,7 @@ function CodeBlock({
     };
 
     return (
-        <div className="relative group/code my-6 rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-default)] bg-[#0c0c0f] shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+        <div className="relative group/code my-6 rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] bg-[var(--bg-base)] shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
             <div
                 className={`flex items-center justify-between px-4 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] ${isExpandable ? "cursor-pointer hover:bg-[var(--bg-hover)]" : ""}`}
                 onClick={() => isExpandable && setIsExpanded(!isExpanded)}

@@ -53,7 +53,7 @@ export function ListTool({ toolName, path, items, status, onToggle }: ListToolPr
 
       {/* Items */}
       {status === "complete" && items && items.length > 0 && (
-        <div className="bg-[#0c0c0f] max-h-[300px] overflow-y-auto">
+        <div className="bg-[var(--bg-base)] max-h-[300px] overflow-y-auto">
           <div className="grid grid-cols-[1fr_auto] gap-x-4 px-3 py-2 border-b border-white/[0.03] text-[9px] font-mono text-[var(--text-faint)] uppercase tracking-wider">
             <span>Name</span>
             <span>Info</span>
@@ -89,7 +89,7 @@ export function ListTool({ toolName, path, items, status, onToggle }: ListToolPr
       )}
 
       {status === "complete" && items && items.length === 0 && (
-        <div className="bg-[#0c0c0f] px-4 py-4 text-center">
+        <div className="bg-[var(--bg-base)] px-4 py-4 text-center">
           <span className="text-[11px] font-mono text-[var(--text-faint)]">Empty directory</span>
         </div>
       )}
