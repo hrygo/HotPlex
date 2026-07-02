@@ -52,7 +52,7 @@ export function ReasoningBlock({ text, isStreaming }: { text: string; isStreamin
             className="overflow-hidden"
           >
             <div className="reasoning-content border-t border-[var(--border-subtle)]/50 leading-relaxed">
-              <MarkdownText text={text.trim()} />
+              <MarkdownText text={text.replace(/\n{3,}/g, "\n\n").trim()} />
             </div>
           </motion.div>
         )}

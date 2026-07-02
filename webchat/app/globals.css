@@ -1060,6 +1060,11 @@ a:not(:disabled):active,
     margin-bottom: 1.25em;
 }
 
+.reasoning-content .prose p {
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
 .prose pre {
     background: #0c0c0f !important;
     border: 1px solid var(--border-default);
