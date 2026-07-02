@@ -1,19 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MarkdownText } from "./MarkdownText";
 
-export function ReasoningBlock({ text }: { text: string }) {
+export function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+
+  useEffect(() => {
+    if (isStreaming && !hasInteracted) {
+      setExpanded(true);
+    }
+  }, [isStreaming, hasInteracted]);
+
   if (!text.trim()) return null;
   const estimatedSeconds = Math.max(1, Math.round(text.length / 200));
+
+  const handleToggle = () => {
+    setExpanded(!expanded);
+    setHasInteracted(true);
+  };
 
   return (
     <div className="reasoning-block group/reasoning border-[var(--border-subtle)] hover:border-[var(--accent-gold)]/20 transition-colors">
       <div
         className="reasoning-header px-4 py-2.5 flex items-center gap-3 cursor-pointer select-none"
-        onClick={() => setExpanded(!expanded)}
+        onClick={handleToggle}
       >
         <motion.div
           animate={{ rotate: expanded ? 90 : 0 }}

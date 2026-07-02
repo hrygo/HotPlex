@@ -43,7 +43,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
               if (!p || !p.type) return null;
               const isStreaming = ext.status?.type === "running";
 
-              if (p.type === "reasoning") return <ReasoningBlock text={p.text || p.reasoning || ""} />;
+              if (p.type === "reasoning") return <ReasoningBlock text={p.text || p.reasoning || ""} isStreaming={isStreaming} />;
               if (p.type === "text") return <div className={`prose-hotplex ${isStreaming ? "streaming-cursor" : ""}`}><MarkdownText text={p.text} /></div>;
 
               if (p.type === "tool-call") {
