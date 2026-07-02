@@ -830,31 +830,6 @@ a:not(:disabled):active,
     transform: translateY(0);
 }
 
-.composer-root::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(
-        135deg,
-        rgba(251, 191, 36, 0.15),
-        transparent 70%,
-        rgba(251, 191, 36, 0.05)
-    );
-    -webkit-mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
-    mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    opacity: 0.3;
-    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
 .composer-root:focus-within {
     border-color: rgba(251, 191, 36, 0.35);
     background-color: var(--bg-surface);
@@ -863,11 +838,6 @@ a:not(:disabled):active,
         0 6px 20px rgba(0, 0, 0, 0.12),
         0 0 0 2px var(--accent-gold-glow),
         var(--shadow-composer-focus);
-}
-
-.composer-root:focus-within::after {
-    opacity: 0.7;
-    background: rgba(251, 191, 36, 0.25);
 }
 
 .composer-input-row {
