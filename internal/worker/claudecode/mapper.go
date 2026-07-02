@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -131,7 +132,7 @@ func (m *Mapper) mapStream(p *StreamPayload) (*events.Envelope, error) { //nolin
 
 	var content string
 	if p.IsDelta {
-		m.recordSentLength(msgID+"_"+p.Type, len(p.Content))
+		m.recordSentLength(msgID+"_"+p.Type, utf8.RuneCountInString(p.Content))
 		content = p.Content
 	} else {
 		content = m.getDeltaText(msgID+"_"+p.Type, p.Content)
@@ -353,14 +354,15 @@ func (m *Mapper) getDeltaText(itemID, currentText string) string {
 		m.sentLengths = make(map[string]int)
 	}
 
+	runes := []rune(currentText)
 	lastLen := m.sentLengths[itemID]
-	currLen := len(currentText)
+	currLen := len(runes)
 
 	if currLen <= lastLen {
 		return ""
 	}
 
-	delta := currentText[lastLen:]
+	delta := string(runes[lastLen:])
 	m.sentLengths[itemID] = currLen
 	return delta
 }

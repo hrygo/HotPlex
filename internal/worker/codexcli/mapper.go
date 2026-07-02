@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -431,7 +432,7 @@ func (m *Mapper) mapNotifDelta(params json.RawMessage) []*events.Envelope {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil
 	}
-	m.recordSentLength(p.ItemID, len(p.Delta))
+	m.recordSentLength(p.ItemID, utf8.RuneCountInString(p.Delta))
 	return []*events.Envelope{
 		newEnvelope(events.MessageDelta, events.MessageDeltaData{
 			MessageID: m.tracker.getMessageID(p.ItemID),
@@ -510,7 +511,7 @@ func (m *Mapper) mapNotifReasoningDelta(params json.RawMessage) []*events.Envelo
 	if err := json.Unmarshal(params, &p); err != nil || p.Delta == "" {
 		return nil
 	}
-	m.recordSentLength(p.ItemID, len(p.Delta))
+	m.recordSentLength(p.ItemID, utf8.RuneCountInString(p.Delta))
 	return []*events.Envelope{
 		newEnvelope(events.Reasoning, events.ReasoningData{
 			ID:      p.ItemID,
@@ -824,14 +825,15 @@ func (m *Mapper) getDeltaText(itemID, currentText string) string {
 		m.sentLengths = make(map[string]int)
 	}
 
+	runes := []rune(currentText)
 	lastLen := m.sentLengths[itemID]
-	currLen := len(currentText)
+	currLen := len(runes)
 
 	if currLen <= lastLen {
 		return ""
 	}
 
-	delta := currentText[lastLen:]
+	delta := string(runes[lastLen:])
 	m.sentLengths[itemID] = currLen
 	return delta
 }
