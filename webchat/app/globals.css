@@ -847,9 +847,10 @@ a:not(:disabled):active,
     padding: 0.75rem 1rem;
 }
 
-.composer-input {
+.composer-input,
+.composer-input-row textarea {
     flex: 1;
-    background: transparent;
+    background: transparent !important;
     border: none !important;
     outline: none !important;
     box-shadow: none !important;
@@ -863,10 +864,17 @@ a:not(:disabled):active,
 
 .composer-input:focus,
 .composer-input:focus-visible,
-.composer-input:active {
+.composer-input:active,
+.composer-input-row textarea:focus,
+.composer-input-row textarea:focus-visible,
+.composer-input-row textarea:active,
+.composer-input-row *:focus,
+.composer-input-row *:focus-visible,
+.composer-input-row *:active {
     outline: none !important;
     border: none !important;
     box-shadow: none !important;
+    background: transparent !important;
 }
 
 .composer-root:focus-within .composer-input {
