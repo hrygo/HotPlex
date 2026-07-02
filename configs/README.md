@@ -119,6 +119,7 @@ log:
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径。仅当 `tls_enabled: true` 时使用 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径。仅当 `tls_enabled: true` 时使用 |
 | `allowed_origins` | []string | `["*"]` | ✅ | CORS 允许的 Origin 列表。WebSocket 升级时 `Upgrader.CheckOrigin` 校验请求的 Origin 头。`["*"]` 允许所有来源（仅开发用），生产应限制为具体域名。热重载即时生效——每次 WS 升级请求读取最新配置 |
+| `cookie_same_site` | string | `none` | — | WebChat 登录 Session Cookie 的 SameSite 属性。可选值：`none`（默认，要求 Secure 标记即 HTTPS 或 localhost 环回）、`lax`（允许纯 HTTP 局域网/内网部署，仍然具备 CSRF 防御）、`strict`、`default`。 |
 
 ### session — 会话生命周期
 
