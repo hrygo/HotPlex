@@ -270,7 +270,7 @@ export function SessionPanel({
                         placeholder={t("chat:placeholder.search")}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-[var(--bg-elevated)] border border-transparent rounded-xl pl-9 pr-4 py-2 text-xs text-[var(--text-primary)] focus:bg-[var(--bg-surface)] focus:border-[var(--border-bright)] transition-all placeholder:text-[var(--text-faint)]"
+                        className="session-search-input"
                     />
                 </div>
             </div>
