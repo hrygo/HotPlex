@@ -35,7 +35,9 @@
   "lang": {
     "switch": "切换语言",
     "en": "English",
-    "zh-CN": "简体中文"
+    "zh-CN": "简体中文",
+    "switchToEn": "切换至英文",
+    "switchToZh": "切换至中文"
   },
   "theme": {
     "light": "切换至亮色模式",

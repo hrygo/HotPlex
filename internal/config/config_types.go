@@ -616,7 +616,8 @@ type SecurityConfig struct {
 
 	// CookieSameSite controls the SameSite attribute of the session cookie.
 	// Valid values: "lax", "strict", "none", "default" (case-insensitive).
-	// Defaults to "none" to preserve same-origin webchat compatibility.
+	// Defaults to "lax" to preserve same-origin webchat compatibility;
+	// cross-origin HTTPS deployments should set to "none".
 	CookieSameSite string `mapstructure:"cookie_same_site"`
 }
 

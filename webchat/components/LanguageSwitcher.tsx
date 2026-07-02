@@ -1,14 +1,16 @@
 "use client";
 
 import { useLanguage } from "@/lib/i18n/use-language";
+import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function LanguageSwitcher({ variant = "icon" }: { variant?: "icon" | "inline" }) {
   const { locale, changeLanguage, supported } = useLanguage();
+  const { t } = useTranslation("common");
 
   const labels: Record<string, string> = {
-    en: "English",
-    "zh-CN": "简体中文",
+    en: t("lang.en"),
+    "zh-CN": t("lang.zh-CN"),
   };
 
   const handleToggle = () => {
@@ -37,7 +39,7 @@ export function LanguageSwitcher({ variant = "icon" }: { variant?: "icon" | "inl
     );
   }
 
-  const tooltipText = locale === "zh-CN" ? "Switch to English" : "切换至中文";
+  const tooltipText = locale === "zh-CN" ? t("lang.switchToEn") : t("lang.switchToZh");
 
   return (
     <button

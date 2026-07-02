@@ -867,10 +867,7 @@ a:not(:disabled):active,
 .composer-input:active,
 .composer-input-row textarea:focus,
 .composer-input-row textarea:focus-visible,
-.composer-input-row textarea:active,
-.composer-input-row *:focus,
-.composer-input-row *:focus-visible,
-.composer-input-row *:active {
+.composer-input-row textarea:active {
     outline: none !important;
     border: none !important;
     box-shadow: none !important;
