@@ -14,7 +14,10 @@ import (
 )
 
 func (a *Adapter) newEventHandler() *dispatcher.EventDispatcher {
-	return dispatcher.NewEventDispatcher("", "").
+	d := dispatcher.NewEventDispatcher("", "")
+	d.Config.Logger = SlogLogger{Logger: a.Log}
+
+	return d.
 		// Callbacks are dispatched before message events in the EventDispatcher
 		// (Do() checks callbackType2CallbackHandler before eventType2EventHandler),
 		// so register card action handlers first to mirror that priority order.

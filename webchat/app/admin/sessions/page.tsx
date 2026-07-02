@@ -8,6 +8,7 @@ import { SessionStatusBadge } from '@/components/admin/session-status-badge';
 import { useAdminUI } from '@/context/admin-ui-context';
 import type { AdminSessionInfo } from '@/lib/types/admin';
 import { formatRelative as formatTime, formatDateTime } from '@/lib/utils/format-time';
+import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,6 +28,7 @@ function truncateId(id: string): string {
 // ---------------------------------------------------------------------------
 
 export default function SessionsPage() {
+  const { t } = useTranslation();
   const { showToast, confirm } = useAdminUI();
   const [sessions, setSessions] = useState<AdminSessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,11 +59,11 @@ export default function SessionsPage() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sessions');
+      setError(err instanceof Error ? err.message : t('admin:sessions.error.load_failed', { defaultValue: 'Failed to load sessions' }));
     } finally {
       setLoading(false);
     }
-  }, [drawerSession]);
+  }, [drawerSession, t]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
@@ -124,18 +126,18 @@ export default function SessionsPage() {
     try {
       await navigator.clipboard.writeText(id);
       setCopyIdFeedback(id);
-      showToast('Copied Session ID to clipboard', 'success');
+      showToast(t('admin:sessions.toast.copied', { defaultValue: 'Copied Session ID to clipboard' }), 'success');
       setTimeout(() => setCopyIdFeedback(null), 2000);
     } catch {
-      showToast('Failed to copy ID', 'error');
+      showToast(t('admin:sessions.toast.copy_failed', { defaultValue: 'Failed to copy ID' }), 'error');
     }
   };
 
   const handleTerminate = async (id: string, fromDrawer = false) => {
     const confirmed = await confirm(
-      'Terminate Session?',
-      `Are you sure you want to terminate session "${truncateId(id)}"? The running worker process will be stopped immediately.`,
-      { confirmLabel: 'Terminate', destructive: true }
+      t('admin:sessions.confirm.terminate_title', { defaultValue: 'Terminate Session?' }),
+      t('admin:sessions.confirm.terminate_body', { id: truncateId(id), defaultValue: `Are you sure you want to terminate session "${truncateId(id)}"? The running worker process will be stopped immediately.` }),
+      { confirmLabel: t('admin:sessions.action.terminate', { defaultValue: 'Terminate' }), destructive: true }
     );
     if (!confirmed) return;
     try {
@@ -150,9 +152,9 @@ export default function SessionsPage() {
         setDrawerSession((prev) => (prev ? { ...prev, state: 'terminated' } : null));
       }
 
-      showToast(`Session "${truncateId(id)}" successfully terminated.`, 'success');
+      showToast(t('admin:sessions.toast.terminated', { id: truncateId(id), defaultValue: `Session "${truncateId(id)}" successfully terminated.` }), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to terminate session', 'error');
+      showToast(err instanceof Error ? err.message : t('admin:sessions.toast.terminate_failed', { defaultValue: 'Failed to terminate session' }), 'error');
     } finally {
       setActionLoading(null);
     }
@@ -160,9 +162,9 @@ export default function SessionsPage() {
 
   const handleDelete = async (id: string, fromDrawer = false) => {
     const confirmed = await confirm(
-      'Delete Session?',
-      `Are you sure you want to permanently delete session "${truncateId(id)}"? All database traces will be deleted. This action is irreversible.`,
-      { confirmLabel: 'Delete', destructive: true }
+      t('admin:sessions.confirm.delete_title', { defaultValue: 'Delete Session?' }),
+      t('admin:sessions.confirm.delete_body', { id: truncateId(id), defaultValue: `Are you sure you want to permanently delete session "${truncateId(id)}"? All database traces will be deleted. This action is irreversible.` }),
+      { confirmLabel: t('admin:sessions.action.delete', { defaultValue: 'Delete' }), destructive: true }
     );
     if (!confirmed) return;
 
@@ -176,9 +178,9 @@ export default function SessionsPage() {
         setDrawerSession(null);
       }
 
-      showToast(`Session "${truncateId(id)}" successfully deleted.`, 'success');
+      showToast(t('admin:sessions.toast.deleted', { id: truncateId(id), defaultValue: `Session "${truncateId(id)}" successfully deleted.` }), 'success');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to delete session', 'error');
+      showToast(err instanceof Error ? err.message : t('admin:sessions.toast.delete_failed', { defaultValue: 'Failed to delete session' }), 'error');
     } finally {
       setActionLoading(null);
     }
@@ -211,14 +213,15 @@ export default function SessionsPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-display font-bold tracking-tight text-[var(--text-primary)]">
-              Sessions
+              {t('admin:sessions.title', { defaultValue: 'Sessions' })}
             </h1>
             <p className="text-xs text-[var(--text-muted)] mt-1">
-              Monitor, audit, and manage real-time active MOSS/Claude Code workers and sessions.
+              {t('admin:sessions.subtitle', { defaultValue: 'Monitor, audit, and manage real-time active MOSS/Claude Code workers and sessions.' })}
             </p>
           </div>
 
           <button
+            type="button"
             onClick={loadSessions}
             disabled={loading}
             className="self-start md:self-auto inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-all active:scale-95 disabled:opacity-40 shadow-[var(--shadow-sm)]"
@@ -237,7 +240,7 @@ export default function SessionsPage() {
                 d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
               />
             </svg>
-            Refresh List
+            {t('admin:sessions.action.refresh', { defaultValue: 'Refresh List' })}
           </button>
         </div>
 
@@ -245,19 +248,19 @@ export default function SessionsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {/* Card 1: Total */}
           <MetricCard
-            label="Total Sessions"
+            label={t('admin:sessions.metrics.total', { defaultValue: 'Total Sessions' })}
             value={stats.total}
-            suffix="sessions"
-            sub="Lifetime execution tracks"
+            suffix={t('admin:sessions.metrics.total_suffix', { defaultValue: 'sessions' })}
+            sub={t('admin:sessions.metrics.total_sub', { defaultValue: 'Lifetime execution tracks' })}
             icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--text-primary)]"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" /></svg>}
           />
 
           {/* Card 2: Active */}
           <MetricCard
-            label="Active Engines"
+            label={t('admin:sessions.metrics.active', { defaultValue: 'Active Engines' })}
             value={stats.active}
-            suffix="running"
-            sub="Consuming worker resources"
+            suffix={t('admin:sessions.metrics.active_suffix', { defaultValue: 'running' })}
+            sub={t('admin:sessions.metrics.active_sub', { defaultValue: 'Consuming worker resources' })}
             accent="emerald"
             pulse
             icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--accent-emerald)]"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>}
@@ -265,20 +268,20 @@ export default function SessionsPage() {
 
           {/* Card 3: Idle */}
           <MetricCard
-            label="Idle Workers"
+            label={t('admin:sessions.metrics.idle', { defaultValue: 'Idle Workers' })}
             value={stats.idle}
-            suffix="waiting"
-            sub="Suspended, waiting for input"
+            suffix={t('admin:sessions.metrics.idle_suffix', { defaultValue: 'waiting' })}
+            sub={t('admin:sessions.metrics.idle_sub', { defaultValue: 'Suspended, waiting for input' })}
             accent="amber"
             icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--accent-amber)]"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>}
           />
 
           {/* Card 4: Terminated */}
           <MetricCard
-            label="Terminated"
+            label={t('admin:sessions.metrics.terminated', { defaultValue: 'Terminated' })}
             value={stats.terminated}
-            suffix="completed"
-            sub="Safely released & exited"
+            suffix={t('admin:sessions.metrics.terminated_suffix', { defaultValue: 'completed' })}
+            sub={t('admin:sessions.metrics.terminated_sub', { defaultValue: 'Safely released & exited' })}
             accent="muted"
             icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-[var(--text-muted)]"><path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" /></svg>}
           />
@@ -289,6 +292,7 @@ export default function SessionsPage() {
           {/* Segmented Tabs Status Filter */}
           <div className="flex flex-wrap items-center gap-1 bg-[var(--bg-base)] border border-[var(--border-subtle)] p-1 rounded-[var(--radius-sm)]">
             <button
+              type="button"
               onClick={() => setFilter('all')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'all'
@@ -296,9 +300,10 @@ export default function SessionsPage() {
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              All <span className="opacity-60 ml-0.5">({stats.total})</span>
+              {t('admin:sessions.filter.all', { defaultValue: 'All' })} <span className="opacity-60 ml-0.5">({stats.total})</span>
             </button>
             <button
+              type="button"
               onClick={() => setFilter('running')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'running'
@@ -306,9 +311,10 @@ export default function SessionsPage() {
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              Running <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'running').length})</span>
+              {t('admin:sessions.filter.running', { defaultValue: 'Running' })} <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'running').length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setFilter('created')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'created'
@@ -316,9 +322,10 @@ export default function SessionsPage() {
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              Created <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'created').length})</span>
+              {t('admin:sessions.filter.created', { defaultValue: 'Created' })} <span className="opacity-60 ml-0.5">({sessions.filter((s) => s.state === 'created').length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setFilter('idle')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'idle'
@@ -326,9 +333,10 @@ export default function SessionsPage() {
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              Idle <span className="opacity-60 ml-0.5">({stats.idle})</span>
+              {t('admin:sessions.filter.idle', { defaultValue: 'Idle' })} <span className="opacity-60 ml-0.5">({stats.idle})</span>
             </button>
             <button
+              type="button"
               onClick={() => setFilter('terminated')}
               className={`px-3 py-1 text-[11px] font-semibold rounded-[var(--radius-xs)] transition-all ${
                 filter === 'terminated'
@@ -336,7 +344,7 @@ export default function SessionsPage() {
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              Terminated <span className="opacity-60 ml-0.5">({stats.terminated})</span>
+              {t('admin:sessions.filter.terminated', { defaultValue: 'Terminated' })} <span className="opacity-60 ml-0.5">({stats.terminated})</span>
             </button>
           </div>
 
@@ -361,11 +369,12 @@ export default function SessionsPage() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search session details..."
+                placeholder={t('admin:sessions.placeholder.search', { defaultValue: 'Search session details...' })}
                 className="w-full pl-8 pr-7 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-base)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-all focus:border-[var(--accent-gold)]/40"
               />
               {query && (
                 <button
+                  type="button"
                   onClick={() => setQuery('')}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-faint)] hover:text-[var(--text-primary)] transition-colors p-0.5"
                 >
@@ -383,8 +392,8 @@ export default function SessionsPage() {
                 onChange={(e) => setSort(e.target.value as SortOption)}
                 className="w-full sm:w-auto rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-base)] pl-3 pr-8 py-1.5 text-xs text-[var(--text-primary)] outline-none transition-all focus:border-[var(--accent-gold)]/40 appearance-none"
               >
-                <option value="last_active">Last Active</option>
-                <option value="created">Created Date</option>
+                <option value="last_active">{t('admin:sessions.sort.last_active', { defaultValue: 'Last Active' })}</option>
+                <option value="created">{t('admin:sessions.sort.created', { defaultValue: 'Created Date' })}</option>
               </select>
               <div className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
@@ -400,7 +409,7 @@ export default function SessionsPage() {
           <div className="flex items-center justify-center py-32 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]">
             <div className="flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs font-medium text-[var(--text-muted)] animate-pulse">Loading execution registry...</span>
+              <span className="text-xs font-medium text-[var(--text-muted)] animate-pulse">{t('admin:sessions.loading', { defaultValue: 'Loading execution registry...' })}</span>
             </div>
           </div>
         )}
@@ -416,10 +425,11 @@ export default function SessionsPage() {
                 <p className="text-xs font-semibold text-[var(--accent-coral)]">{error}</p>
               </div>
               <button
+                type="button"
                 onClick={loadSessions}
                 className="text-xs font-bold text-[var(--accent-coral)] underline underline-offset-4 hover:text-[var(--accent-coral)]/80 transition-colors"
               >
-                Retry Fetch
+                {t('common:action.retry', { defaultValue: 'Retry Fetch' })}
               </button>
             </div>
           </div>
@@ -444,21 +454,22 @@ export default function SessionsPage() {
             </svg>
             <p className="text-sm font-semibold text-[var(--text-muted)]">
               {filter !== 'all' || query.trim()
-                ? 'No matching execution channels found'
-                : 'No session registry exists'}
+                ? t('admin:sessions.empty.no_match', { defaultValue: 'No matching execution channels found' })
+                : t('admin:sessions.empty.no_sessions', { defaultValue: 'No session registry exists' })}
             </p>
             <p className="text-xs text-[var(--text-faint)] mt-1.5 max-w-xs leading-relaxed">
-              Try adjusting your search criteria, selecting another filter tab, or refreshing.
+              {t('admin:sessions.empty.hint', { defaultValue: 'Try adjusting your search criteria, selecting another filter tab, or refreshing.' })}
             </p>
             {(filter !== 'all' || query.trim()) && (
               <button
+                type="button"
                 onClick={() => {
                   setFilter('all');
                   setQuery('');
                 }}
                 className="mt-4 px-3 py-1.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all"
               >
-                Reset Filter Parameters
+                {t('admin:sessions.action.reset_filter', { defaultValue: 'Reset Filter Parameters' })}
               </button>
             )}
           </div>
@@ -472,25 +483,25 @@ export default function SessionsPage() {
               className={`grid ${gridCols} gap-3 px-5 py-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] items-center`}
             >
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono">
-                ID / Title
+                {t('admin:sessions.table.id_title', { defaultValue: 'ID / Title' })}
               </span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono">
-                Engine type
+                {t('admin:sessions.table.engine_type', { defaultValue: 'Engine type' })}
               </span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono">
-                Executing user
+                {t('admin:sessions.table.user', { defaultValue: 'Executing user' })}
               </span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono">
-                Status
+                {t('admin:sessions.table.status', { defaultValue: 'Status' })}
               </span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono">
-                Started
+                {t('admin:sessions.table.started', { defaultValue: 'Started' })}
               </span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono">
-                Active time
+                {t('admin:sessions.table.active_time', { defaultValue: 'Active time' })}
               </span>
               <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest font-mono text-right">
-                Actions
+                {t('admin:sessions.table.actions', { defaultValue: 'Actions' })}
               </span>
             </div>
 
@@ -513,9 +524,9 @@ export default function SessionsPage() {
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
                           className="text-xs font-semibold text-[var(--text-primary)] truncate"
-                          title={session.title || 'Untitled Session'}
+                          title={session.title || t('admin:sessions.detail.untitled', { defaultValue: 'Untitled Session' })}
                         >
-                          {session.title || 'Untitled Session'}
+                          {session.title || t('admin:sessions.detail.untitled', { defaultValue: 'Untitled Session' })}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 mt-1 group">
@@ -523,9 +534,10 @@ export default function SessionsPage() {
                           {truncateId(session.id)}
                         </span>
                         <button
+                          type="button"
                           onClick={(e) => handleCopyId(e, session.id)}
                           className="text-[var(--text-faint)] hover:text-[var(--accent-gold)] p-0.5 rounded-[var(--radius-sm)] transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                          title="Copy session ID"
+                          title={t('admin:sessions.action.copy_id', { defaultValue: 'Copy session ID' })}
                         >
                           {copyIdFeedback === session.id ? (
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="var(--accent-emerald)" className="w-3 h-3">
@@ -583,6 +595,7 @@ export default function SessionsPage() {
                       {confirmId === session.id ? (
                         <div className="flex items-center gap-1 animate-[fadeInScale_0.12s_ease-out]">
                           <button
+                            type="button"
                             onClick={() => handleDelete(session.id)}
                             disabled={actionLoading === session.id}
                             className="px-2.5 py-1 rounded-[var(--radius-xs)] text-[9px] font-extrabold uppercase tracking-wide text-[var(--accent-coral)] bg-[rgba(244,63,94,0.12)] hover:bg-[rgba(244,63,94,0.22)] transition-colors disabled:opacity-40"
@@ -590,25 +603,27 @@ export default function SessionsPage() {
                             {actionLoading === session.id ? (
                               <span className="inline-block w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />
                             ) : (
-                              'Delete'
+                              t('common:action.delete', { defaultValue: 'Delete' })
                             )}
                           </button>
                           <button
+                            type="button"
                             onClick={() => setConfirmId(null)}
                             disabled={actionLoading === session.id}
                             className="px-2 py-1 rounded-[var(--radius-xs)] text-[9px] font-bold text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-40"
                           >
-                            Cancel
+                            {t('common:action.cancel', { defaultValue: 'Cancel' })}
                           </button>
                         </div>
                       ) : (
                         <>
                           {session.state !== 'terminated' && (
                             <button
+                              type="button"
                               onClick={() => handleTerminate(session.id)}
                               disabled={actionLoading === session.id}
                               className="p-2 rounded-[var(--radius-sm)] text-[var(--accent-amber)] bg-[rgba(245,158,11,0.08)] border border-transparent hover:border-[rgba(245,158,11,0.2)] hover:bg-[rgba(245,158,11,0.15)] transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
-                              title="Terminate active execution worker"
+                              title={t('admin:sessions.action.terminate_title_hint', { defaultValue: 'Terminate active execution worker' })}
                             >
                               {actionLoading === session.id ? (
                                 <div className="w-3.5 h-3.5 border border-current border-t-transparent rounded-full animate-spin" />
@@ -620,10 +635,11 @@ export default function SessionsPage() {
                             </button>
                           )}
                           <button
+                            type="button"
                             onClick={() => setConfirmId(session.id)}
                             disabled={actionLoading === session.id}
                             className="p-2 rounded-[var(--radius-sm)] text-[var(--accent-coral)] bg-[rgba(244,63,94,0.06)] border border-transparent hover:border-[rgba(244,63,94,0.18)] hover:bg-[rgba(244,63,94,0.12)] transition-all disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
-                            title="Delete session database entry"
+                            title={t('admin:sessions.action.delete_title_hint', { defaultValue: 'Delete session database entry' })}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="h-3.5 w-3.5">
                               <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
@@ -661,18 +677,19 @@ export default function SessionsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-sm font-bold text-[var(--text-faint)] uppercase tracking-wider font-mono">
-                      Session Inspector
+                      {t('admin:sessions.drawer.title', { defaultValue: 'Session Inspector' })}
                     </h2>
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-gold)]" />
                   </div>
                   <h1 className="text-md font-display font-bold text-[var(--text-primary)] mt-1 truncate max-w-[280px]">
-                    {drawerSession.title || 'Untitled Session'}
+                    {drawerSession.title || t('admin:sessions.detail.untitled', { defaultValue: 'Untitled Session' })}
                   </h1>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setDrawerSession(null)}
                   className="p-1.5 rounded-full text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all"
-                  title="Close inspector"
+                  title={t('admin:sessions.drawer.close', { defaultValue: 'Close inspector' })}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -686,35 +703,36 @@ export default function SessionsPage() {
                 {/* ID with interactive Copy button */}
                 <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
                   <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                    Full Session ID
+                    {t('admin:sessions.drawer.full_id', { defaultValue: 'Full Session ID' })}
                   </span>
                   <div className="flex items-center justify-between gap-3">
                     <code className="text-xs font-mono text-[var(--accent-gold)] break-all select-all font-semibold">
                       {drawerSession.id}
                     </code>
                     <button
+                      type="button"
                       onClick={(e) => handleCopyId(e, drawerSession.id)}
                       className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-[var(--radius-xs)] bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:bg-[var(--accent-gold)]/20 transition-all"
                     >
-                      {copyIdFeedback === drawerSession.id ? 'Copied' : 'Copy'}
+                      {copyIdFeedback === drawerSession.id ? t('common:action.copied', { defaultValue: 'Copied' }) : t('common:action.copy', { defaultValue: 'Copy' })}
                     </button>
                   </div>
                 </div>
 
-                {/* Info key-value block grid */}
+                 {/* Info key-value block grid */}
                 <div className="grid grid-cols-2 gap-3.5">
                   <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Execution State
+                      {t('admin:sessions.drawer.state', { defaultValue: 'Execution State' })}
                     </span>
                     <SessionStatusBadge state={drawerSession.state} />
                   </div>
                   <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Total turns
+                      {t('admin:sessions.drawer.turns', { defaultValue: 'Total turns' })}
                     </span>
                     <span className="text-xs text-[var(--text-primary)] font-bold">
-                      {drawerSession.turn_count ?? 0} <span className="text-[9px] font-normal text-[var(--text-muted)]">turns completed</span>
+                      {drawerSession.turn_count ?? 0} <span className="text-[9px] font-normal text-[var(--text-muted)]">{t('admin:sessions.drawer.turns_completed', { defaultValue: 'turns completed' })}</span>
                     </span>
                   </div>
                 </div>
@@ -722,7 +740,7 @@ export default function SessionsPage() {
                 <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Worker engine type
+                      {t('admin:sessions.drawer.engine_type', { defaultValue: 'Worker engine type' })}
                     </span>
                     <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
                       {drawerSession.worker_type || '—'}
@@ -730,7 +748,7 @@ export default function SessionsPage() {
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Executing User ID
+                      {t('admin:sessions.drawer.user_id', { defaultValue: 'Executing User ID' })}
                     </span>
                     <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
                       {drawerSession.user_id || '—'}
@@ -738,7 +756,7 @@ export default function SessionsPage() {
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Working directory
+                      {t('admin:sessions.drawer.work_dir', { defaultValue: 'Working directory' })}
                     </span>
                     <span className="text-xs font-mono text-[var(--text-muted)] break-all leading-normal" title={drawerSession.work_dir}>
                       {drawerSession.work_dir || '—'}
@@ -749,7 +767,7 @@ export default function SessionsPage() {
                 <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Started At
+                      {t('admin:sessions.drawer.started_at', { defaultValue: 'Started At' })}
                     </span>
                     <span className="text-xs text-[var(--text-secondary)] font-medium">
                       {formatDateTime(drawerSession.created_at)}
@@ -757,7 +775,7 @@ export default function SessionsPage() {
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      Last Active At
+                      {t('admin:sessions.drawer.last_active', { defaultValue: 'Last Active At' })}
                     </span>
                     <span className="text-xs text-[var(--text-secondary)] font-medium">
                       {formatDateTime(drawerSession.updated_at)}
@@ -771,6 +789,7 @@ export default function SessionsPage() {
                 <div className="flex gap-3">
                   {drawerSession.state !== 'terminated' && (
                     <button
+                      type="button"
                       onClick={() => handleTerminate(drawerSession.id, true)}
                       disabled={actionLoading === drawerSession.id}
                       className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider text-[var(--accent-amber)] bg-[rgba(245,158,11,0.08)] border border-[rgba(245,158,11,0.18)] hover:bg-[rgba(245,158,11,0.15)] transition-all active:scale-95 disabled:opacity-40"
@@ -782,15 +801,16 @@ export default function SessionsPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
                         </svg>
                       )}
-                      Terminate Engine
+                      {t('admin:sessions.action.terminate', { defaultValue: 'Terminate Engine' })}
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={() => handleDelete(drawerSession.id, true)}
                     disabled={actionLoading === drawerSession.id}
                     className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider text-[var(--accent-coral)] bg-[rgba(244,63,94,0.06)] border border-[rgba(244,63,94,0.18)] hover:bg-[rgba(244,63,94,0.12)] transition-all active:scale-95 disabled:opacity-40"
                   >
-                    Delete Entry
+                    {t('admin:sessions.action.delete', { defaultValue: 'Delete Entry' })}
                   </button>
                 </div>
 
@@ -801,7 +821,7 @@ export default function SessionsPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                   </svg>
-                  Open Full Detail View
+                  {t('admin:sessions.action.open_details', { defaultValue: 'Open Full Detail View' })}
                 </Link>
               </div>
 

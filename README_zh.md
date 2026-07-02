@@ -33,6 +33,7 @@
 
 ### 📱 多平台分发
 - 🌍 **一次接入，全端覆盖** — 无需修改 Agent 代码，即可分发至 **Slack**（Socket Mode）、**飞书**（WebSocket）和 **Web**。每个适配器提供平台原生流式输出、斜杠命令和交互管理。
+- 🎙️ **语音输入与语音摘要** — 支持平台原生语音消息输入（集成可配置的 Speech-to-Text 引擎，支持飞书云端 STT 或完全本地化的离线语音识别命令，无需云端依赖），以及通过智能语音合成（集成微软 Edge-TTS 或本地化部署的 MOSS-TTS 语音合成伴生进程）将 Agent 的文本摘要以语音形式自动播报回传。
 - ⏰ **AI 原生定时任务** — Agent 自主将自然语言（"30 分钟后提醒我"）转换为定时任务，支持 cron 表达式、固定间隔、一次性执行，具备生命周期控制（`max_runs`、`expires_at`）、附加会话注入和自动结果回传。
 - 💬 **开箱即用 Web Chat + 管理后台** — 单二进制同时提供 AEP 网关、Next.js SPA 聊天界面和管理控制台（Bot 配置、API Key 管理、会话监控）。
 
@@ -183,7 +184,9 @@ func main() {
 | 配置项                      | 默认值                       | 说明                                |
 | :-------------------------- | :--------------------------- | :---------------------------------- |
 | `agent_config.enabled`      | `true`                       | 启用 Agent 人格/上下文注入          |
-| `tts.enabled`               | `true`                       | 启用 Edge-TTS 语音回传流水线（语音输入到语音输出） |
+| `messaging.tts_enabled`     | `true`                       | 开启语音回复 (语音输入 → 语音输出)  |
+| `messaging.tts_provider`    | `edge+moss`                  | TTS 提供商: `edge` (Edge-TTS), `moss` (MOSS CPU), `edge+moss` |
+| `messaging.stt_provider`    | `local`                      | STT 提供商: `local` (本地命令), `feishu` (飞书 API), `feishu+local` |
 | `brain.enabled`             | `false`                      | 启用 Brain LLM 编排层（自动从 Worker 配置文件查找 API Key） |
 | `webchat.enabled`           | `true`                       | 从网关提供嵌入式 Web Chat SPA       |
 | `worker.auto_retry.enabled` | `true`                       | LLM 智能重试，支持指数退避          |

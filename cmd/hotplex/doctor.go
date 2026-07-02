@@ -24,7 +24,8 @@ func newDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Run diagnostic checks",
 		Long: `Run diagnostic checks to verify your HotPlex environment is properly configured.
-Checks are organized by category: environment, config, dependencies, security, runtime, messaging.
+Checks are organized by 10 categories: environment, config, dependencies, security,
+runtime, messaging, stt, tts, agent_config, worker.
 Use --fix to automatically resolve issues where possible.`,
 		Example: `  hotplex doctor                     # Run all checks
   hotplex doctor -v                  # Verbose output with details
@@ -64,7 +65,7 @@ Use --fix to automatically resolve issues where possible.`,
 	cmd.Flags().BoolVar(&fix, "fix", false, "automatically fix issues")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show detailed information")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output in JSON format")
-	cmd.Flags().StringVarP(&category, "category", "C", "", "only check specified category (environment, config, dependencies, security, runtime, messaging, stt)")
+	cmd.Flags().StringVarP(&category, "category", "C", "", "only check specified category (environment, config, dependencies, security, runtime, messaging, stt, tts, agent_config, worker)")
 	configFlag(cmd, &configPath)
 	return cmd
 }

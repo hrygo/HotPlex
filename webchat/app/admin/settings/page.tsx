@@ -9,10 +9,12 @@ import {
   testConnection,
 } from '@/lib/api/admin-client';
 import { useAdminAuth } from '@/hooks/use-admin-auth';
+import { useTranslation } from 'react-i18next';
 
 type ConnectionStatus = 'idle' | 'testing' | 'connected' | 'failed';
 
 export default function SettingsPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { logout } = useAdminAuth();
 
@@ -43,17 +45,17 @@ export default function SettingsPage() {
       const ok = await testConnection({ url: url.trim(), token: token.trim() });
       setStatus(ok ? 'connected' : 'failed');
       if (!ok) {
-        setError('Connection failed. Check the URL and token.');
+        setError(t('admin:settings.error.connection_failed', { defaultValue: 'Connection failed. Check the URL and token.' }));
       }
     } catch {
       setStatus('failed');
-      setError('Connection failed. Unable to reach the gateway.');
+      setError(t('admin:settings.error.unreachable', { defaultValue: 'Connection failed. Unable to reach the gateway.' }));
     }
   };
 
   const handleSave = async () => {
     if (!url.trim() || !token.trim()) {
-      setError('Both fields are required.');
+      setError(t('admin:settings.error.required', { defaultValue: 'Both fields are required.' }));
       return;
     }
 
@@ -66,11 +68,11 @@ export default function SettingsPage() {
         setStatus('connected');
       } else {
         setStatus('failed');
-        setError('Connection test failed. Not saving.');
+        setError(t('admin:settings.error.test_failed', { defaultValue: 'Connection test failed. Not saving.' }));
       }
     } catch {
       setStatus('failed');
-      setError('Connection failed. Unable to reach the gateway.');
+      setError(t('admin:settings.error.unreachable', { defaultValue: 'Connection failed. Unable to reach the gateway.' }));
     }
   };
 
@@ -89,10 +91,10 @@ export default function SettingsPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
-            Admin Connection
+            {t('admin:settings.title', { defaultValue: 'Admin Connection' })}
           </h1>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Manage your gateway connection credentials
+            {t('admin:settings.subtitle', { defaultValue: 'Manage your gateway connection credentials' })}
           </p>
         </div>
 
@@ -101,7 +103,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-center py-24">
             <div className="flex flex-col items-center gap-3">
               <div className="w-6 h-6 border-2 border-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-[var(--text-faint)]">Loading settings...</span>
+              <span className="text-xs text-[var(--text-faint)]">{t('admin:settings.loading', { defaultValue: 'Loading settings...' })}</span>
             </div>
           </div>
         )}
@@ -124,12 +126,12 @@ export default function SettingsPage() {
                 />
                 <span className="text-sm text-[var(--text-secondary)]">
                   {status === 'connected'
-                    ? 'Connected'
+                    ? t('admin:settings.status.connected', { defaultValue: 'Connected' })
                     : status === 'testing'
-                      ? 'Testing connection...'
+                      ? t('admin:settings.status.testing', { defaultValue: 'Testing connection...' })
                       : status === 'failed'
-                        ? 'Connection failed'
-                        : 'Not connected'}
+                        ? t('admin:settings.status.failed', { defaultValue: 'Connection failed' })
+                        : t('admin:settings.status.not_connected', { defaultValue: 'Not connected' })}
                 </span>
               </div>
             </div>
@@ -141,7 +143,7 @@ export default function SettingsPage() {
                   htmlFor="settings-url"
                   className="mb-1.5 block text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider"
                 >
-                  Admin URL
+                  {t('admin:settings.labels.url', { defaultValue: 'Admin URL' })}
                 </label>
                 <input
                   id="settings-url"
@@ -158,14 +160,14 @@ export default function SettingsPage() {
                   htmlFor="settings-token"
                   className="mb-1.5 block text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider"
                 >
-                  Admin Token
+                  {t('admin:settings.labels.token', { defaultValue: 'Admin Token' })}
                 </label>
                 <input
                   id="settings-token"
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder="Enter admin token"
+                  placeholder={t('admin:settings.placeholder.token', { defaultValue: 'Enter admin token' })}
                   className="w-full rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 focus:ring-1 focus:ring-[var(--accent-gold)]/20 font-mono"
                 />
               </div>
@@ -181,6 +183,7 @@ export default function SettingsPage() {
             {/* Actions */}
             <div className="flex items-center gap-3 pt-2">
               <button
+                type="button"
                 onClick={handleTest}
                 disabled={!canTest}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--radius-sm)] text-xs font-bold uppercase tracking-wider bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -188,10 +191,11 @@ export default function SettingsPage() {
                 {status === 'testing' && (
                   <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
                 )}
-                {status === 'testing' ? 'Testing...' : 'Test Connection'}
+                {status === 'testing' ? t('admin:settings.action.testing_btn', { defaultValue: 'Testing...' }) : t('admin:settings.action.test', { defaultValue: 'Test Connection' })}
               </button>
 
               <button
+                type="button"
                 onClick={handleSave}
                 disabled={!canSave}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--radius-sm)] text-xs font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -199,15 +203,16 @@ export default function SettingsPage() {
                 {status === 'testing' ? (
                   <div className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
                 ) : null}
-                {status === 'testing' ? 'Saving...' : 'Save'}
+                {status === 'testing' ? t('common:action.saving', { defaultValue: 'Saving...' }) : t('common:action.save', { defaultValue: 'Save' })}
               </button>
 
               <button
+                type="button"
                 onClick={handleDisconnect}
                 disabled={status === 'testing'}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--radius-sm)] text-xs font-bold uppercase tracking-wider text-[var(--accent-coral)] bg-[rgba(244,63,94,0.08)] hover:bg-[rgba(244,63,94,0.15)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Disconnect
+                {t('admin:settings.action.disconnect', { defaultValue: 'Disconnect' })}
               </button>
             </div>
           </div>

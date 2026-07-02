@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { BrandIcon } from '@/components/icons';
+import { useTranslation } from 'react-i18next';
 
 export default function Error({
   error,
@@ -10,6 +11,8 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { t } = useTranslation(['errors', 'common']);
+
   useEffect(() => {
     console.error('[WebChat ErrorBoundary]', {
       message: error.message,
@@ -24,16 +27,16 @@ export default function Error({
         <BrandIcon size={48} className="opacity-40" />
       </div>
       <h2 className="text-lg font-display font-bold text-[var(--text-primary)] mb-2">
-        Something went wrong
+        {t('errors:title', { defaultValue: 'Something went wrong' })}
       </h2>
       <p className="text-sm text-[var(--text-muted)] mb-6 max-w-sm text-center">
-        {error.message || 'An unexpected error occurred.'}
+        {error.message || t('errors:unexpected', { defaultValue: 'An unexpected error occurred.' })}
       </p>
       <button
         onClick={reset}
         className="px-6 py-2.5 rounded-full bg-[var(--accent-gold)] text-black text-sm font-bold transition-all hover:opacity-90 active:scale-[0.98]"
       >
-        Try Again
+        {t('errors:retry', { defaultValue: 'Try Again' })}
       </button>
     </div>
   );

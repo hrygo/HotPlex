@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 
 interface AdminNavProps {
   onLogout: () => void;
@@ -86,11 +87,25 @@ const NAV_ITEMS = [
 ];
 
 export function AdminNav({ onLogout, showConnectionSettings = false }: AdminNavProps) {
+  const { t } = useTranslation();
   const pathname = usePathname();
 
   const isActive = (href: string, exact: boolean) => {
     if (exact) return pathname === href;
     return pathname.startsWith(href);
+  };
+
+  const getNavLabel = (label: string) => {
+    switch (label) {
+      case 'Dashboard': return t('admin:nav.dashboard', { defaultValue: 'Dashboard' });
+      case 'Bots': return t('admin:nav.bots', { defaultValue: 'Bots' });
+      case 'Sessions': return t('admin:nav.sessions', { defaultValue: 'Sessions' });
+      case 'Workspaces': return t('admin:nav.workspaces', { defaultValue: 'Workspaces' });
+      case 'Cron': return t('admin:nav.cron', { defaultValue: 'Cron' });
+      case 'API Keys': return t('admin:nav.api_keys', { defaultValue: 'API Keys' });
+      case 'Admin Connection': return t('admin:nav.admin_connection', { defaultValue: 'Admin Connection' });
+      default: return label;
+    }
   };
 
   const items = showConnectionSettings
@@ -102,13 +117,24 @@ export function AdminNav({ onLogout, showConnectionSettings = false }: AdminNavP
       {/* Header */}
       <div className="px-5 pt-6 pb-4">
         <h1 className="font-[family-name:var(--font-display)] text-base font-bold tracking-tight text-[var(--text-primary)]">
-          HotPlex Admin
+          {t('admin:nav.title', { defaultValue: 'HotPlex Admin' })}
         </h1>
-        <p className="mt-0.5 text-xs text-[var(--text-muted)]">Management</p>
+        <p className="mt-0.5 text-xs text-[var(--text-muted)]">{t('admin:nav.subtitle', { defaultValue: 'Management' })}</p>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3">
+        <Link
+          href="/"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors mb-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+          </svg>
+          {t('admin:nav.back_to_chat', { defaultValue: 'Back to Chat' })}
+        </Link>
+        <div className="h-px bg-[var(--border-subtle)] my-2 mx-3" />
+
         {items.map((item) => {
           const active = isActive(item.href, item.exact);
           return (
@@ -124,7 +150,7 @@ export function AdminNav({ onLogout, showConnectionSettings = false }: AdminNavP
               <span className={active ? 'text-[var(--accent-gold)]' : ''}>
                 {item.icon}
               </span>
-              {item.label}
+              {getNavLabel(item.label)}
             </Link>
           );
         })}
@@ -133,13 +159,14 @@ export function AdminNav({ onLogout, showConnectionSettings = false }: AdminNavP
       {/* Logout — onLogout owns the redirect (channel-dependent, issue #788) */}
       <div className="border-t border-[var(--border-subtle)] p-3">
         <button
+          type="button"
           onClick={() => onLogout()}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent-coral)]"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
           </svg>
-          Logout
+          {t('admin:nav.logout', { defaultValue: 'Logout' })}
         </button>
       </div>
     </aside>

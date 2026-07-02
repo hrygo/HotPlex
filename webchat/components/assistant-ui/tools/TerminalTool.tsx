@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ToolLoadingSkeleton } from "./ToolLoadingSkeleton";
+import { useTranslation } from "react-i18next";
 
 interface TerminalToolProps {
   command: string;
@@ -15,6 +16,7 @@ interface TerminalToolProps {
 const MAX_VISIBLE_LINES = 15;
 
 export function TerminalTool({ command, stdout, stderr, status, onToggle }: TerminalToolProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const output = stderr || stdout || "";
   const lines = output.split("\n").filter(Boolean);
@@ -35,7 +37,7 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
           <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent-emerald)]/60 group-hover/terminal:bg-[var(--accent-emerald)] transition-colors" />
         </div>
         <span className="text-[11px] font-display font-black tracking-[0.1em] text-[var(--text-faint)] uppercase ml-2">
-          SHELL
+          {t('chat:tool.terminal.title', { defaultValue: 'SHELL' })}
         </span>
         <div className="flex-1 h-[1px] bg-gradient-to-r from-[var(--border-subtle)] to-transparent ml-2" />
         {status === "running" ? (
@@ -45,17 +47,17 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
             transition={{ repeat: Infinity, duration: 2 }}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-emerald)] shadow-[0_0_8px_var(--accent-emerald)]" />
-            LIVE
+            {t('chat:tool.terminal.live', { defaultValue: 'LIVE' })}
           </motion.span>
         ) : status === "error" ? (
           <span className="text-[10px] font-mono text-[var(--accent-coral)] font-bold flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)]" />
-            ERROR
+            {t('common:status.error', { defaultValue: 'ERROR' })}
           </span>
         ) : (
           <span className="text-[10px] font-mono text-[var(--text-faint)] font-bold flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-faint)]" />
-            PROCESSED
+            {t('chat:tool.terminal.processed', { defaultValue: 'PROCESSED' })}
           </span>
         )}
         {onToggle && status !== "running" && (
@@ -68,7 +70,7 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
       </div>
 
       {/* Command */}
-      <div className="px-5 py-3.5 bg-[#08080a] border-b border-[var(--border-subtle)]/50">
+      <div className="px-5 py-3.5 bg-[var(--bg-base)] border-b border-[var(--border-subtle)]/50">
         <div className="flex items-start gap-3">
           <span className="text-[var(--accent-emerald)] font-mono text-[14px] font-bold select-none leading-[21px] flex-shrink-0">❯</span>
           <code className="font-mono text-[14px] text-[var(--text-primary)] leading-[21px] break-all">
@@ -86,7 +88,7 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
 
       {/* Output */}
       {output && (
-        <div className="bg-[#08080a] px-5 py-4 max-h-[500px] overflow-y-auto scrollbar-thin">
+        <div className="bg-[var(--bg-base)] px-5 py-4 max-h-[500px] overflow-y-auto scrollbar-thin">
           <div className="space-y-1">
             {displayLines.map((line, i) => (
               <div
@@ -99,13 +101,22 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
               </div>
             ))}
           </div>
-          {needsCollapse && (
+          {lines.length > MAX_VISIBLE_LINES && (
             <button
-              onClick={() => setExpanded(true)}
-              className="mt-4 text-[11px] font-mono font-bold text-[var(--accent-gold)] hover:text-[var(--accent-gold)]/80 transition-colors uppercase tracking-wider flex items-center gap-2"
+              onClick={() => setExpanded(!expanded)}
+              className="mt-4 text-[11px] font-mono font-bold text-[var(--accent-emerald)] hover:text-[var(--accent-emerald)]/80 transition-colors uppercase tracking-wider flex items-center gap-2"
             >
-              <span>+ {lines.length - MAX_VISIBLE_LINES} more lines</span>
-              <div className="flex-1 h-[1px] bg-[var(--accent-gold)]/20" />
+              {expanded ? (
+                <>
+                  <span>- {t('chat:tool.terminal.collapse_lines', { defaultValue: 'Collapse output' })}</span>
+                  <div className="flex-1 h-[1px] bg-[var(--accent-emerald)]/20" />
+                </>
+              ) : (
+                <>
+                  <span>+ {t('chat:tool.terminal.more_lines', { count: lines.length - MAX_VISIBLE_LINES, defaultValue: `+ ${lines.length - MAX_VISIBLE_LINES} more lines` })}</span>
+                  <div className="flex-1 h-[1px] bg-[var(--accent-emerald)]/20" />
+                </>
+              )}
             </button>
           )}
         </div>
@@ -113,8 +124,8 @@ export function TerminalTool({ command, stdout, stderr, status, onToggle }: Term
 
       {/* Running skeleton */}
       {status === "running" && !output && (
-        <div className="bg-[#08080a] p-8 border-t border-[var(--border-subtle)]/30">
-          <ToolLoadingSkeleton color="var(--accent-emerald)" label="Awaiting response from shell..." />
+        <div className="bg-[var(--bg-base)] p-8 border-t border-[var(--border-subtle)]/30">
+          <ToolLoadingSkeleton color="var(--accent-emerald)" label={t('chat:tool.terminal.awaiting_response', { defaultValue: 'Awaiting response from shell...' })} />
         </div>
       )}
     </div>

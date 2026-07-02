@@ -77,6 +77,77 @@ func TestMapper_Map_StreamEvent(t *testing.T) {
 		require.Equal(t, "msg_think", data.ID)
 		require.Equal(t, "Using chain-of-thought...", data.Content)
 	})
+
+	t.Run("thinking and text diffing/deduplication", func(t *testing.T) {
+		log := newTestLogger()
+		seq := int64(0)
+		seqGen := func() int64 { seq++; return seq }
+		mapper := NewMapper(log, "session_123", seqGen)
+
+		// 1. Send first delta block
+		evt1 := &WorkerEvent{
+			Type: EventStream,
+			Payload: &StreamPayload{
+				Type:      "text",
+				MessageID: "msg_1",
+				Content:   "Part 1",
+				IsDelta:   true,
+			},
+		}
+		envs, err := mapper.Map(evt1)
+		require.NoError(t, err)
+		require.Len(t, envs, 1)
+		data1 := envs[0].Event.Data.(events.MessageDeltaData)
+		require.Equal(t, "Part 1", data1.Content)
+
+		// 2. Send second delta block
+		evt2 := &WorkerEvent{
+			Type: EventStream,
+			Payload: &StreamPayload{
+				Type:      "text",
+				MessageID: "msg_1",
+				Content:   "Part 2",
+				IsDelta:   true,
+			},
+		}
+		envs, err = mapper.Map(evt2)
+		require.NoError(t, err)
+		require.Len(t, envs, 1)
+		data2 := envs[0].Event.Data.(events.MessageDeltaData)
+		require.Equal(t, "Part 2", data2.Content)
+
+		// 3. Send full duplicate cumulative block
+		evt3 := &WorkerEvent{
+			Type: EventStream,
+			Payload: &StreamPayload{
+				Type:      "text",
+				MessageID: "msg_1",
+				Content:   "Part 1Part 2",
+				IsDelta:   false,
+			},
+		}
+		envs, err = mapper.Map(evt3)
+		require.NoError(t, err)
+		require.Len(t, envs, 1)
+		data3 := envs[0].Event.Data.(events.MessageDeltaData)
+		require.Equal(t, "", data3.Content)
+
+		// 4. Send full block with new trailing text
+		evt4 := &WorkerEvent{
+			Type: EventStream,
+			Payload: &StreamPayload{
+				Type:      "text",
+				MessageID: "msg_1",
+				Content:   "Part 1Part 2 New Content",
+				IsDelta:   false,
+			},
+		}
+		envs, err = mapper.Map(evt4)
+		require.NoError(t, err)
+		require.Len(t, envs, 1)
+		data4 := envs[0].Event.Data.(events.MessageDeltaData)
+		require.Equal(t, " New Content", data4.Content)
+	})
 }
 
 func TestMapper_Map_ToolCall(t *testing.T) {

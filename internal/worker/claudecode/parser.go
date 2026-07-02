@@ -59,6 +59,7 @@ type StreamPayload struct {
 	MessageID string
 	Content   string
 	Input     json.RawMessage // For tool_use
+	IsDelta   bool            // True if this content is a delta/chunk; False if it's full cumulative text
 }
 
 // ToolCallPayload represents a tool invocation.
@@ -164,6 +165,7 @@ func (p *Parser) parseStreamEvent(msg *SDKMessage) ([]*WorkerEvent, error) {
 				MessageID: messageID,
 				Content:   streamEvt.Name, // Tool name
 				Input:     streamEvt.Input,
+				IsDelta:   true,
 			},
 			RawMessage: msg,
 		}}, nil
@@ -178,6 +180,7 @@ func (p *Parser) parseStreamEvent(msg *SDKMessage) ([]*WorkerEvent, error) {
 			Type:      streamEvt.Type,
 			MessageID: messageID,
 			Content:   content,
+			IsDelta:   true,
 		},
 		RawMessage: msg,
 	}}, nil
@@ -210,6 +213,7 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 				Payload: &StreamPayload{
 					Type:    "text",
 					Content: block.Text,
+					IsDelta: false,
 				},
 				RawMessage: msg,
 			})
@@ -223,6 +227,7 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 					Payload: &StreamPayload{
 						Type:    string(StreamThinking),
 						Content: block.Thinking,
+						IsDelta: false,
 					},
 					RawMessage: msg,
 				})

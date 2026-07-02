@@ -71,9 +71,12 @@ Requires Go 1.26+, pnpm, Node.js 22+.
 git clone https://github.com/hrygo/hotplex.git
 cd hotplex
 make quickstart    # check tools + build + test
+hotplex install    # install binary to PATH (default: ~/.local/bin)
 ```
 
 Binary output: `bin/hotplex-{os}-{arch}`
+
+`hotplex install` copies the freshly built binary into a PATH directory. If `hotplex` is already on PATH, it updates in-place; otherwise it installs to `~/.local/bin` (overridable with `--path`) and appends that directory to your shell RC (`~/.zshrc` / `~/.bashrc`) or Windows User PATH. Use `--force` to reinstall even when the existing binary matches.
 
 ### Method 3: System Service
 
@@ -168,6 +171,20 @@ docker compose up -d
 4. Print PATH cleanup hints for shell RC files
 5. `--purge`: remove `~/.hotplex/` entirely
 
+### hotplex install (built-in subcommand)
+
+For source-build users or in-place binary updates. Not a download — copies the currently running binary (or the one just built) into a PATH directory.
+
+| Flag | Argument | Description |
+|------|----------|-------------|
+| `--path PATH` | directory | Target directory (default: `~/.local/bin`) |
+| `--force` | — | Reinstall even if already installed with identical content |
+| `--help` | — | Show usage |
+
+**Behavior:**
+- `hotplex` already in PATH → updates in-place if content differs (no-op if identical, unless `--force`)
+- `hotplex` not in PATH → copies to target dir and appends to shell RC (`~/.zshrc` / `~/.bashrc`) or Windows User PATH
+
 ## Configuration (Post-Install)
 
 After binary installation, run the setup wizard:
@@ -204,6 +221,14 @@ security:
 worker:
   max_lifetime: 24h
   idle_timeout: 60m
+
+messaging:
+  worker_type: "claude_code"
+  stt_provider: "local"        # local (custom command), feishu (cloud), feishu+local
+  stt_local_cmd: "python3 ~/.hotplex/scripts/stt_server.py"
+  tts_enabled: true
+  tts_provider: "edge+moss"    # edge (Edge TTS), moss (local CPU), edge+moss (fallback)
+  tts_voice: "zh-CN-XiaoxiaoNeural"
 ```
 
 ### Default Ports

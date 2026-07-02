@@ -2,15 +2,21 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '@/context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
+  const { t } = useTranslation(['chat', 'common']);
 
   return (
     <button
       onClick={toggleTheme}
-      className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none"
-      title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+      className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none ${
+        theme === 'light'
+          ? 'text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] hover:bg-[var(--bg-hover)]'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+      }`}
+      title={theme === 'dark' ? t('common:theme.light') : t('common:theme.dark')}
     >
       <AnimatePresence mode="wait" initial={false}>
         {theme === 'dark' ? (
@@ -39,7 +45,7 @@ export function ThemeToggle() {
             animate={{ opacity: 1, rotate: 0, scale: 1 }}
             exit={{ opacity: 0, rotate: 90, scale: 0.8 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="w-5 h-5 text-[var(--accent-gold)]"
+            className="w-5 h-5"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

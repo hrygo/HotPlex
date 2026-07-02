@@ -613,6 +613,12 @@ type SecurityConfig struct {
 	// Examples: "mailto:security@example.com", "https://example.com/security".
 	// Overridable via HOTPLEX_SECURITY_SECURITY_CONTACT env var.
 	SecurityContact string `mapstructure:"security_contact"`
+
+	// CookieSameSite controls the SameSite attribute of the session cookie.
+	// Valid values: "lax", "strict", "none", "default" (case-insensitive).
+	// Defaults to "lax" to preserve same-origin webchat compatibility;
+	// cross-origin HTTPS deployments should set to "none".
+	CookieSameSite string `mapstructure:"cookie_same_site"`
 }
 
 // SessionConfig holds session lifecycle settings.

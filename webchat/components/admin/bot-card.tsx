@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { BotConfigEntry } from '@/lib/types/admin';
 import { StatusBadge } from './status-badge';
 import { formatRelative } from '@/lib/utils/format-time';
+import { useTranslation } from 'react-i18next';
 
 interface BotCardProps {
   bot: BotConfigEntry;
@@ -16,13 +17,6 @@ const PLATFORM_STYLES: Record<string, { color: string; label: string }> = {
 
 const DEFAULT_PLATFORM_STYLE = { color: 'bg-[var(--bg-hover)] text-[var(--text-muted)]', label: '' };
 
-const SOURCE_LABELS: Record<string, string> = {
-  agents: 'Rules',
-  skills: 'Skills',
-  user: 'User',
-  memory: 'Memory',
-};
-
 const SOURCE_ICONS: Record<string, string> = {
   global: 'G',
   platform: 'P',
@@ -30,7 +24,18 @@ const SOURCE_ICONS: Record<string, string> = {
 };
 
 export function BotCard({ bot }: BotCardProps) {
+  const { t } = useTranslation();
   const platform = PLATFORM_STYLES[bot.platform] ?? DEFAULT_PLATFORM_STYLE;
+
+  const getSourceLabel = (key: string) => {
+    switch (key) {
+      case 'agents': return t('admin:bots.source_labels.agents', { defaultValue: 'Rules' });
+      case 'skills': return t('admin:bots.source_labels.skills', { defaultValue: 'Skills' });
+      case 'user': return t('admin:bots.source_labels.user', { defaultValue: 'User' });
+      case 'memory': return t('admin:bots.source_labels.memory', { defaultValue: 'Memory' });
+      default: return key;
+    }
+  };
 
   return (
     <Link
@@ -79,13 +84,14 @@ export function BotCard({ bot }: BotCardProps) {
         <div className="flex flex-wrap gap-1.5 pt-2.5 border-t border-[var(--border-subtle)]">
           {Object.entries(bot.agent_configs).map(([key, meta]) => {
             if (!meta?.source) return null;
+            const label = getSourceLabel(key);
             return (
               <span
                 key={key}
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--bg-hover)] text-[var(--text-faint)]"
-                title={`${SOURCE_LABELS[key] || key}: ${meta.source} (${meta.size}B)`}
+                title={`${label}: ${meta.source} (${meta.size}B)`}
               >
-                {SOURCE_LABELS[key] || key}
+                {label}
                 <span className="text-[8px] opacity-60">{SOURCE_ICONS[meta.source] || meta.source[0]}</span>
               </span>
             );

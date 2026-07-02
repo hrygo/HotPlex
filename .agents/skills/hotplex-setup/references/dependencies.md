@@ -115,10 +115,10 @@ ffmpeg -version
 
 ```bash
 # 国际用户
-pip3 install -U funasr-onnx modelscope
+pip3 install -U funasr-onnx onnxruntime onnx modelscope
 
 # 中国用户（镜像加速）
-pip3 install -U funasr-onnx modelscope -i https://mirror.sjtu.edu.cn/pypi/web/simple
+pip3 install -U funasr-onnx onnxruntime onnx modelscope -i https://mirror.sjtu.edu.cn/pypi/web/simple
 ```
 
 验证：

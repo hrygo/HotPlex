@@ -453,20 +453,24 @@ func fillYuanxinExtras(acfg *messaging.AdapterConfig, appCfg *config.Config) {
 	applyInjectExclude(acfg, appCfg.AgentConfig.InjectExclude, platformCfg.InjectExclude, nil)
 }
 
+func newFeishuClient(appID, appSecret string, log *slog.Logger) *lark.Client {
+	return lark.NewClient(appID, appSecret, lark.WithLogger(feishu.SlogLogger{Logger: log}))
+}
+
 func buildFeishuTranscriber(sttCfg config.STTConfig, appID, appSecret string, log *slog.Logger) stt.Transcriber {
 	switch sttCfg.Provider {
 	case config.STTProviderFeishu:
-		client := lark.NewClient(appID, appSecret)
+		client := newFeishuClient(appID, appSecret, log)
 		return feishu.NewFeishuSTT(client, log)
 	case config.STTProviderLocal:
 		return buildLocalSTT("feishu", sttCfg, log)
 	case config.STTProviderFeishuLocal:
 		if sttCfg.LocalCmd == "" {
 			log.Warn("feishu: stt_provider=feishu+local but stt_local_cmd is empty, using feishu only")
-			client := lark.NewClient(appID, appSecret)
+			client := newFeishuClient(appID, appSecret, log)
 			return feishu.NewFeishuSTT(client, log)
 		}
-		client := lark.NewClient(appID, appSecret)
+		client := newFeishuClient(appID, appSecret, log)
 		return stt.NewFallbackSTT(
 			feishu.NewFeishuSTT(client, log),
 			buildLocalSTT("feishu", sttCfg, log),
@@ -571,7 +575,7 @@ func buildFeishuTTSPipeline(ttsCfg config.TTSConfig, appID, appSecret string, lo
 		return nil
 	}
 
-	client := lark.NewClient(appID, appSecret)
+	client := newFeishuClient(appID, appSecret, log)
 	return feishu.NewTTSPipeline(synth, client, ttsCfg.MaxChars, log)
 }
 

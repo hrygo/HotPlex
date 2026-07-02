@@ -1,0 +1,208 @@
+{
+  "action": {
+    "collapse_sidebar": "Collapse sidebar",
+    "expand_sidebar": "Expand sidebar",
+    "new_workspace": "New Workspace",
+    "new_chat": "New Chat",
+    "docs": "Documentation",
+    "logout": "Log Out",
+    "start_first_project": "Start Your First Project",
+    "delete_session": "Delete session",
+    "create_workspace": "Create Workspace",
+    "copy_user_id": "Copy User ID",
+    "admin_dashboard": "Admin Dashboard",
+    "start_session": "Start Session"
+  },
+  "label": {
+    "workspace": "Workspace",
+    "workspace_name": "Workspace Name",
+    "directory_optional": "Directory (optional)",
+    "docs": "Docs",
+    "settings": "Settings",
+    "admin": "Admin",
+    "admin_subtitle": "Dashboard & Settings",
+    "turns": "turns",
+    "session_name_optional": "Session Name (optional)",
+    "worker_engine": "Worker Engine",
+    "user_id": "User ID",
+    "display_name": "Display Name",
+    "created_time": "Created Time",
+    "last_login": "Last Login",
+    "you": "You"
+  },
+  "placeholder": {
+    "workspace_name": "My Project",
+    "directory_optional": "Leave empty to use name",
+    "search": "Search history...",
+    "session_name": "e.g. HotPlex Bug Fix"
+  },
+  "title": {
+    "workspaces": "Workspaces",
+    "recent_conversations": "Recent Conversations",
+    "new_session": "New Session"
+  },
+  "text": {
+    "path": "Path",
+    "configure_env": "Configure your coding environment",
+    "not_installed": "Not installed on server",
+    "not_configured": "Not configured",
+    "no_results": "No conversations found"
+  },
+  "status": {
+    "preparing": "PREPARING",
+    "error": "ERROR",
+    "active": "ACTIVE",
+    "session_expired_settings": "Session expired — please re-login to access Settings",
+    "starting_session": "Starting new session...",
+    "loading_workers": "Loading worker engines...",
+    "created": "Created",
+    "running": "Running",
+    "idle": "Idle",
+    "terminated": "Terminated",
+    "deleted": "Deleted"
+  },
+  "welcome": {
+    "title": "Empower Your Coding",
+    "subtitle": "Select an existing session from the sidebar or start a new high-fidelity coding conversation.",
+    "tagline": "Next-generation autonomous workspace."
+  },
+  "error": {
+    "no_workers": "All worker engines are unavailable. Please install at least one worker CLI on the server."
+  },
+  "worker": {
+    "name": {
+      "claude_code": "Claude Code",
+      "opencode_server": "OpenCode Server",
+      "codex_cli": "Codex CLI",
+      "acp": "ACP Agent"
+    },
+    "description": {
+      "claude_code": "Anthropic coding agent",
+      "opencode_server": "Open-source self-hosted developer agent",
+      "codex_cli": "OpenAI coding agent",
+      "acp": "Generic JSON-RPC agent protocol"
+    }
+  },
+  "settings": {
+    "group": {
+      "workspace": "Workspace Settings",
+      "personal": "Personal Settings"
+    },
+    "tab": {
+      "general": "General",
+      "ai": "AI Config",
+      "members": "Members",
+      "profile": "Profile"
+    },
+    "heading": {
+      "general": {
+        "title": "General Settings",
+        "desc": "Manage your workspace name, directories, and main operational settings."
+      },
+      "ai": {
+        "title": "AI Configuration",
+        "desc": "Configure your preferred worker engines and custom prompt rules."
+      },
+      "profile": {
+        "title": "Personal Profile",
+        "desc": "View your account credentials, roles, and session information."
+      },
+      "members": {
+        "title": "Member Management",
+        "desc": "Invite new users, manage active team accounts, and update permissions."
+      }
+    },
+    "action": {
+      "save": "Save Changes",
+      "saving": "Saving Changes...",
+      "back_to_chat": "Back to Chat",
+      "generate_invite": "Generate Invite",
+      "copy_code": "Copy Code"
+    },
+    "label": {
+      "worker_preference": "Worker Engine Preference",
+      "permission_mode": "Permission Mode",
+      "working_directory": "Working Directory",
+      "active_workspace": "Active Workspace"
+    },
+    "desc": {
+      "workspace_name": "The display name for your workspace, used inside the workspace switcher and header.",
+      "worker_preference": "Select which agent binary is used to power new sessions in this workspace. Existing sessions keep their current engines.",
+      "permission_mode": "Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.",
+      "working_directory": "The local directory where CLI agents read, write, and execute files. Session-level runs inherit this setting and cannot change it per session.",
+      "no_active_workspace": "This tab requires an active workspace connection. Return to the chat page to select or create a workspace."
+    },
+    "success": {
+      "saved": "Workspace configuration saved successfully.",
+      "status_updated": "Status updated: {{username}} is now {{status}}",
+      "invite_generated": "New invitation code generated.",
+      "invite_deleted": "Invitation code deleted."
+    },
+    "error": {
+      "modified_elsewhere": "Workspace was modified elsewhere — refreshed to latest, please retry.",
+      "save_failed": "Save failed",
+      "non_standard_path": "This workspace uses a non-standard path outside the owner sandbox and can’t be edited here.",
+      "update_failed": "Update failed",
+      "create_failed": "Create failed",
+      "delete_failed": "Delete failed",
+      "no_workspace_selected": "No workspace selected",
+      "no_active_workspace": "No Active Workspace"
+    },
+    "confirm": {
+      "disable_self": "Disable your own account? You will be logged out immediately and unable to sign back in."
+    },
+    "title": {
+      "registered_users": "Registered Team Users ({{count}})",
+      "invite_codes": "Invite Codes ({{count}})"
+    },
+    "text": {
+      "expires": "Expires {{date}}",
+      "no_users": "No users registered in this workspace.",
+      "no_invitations": "No active invitations. Click 'Generate Invite' to invite team members."
+    },
+    "invite_state": {
+      "active": "Active",
+      "used": "Used",
+      "expired": "Expired"
+    },
+    "worker": {
+      "default": "Default (Inherit team settings)"
+    },
+    "permission": {
+      "default": "Default (workspace)",
+      "workspace": "Workspace — Edits within workspace (default)",
+      "auto-edit": "Auto Edit — Auto-approve edits",
+      "bypass": "Bypass — Full access",
+      "read-only": "Read Only — Plan only"
+    }
+  },
+  "context": {
+    "label": "Context",
+    "category": {
+      "skills": "skills",
+      "memory": "memory",
+      "agents": "agents"
+    },
+    "usage": {
+      "comfortable": "Comfortable",
+      "moderate": "Moderate",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "tip": {
+      "comfortable": "",
+      "moderate": "",
+      "high": "Consider /compact to free up space",
+      "critical": "Context nearly full — use /compact or /reset"
+    }
+  },
+  "tool": {
+    "terminal": {
+      "title": "SHELL",
+      "live": "LIVE",
+      "processed": "PROCESSED",
+      "more_lines": "+ {{count}} more lines",
+      "awaiting_response": "Awaiting response from shell..."
+    }
+  }
+}

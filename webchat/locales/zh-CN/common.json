@@ -1,0 +1,46 @@
+{
+  "action": {
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "saving": "保存中...",
+    "delete": "删除",
+    "deleting": "删除中...",
+    "create": "创建",
+    "creating": "创建中...",
+    "retry": "重试",
+    "copy": "复制",
+    "copied": "已复制",
+    "edit": "编辑",
+    "close": "关闭",
+    "enable": "启用",
+    "disable": "禁用",
+    "approve": "同意",
+    "reject": "拒绝",
+    "refresh": "刷新"
+  },
+  "status": {
+    "loading": "加载中...",
+    "connected": "已连接",
+    "connecting": "连接中...",
+    "disconnected": "断开连接",
+    "error": "错误",
+    "active": "正常",
+    "disabled": "禁用"
+  },
+  "role": {
+    "admin": "管理员",
+    "user": "普通用户"
+  },
+  "lang": {
+    "switch": "切换语言",
+    "en": "English",
+    "zh-CN": "简体中文",
+    "switchToEn": "切换至英文",
+    "switchToZh": "切换至中文"
+  },
+  "theme": {
+    "light": "切换至亮色模式",
+    "dark": "切换至暗色模式"
+  }
+}

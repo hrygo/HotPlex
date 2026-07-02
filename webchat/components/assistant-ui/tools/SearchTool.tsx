@@ -47,7 +47,7 @@ export function SearchTool({ toolName, query, results, status, onToggle }: Searc
 
       {/* Results */}
       {status === "complete" && results && results.length > 0 && (
-        <div className="bg-[#0c0c0f] max-h-[250px] overflow-y-auto divide-y divide-[var(--border-subtle)]">
+        <div className="bg-[var(--bg-base)] max-h-[250px] overflow-y-auto divide-y divide-[var(--border-subtle)]">
           {results.map((r, i) => (
             <div key={i} className="px-3 py-2 flex items-start gap-2 hover:bg-[var(--bg-hover)] transition-colors">
               <span className="text-[10px] font-mono text-[var(--text-faint)] select-none mt-0.5 shrink-0">
@@ -67,7 +67,7 @@ export function SearchTool({ toolName, query, results, status, onToggle }: Searc
       )}
 
       {status === "complete" && results && results.length === 0 && (
-        <div className="bg-[#0c0c0f] px-4 py-4 text-center">
+        <div className="bg-[var(--bg-base)] px-4 py-4 text-center">
           <span className="text-[11px] font-mono text-[var(--text-faint)]">No results found</span>
         </div>
       )}

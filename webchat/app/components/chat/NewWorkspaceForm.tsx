@@ -5,6 +5,7 @@ import { createWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { createSession, ANCHOR_CLIENT_SESSION_ID } from '@/lib/api/sessions';
 import { workerType } from '@/lib/config';
 import { buildWorkspaceWorkDir } from '@/lib/utils/workspace-path';
+import { useTranslation } from 'react-i18next';
 
 interface NewWorkspaceFormProps {
   uid: string;
@@ -19,6 +20,7 @@ const labelClass =
   'block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5';
 
 export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormProps) {
+  const { t } = useTranslation(['chat', 'common']);
   const [name, setName] = useState('');
   const [subdir, setSubdir] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -67,28 +69,28 @@ export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormP
       className="space-y-3"
     >
       <div>
-        <label className={labelClass}>Workspace Name</label>
+        <label className={labelClass}>{t('chat:label.workspace_name')}</label>
         <input
           className={inputClass}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="My Project"
+          placeholder={t('chat:placeholder.workspace_name')}
           disabled={submitting}
           autoFocus
         />
       </div>
       <div>
-        <label className={labelClass}>Directory (optional)</label>
+        <label className={labelClass}>{t('chat:label.directory_optional')}</label>
         <input
           className={inputClass}
           value={subdir}
           onChange={(e) => setSubdir(e.target.value)}
-          placeholder="Leave empty to use name"
+          placeholder={t('chat:placeholder.directory_optional')}
           disabled={submitting}
         />
       </div>
       <div className="text-[10px] font-mono text-[var(--text-faint)] break-all">
-        Path: {preview}
+        {t('chat:text.path')}: {preview}
       </div>
       {error && <div className="text-xs text-[var(--accent-coral)]">{error}</div>}
       <div className="flex items-center gap-2">
@@ -97,7 +99,7 @@ export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormP
           className="px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--accent-gold)] text-black text-sm font-bold transition-opacity hover:opacity-90 disabled:opacity-50"
           disabled={!name.trim() || submitting}
         >
-          {submitting ? 'Creating…' : 'Create Workspace'}
+          {submitting ? t('common:action.creating') : t('chat:action.create_workspace')}
         </button>
         {onCancel && (
           <button
@@ -106,7 +108,7 @@ export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormP
             className="px-3 py-1.5 rounded-[var(--radius-sm)] text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-50"
             disabled={submitting}
           >
-            Cancel
+            {t('common:action.cancel')}
           </button>
         )}
       </div>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBot } from '@/lib/api/admin-bots';
 import { getWorkers, WorkerInstallationStatus } from '@/lib/api/sessions';
+import { useTranslation } from 'react-i18next';
 
 type Platform = 'feishu' | 'slack';
 type WorkerType = 'claude_code' | 'opencode_server' | 'codex_cli' | 'acp';
@@ -61,6 +62,7 @@ const labelClass =
   'block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5';
 
 export default function NewBotPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [form, setForm] = useState<FormState>(INITIAL);
   const [workers, setWorkers] = useState<WorkerInstallationStatus[]>([]);
@@ -97,20 +99,20 @@ export default function NewBotPage() {
     const errors: FieldError[] = [];
 
     if (!form.platform) {
-      errors.push({ field: 'platform', message: 'Platform is required.' });
+      errors.push({ field: 'platform', message: t('admin:bots.validation.platform_required', { defaultValue: 'Platform is required.' }) });
     }
     if (!form.name.trim()) {
-      errors.push({ field: 'name', message: 'Bot name is required.' });
+      errors.push({ field: 'name', message: t('admin:bots.validation.name_required', { defaultValue: 'Bot name is required.' }) });
     } else if (!NAME_RE.test(form.name.trim())) {
-      errors.push({ field: 'name', message: 'Only letters, numbers, and hyphens.' });
+      errors.push({ field: 'name', message: t('admin:bots.validation.name_invalid', { defaultValue: 'Only letters, numbers, and hyphens.' }) });
     }
     if (form.platform === 'feishu') {
-      if (!form.app_id.trim()) errors.push({ field: 'app_id', message: 'App ID is required.' });
-      if (!form.app_secret.trim()) errors.push({ field: 'app_secret', message: 'App Secret is required.' });
+      if (!form.app_id.trim()) errors.push({ field: 'app_id', message: t('admin:bots.validation.app_id_required', { defaultValue: 'App ID is required.' }) });
+      if (!form.app_secret.trim()) errors.push({ field: 'app_secret', message: t('admin:bots.validation.app_secret_required', { defaultValue: 'App Secret is required.' }) });
     }
     if (form.platform === 'slack') {
-      if (!form.bot_token.trim()) errors.push({ field: 'bot_token', message: 'Bot Token is required.' });
-      if (!form.app_token.trim()) errors.push({ field: 'app_token', message: 'App Token is required.' });
+      if (!form.bot_token.trim()) errors.push({ field: 'bot_token', message: t('admin:bots.validation.bot_token_required', { defaultValue: 'Bot Token is required.' }) });
+      if (!form.app_token.trim()) errors.push({ field: 'app_token', message: t('admin:bots.validation.app_token_required', { defaultValue: 'App Token is required.' }) });
     }
 
     return errors;
@@ -154,7 +156,7 @@ export default function NewBotPage() {
         router.push('/admin/bots');
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Failed to create bot');
+        setError(err instanceof Error ? err.message : t('admin:bots.error.create_failed', { defaultValue: 'Failed to create bot' }));
       })
       .finally(() => {
         setSubmitting(false);
@@ -179,13 +181,13 @@ export default function NewBotPage() {
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
               <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Bots
+            {t('admin:bots.title', { defaultValue: 'Bots' })}
           </Link>
           <span className="text-[var(--border-subtle)]">/</span>
-          <span className="text-[var(--text-secondary)]">New Bot</span>
+          <span className="text-[var(--text-secondary)]">{t('admin:bots.action.new_bot', { defaultValue: 'New Bot' })}</span>
         </div>
 
-        <h1 className="text-xl font-display font-bold text-[var(--text-primary)] mb-8">Create Bot</h1>
+        <h1 className="text-xl font-display font-bold text-[var(--text-primary)] mb-8">{t('admin:bots.create_title', { defaultValue: 'Create Bot' })}</h1>
 
         {/* Global error */}
         {error && (
@@ -198,19 +200,19 @@ export default function NewBotPage() {
           {/* Section 1: Basic Info */}
           <section className="space-y-4 pb-8 border-b border-[var(--border-subtle)]">
             <h2 className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider">
-              Basic Info
+              {t('admin:bots.sections.basic_info', { defaultValue: 'Basic Info' })}
             </h2>
 
             {/* Platform */}
             <div>
-              <label htmlFor="platform" className={labelClass}>Platform *</label>
+              <label htmlFor="platform" className={labelClass}>{t('admin:bots.labels.platform', { defaultValue: 'Platform *' })}</label>
               <select
                 id="platform"
                 value={form.platform}
                 onChange={(e) => set('platform', e.target.value as Platform | '')}
                 className={`${selectClass} ${fieldBorder('platform')}`}
               >
-                <option value="">Select platform...</option>
+                <option value="">{t('admin:bots.placeholder.select_platform', { defaultValue: 'Select platform...' })}</option>
                 <option value="feishu">Feishu</option>
                 <option value="slack">Slack</option>
               </select>
@@ -221,7 +223,7 @@ export default function NewBotPage() {
 
             {/* Name */}
             <div>
-              <label htmlFor="name" className={labelClass}>Bot Name *</label>
+              <label htmlFor="name" className={labelClass}>{t('admin:bots.labels.bot_name', { defaultValue: 'Bot Name *' })}</label>
               <input
                 id="name"
                 type="text"
@@ -234,7 +236,7 @@ export default function NewBotPage() {
                 <p className="mt-1 text-[11px] text-[var(--accent-coral)]">{getFieldError('name')}</p>
               ) : (
                 <p className="mt-1 text-[11px] text-[var(--text-faint)]">
-                  Letters, numbers, and hyphens only.
+                  {t('admin:bots.hints.bot_name', { defaultValue: 'Letters, numbers, and hyphens only.' })}
                 </p>
               )}
             </div>
@@ -243,7 +245,7 @@ export default function NewBotPage() {
             {form.platform === 'feishu' && (
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label htmlFor="app_id" className={labelClass}>App ID *</label>
+                  <label htmlFor="app_id" className={labelClass}>{t('admin:bots.labels.app_id', { defaultValue: 'App ID *' })}</label>
                   <input
                     id="app_id"
                     type="text"
@@ -257,11 +259,11 @@ export default function NewBotPage() {
                   )}
                 </div>
                 <div>
-                  <label htmlFor="app_secret" className={labelClass}>App Secret *</label>
+                  <label htmlFor="app_secret" className={labelClass}>{t('admin:bots.labels.app_secret', { defaultValue: 'App Secret *' })}</label>
                   <input
                     id="app_secret"
                     type="password"
-                    placeholder="Secret value"
+                    placeholder={t('admin:bots.placeholder.secret_value', { defaultValue: 'Secret value' })}
                     value={form.app_secret}
                     onChange={(e) => set('app_secret', e.target.value)}
                     className={`${inputClass} ${fieldBorder('app_secret')}`}
@@ -277,7 +279,7 @@ export default function NewBotPage() {
             {form.platform === 'slack' && (
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label htmlFor="bot_token" className={labelClass}>Bot Token *</label>
+                  <label htmlFor="bot_token" className={labelClass}>{t('admin:bots.labels.bot_token', { defaultValue: 'Bot Token *' })}</label>
                   <input
                     id="bot_token"
                     type="password"
@@ -291,7 +293,7 @@ export default function NewBotPage() {
                   )}
                 </div>
                 <div>
-                  <label htmlFor="app_token" className={labelClass}>App Token *</label>
+                  <label htmlFor="app_token" className={labelClass}>{t('admin:bots.labels.app_token', { defaultValue: 'App Token *' })}</label>
                   <input
                     id="app_token"
                     type="password"
@@ -311,11 +313,11 @@ export default function NewBotPage() {
           {/* Section 2: Worker Config */}
           <section className="space-y-4 pb-8 border-b border-[var(--border-subtle)]">
             <h2 className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider">
-              Worker Config
+              {t('admin:bots.sections.worker_config', { defaultValue: 'Worker Config' })}
             </h2>
 
             <div>
-              <label htmlFor="worker_type" className={labelClass}>Worker Type</label>
+              <label htmlFor="worker_type" className={labelClass}>{t('admin:bots.labels.worker_type', { defaultValue: 'Worker Type' })}</label>
               <select
                 id="worker_type"
                 value={form.worker_type}
@@ -324,7 +326,7 @@ export default function NewBotPage() {
               >
                 {workers.map((w) => (
                   <option key={w.type} value={w.type}>
-                    {w.type}{!w.installed ? " (Not Installed)" : ""}
+                    {w.type}{!w.installed ? t('admin:bots.hints.not_installed', { defaultValue: ' (Not Installed)' }) : ""}
                   </option>
                 ))}
                 {workers.length === 0 && (
@@ -339,7 +341,7 @@ export default function NewBotPage() {
             </div>
 
             <div>
-              <label htmlFor="work_dir" className={labelClass}>Work Dir</label>
+              <label htmlFor="work_dir" className={labelClass}>{t('admin:bots.labels.work_dir', { defaultValue: 'Work Dir' })}</label>
               <input
                 id="work_dir"
                 type="text"
@@ -349,40 +351,39 @@ export default function NewBotPage() {
                 className={inputClass}
               />
             </div>
-
           </section>
 
           {/* Section 3: Access Control */}
           <section className="space-y-4 pb-8 border-b border-[var(--border-subtle)]">
             <h2 className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider">
-              Access Control
+              {t('admin:bots.sections.access_control', { defaultValue: 'Access Control' })}
             </h2>
 
             <div>
-              <label htmlFor="dm_policy" className={labelClass}>DM Policy</label>
+              <label htmlFor="dm_policy" className={labelClass}>{t('admin:bots.labels.dm_policy', { defaultValue: 'DM Policy' })}</label>
               <select
                 id="dm_policy"
                 value={form.dm_policy}
                 onChange={(e) => set('dm_policy', e.target.value as Policy)}
                 className={selectClass}
               >
-                <option value="open">Open</option>
-                <option value="allowlist">Allowlist</option>
-                <option value="disabled">Disabled</option>
+                <option value="open">{t('admin:bots.policies.open', { defaultValue: 'Open' })}</option>
+                <option value="allowlist">{t('admin:bots.policies.allowlist', { defaultValue: 'Allowlist' })}</option>
+                <option value="disabled">{t('admin:bots.policies.disabled', { defaultValue: 'Disabled' })}</option>
               </select>
             </div>
 
             <div>
-              <label htmlFor="group_policy" className={labelClass}>Group Policy</label>
+              <label htmlFor="group_policy" className={labelClass}>{t('admin:bots.labels.group_policy', { defaultValue: 'Group Policy' })}</label>
               <select
                 id="group_policy"
                 value={form.group_policy}
                 onChange={(e) => set('group_policy', e.target.value as Policy)}
                 className={selectClass}
               >
-                <option value="open">Open</option>
-                <option value="allowlist">Allowlist</option>
-                <option value="disabled">Disabled</option>
+                <option value="open">{t('admin:bots.policies.open', { defaultValue: 'Open' })}</option>
+                <option value="allowlist">{t('admin:bots.policies.allowlist', { defaultValue: 'Allowlist' })}</option>
+                <option value="disabled">{t('admin:bots.policies.disabled', { defaultValue: 'Disabled' })}</option>
               </select>
             </div>
 
@@ -395,7 +396,7 @@ export default function NewBotPage() {
                 className="h-4 w-4 rounded border-[var(--border-subtle)] bg-[var(--bg-surface)] accent-[var(--accent-gold)]"
               />
               <label htmlFor="require_mention" className="text-sm text-[var(--text-secondary)]">
-                Require mention in group messages
+                {t('admin:bots.labels.require_mention', { defaultValue: 'Require mention in group messages' })}
               </label>
             </div>
           </section>
@@ -403,39 +404,39 @@ export default function NewBotPage() {
           {/* Section 4: Voice (STT/TTS) */}
           <section className="space-y-4 pb-8 border-b border-[var(--border-subtle)]">
             <h2 className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider">
-              Voice (STT/TTS)
+              {t('admin:bots.sections.voice', { defaultValue: 'Voice (STT/TTS)' })}
             </h2>
 
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <label htmlFor="stt_provider" className={labelClass}>STT Provider</label>
+                <label htmlFor="stt_provider" className={labelClass}>{t('admin:bots.labels.stt_provider', { defaultValue: 'STT Provider' })}</label>
                 <select
                   id="stt_provider"
                   value={form.stt_provider}
                   onChange={(e) => set('stt_provider', e.target.value)}
                   className={selectClass}
                 >
-                  <option value="">Default</option>
-                  <option value="local">Local</option>
+                  <option value="">{t('admin:bots.options.default', { defaultValue: 'Default' })}</option>
+                  <option value="local">{t('admin:bots.options.local', { defaultValue: 'Local' })}</option>
                   <option value="feishu">Feishu</option>
                   <option value="feishu+local">Feishu + Local</option>
                 </select>
               </div>
               <div>
-                <label htmlFor="tts_provider" className={labelClass}>TTS Provider</label>
+                <label htmlFor="tts_provider" className={labelClass}>{t('admin:bots.labels.tts_provider', { defaultValue: 'TTS Provider' })}</label>
                 <select
                   id="tts_provider"
                   value={form.tts_provider}
                   onChange={(e) => set('tts_provider', e.target.value)}
                   className={selectClass}
                 >
-                  <option value="">Default</option>
+                  <option value="">{t('admin:bots.options.default', { defaultValue: 'Default' })}</option>
                   <option value="edge">Edge</option>
                   <option value="edge+moss">Edge + MOSS</option>
                 </select>
               </div>
               <div>
-                <label htmlFor="tts_voice" className={labelClass}>TTS Voice</label>
+                <label htmlFor="tts_voice" className={labelClass}>{t('admin:bots.labels.tts_voice', { defaultValue: 'TTS Voice' })}</label>
                 <input
                   id="tts_voice"
                   type="text"
@@ -454,7 +455,7 @@ export default function NewBotPage() {
               href="/admin/bots"
               className="px-4 py-2 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--text-faint)] hover:text-[var(--text-secondary)] transition-colors"
             >
-              Cancel
+              {t('common:action.cancel', { defaultValue: 'Cancel' })}
             </Link>
             <button
               type="submit"
@@ -464,7 +465,7 @@ export default function NewBotPage() {
               {submitting && (
                 <div className="w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
               )}
-              {submitting ? 'Creating...' : 'Create Bot'}
+              {submitting ? t('common:action.creating', { defaultValue: 'Creating...' }) : t('admin:bots.action.create', { defaultValue: 'Create Bot' })}
             </button>
           </div>
         </form>

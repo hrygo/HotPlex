@@ -43,7 +43,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
               if (!p || !p.type) return null;
               const isStreaming = ext.status?.type === "running";
 
-              if (p.type === "reasoning") return <ReasoningBlock text={p.text || p.reasoning || ""} />;
+              if (p.type === "reasoning") return <ReasoningBlock text={p.text || p.reasoning || ""} isStreaming={isStreaming} />;
               if (p.type === "text") return <div className={`prose-hotplex ${isStreaming ? "streaming-cursor" : ""}`}><MarkdownText text={p.text} /></div>;
 
               if (p.type === "tool-call") {
@@ -109,7 +109,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
               if (p.type === "tool-summary") {
                 const names = p.toolNames || [];
                 return (
-                  <div className="flex items-center gap-2 px-3 py-1.5 mt-3 rounded-[var(--radius-sm)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-bold text-[var(--text-secondary)] w-fit shadow-sm">
+                  <div className="flex items-center gap-2 px-3 py-1.5 mt-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-bold text-[var(--text-secondary)] w-fit shadow-sm">
                     <span className="text-[var(--accent-gold)] animate-pulse-subtle">🔧</span>
                     <span className="tracking-wide">{names.join(', ').toUpperCase()}</span>
                     {p.count > 1 && <span className="text-[var(--text-faint)] ml-1">×{p.count}</span>}

@@ -34,7 +34,11 @@ type Mapper struct {
 	// maxTokens source for the get_context_usage control channel.
 	contextWindow int64
 
-	// mu guards lastUsage, model, contextWindow, and turnID.
+	// sentTexts tracks the cumulative text/reasoning already sent for each item ID
+	// to perform delta-based diff calculations. Sourced under mu.
+	sentTexts map[string]string
+
+	// mu guards lastUsage, model, contextWindow, turnID, and sentTexts.
 	// trackTokenUsage and trackedUsageStats run in the readNotification
 	// goroutine; Reset runs in the monitorProcess goroutine; LastContextUsage
 	// and SetModel are invoked from worker goroutines (get_context_usage
@@ -47,6 +51,7 @@ func NewMapper(sessionID string) *Mapper {
 	return &Mapper{
 		sessionID: sessionID,
 		tracker:   newMessageTracker(),
+		sentTexts: make(map[string]string),
 	}
 }
 
@@ -237,17 +242,26 @@ func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
 	}
 	switch item.Type {
 	case ItemAgentMessage:
+		delta := m.getDeltaText(item.ID, item.Text)
+		if delta == "" {
+			return nil
+		}
 		return []*events.Envelope{
 			newEnvelope(events.MessageDelta, events.MessageDeltaData{
 				MessageID: aep.NewID(),
-				Content:   item.Text,
+				Content:   delta,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemReasoning:
+		fullText := strings.Join(item.SummaryText, "\n")
+		delta := m.getDeltaText(item.ID, fullText)
+		if delta == "" {
+			return nil
+		}
 		return []*events.Envelope{
 			newEnvelope(events.Reasoning, events.ReasoningData{
 				ID:      item.ID,
-				Content: strings.Join(item.SummaryText, "\n"),
+				Content: delta,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemCommandExecution:
@@ -341,13 +355,14 @@ func (m *Mapper) mapItemUpdated(item *CodexItem) []*events.Envelope {
 	}
 	switch item.Type {
 	case ItemAgentMessage:
-		if item.Text == "" {
+		delta := m.getDeltaText(item.ID, item.Text)
+		if delta == "" {
 			return nil
 		}
 		return []*events.Envelope{
 			newEnvelope(events.MessageDelta, events.MessageDeltaData{
 				MessageID: m.tracker.getMessageID(item.ID),
-				Content:   item.Text,
+				Content:   delta,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemCommandExecution:
@@ -373,14 +388,15 @@ func (m *Mapper) mapItemUpdated(item *CodexItem) []*events.Envelope {
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemReasoning:
-		text := strings.Join(item.SummaryText, "\n")
-		if text == "" {
+		fullText := strings.Join(item.SummaryText, "\n")
+		delta := m.getDeltaText(item.ID, fullText)
+		if delta == "" {
 			return nil
 		}
 		return []*events.Envelope{
 			newEnvelope(events.Reasoning, events.ReasoningData{
 				ID:      item.ID,
-				Content: text,
+				Content: delta,
 			}, m.sessionID, m.nextSeq()),
 		}
 	case ItemTodoList:
@@ -415,6 +431,7 @@ func (m *Mapper) mapNotifDelta(params json.RawMessage) []*events.Envelope {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil
 	}
+	m.recordSentDelta(p.ItemID, p.Delta)
 	return []*events.Envelope{
 		newEnvelope(events.MessageDelta, events.MessageDeltaData{
 			MessageID: m.tracker.getMessageID(p.ItemID),
@@ -493,6 +510,7 @@ func (m *Mapper) mapNotifReasoningDelta(params json.RawMessage) []*events.Envelo
 	if err := json.Unmarshal(params, &p); err != nil || p.Delta == "" {
 		return nil
 	}
+	m.recordSentDelta(p.ItemID, p.Delta)
 	return []*events.Envelope{
 		newEnvelope(events.Reasoning, events.ReasoningData{
 			ID:      p.ItemID,
@@ -789,8 +807,50 @@ func (m *Mapper) Reset() {
 	m.model = ""
 	m.turnID = ""
 	m.contextWindow = 0
+	m.sentTexts = make(map[string]string)
 	m.mu.Unlock()
 	m.tracker.Reset()
+}
+
+// getDeltaText computes the newly appended characters for a given item ID
+// by comparing the current text against the previously recorded sent text.
+// It updates the recorded text to reflect the new state.
+// Access to m.sentTexts is guarded under m.mu.
+func (m *Mapper) getDeltaText(itemID, currentText string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sentTexts == nil {
+		m.sentTexts = make(map[string]string)
+	}
+
+	sentRunes := []rune(m.sentTexts[itemID])
+	currRunes := []rune(currentText)
+
+	lastLen := len(sentRunes)
+	currLen := len(currRunes)
+
+	if currLen <= lastLen {
+		return ""
+	}
+
+	deltaRunes := currRunes[lastLen:]
+	delta := string(deltaRunes)
+	m.sentTexts[itemID] += delta
+	return delta
+}
+
+// recordSentDelta appends the sent delta string for a given item ID
+// after delta content has been sent via another event source (like delta notification).
+func (m *Mapper) recordSentDelta(itemID, delta string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sentTexts == nil {
+		m.sentTexts = make(map[string]string)
+	}
+
+	m.sentTexts[itemID] += delta
 }
 
 func newEnvelope(kind events.Kind, data interface{}, sessionID string, seq int64) *events.Envelope {

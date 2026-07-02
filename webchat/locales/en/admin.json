@@ -1,0 +1,501 @@
+{
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Gateway overview and system status",
+    "offline": "Offline",
+    "loading": "Loading dashboard...",
+    "error": {
+      "unreachable": "Gateway unreachable",
+      "load_failed": "Failed to load dashboard",
+      "restart_failed": "Restart request failed",
+      "timeout": "Gateway restart polling timed out."
+    },
+    "success": {
+      "restarted": "Gateway successfully restarted and recovered!"
+    },
+    "confirm": {
+      "restart_title": "Restart HotPlex Gateway?",
+      "restart_body": "This will safely fork a detached process helper, flush existing HTTP connections, reload configuration, and reboot. Active WebSocket clients will temporarily disconnect."
+    },
+    "action": {
+      "restart": "Restart Gateway",
+      "restart_gateway": "Restart Go Gateway"
+    },
+    "lifecycle": {
+      "title": "Gateway Reboot Lifecycle",
+      "pgid_active": "PGID Restart Handler Active",
+      "step1": "Step 1",
+      "step1_title": "Initiating Handshake",
+      "step1_desc": "Triggering POST /restart...",
+      "step2": "Step 2",
+      "step2_title": "Connection Drop",
+      "step2_desc": "Gracefully flushing sockets...",
+      "step3": "Step 3",
+      "step3_title": "Polling Health",
+      "step3_desc": "Backing off recovery checks...",
+      "step4": "Step 4",
+      "step4_title": "Gateway Online",
+      "step4_desc": "Dashboard metrics synced."
+    },
+    "uptime": {
+      "label": "Gateway Live Uptime",
+      "active": "Active (Version {{version}})",
+      "unreachable": "Unreachable",
+      "days": "d",
+      "hours": "h",
+      "minutes": "m",
+      "seconds": "s"
+    },
+    "database": {
+      "sqlite_label": "SQLite Database",
+      "status_label": "Database Store Status",
+      "healthy": "Healthy (SQLite Core)",
+      "degraded": "Degraded / Standby"
+    },
+    "metrics": {
+      "bots_label": "Active Agents / Bots",
+      "bots_sub": "{{count}} connected, {{standby}} standby",
+      "sessions_label": "WebSocket Sessions",
+      "sessions_sub": "{{active}} active of {{total}} total",
+      "cron_label": "Scheduled Jobs (Cron)",
+      "cron_sub": "{{count}} scheduler loops enabled"
+    }
+  },
+  "nav": {
+    "title": "HotPlex Admin",
+    "subtitle": "Management",
+    "dashboard": "Dashboard",
+    "bots": "Bots",
+    "sessions": "Sessions",
+    "workspaces": "Workspaces",
+    "cron": "Cron",
+    "api_keys": "API Keys",
+    "admin_connection": "Admin Connection",
+    "back_to_chat": "Back to Chat",
+    "logout": "Logout"
+  },
+  "bots": {
+    "title": "Bots",
+    "online_count": "{{count}} online",
+    "create_title": "Create Bot",
+    "loading": "Loading bots...",
+    "search_no_results": "No bots matching \"{{query}}\"",
+    "action": {
+      "new_bot": "+ New Bot",
+      "clear_search": "Clear search",
+      "delete": "Delete Bot",
+      "create": "Create Bot"
+    },
+    "defaults": {
+      "title": "Channel Defaults",
+      "subtitle": "Team defaults for channels without a bot instance"
+    },
+    "placeholder": {
+      "search": "Search by name, platform, or bot ID...",
+      "select_platform": "Select platform...",
+      "secret_value": "Secret value",
+      "allow_from": "User or channel ID...",
+      "allow_dm_from": "User ID...",
+      "allow_group_from": "Channel or group ID..."
+    },
+    "empty": {
+      "title": "No bots configured",
+      "description": "Create your first bot to connect a messaging platform."
+    },
+    "sections": {
+      "basic_info": "Basic Info",
+      "worker_config": "Worker Config",
+      "access_control": "Access Control",
+      "voice": "Voice (STT/TTS)"
+    },
+    "labels": {
+      "platform": "Platform *",
+      "bot_name": "Bot Name *",
+      "app_id": "App ID *",
+      "app_secret": "App Secret *",
+      "bot_token": "Bot Token *",
+      "app_token": "App Token *",
+      "worker_type": "Worker Type",
+      "work_dir": "Work Dir",
+      "dm_policy": "DM Policy",
+      "group_policy": "Group Policy",
+      "require_mention": "Require mention in group messages",
+      "stt_provider": "STT Provider",
+      "tts_provider": "TTS Provider",
+      "tts_voice": "TTS Voice",
+      "bot_id": "Bot ID",
+      "connected_at": "Connected At",
+      "allow_from": "Allow From",
+      "allow_dm_from": "Allow DM From",
+      "allow_group_from": "Allow Group From"
+    },
+    "hints": {
+      "bot_name": "Letters, numbers, and hyphens only.",
+      "not_installed": " (Not Installed)"
+    },
+    "policies": {
+      "open": "Open",
+      "allowlist": "Allowlist",
+      "disabled": "Disabled"
+    },
+    "options": {
+      "default": "Default",
+      "local": "Local"
+    },
+    "validation": {
+      "platform_required": "Platform is required.",
+      "name_required": "Bot name is required.",
+      "name_invalid": "Only letters, numbers, and hyphens.",
+      "app_id_required": "App ID is required.",
+      "app_secret_required": "App Secret is required.",
+      "bot_token_required": "Bot Token is required.",
+      "app_token_required": "App Token is required."
+    },
+    "error": {
+      "create_failed": "Failed to create bot",
+      "update_failed": "Failed to update"
+    },
+    "editor": {
+      "confirm_discard": "You have unsaved changes. Discard them and switch file?",
+      "save_success": "Saved successfully",
+      "chars": "{{count}} chars",
+      "unsaved": "unsaved",
+      "placeholder_edit": "Edit {{file}}...",
+      "ctrl_s_hint": "Ctrl+S to save",
+      "not_saved_hint": "Changes not saved",
+      "overridden": "Overridden",
+      "inherits_default": "Inherits default",
+      "channel_defaults_banner": "Editing {{platform}}/ channel team defaults. These apply to every {{platform}} workspace unless overridden per-workspace in Settings → AI."
+    },
+    "config_files": {
+      "soul": {
+        "label": "Soul",
+        "description": "Persona & identity"
+      },
+      "agents": {
+        "label": "Agents",
+        "description": "Behavior rules"
+      },
+      "skills": {
+        "label": "Skills",
+        "description": "Capabilities"
+      },
+      "user": {
+        "label": "User",
+        "description": "User preferences"
+      },
+      "memory": {
+        "label": "Memory",
+        "description": "Persistent context"
+      }
+    },
+    "source_labels": {
+      "agents": "Rules",
+      "skills": "Skills",
+      "user": "User",
+      "memory": "Memory"
+    },
+    "detail": {
+      "add_item_placeholder": "Add item...",
+      "overview_updated": "Updated. Restart gateway to apply.",
+      "no_name": "No bot name specified",
+      "loading": "Loading bot...",
+      "not_found": "Bot not found",
+      "back_to_bots": "Back to Bots",
+      "tabs": {
+        "overview": "Overview",
+        "config": "Config",
+        "access": "Access"
+      }
+    }
+  },
+  "delete_button": {
+    "error_failed": "Failed to delete",
+    "confirm_message": "Delete \"{{name}}\"? This action cannot be undone.",
+    "yes_delete": "Yes, Delete"
+  },
+  "settings": {
+    "title": "Admin Connection",
+    "subtitle": "Manage your gateway connection credentials",
+    "loading": "Loading settings...",
+    "status": {
+      "connected": "Connected",
+      "testing": "Testing connection...",
+      "failed": "Connection failed",
+      "not_connected": "Not connected"
+    },
+    "labels": {
+      "url": "Admin URL",
+      "token": "Admin Token"
+    },
+    "placeholder": {
+      "token": "Enter admin token"
+    },
+    "action": {
+      "test": "Test Connection",
+      "testing_btn": "Testing...",
+      "disconnect": "Disconnect"
+    },
+    "error": {
+      "connection_failed": "Connection failed. Check the URL and token.",
+      "unreachable": "Connection failed. Unable to reach the gateway.",
+      "required": "Both fields are required.",
+      "test_failed": "Connection test failed. Not saving."
+    }
+  },
+  "login": {
+    "subtitle": "Connect to your gateway",
+    "connecting": "Connecting...",
+    "connect": "Connect",
+    "help": {
+      "title": "How to set or get Admin Token?",
+      "desc": "The Admin Token is used to authorize connection to your gateway. It is configured inside your backend environment settings:",
+      "dev_html": "<strong>Development Mode</strong>: Default value is <code class=\"font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] text-[var(--accent-gold)] border border-[var(--border-subtle)]\">admin-token-dev</code>, or read from <code class=\"font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]\">ADMIN_TOKEN</code> inside local <code class=\"font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]\">.env</code>.",
+      "prod_html": "<strong>Production Mode</strong>: Configured via numbered environment variables in your gateway host config (e.g. <code class=\"font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]\">HOTPLEX_ADMIN_TOKEN_1</code> ... <code class=\"font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]\">HOTPLEX_ADMIN_TOKEN_N</code>) inside <code class=\"font-mono bg-[var(--bg-hover)] px-1 py-0.5 rounded-[var(--radius-xs)] border border-[var(--border-subtle)]\">.env</code> or system configs.",
+      "generate_hint": "Generate a secure token using CLI:"
+    }
+  },
+  "sessions": {
+    "title": "Sessions",
+    "subtitle": "Monitor, audit, and manage real-time active MOSS/Claude Code workers and sessions.",
+    "loading": "Loading execution registry...",
+    "action": {
+      "refresh": "Refresh List",
+      "reset_filter": "Reset Filter Parameters",
+      "terminate": "Terminate Engine",
+      "delete": "Delete Entry",
+      "open_details": "Open Full Detail View",
+      "copy_id": "Copy session ID",
+      "back_to_sessions": "Back to Sessions",
+      "terminate_title_hint": "Terminate active execution worker",
+      "delete_title_hint": "Delete session database entry"
+    },
+    "metrics": {
+      "total": "Total Sessions",
+      "total_suffix": "sessions",
+      "total_sub": "Lifetime execution tracks",
+      "active": "Active Engines",
+      "active_suffix": "running",
+      "active_sub": "Consuming worker resources",
+      "idle": "Idle Workers",
+      "idle_suffix": "waiting",
+      "idle_sub": "Suspended, waiting for input",
+      "terminated": "Terminated",
+      "terminated_suffix": "completed",
+      "terminated_sub": "Safely released & exited"
+    },
+    "filter": {
+      "all": "All",
+      "running": "Running",
+      "created": "Created",
+      "idle": "Idle",
+      "terminated": "Terminated"
+    },
+    "placeholder": {
+      "search": "Search session details..."
+    },
+    "sort": {
+      "last_active": "Last Active",
+      "created": "Created Date"
+    },
+    "empty": {
+      "no_match": "No matching execution channels found",
+      "no_sessions": "No session registry exists",
+      "hint": "Try adjusting your search criteria, selecting another filter tab, or refreshing."
+    },
+    "table": {
+      "id_title": "ID / Title",
+      "engine_type": "Engine type",
+      "user": "Executing user",
+      "status": "Status",
+      "started": "Started",
+      "active_time": "Active time",
+      "actions": "Actions"
+    },
+    "drawer": {
+      "title": "Session Inspector",
+      "close": "Close inspector",
+      "full_id": "Full Session ID",
+      "state": "Execution State",
+      "turns": "Total turns",
+      "turns_completed": "turns completed",
+      "engine_type": "Worker engine type",
+      "user_id": "Executing User ID",
+      "work_dir": "Working directory",
+      "started_at": "Started At",
+      "last_active": "Last Active At"
+    },
+    "confirm": {
+      "terminate_title": "Terminate Session?",
+      "terminate_body": "Are you sure you want to terminate session \"{{id}}\"? The running worker process will be stopped immediately.",
+      "delete_title": "Delete Session?",
+      "delete_body": "Are you sure you want to permanently delete session \"{{id}}\"? All database traces will be deleted. This action is irreversible."
+    },
+    "toast": {
+      "copied": "Copied Session ID to clipboard",
+      "copy_failed": "Failed to copy ID",
+      "terminated": "Session \"{{id}}\" successfully terminated.",
+      "terminate_failed": "Failed to terminate session",
+      "deleted": "Session \"{{id}}\" successfully deleted.",
+      "delete_failed": "Failed to delete session"
+    },
+    "detail": {
+      "untitled": "Untitled Session",
+      "no_id": "No session ID specified",
+      "loading": "Loading session...",
+      "error_load": "Failed to load session",
+      "not_found": "Session not found",
+      "title_label": "Title"
+    }
+  },
+  "workspaces": {
+    "title": "Workspaces",
+    "loading": "Loading workspaces...",
+    "banner": "Permission mode changes apply to <strong>new sessions only</strong>; running conversations keep their current mode. The user self-service endpoints (<code class=\"font-mono\">/api/workspaces</code>) remain admin-gated for this field.",
+    "toast": {
+      "updated": "Updated — takes effect for new sessions.",
+      "update_failed": "Update failed."
+    },
+    "empty": {
+      "title": "No workspaces",
+      "description": "Workspaces appear here once users create them via the chat client."
+    },
+    "modes": {
+      "default": "Default (workspace)",
+      "workspace": "Workspace",
+      "auto_edit": "Auto Edit",
+      "read_only": "Read Only",
+      "bypass": "Bypass"
+    },
+    "table": {
+      "owner": "Owner",
+      "workspace": "Workspace",
+      "work_dir": "Work Dir",
+      "permission_mode": "Permission Mode"
+    }
+  },
+  "api_keys": {
+    "title": "API Keys",
+    "key_count": "{{count}} key",
+    "key_count_plural": "{{count}} keys",
+    "loading": "Loading API keys...",
+    "action": {
+      "create": "Create Key",
+      "create_first": "Create First Key"
+    },
+    "validation": {
+      "user_id_required": "User ID is required",
+      "key_exists": "This User ID already has an API key"
+    },
+    "error": {
+      "create_failed": "Failed to create API key",
+      "delete_failed": "Failed to delete API key"
+    },
+    "confirm": {
+      "delete_title": "Delete API Key",
+      "delete_body": "Are you sure you want to permanently delete the API key for user \"{{userId}}\"? This will immediately revoke all access for this key. This action is irreversible."
+    },
+    "toast": {
+      "deleted": "API key successfully deleted"
+    },
+    "empty": {
+      "title": "No API keys configured yet."
+    },
+    "table": {
+      "api_key": "API Key",
+      "user_id": "User ID",
+      "description": "Description",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "create_title": "Create API Key",
+      "warning_title": "Critical Security Warning",
+      "warning_body": "For security reasons, this API key will be shown <strong class=\"text-[var(--text-primary)]\">ONLY ONCE</strong>. You will not be able to retrieve, view, or copy it again after closing this dialog.",
+      "confirm_saved": "I have copied & saved this key"
+    },
+    "placeholder": {
+      "user_id": "e.g. alice",
+      "description": "Optional description"
+    }
+  },
+  "cron": {
+    "title": "Cron Jobs",
+    "loading": "Loading cron jobs...",
+    "job_count": "{{enabled}} enabled / {{total}} total",
+    "filter": {
+      "all": "All Jobs",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "empty": {
+      "no_jobs": "No cron jobs configured yet.",
+      "no_match": "No {{filter}} cron jobs found."
+    },
+    "table": {
+      "name": "Name",
+      "schedule": "Schedule",
+      "enabled": "Enabled",
+      "last_run": "Last Run",
+      "next_run": "Next Run",
+      "runs": "Runs",
+      "actions": "Actions"
+    },
+    "schedule": {
+      "every": "every {{duration}}"
+    },
+    "action": {
+      "enable_verb": "Enable",
+      "disable_verb": "Disable",
+      "trigger": "Trigger",
+      "run": "Run",
+      "back_to_cron": "Back to Cron Jobs"
+    },
+    "confirm": {
+      "enable_title": "Enable Cron Job?",
+      "enable_body": "Are you sure you want to enable cron job \"{{name}}\"?",
+      "disable_title": "Disable Cron Job?",
+      "disable_body": "Are you sure you want to disable cron job \"{{name}}\"?",
+      "trigger_title": "Trigger Cron Job?",
+      "trigger_body": "Manually execute cron job \"{{name}}\" right now?",
+      "delete_title": "Delete Cron Job?",
+      "delete_body": "Are you sure you want to permanently delete cron job \"{{name}}\"? This cannot be undone."
+    },
+    "toast": {
+      "enabled": "Cron job \"{{name}}\" enabled successfully.",
+      "disabled": "Cron job \"{{name}}\" disabled successfully.",
+      "triggered": "Cron job \"{{name}}\" manually triggered.",
+      "deleted": "Cron job \"{{name}}\" successfully deleted.",
+      "updated": "Cron job \"{{name}}\" configuration updated."
+    },
+    "error": {
+      "toggle_failed": "Failed to toggle cron job",
+      "trigger_failed": "Failed to trigger cron job",
+      "delete_failed": "Failed to delete cron job",
+      "update_failed": "Failed to update cron job"
+    },
+    "detail": {
+      "no_id": "No cron job ID specified",
+      "loading": "Loading cron job...",
+      "error_load": "Failed to load cron job",
+      "not_found": "Cron job not found",
+      "configuration": "Configuration",
+      "field_schedule": "Schedule",
+      "field_message": "Message",
+      "field_max_runs": "Max Runs",
+      "placeholder_message": "Task message...",
+      "placeholder_unlimited": "Unlimited",
+      "invalid_schedule": "Invalid schedule format. Use cron:EXPR, every:DURATION, or at:TIMESTAMP.",
+      "save_changes": "Save Changes",
+      "discard": "Discard",
+      "details_heading": "Details",
+      "owner_id": "Owner ID",
+      "bot_id": "Bot ID",
+      "expires_at": "Expires At",
+      "run_count": "Run Count",
+      "last_run": "Last Run",
+      "next_run": "Next Run"
+    }
+  }
+}
+

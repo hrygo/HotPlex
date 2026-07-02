@@ -8,6 +8,7 @@ import {
   resolveSandboxAnchor,
   sanitizeWorkspaceDir,
 } from '@/lib/utils/workspace-path';
+import { useTranslation } from 'react-i18next';
 
 const WORKER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'Default (Inherit team settings)' },
@@ -35,6 +36,7 @@ interface GeneralTabProps {
 }
 
 export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
+  const { t } = useTranslation(['chat', 'common']);
   // Anchor the sandbox by owner_id rather than a hard-coded ~/ prefix: backend
   // ExpandAndAbs stores work_dir as an absolute $HOME path, so the on-disk form
   // differs from the ~/ form used by the create flow. resolveSandboxAnchor reads
@@ -113,14 +115,14 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
       // CAS 409 (PR #779 review P2-2): re-fetch latest and repopulate so the
       // form does not sit on a stale updated_at and 409 again on retry.
       if (err instanceof ApiError && err.status === 409) {
-        setError('Workspace was modified elsewhere — refreshed to latest, please retry.');
+        setError(t('chat:settings.error.modified_elsewhere'));
         try {
           onUpdated?.(await getWorkspace(workspace.id));
         } catch {
           // re-fetch failed; keep the 409 message above
         }
       } else {
-        setError(err instanceof Error ? err.message : 'Save failed');
+        setError(err instanceof Error ? err.message : t('chat:settings.error.save_failed'));
       }
     } finally {
       setSaving(false);
@@ -132,24 +134,24 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
       {/* Workspace Name Input Field */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-          Workspace Name
+          {t('chat:label.workspace_name')}
         </label>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)]/20 transition-all placeholder:text-[var(--text-faint)]"
-          placeholder="Enter workspace name"
+          placeholder={t('chat:placeholder.workspace_name')}
         />
         <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-          The display name for your workspace, used inside the workspace switcher and header.
+          {t('chat:settings.desc.workspace_name')}
         </p>
       </div>
 
       {/* Worker Engine Preference Selection */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-          Worker Engine Preference
+          {t('chat:settings.label.worker_preference')}
         </label>
         <div className="relative">
           <select
@@ -159,7 +161,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
           >
             {WORKER_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
-                {opt.label}
+                {opt.value === '' ? t('chat:settings.worker.default') : t(('chat:worker.name.' + opt.value) as any, { defaultValue: opt.label })}
               </option>
             ))}
           </select>
@@ -170,7 +172,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
           </div>
         </div>
         <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-          Select which agent binary is used to power new sessions in this workspace. Existing sessions keep their current engines.
+          {t('chat:settings.desc.worker_preference')}
         </p>
       </div>
 
@@ -180,7 +182,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
           touches the admin-gated column (r3 would 403 if it did). */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-          Permission Mode
+          {t('chat:settings.label.permission_mode')}
         </label>
         {isAdmin ? (
           <div className="relative">
@@ -191,7 +193,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
             >
               {PERMISSION_MODE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.label}
+                  {t(('chat:settings.permission.' + opt.value) as any, { defaultValue: opt.label })}
                 </option>
               ))}
             </select>
@@ -205,19 +207,21 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-secondary)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-gold)]" />
             {workspace.permission_mode === ''
-              ? 'Default (workspace)'
-              : (PERMISSION_MODE_OPTIONS.find((o) => o.value === workspace.permission_mode)?.label ?? workspace.permission_mode)}
+              ? t('chat:settings.permission.default')
+              : (PERMISSION_MODE_OPTIONS.find((o) => o.value === workspace.permission_mode)
+                ? t(('chat:settings.permission.' + workspace.permission_mode) as any)
+                : workspace.permission_mode)}
           </div>
         )}
         <p className="text-[10px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-          Controls the blast radius for new sessions: how aggressively the agent may edit files or run commands. Applies to new sessions only; existing sessions keep their current mode.
+          {t('chat:settings.desc.permission_mode')}
         </p>
       </div>
 
       {/* Working Directory: sandbox prefix (read-only) + editable segment */}
       <div>
         <label className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest block mb-2">
-          Working Directory
+          {t('chat:settings.label.working_directory')}
         </label>
         {segEditable ? (
           <>
@@ -240,7 +244,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
             </div>
             {/* Live preview of the rejoined absolute path */}
             <p className="text-[10px] font-mono text-[var(--text-faint)] mt-1.5 break-all leading-relaxed">
-              Path: <span className="text-[var(--text-secondary)]">{previewPath}</span>
+              {t('chat:text.path')}: <span className="text-[var(--text-secondary)]">{previewPath}</span>
             </p>
           </>
         ) : (
@@ -249,12 +253,12 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
               {workspace.work_dir}
             </div>
             <p className="text-[10px] text-[var(--accent-coral)] mt-1.5 leading-relaxed font-bold">
-              This workspace uses a non-standard path outside the owner sandbox and can’t be edited here.
+              {t('chat:settings.error.non_standard_path')}
             </p>
           </>
         )}
         <p className="text-[10px] text-[var(--text-muted)] mt-1 leading-relaxed">
-          The local directory where CLI agents read, write, and execute files. Session-level runs inherit this setting and cannot change it per session.
+          {t('chat:settings.desc.working_directory')}
         </p>
       </div>
 
@@ -273,7 +277,7 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
           <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
-          <span>Workspace configuration saved successfully.</span>
+          <span>{t('chat:settings.success.saved')}</span>
         </div>
       )}
 
@@ -290,10 +294,10 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
                 <circle className="opacity-25" cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Saving Changes…
+              {t('chat:settings.action.saving')}
             </>
           ) : (
-            'Save Changes'
+            t('chat:settings.action.save')
           )}
         </button>
       </div>

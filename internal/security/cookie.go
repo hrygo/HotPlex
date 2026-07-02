@@ -43,14 +43,15 @@ const (
 // crypto/rand and is never stored on disk or embedded in the binary.
 //
 // Cookie format: Base64(timestamp|userID|hex(HMAC-SHA256(timestamp|userID, secret)))
-// Cookie attributes: HttpOnly, SameSite=None, Path=/, Secure (HTTPS or loopback dev), 7d Max-Age.
+// Cookie attributes: HttpOnly, SameSite=Lax, Path=/, Secure (HTTPS or loopback dev), 7d Max-Age.
 //
 // Immutability: the secret and maxAge fields are set once at construction and never
 // modified. This allows safe concurrent access from both Hub.HandleHTTP (WS upgrade)
 // and Authenticator.AuthenticateRequest (REST API) without additional locking.
 type CookieAuth struct {
-	secret []byte
-	maxAge time.Duration
+	secret   []byte
+	maxAge   time.Duration
+	sameSite http.SameSite
 }
 
 // NewCookieAuth creates a CookieAuth with the given configured secret or falls back to filesystem persistence.
@@ -62,8 +63,9 @@ func NewCookieAuth(configuredSecret string) (*CookieAuth, error) {
 			return nil, fmt.Errorf("security: generate cookie secret for test: %w", err)
 		}
 		return &CookieAuth{
-			secret: secretBytes,
-			maxAge: cookieMaxAge,
+			secret:   secretBytes,
+			maxAge:   cookieMaxAge,
+			sameSite: http.SameSiteLaxMode,
 		}, nil
 	}
 
@@ -99,9 +101,28 @@ func NewCookieAuth(configuredSecret string) (*CookieAuth, error) {
 	}
 
 	return &CookieAuth{
-		secret: secretBytes,
-		maxAge: cookieMaxAge,
+		secret:   secretBytes,
+		maxAge:   cookieMaxAge,
+		sameSite: http.SameSiteLaxMode,
 	}, nil
+}
+
+// SetSameSite configures the SameSite attribute for the session cookies.
+// Supported values: "lax", "strict", "none", "default" (case-insensitive).
+// Defaults to SameSite=Lax to preserve intranet plain HTTP compatibility.
+func (c *CookieAuth) SetSameSite(mode string) {
+	switch strings.ToLower(mode) {
+	case "lax":
+		c.sameSite = http.SameSiteLaxMode
+	case "strict":
+		c.sameSite = http.SameSiteStrictMode
+	case "none":
+		c.sameSite = http.SameSiteNoneMode
+	case "default":
+		c.sameSite = http.SameSiteDefaultMode
+	default:
+		c.sameSite = http.SameSiteLaxMode
+	}
 }
 
 // SetCookie issues a new HMAC-signed cookie for the given userID.
@@ -122,7 +143,7 @@ func (c *CookieAuth) SetCookie(w http.ResponseWriter, r *http.Request, userID st
 		MaxAge:   int(c.maxAge.Seconds()),
 		HttpOnly: true,
 		Secure:   cookieSecure(r),
-		SameSite: http.SameSiteNoneMode,
+		SameSite: c.sameSite,
 	})
 	return nil
 }
@@ -167,7 +188,7 @@ func (c *CookieAuth) setCookieAt(w http.ResponseWriter, r *http.Request, userID 
 		MaxAge:   int(c.maxAge.Seconds()),
 		HttpOnly: true,
 		Secure:   cookieSecure(r),
-		SameSite: http.SameSiteNoneMode,
+		SameSite: c.sameSite,
 	})
 }
 
@@ -244,7 +265,7 @@ func (c *CookieAuth) Clear(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   cookieSecure(r),
-		SameSite: http.SameSiteNoneMode,
+		SameSite: c.sameSite,
 	})
 }
 
@@ -279,14 +300,15 @@ func isLocalhost(r *http.Request) bool {
 // HTTPS anywhere, or any loopback origin (a secure context in modern browsers,
 // allowing Secure cookies over plain http during local development).
 //
-// Deployment note: cookies use SameSite=None, which the browser rejects unless
-// Secure is also set. On a non-loopback plaintext HTTP deployment (intranet IP,
-// or a reverse proxy that strips X-Forwarded-Proto) this returns false → the
-// login responds 200 but the browser silently drops the cookie → every
-// subsequent request 401s. Production MUST terminate TLS at the edge (or proxy
-// X-Forwarded-Proto correctly). SameSite=None is the CSRF trade-off for
-// cross-origin webchat; it is mitigated by Secure and by state-changing
-// endpoints requiring a valid HMAC cookie (no additional CSRF token today).
+// Deployment note: cookies use the configured SameSite value (default "lax").
+// When set to SameSite=None, the browser rejects unless Secure is also set.
+// On a non-loopback plaintext HTTP deployment (intranet IP, or a reverse
+// proxy that strips X-Forwarded-Proto) this returns false → the login responds
+// 200 but the browser silently drops the cookie → every subsequent request
+// 401s. Production MUST terminate TLS at the edge (or proxy X-Forwarded-Proto
+// correctly). SameSite=Lax is the default and works for same-origin webchat;
+// cross-origin HTTPS deployments that need SameSite=None must also ensure
+// Secure=true (i.e. edge TLS or localhost).
 func cookieSecure(r *http.Request) bool {
 	return isHTTPS(r) || isLocalhost(r)
 }

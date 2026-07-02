@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MarkdownText } from "../MarkdownText";
+import { useTranslation } from "react-i18next";
 
 interface AgentToolProps {
   description: string;
@@ -14,10 +15,11 @@ interface AgentToolProps {
 }
 
 export function AgentTool({ description, prompt, subagent_type, run_in_background, status, onToggle }: AgentToolProps) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-default)] my-6 bg-[var(--bg-surface)]/40 backdrop-blur-md shadow-[var(--shadow-md)] transition-all duration-500 hover:shadow-[var(--shadow-lg)]">
+    <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-6 bg-[var(--bg-surface)]/40 backdrop-blur-md shadow-[var(--shadow-md)] transition-all duration-500 hover:shadow-[var(--shadow-lg)]">
       {/* Header */}
       <div 
         className={`px-5 py-4 bg-gradient-to-r from-[var(--bg-elevated)] to-transparent border-b border-white/[0.05] flex items-center justify-between ${onToggle ? "cursor-pointer hover:bg-white/[0.02] transition-all" : ""}`}
@@ -38,14 +40,14 @@ export function AgentTool({ description, prompt, subagent_type, run_in_backgroun
             )}
           </div>
           <div>
-            <h3 className="text-[14px] font-bold text-[var(--text-primary)] tracking-tight">Agent Delegation</h3>
+            <h3 className="text-[14px] font-bold text-[var(--text-primary)] tracking-tight">{t('chat:tool.agent.title', { defaultValue: 'Agent Delegation' })}</h3>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[10px] font-mono text-[var(--accent-gold)] uppercase tracking-wider bg-[var(--accent-gold)]/10 px-1.5 py-0.5 rounded border border-[var(--accent-gold)]/20 font-bold">
                 {subagent_type || "autonomous"}
               </span>
               {run_in_background && (
                 <span className="text-[9px] font-mono text-[var(--text-faint)] uppercase tracking-tighter">
-                  • Background Process
+                  • {t('chat:tool.agent.background_process', { defaultValue: 'Background Process' })}
                 </span>
               )}
             </div>
@@ -53,7 +55,7 @@ export function AgentTool({ description, prompt, subagent_type, run_in_backgroun
         </div>
         <div className="flex items-center gap-3">
            <span className={`text-[10px] font-bold uppercase tracking-widest ${status === 'running' ? 'text-[var(--accent-gold)] animate-pulse' : 'text-[var(--text-faint)]'}`}>
-             {status === 'running' ? 'Initializing...' : 'Deployed'}
+             {status === 'running' ? t('chat:tool.agent.initializing', { defaultValue: 'Initializing...' }) : t('chat:tool.agent.deployed', { defaultValue: 'Deployed' })}
            </span>
         </div>
       </div>
@@ -74,11 +76,12 @@ export function AgentTool({ description, prompt, subagent_type, run_in_backgroun
         {/* Prompt Section */}
         <div className="rounded-xl bg-black/40 border border-white/[0.05] overflow-hidden">
           <button 
+            type="button"
             onClick={() => setIsExpanded(!isExpanded)}
             className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-colors group"
           >
             <span className="text-[11px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest group-hover:text-[var(--text-secondary)] transition-colors">
-              Operational Instructions
+              {t('chat:tool.agent.instructions', { defaultValue: 'Operational Instructions' })}
             </span>
             <motion.div
               animate={{ rotate: isExpanded ? 180 : 0 }}
@@ -123,7 +126,7 @@ export function AgentTool({ description, prompt, subagent_type, run_in_backgroun
              ))}
           </div>
           <span className="text-[9px] font-mono text-[var(--text-faint)] uppercase tracking-[0.2em] ml-2">
-            AI Core Link Active
+            {t('chat:tool.agent.ai_core_link_active', { defaultValue: 'AI Core Link Active' })}
           </span>
         </div>
         <div className="flex items-center gap-2">

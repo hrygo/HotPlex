@@ -13,16 +13,11 @@ import {
   EmptyState,
 } from '@/components/admin/resource-states';
 import { useAdminUI } from '@/context/admin-ui-context';
+import { useTranslation } from 'react-i18next';
 
 // 4 tiers + "" (clear override → config global default, which r3 made "workspace").
 // Mirrors GeneralTab's set with an explicit "" entry for the admin console.
-const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'Default (workspace)' },
-  { value: 'workspace', label: 'Workspace' },
-  { value: 'auto-edit', label: 'Auto Edit' },
-  { value: 'read-only', label: 'Read Only' },
-  { value: 'bypass', label: 'Bypass' },
-];
+const PERMISSION_MODE_OPTIONS = ['', 'workspace', 'auto-edit', 'read-only', 'bypass'];
 
 const selectClass =
   'w-full rounded-[var(--radius-sm)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] appearance-none cursor-pointer';
@@ -38,6 +33,7 @@ function WorkspaceRow({
   ws: AdminWorkspace;
   onUpdated: () => void;
 }) {
+  const { t } = useTranslation();
   const { showToast } = useAdminUI();
   const [mode, setMode] = useState(ws.permission_mode || '');
   const [saving, setSaving] = useState(false);
@@ -54,13 +50,24 @@ function WorkspaceRow({
     setSaving(true);
     try {
       await updateAdminWorkspacePermissionMode(ws.id, mode);
-      showToast('Updated — takes effect for new sessions.', 'success');
+      showToast(t('admin:workspaces.toast.updated', { defaultValue: 'Updated — takes effect for new sessions.' }), 'success');
       onUpdated(); // refetch so updated_at + any reordering propagate
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Update failed.', 'error');
+      showToast(err instanceof Error ? err.message : t('admin:workspaces.toast.update_failed', { defaultValue: 'Update failed.' }), 'error');
       setMode(ws.permission_mode || ''); // revert local selection
     } finally {
       setSaving(false);
+    }
+  };
+
+  const getPermissionModeLabel = (val: string) => {
+    switch (val) {
+      case '': return t('admin:workspaces.modes.default', { defaultValue: 'Default (workspace)' });
+      case 'workspace': return t('admin:workspaces.modes.workspace', { defaultValue: 'Workspace' });
+      case 'auto-edit': return t('admin:workspaces.modes.auto_edit', { defaultValue: 'Auto Edit' });
+      case 'read-only': return t('admin:workspaces.modes.read_only', { defaultValue: 'Read Only' });
+      case 'bypass': return t('admin:workspaces.modes.bypass', { defaultValue: 'Bypass' });
+      default: return val;
     }
   };
 
@@ -101,8 +108,8 @@ function WorkspaceRow({
           disabled={saving}
         >
           {PERMISSION_MODE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
+            <option key={opt} value={opt}>
+              {getPermissionModeLabel(opt)}
             </option>
           ))}
         </select>
@@ -115,22 +122,34 @@ function WorkspaceRow({
 
       {/* Save */}
       <button
+        type="button"
         onClick={handleSave}
         disabled={!dirty || saving}
         className="px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
       >
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? t('common:action.saving', { defaultValue: 'Saving…' }) : t('common:action.save', { defaultValue: 'Save' })}
       </button>
     </div>
   );
 }
 
 export default function AdminWorkspacesPage() {
+  const { t } = useTranslation();
   const { data, loading, error, reload } = useResource<AdminWorkspace[]>(
     () => listAdminWorkspaces(),
     [],
   );
   const list = data ?? [];
+
+  const getHeaderLabel = (index: number) => {
+    switch (index) {
+      case 0: return t('admin:workspaces.table.owner', { defaultValue: 'Owner' });
+      case 1: return t('admin:workspaces.table.workspace', { defaultValue: 'Workspace' });
+      case 2: return t('admin:workspaces.table.work_dir', { defaultValue: 'Work Dir' });
+      case 3: return t('admin:workspaces.table.permission_mode', { defaultValue: 'Permission Mode' });
+      default: return '';
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] p-6">
@@ -139,7 +158,7 @@ export default function AdminWorkspacesPage() {
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
-              Workspaces
+              {t('admin:workspaces.title', { defaultValue: 'Workspaces' })}
             </h1>
             {!loading && !error && (
               <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
@@ -148,10 +167,11 @@ export default function AdminWorkspacesPage() {
             )}
           </div>
           <button
+            type="button"
             onClick={reload}
             disabled={loading}
             className="inline-flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-            title="Refresh"
+            title={t('common:action.refresh', { defaultValue: 'Refresh' })}
           >
             <svg
               width="14"
@@ -177,21 +197,20 @@ export default function AdminWorkspacesPage() {
           <svg className="w-4 h-4 shrink-0 mt-0.5 text-[var(--accent-gold)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
           </svg>
-          <span>
-            Permission mode changes apply to <strong>new sessions only</strong>; running
-            conversations keep their current mode. The user self-service endpoints
-            (<code className="font-mono">/api/workspaces</code>) remain admin-gated for this
-            field.
-          </span>
+          <span dangerouslySetInnerHTML={{
+            __html: t('admin:workspaces.banner', {
+              defaultValue: 'Permission mode changes apply to <strong>new sessions only</strong>; running conversations keep their current mode. The user self-service endpoints (<code class="font-mono">/api/workspaces</code>) remain admin-gated for this field.'
+            })
+          }} />
         </div>
 
-        {loading && <LoadingState label="Loading workspaces..." />}
+        {loading && <LoadingState label={t('admin:workspaces.loading', { defaultValue: 'Loading workspaces...' })} />}
         {error && <ErrorState message={error} onRetry={reload} />}
 
         {!loading && !error && list.length === 0 && (
           <EmptyState
-            title="No workspaces"
-            description="Workspaces appear here once users create them via the chat client."
+            title={t('admin:workspaces.empty.title', { defaultValue: 'No workspaces' })}
+            description={t('admin:workspaces.empty.description', { defaultValue: 'Workspaces appear here once users create them via the chat client.' })}
           />
         )}
 
@@ -200,12 +219,12 @@ export default function AdminWorkspacesPage() {
           <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
             {/* Header row */}
             <div className="grid grid-cols-[1.4fr_1fr_1.6fr_1.3fr_auto] items-center gap-3 px-4 py-2.5 bg-[var(--bg-hover)]/60 border-b border-[var(--border-subtle)]">
-              {['Owner', 'Workspace', 'Work Dir', 'Permission Mode', ''].map((h, i) => (
+              {[0, 1, 2, 3, 4].map((idx) => (
                 <div
-                  key={i}
+                  key={idx}
                   className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest"
                 >
-                  {h}
+                  {getHeaderLabel(idx)}
                 </div>
               ))}
             </div>

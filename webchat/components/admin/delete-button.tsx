@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 
 interface DeleteButtonProps {
   // Resource name shown in the confirmation prompt (e.g. bot/workspace name).
@@ -20,14 +21,17 @@ interface DeleteButtonProps {
 // workspaces/detail (PR-1b).
 export function DeleteButton({
   resourceName,
-  buttonLabel = 'Delete',
+  buttonLabel,
   redirectHref,
   onDelete,
 }: DeleteButtonProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const label = buttonLabel || t('common:action.delete', { defaultValue: 'Delete' });
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -36,7 +40,7 @@ export function DeleteButton({
       await onDelete();
       if (redirectHref) router.push(redirectHref);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete');
+      setError(err instanceof Error ? err.message : t('admin:delete_button.error_failed', { defaultValue: 'Failed to delete' }));
       setDeleting(false);
     }
   };
@@ -46,22 +50,24 @@ export function DeleteButton({
       <div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
         <div className="rounded-[var(--radius-md)] bg-[rgba(244,63,94,0.06)] border border-[rgba(244,63,94,0.12)] p-4">
           <p className="text-sm text-[var(--accent-coral)] font-medium mb-3">
-            Delete &ldquo;{resourceName}&rdquo;? This action cannot be undone.
+            {t('admin:delete_button.confirm_message', { name: resourceName, defaultValue: `Delete "${resourceName}"? This action cannot be undone.` })}
           </p>
           {error && <p className="text-xs text-[var(--accent-coral)] mb-3">{error}</p>}
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleDelete}
               disabled={deleting}
               className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold bg-[var(--accent-coral)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
             >
-              {deleting ? 'Deleting...' : 'Yes, Delete'}
+              {deleting ? t('common:action.deleting', { defaultValue: 'Deleting...' }) : t('admin:delete_button.yes_delete', { defaultValue: 'Yes, Delete' })}
             </button>
             <button
+              type="button"
               onClick={() => { setConfirming(false); setError(null); }}
               className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--text-faint)] hover:text-[var(--text-secondary)] transition-colors"
             >
-              Cancel
+              {t('common:action.cancel', { defaultValue: 'Cancel' })}
             </button>
           </div>
         </div>
@@ -72,10 +78,11 @@ export function DeleteButton({
   return (
     <div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
       <button
+        type="button"
         onClick={() => setConfirming(true)}
         className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold text-[var(--accent-coral)] border border-[rgba(244,63,94,0.2)] hover:bg-[rgba(244,63,94,0.06)] transition-colors"
       >
-        {buttonLabel}
+        {label}
       </button>
     </div>
   );

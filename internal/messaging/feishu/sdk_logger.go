@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/hrygo/hotplex/internal/messaging/toolfmt"
 )
 
 // Sensitive URL query parameter keys redacted in logs: access_key, conn_id,
@@ -36,7 +34,33 @@ func sdkLogFilter(msg string) string {
 	}
 	// Truncate oversized debug messages (full event payloads are noise in logs).
 	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
-		msg = toolfmt.TruncateRunes(msg, maxDebugMsgLen)
+		runes := []rune(msg)
+		if maxDebugMsgLen > 1 {
+			msg = string(runes[:maxDebugMsgLen-1]) + "…"
+		} else {
+			msg = string(runes[:maxDebugMsgLen])
+		}
+	}
+	return msg
+}
+
+// sdkWarnFilter applies the same truncation and message cleanup as sdkLogFilter
+// but does NOT silence routine heartbeat (ping/pong) or reconnection messages.
+// This ensures Warn/Error level logs always surface failures — the original
+// comment on sdkDebugSilent says "Failures still surface via Warn/Error level".
+func sdkWarnFilter(msg string) string {
+	// Improve "receive message failed" error readability.
+	if strings.Contains(msg, "receive message failed") {
+		msg = strings.Split(msg, ", err:")[0] + " (connection reset by peer)"
+	}
+	// Truncate oversized messages.
+	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
+		runes := []rune(msg)
+		if maxDebugMsgLen > 1 {
+			msg = string(runes[:maxDebugMsgLen-1]) + "…"
+		} else {
+			msg = string(runes[:maxDebugMsgLen])
+		}
 	}
 	return msg
 }
@@ -81,31 +105,38 @@ var sdkReconnectSilent = []string{
 // to reduce log noise — failures still surface via Warn/Error level.
 type SlogLogger struct{ *slog.Logger }
 
+func (s SlogLogger) logger() *slog.Logger {
+	if s.Logger == nil {
+		return slog.Default()
+	}
+	return s.Logger
+}
+
 func (s SlogLogger) Debug(_ context.Context, args ...any) {
 	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelDebug, msg)
+	s.logger().Log(context.Background(), slog.LevelDebug, msg)
 }
 func (s SlogLogger) Info(_ context.Context, args ...any) {
 	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelInfo, msg)
+	s.logger().Log(context.Background(), slog.LevelInfo, msg)
 }
 func (s SlogLogger) Warn(_ context.Context, args ...any) {
-	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	msg := sdkWarnFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelWarn, msg)
+	s.logger().Log(context.Background(), slog.LevelWarn, msg)
 }
 func (s SlogLogger) Error(_ context.Context, args ...any) {
-	msg := sdkLogFilter(redactURL(fmt.Sprint(args...)))
+	msg := sdkWarnFilter(redactURL(fmt.Sprint(args...)))
 	if msg == "" {
 		return
 	}
-	s.Logger.Log(context.Background(), slog.LevelError, msg)
+	s.logger().Log(context.Background(), slog.LevelError, msg)
 }

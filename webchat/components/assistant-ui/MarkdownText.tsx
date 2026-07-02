@@ -37,7 +37,7 @@ function CodeBlock({
     };
 
     return (
-        <div className="relative group/code my-6 rounded-[var(--radius-lg)] overflow-hidden border border-[var(--border-default)] bg-[#0c0c0f] shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+        <div className="relative group/code my-6 rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] bg-[var(--bg-base)] shadow-sm">
             <div
                 className={`flex items-center justify-between px-4 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] ${isExpandable ? "cursor-pointer hover:bg-[var(--bg-hover)]" : ""}`}
                 onClick={() => isExpandable && setIsExpanded(!isExpanded)}
@@ -107,19 +107,19 @@ function CodeBlock({
                 </div>
             </div>
             <div
-                className="p-4 overflow-x-auto custom-scrollbar transition-[max-height] duration-300 ease-in-out relative"
+                className="p-4 w-full max-w-full overflow-x-auto custom-scrollbar transition-[max-height] duration-300 ease-in-out relative"
                 style={{
                     maxHeight: showContent ? "none" : "200px",
                     overflowY: showContent ? "auto" : "hidden",
                 }}
             >
                 <code
-                    className="block font-mono text-[13px] leading-relaxed whitespace-pre"
+                    className="block font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all"
                     dangerouslySetInnerHTML={{ __html: highlighted }}
                 />
                 {!showContent && (
                     <div
-                        className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#0c0c0f] to-transparent flex items-end justify-center pb-2 cursor-pointer"
+                        className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[var(--bg-base)] to-transparent flex items-end justify-center pb-2 cursor-pointer"
                         onClick={() => setIsExpanded(true)}
                     >
                         <span className="text-[10px] font-bold text-[var(--accent-gold)] tracking-widest bg-[var(--bg-surface)] px-2 py-1 rounded border border-[var(--border-subtle)] shadow-lg">

@@ -15,10 +15,6 @@ import (
 const (
 	ansiReset = "\033[0m"
 	ansiBold  = "\033[1m"
-	ansiCyan  = "\033[36m"
-	ansiDim   = "\033[2m"
-	ansiGreen = "\033[32m"
-	ansiRed   = "\033[31m"
 )
 
 //go:embed banner_art.txt
@@ -78,6 +74,30 @@ func writeAll(w io.Writer, lines ...string) {
 	}
 }
 
+func formatBannerURL(tty bool, scheme, addr, path string) string {
+	if addr == "" {
+		return ""
+	}
+	host := addr
+	switch {
+	case strings.HasPrefix(host, ":"):
+		host = "127.0.0.1" + host
+	case host == "0.0.0.0":
+		host = "127.0.0.1"
+	case strings.HasPrefix(host, "0.0.0.0:"):
+		host = "127.0.0.1" + host[7:]
+	case host == "[::]":
+		host = "127.0.0.1"
+	case strings.HasPrefix(host, "[::]:"):
+		host = "127.0.0.1" + host[4:]
+	}
+	url := scheme + "://" + host + path
+	if tty {
+		return "\033[38;2;100;149;237m" + url + ansiReset
+	}
+	return url
+}
+
 func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPath string) {
 	tty := output.IsTTY(out)
 
@@ -87,33 +107,39 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 		}
 		return text
 	}
-	cyan := func(text string) string {
+	orange := func(text string) string {
 		if tty {
-			return ansiCyan + text + ansiReset
+			return "\033[38;2;255;138;0m" + text + ansiReset
 		}
 		return text
 	}
-	dim := func(text string) string {
+	teal := func(text string) string {
 		if tty {
-			return ansiDim + text + ansiReset
+			return "\033[38;2;0;185;203m" + text + ansiReset
 		}
 		return text
 	}
-	green := func(text string) string {
+	emerald := func(text string) string {
 		if tty {
-			return ansiGreen + text + ansiReset
+			return "\033[38;2;40;167;69m" + text + ansiReset
 		}
 		return text
 	}
-	red := func(text string) string {
+	rose := func(text string) string {
 		if tty {
-			return ansiRed + text + ansiReset
+			return "\033[38;2;220;53;69m" + text + ansiReset
+		}
+		return text
+	}
+	gray := func(text string) string {
+		if tty {
+			return "\033[38;2;120;120;120m" + text + ansiReset
 		}
 		return text
 	}
 
 	pad := func(label, value string) string {
-		return fmt.Sprintf("  %s%s", bold(fmt.Sprintf("%-11s", label)), value)
+		return fmt.Sprintf("  %s%s", gray(fmt.Sprintf("%-11s", label)), value)
 	}
 
 	const sectionWidth = 48
@@ -123,11 +149,15 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 		if dashLen < 3 {
 			dashLen = 3
 		}
-		return "  " + bold(name) + " " + dim(strings.Repeat("─", dashLen))
+		return "  " + teal(bold(name)) + " " + gray(strings.Repeat("─", dashLen))
 	}
 
 	sectionPad := func(label, value string) string {
-		return fmt.Sprintf("    %s%s", bold(fmt.Sprintf("%-15s", label)), value)
+		return fmt.Sprintf("    %s%s", gray(fmt.Sprintf("%-15s", label)), value)
+	}
+
+	formatURL := func(scheme, addr, path string) string {
+		return formatBannerURL(tty, scheme, addr, path)
 	}
 
 	wsScheme := "ws"
@@ -138,9 +168,9 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 	var lines []string
 
 	// ASCII art + build info
-	lines = append(lines, "", cyan(bannerArt), "")
+	lines = append(lines, "", bannerArt, "")
 	lines = append(lines,
-		pad("Version", cyan(info.Version)),
+		pad("Version", orange(info.Version)),
 		pad("Build", info.BuildTime),
 		pad("Go", fmt.Sprintf("%s · %s/%s", info.GoVersion, info.OS, info.Arch)),
 	)
@@ -150,20 +180,20 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 
 	// ── Endpoints ────────────────────────────────────────────
 	lines = append(lines, "", sectionHeader("Endpoints"))
-	lines = append(lines, sectionPad("Gateway", "http://"+s.GatewayAddr))
-	lines = append(lines, sectionPad("WebSocket", wsScheme+"://"+s.GatewayAddr+"/ws"))
-	lines = append(lines, sectionPad("Health", "http://"+s.GatewayAddr+"/health"))
+	lines = append(lines, sectionPad("Gateway", formatURL("http", s.GatewayAddr, "")))
+	lines = append(lines, sectionPad("WebSocket", formatURL(wsScheme, s.GatewayAddr, "/ws")))
+	lines = append(lines, sectionPad("Health", formatURL("http", s.GatewayAddr, "/health")))
 	if s.WebChatEmbedded {
-		lines = append(lines, sectionPad("WebChat", "http://"+s.GatewayAddr+"/ "+dim("(embedded)")))
-		lines = append(lines, sectionPad("Admin UI", "http://"+s.GatewayAddr+"/admin "+dim("(embedded)")))
+		lines = append(lines, sectionPad("WebChat", formatURL("http", s.GatewayAddr, "/")+" "+gray("(embedded)")))
+		lines = append(lines, sectionPad("Admin UI", formatURL("http", s.GatewayAddr, "/admin")+" "+gray("(embedded)")))
 	} else if s.WebChatAddr != "" {
-		lines = append(lines, sectionPad("WebChat", "http://"+s.WebChatAddr))
-		lines = append(lines, sectionPad("Admin UI", "http://"+s.WebChatAddr+"/admin"))
+		lines = append(lines, sectionPad("WebChat", formatURL("http", s.WebChatAddr, "")))
+		lines = append(lines, sectionPad("Admin UI", formatURL("http", s.WebChatAddr, "/admin")))
 	}
-	lines = append(lines, sectionPad("Docs", "http://"+s.GatewayAddr+"/docs/"))
-	lines = append(lines, sectionPad("API Console", "http://"+s.GatewayAddr+"/docs/reference/api-console.html"))
+	lines = append(lines, sectionPad("Docs", formatURL("http", s.GatewayAddr, "/docs/")))
+	lines = append(lines, sectionPad("API Console", formatURL("http", s.GatewayAddr, "/docs/reference/api-console.html")))
 	if s.AdminAddr != "" {
-		lines = append(lines, sectionPad("Admin API", "http://"+s.AdminAddr))
+		lines = append(lines, sectionPad("Admin API", formatURL("http", s.AdminAddr, "")))
 	}
 
 	// ── Bots ─────────────────────────────────────────────────
@@ -174,15 +204,15 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 			if a.BotName != "" {
 				name += "/" + a.BotName
 			}
-			icon := green("✓")
+			icon := emerald("✓")
 			if !a.Started {
-				icon = red("✗")
+				icon = rose("✗")
 			}
 			wt := a.WorkerType
 			if a.WorkerDetail != "" {
 				wt += "/" + a.WorkerDetail
 			}
-			lines = append(lines, fmt.Sprintf("    %-16s %s %s", name, icon, dim(wt)))
+			lines = append(lines, fmt.Sprintf("    %-20s %s %s", name, icon, gray(wt)))
 		}
 	}
 
@@ -195,7 +225,7 @@ func printStartupBanner(out *os.File, info BuildInfo, s RuntimeStatus, configPat
 	}
 	lines = append(lines, sectionPad("Pool", fmt.Sprintf("%d sessions / %d idle per user", s.PoolMax, s.PoolIdle)))
 	if s.RetryEnabled {
-		lines = append(lines, sectionPad("LLM Retry", green(fmt.Sprintf("✓ %d retries, %s delay", s.RetryMax, s.RetryDelay))))
+		lines = append(lines, sectionPad("LLM Retry", emerald(fmt.Sprintf("✓ %d retries, %s delay", s.RetryMax, s.RetryDelay))))
 	}
 
 	lines = append(lines, "")

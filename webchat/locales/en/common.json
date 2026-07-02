@@ -1,0 +1,46 @@
+{
+  "action": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "saving": "Saving...",
+    "delete": "Delete",
+    "deleting": "Deleting...",
+    "create": "Create",
+    "creating": "Creating...",
+    "retry": "Retry",
+    "copy": "Copy",
+    "copied": "Copied",
+    "edit": "Edit",
+    "close": "Close",
+    "enable": "Enable",
+    "disable": "Disable",
+    "approve": "Approve",
+    "reject": "Reject",
+    "refresh": "Refresh"
+  },
+  "status": {
+    "loading": "Loading...",
+    "connected": "Connected",
+    "connecting": "Connecting...",
+    "disconnected": "Disconnected",
+    "error": "Error",
+    "active": "Active",
+    "disabled": "Disabled"
+  },
+  "role": {
+    "admin": "Admin",
+    "user": "User"
+  },
+  "lang": {
+    "switch": "Switch Language",
+    "en": "English",
+    "zh-CN": "简体中文",
+    "switchToEn": "Switch to English",
+    "switchToZh": "Switch to Chinese"
+  },
+  "theme": {
+    "light": "Switch to Light Mode",
+    "dark": "Switch to Dark Mode"
+  }
+}
