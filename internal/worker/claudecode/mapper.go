@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"maps"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -18,19 +17,19 @@ type Mapper struct {
 	sessionID string
 	seqGen    func() int64 // Sequence generator (provided by Hub)
 
-	// sentLengths tracks the length of text/reasoning already sent for each item ID
+	// sentTexts tracks the cumulative text/reasoning already sent for each item ID
 	// to perform delta-based diff calculations. Sourced under mu.
-	sentLengths map[string]int
-	mu          sync.Mutex
+	sentTexts map[string]string
+	mu        sync.Mutex
 }
 
 // NewMapper creates a new Mapper instance.
 func NewMapper(log *slog.Logger, sessionID string, seqGen func() int64) *Mapper {
 	return &Mapper{
-		log:         log,
-		sessionID:   sessionID,
-		seqGen:      seqGen,
-		sentLengths: make(map[string]int),
+		log:       log,
+		sessionID: sessionID,
+		seqGen:    seqGen,
+		sentTexts: make(map[string]string),
 	}
 }
 
@@ -132,7 +131,7 @@ func (m *Mapper) mapStream(p *StreamPayload) (*events.Envelope, error) { //nolin
 
 	var content string
 	if p.IsDelta {
-		m.recordSentLength(msgID+"_"+p.Type, utf8.RuneCountInString(p.Content))
+		m.recordSentDelta(msgID+"_"+p.Type, p.Content)
 		content = p.Content
 	} else {
 		content = m.getDeltaText(msgID+"_"+p.Type, p.Content)
@@ -343,39 +342,42 @@ func mapMCPStatusResponse(raw map[string]any) *events.MCPStatusData {
 }
 
 // getDeltaText computes the newly appended characters for a given item ID
-// by comparing the current text against the previously recorded sent length.
-// It updates the recorded length to reflect the new state.
-// Access to m.sentLengths is guarded under m.mu.
+// by comparing the current text against the previously recorded sent text.
+// It updates the recorded text to reflect the new state.
+// Access to m.sentTexts is guarded under m.mu.
 func (m *Mapper) getDeltaText(itemID, currentText string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.sentLengths == nil {
-		m.sentLengths = make(map[string]int)
+	if m.sentTexts == nil {
+		m.sentTexts = make(map[string]string)
 	}
 
-	runes := []rune(currentText)
-	lastLen := m.sentLengths[itemID]
-	currLen := len(runes)
+	sentRunes := []rune(m.sentTexts[itemID])
+	currRunes := []rune(currentText)
+
+	lastLen := len(sentRunes)
+	currLen := len(currRunes)
 
 	if currLen <= lastLen {
 		return ""
 	}
 
-	delta := string(runes[lastLen:])
-	m.sentLengths[itemID] = currLen
+	deltaRunes := currRunes[lastLen:]
+	delta := string(deltaRunes)
+	m.sentTexts[itemID] += delta
 	return delta
 }
 
-// recordSentLength updates the recorded sent length for a given item ID
+// recordSentDelta appends the sent delta string for a given item ID
 // after delta content has been sent via another event source (like delta notification).
-func (m *Mapper) recordSentLength(itemID string, deltaLength int) {
+func (m *Mapper) recordSentDelta(itemID, delta string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.sentLengths == nil {
-		m.sentLengths = make(map[string]int)
+	if m.sentTexts == nil {
+		m.sentTexts = make(map[string]string)
 	}
 
-	m.sentLengths[itemID] += deltaLength
+	m.sentTexts[itemID] += delta
 }
