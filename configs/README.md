@@ -119,7 +119,7 @@ log:
 | `tls_cert_file` | string | `/etc/hotplex/tls/server.crt` | — | TLS 证书文件路径。仅当 `tls_enabled: true` 时使用 |
 | `tls_key_file` | string | `/etc/hotplex/tls/server.key` | — | TLS 私钥文件路径。仅当 `tls_enabled: true` 时使用 |
 | `allowed_origins` | []string | `["*"]` | ✅ | CORS 允许的 Origin 列表。WebSocket 升级时 `Upgrader.CheckOrigin` 校验请求的 Origin 头。`["*"]` 允许所有来源（仅开发用），生产应限制为具体域名。热重载即时生效——每次 WS 升级请求读取最新配置 |
-| `cookie_same_site` | string | `none` | — | WebChat 登录 Session Cookie 的 SameSite 属性。可选值：`none`（默认，要求 Secure 标记即 HTTPS 或 localhost 环回）、`lax`（允许纯 HTTP 局域网/内网部署，仍然具备 CSRF 防御）、`strict`、`default`。 |
+| `cookie_same_site` | string | `lax` | — | WebChat 登录 Session Cookie 的 SameSite 属性。可选值：`lax`、`none`、`strict`、`default`。<br>**Lax 模式 (默认值)**：允许在纯 HTTP 内网/局域网下成功交换 Cookie（不需要 Secure 属性），且具备原生 CSRF 安全防护；但对于“跨域/跨站的前后端分离部署”，浏览器不会在跨站 AJAX 请求中携带此 Cookie，会导致接口调用返回 401。<br>**None 模式**：允许在任何跨站请求下自动携带 Cookie（最宽松模式），但必须配合 `tls_enabled: true` 即 HTTPS 强制启用（因为浏览器强制规定 SameSite=None 必须具有 Secure 属性，否则在非 localhost HTTP 下会被浏览器直接静默丢弃）。 |
 
 ### session — 会话生命周期
 
