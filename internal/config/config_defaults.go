@@ -90,6 +90,7 @@ func Default() *Config {
 			AllowedOrigins:  []string{"*"},
 			CSP:             "", // empty → webchat/docs use package-level default
 			SecurityContact: "",
+			CookieSameSite:  "none",
 		},
 		Session: SessionConfig{
 			RetentionPeriod:   7 * 24 * time.Hour,

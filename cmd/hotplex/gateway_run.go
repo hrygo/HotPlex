@@ -432,6 +432,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		if err != nil {
 			return fmt.Errorf("create cookie auth: %w", err)
 		}
+		ca.SetSameSite(cfg.Security.CookieSameSite)
 		cookieAuth = ca
 		auth.SetCookieAuth(ca)
 		log.Info("gateway: webchat cookie auth enabled")
