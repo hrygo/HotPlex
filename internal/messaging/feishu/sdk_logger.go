@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/hrygo/hotplex/internal/messaging/toolfmt"
 )
 
 // Sensitive URL query parameter keys redacted in logs: access_key, conn_id,
@@ -36,7 +34,12 @@ func sdkLogFilter(msg string) string {
 	}
 	// Truncate oversized debug messages (full event payloads are noise in logs).
 	if utf8.RuneCountInString(msg) > maxDebugMsgLen {
-		msg = toolfmt.TruncateRunes(msg, maxDebugMsgLen)
+		runes := []rune(msg)
+		if maxDebugMsgLen > 1 {
+			msg = string(runes[:maxDebugMsgLen-1]) + "…"
+		} else {
+			msg = string(runes[:maxDebugMsgLen])
+		}
 	}
 	return msg
 }
