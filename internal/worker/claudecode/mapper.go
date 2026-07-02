@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"sync"
 
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -15,14 +16,20 @@ type Mapper struct {
 	log       *slog.Logger
 	sessionID string
 	seqGen    func() int64 // Sequence generator (provided by Hub)
+
+	// sentLengths tracks the length of text/reasoning already sent for each item ID
+	// to perform delta-based diff calculations. Sourced under mu.
+	sentLengths map[string]int
+	mu          sync.Mutex
 }
 
 // NewMapper creates a new Mapper instance.
 func NewMapper(log *slog.Logger, sessionID string, seqGen func() int64) *Mapper {
 	return &Mapper{
-		log:       log,
-		sessionID: sessionID,
-		seqGen:    seqGen,
+		log:         log,
+		sessionID:   sessionID,
+		seqGen:      seqGen,
+		sentLengths: make(map[string]int),
 	}
 }
 
@@ -117,6 +124,19 @@ func (m *Mapper) mapRawStringPayload(raw json.RawMessage, mapFn func(string) (*e
 // mapStream converts a stream_event to an AEP envelope.
 // thinking → events.Reasoning; all other types → events.MessageDelta.
 func (m *Mapper) mapStream(p *StreamPayload) (*events.Envelope, error) { //nolint:unparam // consistent mapper API
+	msgID := p.MessageID
+	if msgID == "" {
+		msgID = "assistant_msg"
+	}
+
+	var content string
+	if p.IsDelta {
+		m.recordSentLength(msgID+"_"+p.Type, len(p.Content))
+		content = p.Content
+	} else {
+		content = m.getDeltaText(msgID+"_"+p.Type, p.Content)
+	}
+
 	if p.Type == "thinking" {
 		return events.NewEnvelope(
 			aep.NewID(),
@@ -124,8 +144,8 @@ func (m *Mapper) mapStream(p *StreamPayload) (*events.Envelope, error) { //nolin
 			m.seqGen(),
 			events.Reasoning,
 			events.ReasoningData{
-				ID:      p.MessageID,
-				Content: p.Content,
+				ID:      msgID,
+				Content: content,
 			},
 		), nil
 	}
@@ -136,8 +156,8 @@ func (m *Mapper) mapStream(p *StreamPayload) (*events.Envelope, error) { //nolin
 		m.seqGen(),
 		events.MessageDelta,
 		events.MessageDeltaData{
-			MessageID: p.MessageID,
-			Content:   p.Content,
+			MessageID: msgID,
+			Content:   content,
 		},
 	), nil
 }
@@ -319,4 +339,41 @@ func mapContextUsageResponse(raw map[string]any) *events.ContextUsageData {
 
 func mapMCPStatusResponse(raw map[string]any) *events.MCPStatusData {
 	return events.MapMCPStatusResponse(raw)
+}
+
+// getDeltaText computes the newly appended characters for a given item ID
+// by comparing the current text against the previously recorded sent length.
+// It updates the recorded length to reflect the new state.
+// Access to m.sentLengths is guarded under m.mu.
+func (m *Mapper) getDeltaText(itemID, currentText string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sentLengths == nil {
+		m.sentLengths = make(map[string]int)
+	}
+
+	lastLen := m.sentLengths[itemID]
+	currLen := len(currentText)
+
+	if currLen <= lastLen {
+		return ""
+	}
+
+	delta := currentText[lastLen:]
+	m.sentLengths[itemID] = currLen
+	return delta
+}
+
+// recordSentLength updates the recorded sent length for a given item ID
+// after delta content has been sent via another event source (like delta notification).
+func (m *Mapper) recordSentLength(itemID string, deltaLength int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sentLengths == nil {
+		m.sentLengths = make(map[string]int)
+	}
+
+	m.sentLengths[itemID] += deltaLength
 }
