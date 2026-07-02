@@ -21,6 +21,8 @@ func TestFormatBannerURL(t *testing.T) {
 		{name: "colon-only port", scheme: "http", addr: ":8888", path: "", want: "http://127.0.0.1:8888"},
 		{name: "localhost with port", scheme: "ws", addr: "localhost:8888", path: "/ws", want: "ws://localhost:8888/ws"},
 		{name: "explicit host with path", scheme: "http", addr: "192.168.1.1:9999", path: "/admin", want: "http://192.168.1.1:9999/admin"},
+		{name: "IPv6 wildcard without port", scheme: "http", addr: "[::]", path: "", want: "http://127.0.0.1"},
+		{name: "IPv6 wildcard with port", scheme: "http", addr: "[::]:8888", path: "/ws", want: "http://127.0.0.1:8888/ws"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

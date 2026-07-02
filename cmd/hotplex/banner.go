@@ -86,6 +86,10 @@ func formatBannerURL(tty bool, scheme, addr, path string) string {
 		host = "127.0.0.1"
 	case strings.HasPrefix(host, "0.0.0.0:"):
 		host = "127.0.0.1" + host[7:]
+	case host == "[::]":
+		host = "127.0.0.1"
+	case strings.HasPrefix(host, "[::]:"):
+		host = "127.0.0.1" + host[4:]
 	}
 	url := scheme + "://" + host + path
 	if tty {
