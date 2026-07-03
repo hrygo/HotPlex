@@ -3,6 +3,17 @@
 import { useEffect } from 'react';
 import i18n from '@/lib/i18n/config';
 
+// global-error.tsx 在 RootLayout 之外渲染 —— 既无法访问 globals.css 的 design
+// token，也无法依赖 ThemeContext。此页显式采用恒暗配色（取值对齐暗色 token），
+// 作为整个应用崩溃时的最后兜底界面。
+const COLORS = {
+  bg: '#050506',
+  text: '#e5e5e5',
+  muted: '#888',
+  accent: '#e5a00d',
+  accentText: '#000',
+} as const;
+
 export default function GlobalError({
   error,
   reset,
@@ -27,14 +38,14 @@ export default function GlobalError({
           alignItems: 'center',
           justifyContent: 'center',
           height: '100vh',
-          background: '#050506',
-          color: '#e5e5e5',
+          background: COLORS.bg,
+          color: COLORS.text,
           fontFamily: 'system-ui, sans-serif',
         }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
             {i18n.t('errors:title', { defaultValue: 'Something went wrong' })}
           </h2>
-          <p style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1.5rem' }}>
+          <p style={{ fontSize: '0.875rem', color: COLORS.muted, marginBottom: '1.5rem' }}>
             {error.message || i18n.t('errors:unexpected', { defaultValue: 'An unexpected error occurred.' })}
           </p>
           <button
@@ -42,8 +53,8 @@ export default function GlobalError({
             style={{
               padding: '0.625rem 1.5rem',
               borderRadius: '9999px',
-              background: '#e5a00d',
-              color: '#000',
+              background: COLORS.accent,
+              color: COLORS.accentText,
               border: 'none',
               fontWeight: 'bold',
               cursor: 'pointer',
