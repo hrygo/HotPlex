@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 /**
  * Timeout helper: schedule a single delayed callback that is cancelable and
@@ -36,5 +36,7 @@ export function useTimeout() {
     // Clear any pending timer on unmount — prevents setState-after-unmount.
     useEffect(() => cancel, [cancel]);
 
-    return { schedule, cancel };
+    // Stable return object so downstream useCallback/useMemo dependencies
+    // (e.g. scheduleWsClose in ChatContainer) don't invalidate every render.
+    return useMemo(() => ({ schedule, cancel }), [schedule, cancel]);
 }

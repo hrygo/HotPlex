@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useTimeout } from "@/lib/hooks/useTimeout";
 import { useRouter } from "next/navigation";
 import {
@@ -111,6 +111,11 @@ export default function ChatContainer() {
     const router = useRouter();
     const { t } = useTranslation(['chat', 'common']);
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    // Reactive mobile detection: the mobile drawer (fixed overlay) needs a11y
+    // behaviors (ESC / focus trap / scroll lock / aria-modal) that the desktop
+    // inline sidebar must NOT get. Updated on viewport resize.
+    const [isMobile, setIsMobile] = useState(false);
+    const asideRef = useRef<HTMLElement>(null);
     const [showNewModal, setShowNewModal] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
     // Hover-to-close for the workspace dropdown. The close is delayed so the
@@ -127,13 +132,63 @@ export default function ChatContainer() {
 
     // Desktop keeps the sidebar open by default; on mobile the fixed drawer
     // plus its backdrop would cover the chat on first paint, so collapse it.
-    // Runs once after mount — SSR-safe (initial render stays `true` everywhere).
+    // Also tracks `isMobile` reactively (resize-aware) so the drawer's a11y
+    // behaviors below apply only in overlay mode, never to the desktop inline
+    // sidebar. Runs after mount — SSR-safe (initial render stays `true`).
     useEffect(() => {
-        if (window.matchMedia("(max-width: 767px)").matches) {
+        const mq = window.matchMedia("(max-width: 767px)");
+        const sync = () => setIsMobile(mq.matches);
+        sync();
+        if (mq.matches) {
             // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time viewport detection (SSR-safe)
             setSidebarOpen(false);
         }
+        mq.addEventListener("change", sync);
+        return () => mq.removeEventListener("change", sync);
     }, []);
+
+    // Mobile drawer accessibility (overlay mode only): Escape closes the
+    // drawer, body scroll is locked while open, and focus is trapped inside
+    // then restored to the previously-focused element on close. The desktop
+    // inline sidebar (isMobile=false) is intentionally unaffected.
+    useEffect(() => {
+        if (!isMobile || !sidebarOpen) return;
+
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                setSidebarOpen(false);
+                return;
+            }
+            if (e.key === "Tab" && asideRef.current) {
+                const focusable = asideRef.current.querySelectorAll<HTMLElement>(
+                    'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+                );
+                if (focusable.length === 0) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        document.addEventListener("keydown", onKeyDown);
+
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+
+        const previouslyFocused = document.activeElement as HTMLElement | null;
+        asideRef.current?.focus();
+
+        return () => {
+            document.removeEventListener("keydown", onKeyDown);
+            document.body.style.overflow = prevOverflow;
+            previouslyFocused?.focus?.();
+        };
+    }, [isMobile, sidebarOpen]);
     const [authError, setAuthError] = useState(false);
     const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(
         null,
@@ -544,7 +599,12 @@ export default function ChatContainer() {
                     />
                 )}
                 <aside
-                    className={`fixed inset-y-0 left-0 z-40 w-[280px] bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] transform transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:z-20 md:translate-x-0 md:bg-transparent md:border-0 md:transition-all md:flex-shrink-0 md:overflow-hidden ${sidebarOpen ? "md:w-[280px]" : "md:w-0"}`}
+                    ref={asideRef}
+                    tabIndex={-1}
+                    role={isMobile && sidebarOpen ? "dialog" : undefined}
+                    aria-modal={isMobile && sidebarOpen ? "true" : undefined}
+                    aria-label={isMobile && sidebarOpen ? t("chat:aria.session_drawer") : undefined}
+                    className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] transform transition-transform duration-300 ease-in-out focus:outline-none ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:z-20 md:translate-x-0 md:bg-transparent md:border-0 md:transition-all md:flex-shrink-0 md:overflow-hidden ${sidebarOpen ? "md:w-[280px]" : "md:w-0"}`}
                 >
                     <SessionPanel
                         sessions={sessions}

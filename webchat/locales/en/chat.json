@@ -237,6 +237,7 @@
     "stopping": "Stopping…",
     "toggle_theme": "Toggle theme",
     "toggle_language": "Switch language",
-    "scroll_to_latest": "Scroll to latest messages"
+    "scroll_to_latest": "Scroll to latest messages",
+    "session_drawer": "Sessions panel"
   }
 }

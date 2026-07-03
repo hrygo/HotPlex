@@ -237,6 +237,7 @@
     "stopping": "正在停止…",
     "toggle_theme": "切换主题",
     "toggle_language": "切换语言",
-    "scroll_to_latest": "滚动到最新消息"
+    "scroll_to_latest": "滚动到最新消息",
+    "session_drawer": "会话列表面板"
   }
 }
