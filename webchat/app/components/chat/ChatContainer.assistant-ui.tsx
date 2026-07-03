@@ -531,8 +531,16 @@ export default function ChatContainer() {
 
             {/* Body: session sidebar + chat */}
             <div className="flex flex-1 overflow-hidden">
+                {/* Mobile overlay backdrop — click to close the drawer (hidden on desktop) */}
+                {sidebarOpen && (
+                    <div
+                        className="fixed inset-0 z-30 bg-black/50 md:hidden"
+                        onClick={() => setSidebarOpen(false)}
+                        aria-hidden="true"
+                    />
+                )}
                 <aside
-                    className={`transition-all duration-300 ease-in-out ${sidebarOpen ? "w-[280px]" : "w-0"} overflow-hidden flex-shrink-0 relative z-20`}
+                    className={`fixed inset-y-0 left-0 z-40 w-[280px] bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] transform transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:z-20 md:translate-x-0 md:bg-transparent md:border-0 md:transition-all md:flex-shrink-0 md:overflow-hidden ${sidebarOpen ? "md:w-[280px]" : "md:w-0"}`}
                 >
                     <SessionPanel
                         sessions={sessions}
