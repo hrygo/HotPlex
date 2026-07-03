@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.31.0] - 2026-07-03
+
+### Summary
+
+v1.31.0 是一次 minor 版本更新，核心主题是 **WebChat 中英双语国际化（i18n）**。基于 react-i18next + i18next 为登录、引导、设置、工作区、聊天与全部管理端页面接入完整中英双语资源，默认 `zh-CN`，附重新设计的语言切换器（匹配主题切换风格、点击直接循环切换、状态持久化于 LocalStorage）。附带一项安全加固（cookie `SameSite` 属性可配置以支持内网 HTTP 部署）以及一组稳定性修复：Feishu dispatcher 消除 `os.Stdout` 劫持导致的 data race、Worker reasoning/text delta diff 与 UTF-8 边界截断修复、CLI 启动 banner 优化（Truecolor + loopback URL）。
+
+### Added
+
+- **WebChat UI**: 中英双语国际化（#818）— 基于 `i18next` + `react-i18next` 搭建 i18n 基础设施，为 login / onboarding / settings / workspaces / chat 及全部 admin 页面（sessions / workspaces / API keys / cron / bots）接入完整双语资源（`webchat/locales/{zh-CN,en}/*.json`），`zh-CN` 为默认语言。语言切换器重新设计以匹配主题切换风格、点击直接循环切换，状态持久化于 LocalStorage `hotplex.locale`；error / global-error 边界页通过 i18n 实例直连安全本地化（脱离 React context）。完整 TypeScript 类型安全。
+- **Configuration**: 双语 i18n 前端编码规范写入 `AGENTS.md` — 禁止硬编码中英文 UI 文案、zh-CN/en 资源属性键必须同步对齐、按业务域划分 Namespace（common / chat / admin / auth / errors）、`useTranslation('namespace')` 与 `{{param}}` 插值调用规范。
+- **Security**: cookie `SameSite` 属性可配置，支持内网 HTTP 部署 — 新增 `cookie_same_site` 配置项（默认 `lax`），HTTP 部署时启动打印安全告警日志。`README` / `configs/README.md` / `env.example` 同步文档化安全权衡。
+
+### Changed
+
+- **CLI**: 启动 banner 优化 — 24-bit RGB Truecolor 渲染颜色与分隔线；绑定地址统一规范化为 loopback（`0.0.0.0` → `127.0.0.1`、`[::]` → `[::1]`）使 URL 可点击；bot 适配器状态表列对齐；Feishu SDK 默认 logger 经 `SlogLogger` 注入而非劫持 `os.Stdout`，消除 SDK 启动噪音。
+- **WebChat UI**: 全局交互与设计令牌规范化 — cursor 与微交互统一，工具卡片 / Markdown 代码块 / 终端 / FileDiff 组件的 border-radius 收敛至设计系统变量（`radius-md`）；Markdown 代码块启用自动换行 + 主题感知折叠渐变 + `shadow-sm`；聊天输入框 focus 动画精简为仅外环 focus-ring。
+
+### Fixed
+
+- **Messaging (Feishu)**: dispatcher 注入 `SlogLogger` 替代劫持 `os.Stdout`（#828 P1）— `NewEventDispatcher` 构造窗口内将进程级 `os.Stdout` 重定向到 `/dev/null` 以消音 SDK 默认 logger，与并发 goroutine（slog stdout handler / 其他 adapter）竞态丢日志且构成 data race。改为直接注入 `d.Config.Logger = SlogLogger{}`，与 ws client 的 `WithLogger` 同一路径，彻底移除 `os.Stdout` 劫持。附带修复：`SlogLogger` 补 nil 防御 fallback `slog.Default()`；新增 `sdkWarnFilter` 按 level 过滤 SDK 日志（Debug/Info 仍静默 ping-pong 与重连，Warn/Error 不再被误静默，恢复"故障仍经 Warn/Error 上报"语义）。
+- **Worker**: codexcli / claudecode 实现 reasoning / text delta diff 计算 — 此前 turn summary 聚合依赖完整文本覆盖，delta 缺失导致思考过程与文本更新错位。改用 rune count 替代 byte len 进行长度追踪，防止 UTF-8 多字节边界截断导致思考内容丢失；terminal 工具对齐 raw split bytes 支持可折叠输出。
+- **CLI**: banner `formatBannerURL` 处理 `0.0.0.0` 无端口形式与 IPv6 `[::]` / `[::]:port` wildcard — 此前仅匹配带冒号的 `0.0.0.0:` 与 IPv4，无端口地址与 IPv6 wildcard 落入回退分支打印不可访问地址。补充对应分支 + table-driven 测试覆盖。
+- **CLI**: `doctor --help` 列全 10 个 checker category（补 `tts` / `agent_config` / `worker`）— flag help 与 Long 描述遗漏 3 个类别，与 `worker.claude_auto_mode`（issue #789，第 26 个 checker / 第 10 个 category）对齐；`checkers/AGENTS.md` 计数同步 25→26 / 9→10。
+- **WebChat UI**: thought process 流式自动展开、多空行压缩与段落间距收紧、Terminal / FileDiff 浅色模式文本可见性修复、terminal collapse 按钮配色对齐终端主题（accent-emerald）。
+
 ## [1.30.3] - 2026-07-01
 
 ### Summary
