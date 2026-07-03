@@ -296,8 +296,11 @@ Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客
 | POST | `/api/sessions/{id}/cd` | API Key | 切换工作目录 |
 | GET | `/api/sessions/{id}/history` | API Key | 获取会话历史 |
 | GET | `/api/sessions/{id}/events` | API Key | 获取会话事件流 |
+| GET | `/api/workers` | API Key | 列出 Worker 类型及二进制安装状态 |
 
 所有 Gateway API 端点启用 CORS（`Access-Control-Allow-Origin: *`），支持 `GET`、`POST`、`DELETE`、`OPTIONS` 方法。
+
+**GET /api/workers** — 返回所有已注册 Worker 类型（`claude_code` / `opencode_server` / `codex_cli` / `acp`）的二进制安装状态，供客户端（如 WebChat「新建会话」弹窗）动态过滤可选引擎，避免误选未安装的 Worker。命令名取自配置（`worker.<type>.command`），缺失时回落到各类型的默认二进制（`claude` / `opencode` / `codex` / `hermes`），再经 `exec.LookPath` 探测。响应体为 JSON 数组：`[{"type":"<worker_type>","installed":<bool>,"path":"<abs_path, omitempty>"}]`。
 
 ### WebChat 多租户端点（spec ① / ④ / ⑥）
 
