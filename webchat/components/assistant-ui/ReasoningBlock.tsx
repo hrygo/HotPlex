@@ -3,8 +3,10 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MarkdownText } from "./MarkdownText";
+import { useTranslation } from "react-i18next";
 
 export function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming?: boolean }) {
+  const { t } = useTranslation('chat');
   const [expanded, setExpanded] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
 
@@ -36,10 +38,10 @@ export function ReasoningBlock({ text, isStreaming }: { text: string; isStreamin
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
           </svg>
         </motion.div>
-        <span className="text-[11px] font-display font-bold tracking-[0.1em] text-[var(--text-secondary)]">THOUGHT PROCESS</span>
+        <span className="text-[11px] font-display font-bold tracking-[0.1em] text-[var(--text-secondary)]">{t('label.thought_process')}</span>
         <div className="flex-1 h-[1px] bg-gradient-to-r from-[var(--border-subtle)] to-transparent" />
         <span className="font-mono text-[10px] text-[var(--text-faint)] tabular-nums">
-          {estimatedSeconds}s elapsed
+          {t('status.elapsed_seconds', { seconds: estimatedSeconds })}
         </span>
       </div>
       <AnimatePresence initial={false}>

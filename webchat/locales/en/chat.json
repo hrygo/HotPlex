@@ -11,7 +11,12 @@
     "create_workspace": "Create Workspace",
     "copy_user_id": "Copy User ID",
     "admin_dashboard": "Admin Dashboard",
-    "start_session": "Start Session"
+    "start_session": "Start Session",
+    "load_earlier": "Load earlier messages",
+    "new_messages": "New",
+    "copy": "COPY",
+    "copied": "COPIED",
+    "show_more": "SHOW MORE"
   },
   "label": {
     "workspace": "Workspace",
@@ -28,13 +33,18 @@
     "display_name": "Display Name",
     "created_time": "Created Time",
     "last_login": "Last Login",
-    "you": "You"
+    "you": "You",
+    "thought_process": "THOUGHT PROCESS",
+    "agent_skills": "Agent Skills",
+    "latest_messages": "Latest Messages",
+    "code": "code"
   },
   "placeholder": {
     "workspace_name": "My Project",
     "directory_optional": "Leave empty to use name",
     "search": "Search history...",
-    "session_name": "e.g. HotPlex Bug Fix"
+    "session_name": "e.g. HotPlex Bug Fix",
+    "composer": "Type a message or '/' for commands..."
   },
   "title": {
     "workspaces": "Workspaces",
@@ -46,7 +56,11 @@
     "configure_env": "Configure your coding environment",
     "not_installed": "Not installed on server",
     "not_configured": "Not configured",
-    "no_results": "No conversations found"
+    "no_results": "No conversations found",
+    "kbd_send_hint": "to send",
+    "kbd_newline_hint": "new line",
+    "code_lines": "({{count}} lines)",
+    "action_default": "Action..."
   },
   "status": {
     "preparing": "PREPARING",
@@ -59,7 +73,15 @@
     "running": "Running",
     "idle": "Idle",
     "terminated": "Terminated",
-    "deleted": "Deleted"
+    "deleted": "Deleted",
+    "loading": "Loading...",
+    "synthesizing": "Synthesizing Strategy",
+    "elapsed_seconds": "{{seconds}}s elapsed",
+    "connection": {
+      "connected": "Connected",
+      "connecting": "Connecting...",
+      "disconnected": "Disconnected"
+    }
   },
   "welcome": {
     "title": "Empower Your Coding",

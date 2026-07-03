@@ -19,9 +19,11 @@ import { AgentTool } from "./tools/AgentTool";
 import { MessageActions } from "./MessageActions";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { getExt, messageVariants, extractCommand, extractFilePath, extractFileContent } from "./thread-helpers";
+import { useTranslation } from "react-i18next";
 
  
 const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, allowed: boolean) => void }) {
+  const { t } = useTranslation('chat');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const ext = getExt(message);
 
@@ -64,7 +66,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                   return (
                     <CompactToolTab
                       toolName={p.toolName}
-                      summary={extractCommand(args) || extractFilePath(args) || "Action..."}
+                      summary={extractCommand(args) || extractFilePath(args) || t('text.action_default')}
                       status={status === "running" ? "complete" : status as "complete" | "error"}
                       onClick={toggle}
                     />

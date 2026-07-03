@@ -11,7 +11,12 @@
     "create_workspace": "创建工作区",
     "copy_user_id": "复制用户 ID",
     "admin_dashboard": "管理员后台",
-    "start_session": "开始会话"
+    "start_session": "开始会话",
+    "load_earlier": "加载更早的消息",
+    "new_messages": "新消息",
+    "copy": "复制",
+    "copied": "已复制",
+    "show_more": "展开更多"
   },
   "label": {
     "workspace": "工作区",
@@ -28,13 +33,18 @@
     "display_name": "显示名称",
     "created_time": "创建时间",
     "last_login": "最后登录",
-    "you": "你自己"
+    "you": "你自己",
+    "thought_process": "思考过程",
+    "agent_skills": "智能体技能",
+    "latest_messages": "最新消息",
+    "code": "代码"
   },
   "placeholder": {
     "workspace_name": "我的项目",
     "directory_optional": "留空则使用项目名称",
     "search": "搜索历史...",
-    "session_name": "例如：修复 HotPlex Bug"
+    "session_name": "例如：修复 HotPlex Bug",
+    "composer": "输入消息，或输入 '/' 使用命令..."
   },
   "title": {
     "workspaces": "工作区列表",
@@ -46,7 +56,11 @@
     "configure_env": "配置您的编码环境",
     "not_installed": "服务器上未安装",
     "not_configured": "未配置",
-    "no_results": "没有找到对话"
+    "no_results": "没有找到对话",
+    "kbd_send_hint": "发送",
+    "kbd_newline_hint": "换行",
+    "code_lines": "（{{count}} 行）",
+    "action_default": "操作..."
   },
   "status": {
     "preparing": "准备中",
@@ -59,7 +73,15 @@
     "running": "运行中",
     "idle": "空闲",
     "terminated": "已终止",
-    "deleted": "已删除"
+    "deleted": "已删除",
+    "loading": "加载中...",
+    "synthesizing": "综合策略中",
+    "elapsed_seconds": "已用 {{seconds}}s",
+    "connection": {
+      "connected": "已连接",
+      "connecting": "连接中...",
+      "disconnected": "已断开"
+    }
   },
   "welcome": {
     "title": "设计、重构并维护你的项目",
