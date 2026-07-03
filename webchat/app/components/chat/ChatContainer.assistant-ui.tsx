@@ -184,7 +184,15 @@ export default function ChatContainer() {
         document.body.style.overflow = "hidden";
 
         const previouslyFocused = document.activeElement as HTMLElement | null;
-        asideRef.current?.focus();
+        // Focus the first focusable child so keyboard users land on an actual
+        // control — the aside container is tabIndex={-1} with outline suppressed,
+        // so focusing it directly leaves no visible focus indicator until Tab is
+        // pressed. Falls back to the container when the drawer has no focusable
+        // descendants (defensive — SessionPanel always renders buttons).
+        const firstFocusable = asideRef.current?.querySelector<HTMLElement>(
+            'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        (firstFocusable ?? asideRef.current)?.focus();
 
         return () => {
             document.removeEventListener("keydown", onKeyDown);

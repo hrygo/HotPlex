@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { ToolLoadingSkeleton } from "./ToolLoadingSkeleton";
+import { useTranslation } from "react-i18next";
 
 interface Task {
   text: string;
@@ -16,6 +17,7 @@ interface TodoToolProps {
 }
 
 export function TodoTool({ todo, todos, status, onToggle }: TodoToolProps) {
+  const { t } = useTranslation();
   // Parse markdown-style TODOs if string is provided
   const parseTasks = (text: string): Task[] => {
     return text.split("\n")
@@ -90,7 +92,7 @@ export function TodoTool({ todo, todos, status, onToggle }: TodoToolProps) {
       {/* Task List */}
       <div className="p-2 max-h-[300px] overflow-y-auto">
         {status === "running" && tasks.length === 0 ? (
-          <ToolLoadingSkeleton color="var(--accent-violet)" label="Retrieving latest tasks..." />
+          <ToolLoadingSkeleton color="var(--accent-violet)" label={t("chat:tool.todo.loading", { defaultValue: "Retrieving latest tasks..." })} />
         ) : (
           <div className="grid grid-cols-1 gap-1">
             {tasks.map((task, i) => (

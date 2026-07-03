@@ -1,8 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { ToolLoadingSkeleton } from "./ToolLoadingSkeleton";
-import { ToolName } from "@/lib/tool-categories";
+import { useTranslation } from "react-i18next";
 
 interface SearchToolProps {
   toolName: string;
@@ -13,6 +12,7 @@ interface SearchToolProps {
 }
 
 export function SearchTool({ toolName, query, results, status, onToggle }: SearchToolProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[var(--shadow-md)]">
       {/* Header */}
@@ -42,7 +42,7 @@ export function SearchTool({ toolName, query, results, status, onToggle }: Searc
 
       {/* Running skeleton */}
       {status === "running" && (
-        <ToolLoadingSkeleton color="var(--accent-violet)" label="Searching..." />
+        <ToolLoadingSkeleton color="var(--accent-violet)" label={t("chat:tool.search.loading", { defaultValue: "Searching..." })} />
       )}
 
       {/* Results */}

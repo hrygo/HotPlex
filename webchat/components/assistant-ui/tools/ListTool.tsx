@@ -1,7 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { ToolLoadingSkeleton } from "./ToolLoadingSkeleton";
+import { useTranslation } from "react-i18next";
 
 interface ListItem {
   name: string;
@@ -19,6 +19,7 @@ interface ListToolProps {
 }
 
 export function ListTool({ toolName, path, items, status, onToggle }: ListToolProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-default)] my-4 shadow-[var(--shadow-md)]">
       {/* Header */}
@@ -48,7 +49,7 @@ export function ListTool({ toolName, path, items, status, onToggle }: ListToolPr
 
       {/* Running skeleton */}
       {status === "running" && (
-        <ToolLoadingSkeleton color="var(--accent-gold)" label="Listing directory..." />
+        <ToolLoadingSkeleton color="var(--accent-gold)" label={t("chat:tool.list.loading", { defaultValue: "Listing directory..." })} />
       )}
 
       {/* Items */}

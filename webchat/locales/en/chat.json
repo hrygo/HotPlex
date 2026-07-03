@@ -229,7 +229,11 @@
       "processed": "PROCESSED",
       "more_lines": "+ {{count}} more lines",
       "awaiting_response": "Awaiting response from shell..."
-    }
+    },
+    "search": { "loading": "Searching..." },
+    "list": { "loading": "Listing directory..." },
+    "todo": { "loading": "Retrieving latest tasks..." },
+    "filediff": { "loading": "Synthesizing file patch..." }
   },
   "aria": {
     "send": "Send message",
@@ -237,7 +241,6 @@
     "stopping": "Stopping…",
     "toggle_theme": "Toggle theme",
     "toggle_language": "Switch language",
-    "scroll_to_latest": "Scroll to latest messages",
     "session_drawer": "Sessions panel"
   }
 }

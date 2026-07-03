@@ -255,6 +255,7 @@ export function SessionPanel({
                         id="session-search"
                         name="session-search"
                         type="text"
+                        aria-label={t("chat:placeholder.search")}
                         placeholder={t("chat:placeholder.search")}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
