@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.31.1] - 2026-07-03
+
+### Summary
+
+v1.31.1 是一次 patch 版本更新，是 v1.31.0 中英双语 i18n 框架的**补全与 WebChat UI/UX 收尾**（#830）。集中消除核心聊天组件残留的英文硬编码、补齐 icon-only 按钮的无障碍标签（aria-label / focus trap / 焦点转发），并新增断线重连横幅、失败消息视觉区分、移动端 overlay drawer 等交互改进；同时修复登录页中文翻译缺失、OAuth 提供商 CORS 预检、dev 跨站 cookie 三个互相独立的根因。无新对外 API、无破坏性变更。
+
+### Added
+
+- **WebChat UI**: 主聊天面 i18n 补全（#830）— 消除 thread / ReasoningBlock / PreAssistantIndicator / MarkdownText / AssistantMessage / ToolLoadingSkeleton 等 8+ 处英文硬编码，zh-CN/en locale 同步对齐；`connLabel` 由模块级字符串常量重构为 i18n key 映射。
+- **WebChat UI**: icon-only 按钮无障碍标签（#830）— 为 composer Send/Cancel、顶栏 sidebar/docs/settings、ThemeToggle、LanguageSwitcher 补 i18n `aria-label`；新增 `chat.json` aria 命名空间。
+- **WebChat UI**: 断线重连横幅与搜索空状态引导（#830）— `disconnected` 时在 composer 上方显示醒目横幅（原仅角落小圆点）；SessionPanel 搜索无结果升级为放大镜图标 + 居中文案。
+- **WebChat UI**: 失败消息视觉区分与重发引导（#830）— AssistantMessage 检测结构化 `status==="error"`，加 coral 左边框并追加 i18n 重发提示。
+- **WebChat UI**: 移动端会话侧栏 overlay drawer（#830）— 移动端改为 fixed overlay + 半透明遮罩，桌面端保持 inline 折叠；附 ESC 关闭、body scroll lock、focus trap、`role=dialog` / `aria-modal`。
+- **Docs**: 用户行为审计系统设计 spec（`docs/specs/User-Behavior-Audit-Spec.md`）— 独立 `user_activity` 审计表 + hash chain 不可变 + checkpoint rebase 裁剪 + AlertSink 可扩展接口 + 3 年保留；经自审与独立 agent 审计修正全部 P0/P1。
+
+### Changed
+
+- **WebChat UI**: workspace 下拉 hover-close（#830）— 由 click-toggle 改为 panel `onMouseLeave` 延迟 300ms 收起，click-catcher 仅保留 click-outside 关闭；经两轮 code review 修复“弹出后立即消失”与 `mouseleave` 失效问题。
+- **WebChat UI**: global-error 恒暗配色去除 magic number — 由硬编码 hex 改为 import `globals.css` + `var()` 对齐暗色 token。
+- **WebChat UI**: `globals.css` 删除逐字重复的动画定义（quantumBloom / rotateOrbit / quantumWobble / electricalGlow 及 `.skeleton-text` 第二份重复），消除零行为死代码。
+- **WebChat UI**: 抽取 `lib/hooks/useTimeout` 与 `components/icons SearchIcon` 复用，消除手写 timer 模式与重复图标定义。
+
+### Fixed
+
+- **Gateway Core**: `/api/auth/oauth/providers` 漏注册 OPTIONS 预检路由 — ServeMux 返回 405 且不经 `corsMw`，浏览器以 CORS 错误阻断 `getOAuthProviders()`；补 OPTIONS 路由与 `/api/auth/*` 一致。
+- **WebChat UI**: 登录页中文翻译缺失 — `zh-CN/auth.json` 大量 key（tab/label/placeholder/button）误填英文，中文用户看到满屏英文；翻译为中文（en 已正确，不动）。
+- **Configuration**: dev 跨站 cookie 不携带致登录态丢失 — webchat（:3000）与 gateway（:8888）loopback 不同主机被浏览器判为跨站，`SameSite=Lax` 阻断 cookie；`config-dev.yaml` 设 `cookie_same_site=none`（loopback 属 secure context，Secure cookie 可用，CSRF 已由 `csrfMw` 防护）。
+- **WebChat UI**: 工具组件硬编码英文 label → i18n — SearchTool / ListTool / TodoTool / FileDiffTool 加载文案改走 `chat:tool.*.loading`；顺手删除预先存在的死 import。
+- **WebChat UI**: 断线状态语义化 — 引入 `reconnecting` / `reconnect_failed` 事件与状态，`disconnected` 改终态文案、`reconnecting` 显示重连中，消除“重连耗尽后仍承诺正在重连”的误导。
+- **WebChat UI**: 错误消息检测由 ID 前缀嗅探改为结构化 `status` 字段；移动端首屏 `sidebarOpen` 不再盖住聊天区（mount 时 `matchMedia` 检测）；SessionPanel 搜索框补 `aria-label`；删除零引用死 key `chat:aria.scroll_to_latest`。
+
 ## [1.31.0] - 2026-07-03
 
 ### Summary
