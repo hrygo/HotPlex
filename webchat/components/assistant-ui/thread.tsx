@@ -101,6 +101,12 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       </ThreadPrimitive.Viewport>
 
       <div className="composer-wrapper px-4 pb-12">
+        {conn === 'disconnected' && (
+          <div className="max-w-3xl mx-auto mb-3 flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-coral)]/10 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] text-[11px] font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse" />
+            {t('status.disconnected_banner')}
+          </div>
+        )}
         <ThreadComposer
           skills={skills}
           isRunning={isRunning}

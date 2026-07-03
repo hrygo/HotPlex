@@ -293,7 +293,10 @@ export function SessionPanel({
                     ))}
 
                     {filteredSessions.length === 0 && !isLoading && (
-                        <div className="px-3 py-8 text-center">
+                        <div className="px-3 py-10 text-center flex flex-col items-center gap-2">
+                            <svg className="w-6 h-6 text-[var(--text-faint)] opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+                            </svg>
                             <p className="text-[11px] text-[var(--text-faint)]">
                                 {t("chat:text.no_results")}
                             </p>
