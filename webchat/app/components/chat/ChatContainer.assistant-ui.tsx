@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useTimeout } from "@/lib/hooks/useTimeout";
 import { useRouter } from "next/navigation";
 import {
     AssistantRuntimeProvider,
@@ -115,18 +116,23 @@ export default function ChatContainer() {
     // Hover-to-close for the workspace dropdown. The close is delayed so the
     // pointer can cross the gap between the trigger and the floating panel
     // without the panel snapping shut; re-entering either element cancels it.
-    const wsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const scheduleWsClose = useCallback(() => {
-        wsCloseTimer.current = setTimeout(() => setWsDropdownOpen(false), 120);
-    }, []);
-    const cancelWsClose = useCallback(() => {
-        if (wsCloseTimer.current) {
-            clearTimeout(wsCloseTimer.current);
-            wsCloseTimer.current = null;
+    // The close is scheduled when the mouse moves onto the full-viewport
+    // click-catcher overlay (== moved off the panel/trigger) and cancelled
+    // when it re-enters the trigger or panel — see the dropdown JSX below.
+    const wsCloseTimer = useTimeout();
+    const scheduleWsClose = useCallback(
+        () => wsCloseTimer.schedule(() => setWsDropdownOpen(false), 120),
+        [wsCloseTimer],
+    );
+
+    // Desktop keeps the sidebar open by default; on mobile the fixed drawer
+    // plus its backdrop would cover the chat on first paint, so collapse it.
+    // Runs once after mount — SSR-safe (initial render stays `true` everywhere).
+    useEffect(() => {
+        if (window.matchMedia("(max-width: 767px)").matches) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time viewport detection (SSR-safe)
+            setSidebarOpen(false);
         }
-    }, []);
-    useEffect(() => () => {
-        if (wsCloseTimer.current) clearTimeout(wsCloseTimer.current);
     }, []);
     const [authError, setAuthError] = useState(false);
     const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(
@@ -300,13 +306,10 @@ export default function ChatContainer() {
                 </button>
 
                 {/* Workspace dropdown */}
-                <div
-                    className="relative flex-shrink-0"
-                    onMouseEnter={cancelWsClose}
-                    onMouseLeave={scheduleWsClose}
-                >
+                <div className="relative flex-shrink-0">
                     <button
                         onClick={() => setWsDropdownOpen((v) => !v)}
+                        onMouseEnter={wsCloseTimer.cancel}
                         className="flex items-center gap-2 pl-1.5 pr-2 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] text-sm font-bold text-[var(--text-primary)] transition-all"
                     >
                         <span className="w-6 h-6 rounded-md bg-[var(--accent-gold)] text-black flex items-center justify-center text-[10px] font-black uppercase tracking-wider">
@@ -334,8 +337,9 @@ export default function ChatContainer() {
                             <div
                                 className="fixed inset-0 z-40"
                                 onClick={() => setWsDropdownOpen(false)}
+                                onMouseEnter={scheduleWsClose}
                             />
-                            <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50">
+                            <div onMouseEnter={wsCloseTimer.cancel} className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50">
                                 <p className="px-3 py-1 text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest">
                                     {t("chat:title.workspaces")}
                                 </p>
@@ -534,7 +538,7 @@ export default function ChatContainer() {
                 {/* Mobile overlay backdrop — click to close the drawer (hidden on desktop) */}
                 {sidebarOpen && (
                     <div
-                        className="fixed inset-0 z-30 bg-black/50 md:hidden"
+                        className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
                         onClick={() => setSidebarOpen(false)}
                         aria-hidden="true"
                     />

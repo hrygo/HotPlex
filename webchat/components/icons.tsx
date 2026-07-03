@@ -13,6 +13,14 @@ export function BrandIcon({ size = 28, style, className }: { size?: number; styl
   );
 }
 
+export function SearchIcon({ className, strokeWidth = 2 }: { className?: string; strokeWidth?: number }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+    </svg>
+  );
+}
+
 export const WORKER_DISPLAY: Record<string, string> = {
   claude_code: "Claude",
   codex_cli: "Codex",

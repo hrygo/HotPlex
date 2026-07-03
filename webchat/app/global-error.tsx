@@ -2,16 +2,18 @@
 
 import { useEffect } from 'react';
 import i18n from '@/lib/i18n/config';
+import './globals.css';
 
-// global-error.tsx 在 RootLayout 之外渲染 —— 既无法访问 globals.css 的 design
-// token，也无法依赖 ThemeContext。此页显式采用恒暗配色（取值对齐暗色 token），
-// 作为整个应用崩溃时的最后兜底界面。
+// global-error.tsx 在 RootLayout 之外渲染，且自带 <html><body>，因此必须自行
+// 引入 globals.css 才能拿到 design token。:root 的 token 默认即 Obsidian 暗色
+// 值，与 app/error.tsx 共用同一套暗色 token —— 单一事实源，避免早期版本里
+// 硬编码 hex（#050506 等）与暗色 token 漂移的问题。
 const COLORS = {
-  bg: '#050506',
-  text: '#e5e5e5',
-  muted: '#888',
-  accent: '#e5a00d',
-  accentText: '#000',
+  bg: 'var(--bg-base)',
+  text: 'var(--text-primary)',
+  muted: 'var(--text-faint)',
+  accent: 'var(--accent-gold)',
+  accentText: 'var(--text-contrast)',
 } as const;
 
 export default function GlobalError({

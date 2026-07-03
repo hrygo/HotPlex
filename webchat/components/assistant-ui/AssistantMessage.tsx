@@ -25,7 +25,7 @@ import { useTranslation } from "react-i18next";
 const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, allowed: boolean) => void }) {
   const { t } = useTranslation('chat');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
-  const isError = typeof message.id === "string" && message.id.startsWith("error-");
+  const isError = message?.status === "error";
   const ext = getExt(message);
 
   return (

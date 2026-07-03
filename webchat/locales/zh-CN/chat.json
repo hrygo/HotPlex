@@ -80,9 +80,11 @@
     "connection": {
       "connected": "已连接",
       "connecting": "连接中...",
+      "reconnecting": "正在重连...",
       "disconnected": "已断开"
     },
-    "disconnected_banner": "连接已断开，正在尝试重连…"
+    "disconnected_banner": "连接已断开，请刷新页面重试",
+    "reconnecting_banner": "连接已断开，正在尝试重连…"
   },
   "welcome": {
     "title": "设计、重构并维护你的项目",

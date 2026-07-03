@@ -825,13 +825,24 @@ export function useHotPlexRuntime({
                     role: "assistant",
                     parts: [{ type: "text", text: `⚠️ ${errorMessage}` }],
                     createdAt: new Date(),
-                    status: "complete",
+                    status: "error",
                 },
             ]);
         };
 
         const handleDisconnected = (reason: string) => {
             logger.info("RuntimeAdapter", "Disconnected", { reason });
+            setIsRunning(false);
+            setConnectionState("disconnected");
+        };
+
+        const handleReconnecting = (attempt: number) => {
+            logger.info("RuntimeAdapter", "Reconnecting", { attempt });
+            setConnectionState("reconnecting");
+        };
+
+        const handleReconnectFailed = (attempt: number) => {
+            logger.warn("RuntimeAdapter", "Reconnect attempts exhausted", { attempt });
             setIsRunning(false);
             setConnectionState("disconnected");
         };
@@ -881,6 +892,8 @@ export function useHotPlexRuntime({
         client.on("done", handleDone);
         client.on("error", handleError);
         client.on("disconnected", handleDisconnected);
+        client.on("reconnecting", handleReconnecting);
+        client.on("reconnect_failed", handleReconnectFailed);
         client.on("reasoning", handleReasoning);
         client.on("messageStart", handleMessageStart);
         client.on("toolCall", handleToolCall);
@@ -1067,6 +1080,8 @@ export function useHotPlexRuntime({
             client.off("done", handleDone);
             client.off("error", handleError);
             client.off("disconnected", handleDisconnected);
+            client.off("reconnecting", handleReconnecting);
+            client.off("reconnect_failed", handleReconnectFailed);
             client.off("reasoning", handleReasoning);
             client.off("messageStart", handleMessageStart);
             client.off("toolCall", handleToolCall);

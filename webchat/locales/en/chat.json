@@ -80,9 +80,11 @@
     "connection": {
       "connected": "Connected",
       "connecting": "Connecting...",
+      "reconnecting": "Reconnecting...",
       "disconnected": "Disconnected"
     },
-    "disconnected_banner": "Connection lost, reconnecting…"
+    "disconnected_banner": "Connection lost. Please refresh the page.",
+    "reconnecting_banner": "Connection lost, reconnecting…"
   },
   "welcome": {
     "title": "Empower Your Coding",

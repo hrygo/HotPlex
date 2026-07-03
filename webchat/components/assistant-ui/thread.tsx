@@ -30,12 +30,14 @@ interface ThreadProps {
 const connLabelKey = {
   connected: 'status.connection.connected',
   connecting: 'status.connection.connecting',
+  reconnecting: 'status.connection.reconnecting',
   disconnected: 'status.connection.disconnected',
 } as const satisfies Record<ConnectionState, string>;
 
 const connDot: Record<ConnectionState, string> = {
   connected: 'bg-emerald-400',
   connecting: 'bg-amber-400 animate-pulse',
+  reconnecting: 'bg-amber-400 animate-pulse',
   disconnected: 'bg-red-400',
 };
 
@@ -61,6 +63,10 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
   const handleSuggestionClick = useCallback((prompt: string) => {
     aui.composer().setText(prompt);
   }, [aui]);
+
+  // Resolve the connection badge once per render — the label is reused for both
+  // the dot's title and the sr-only text, avoiding a duplicate i18n lookup.
+  const connStatus = conn ? { dot: connDot[conn], label: t(connLabelKey[conn]) } : null;
 
   return (
     <ThreadPrimitive.Root className="flex flex-col h-full relative overflow-hidden bg-[var(--bg-base)]">
@@ -101,10 +107,10 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       </ThreadPrimitive.Viewport>
 
       <div className="composer-wrapper px-4 pb-12">
-        {conn === 'disconnected' && (
+        {(conn === 'disconnected' || conn === 'reconnecting') && (
           <div className="max-w-3xl mx-auto mb-3 flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-coral)]/10 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] text-[11px] font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse" />
-            {t('status.disconnected_banner')}
+            {t(conn === 'reconnecting' ? 'status.reconnecting_banner' : 'status.disconnected_banner')}
           </div>
         )}
         <ThreadComposer
@@ -122,10 +128,10 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
             </span>
           </div>
           <span className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest flex items-center gap-1.5">
-            {conn && (
+            {connStatus && (
               <>
-                <span className={`w-1.5 h-1.5 rounded-full ${connDot[conn]}`} title={t(connLabelKey[conn])} />
-                <span className="sr-only">{t(connLabelKey[conn])}</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${connStatus.dot}`} title={connStatus.label} />
+                <span className="sr-only">{connStatus.label}</span>
               </>
             )}
             v{version}-stable

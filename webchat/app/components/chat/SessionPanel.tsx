@@ -6,7 +6,7 @@ import {
     stateLabel,
     type SessionInfo,
 } from "@/lib/api/sessions";
-import { WORKER_DISPLAY, WorkerIcon } from "@/components/icons";
+import { WORKER_DISPLAY, SearchIcon, WorkerIcon } from "@/components/icons";
 import { useTranslation } from "react-i18next";
 
 function getDisplayTitle(session: SessionInfo): string {
@@ -250,19 +250,7 @@ export function SessionPanel({
             {/* Search */}
             <div className="px-5 mb-4">
                 <div className="relative">
-                    <svg
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-faint)]"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                        />
-                    </svg>
+                    <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-faint)]" />
                     <input
                         id="session-search"
                         name="session-search"
@@ -294,9 +282,7 @@ export function SessionPanel({
 
                     {filteredSessions.length === 0 && !isLoading && (
                         <div className="px-3 py-10 text-center flex flex-col items-center gap-2">
-                            <svg className="w-6 h-6 text-[var(--text-faint)] opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
-                            </svg>
+                            <SearchIcon className="w-6 h-6 text-[var(--text-faint)] opacity-50" strokeWidth={1.5} />
                             <p className="text-[11px] text-[var(--text-faint)]">
                                 {t("chat:text.no_results")}
                             </p>
