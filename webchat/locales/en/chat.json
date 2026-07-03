@@ -90,7 +90,8 @@
     "tagline": "Next-generation autonomous workspace."
   },
   "error": {
-    "no_workers": "All worker engines are unavailable. Please install at least one worker CLI on the server."
+    "no_workers": "All worker engines are unavailable. Please install at least one worker CLI on the server.",
+    "resend_hint": "Something went wrong — please review and resend your message"
   },
   "worker": {
     "name": {

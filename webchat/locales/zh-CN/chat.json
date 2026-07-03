@@ -90,6 +90,7 @@
     "tagline": "次世代自主编码工作区"
   },
   "error": {
+    "resend_hint": "出错了 — 请检查后重新发送你的问题",
     "no_workers": "所有 Worker 引擎均不可用。请在服务器上安装至少一个 Worker 命令行工具。"
   },
   "worker": {
