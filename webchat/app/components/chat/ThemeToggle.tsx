@@ -17,6 +17,7 @@ export function ThemeToggle() {
           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
       }`}
       title={theme === 'dark' ? t('common:theme.light') : t('common:theme.dark')}
+      aria-label={t('chat:aria.toggle_theme')}
     >
       <AnimatePresence mode="wait" initial={false}>
         {theme === 'dark' ? (

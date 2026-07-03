@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { useCopyToClipboard } from "@/lib/hooks/useCopyToClipboard";
 import { getHighlighter, type Highlighter } from "@/lib/highlight";
 import { useTheme } from "@/context/ThemeContext";
+import { useTranslation } from "react-i18next";
 
 function escapeHtml(text: string): string {
     return text
@@ -25,6 +26,7 @@ function CodeBlock({
     lang: string;
     highlighted: string;
 }) {
+    const { t } = useTranslation('chat');
     const { copied, copy } = useCopyToClipboard();
     const [isExpanded, setIsExpanded] = useState(false);
     const lineCount = raw.split("\n").length;
@@ -59,8 +61,8 @@ function CodeBlock({
                         </svg>
                     )}
                     <span className="text-[10px] font-mono font-bold tracking-widest text-[var(--text-faint)] uppercase">
-                        {lang || "code"}{" "}
-                        {isExpandable && `(${lineCount} lines)`}
+                        {lang || t('label.code')}{" "}
+                        {isExpandable && t('text.code_lines', { count: lineCount })}
                     </span>
                 </div>
                 <div className="flex items-center gap-3">
@@ -83,7 +85,7 @@ function CodeBlock({
                                         d="M5 13l4 4L19 7"
                                     />
                                 </svg>
-                                COPIED
+                                {t('action.copied')}
                             </>
                         ) : (
                             <>
@@ -100,7 +102,7 @@ function CodeBlock({
                                         d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 012-2v-8a2 2 0 01-2-2h-8a2 2 0 01-2 2v8a2 2 0 012 2z"
                                     />
                                 </svg>
-                                COPY
+                                {t('action.copy')}
                             </>
                         )}
                     </button>
@@ -123,7 +125,7 @@ function CodeBlock({
                         onClick={() => setIsExpanded(true)}
                     >
                         <span className="text-[10px] font-bold text-[var(--accent-gold)] tracking-widest bg-[var(--bg-surface)] px-2 py-1 rounded border border-[var(--border-subtle)] shadow-lg">
-                            SHOW MORE
+                            {t('action.show_more')}
                         </span>
                     </div>
                 )}

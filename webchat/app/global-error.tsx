@@ -2,6 +2,19 @@
 
 import { useEffect } from 'react';
 import i18n from '@/lib/i18n/config';
+import './globals.css';
+
+// global-error.tsx 在 RootLayout 之外渲染，且自带 <html><body>，因此必须自行
+// 引入 globals.css 才能拿到 design token。:root 的 token 默认即 Obsidian 暗色
+// 值，与 app/error.tsx 共用同一套暗色 token —— 单一事实源，避免早期版本里
+// 硬编码 hex（#050506 等）与暗色 token 漂移的问题。
+const COLORS = {
+  bg: 'var(--bg-base)',
+  text: 'var(--text-primary)',
+  muted: 'var(--text-faint)',
+  accent: 'var(--accent-gold)',
+  accentText: 'var(--text-contrast)',
+} as const;
 
 export default function GlobalError({
   error,
@@ -27,14 +40,14 @@ export default function GlobalError({
           alignItems: 'center',
           justifyContent: 'center',
           height: '100vh',
-          background: '#050506',
-          color: '#e5e5e5',
+          background: COLORS.bg,
+          color: COLORS.text,
           fontFamily: 'system-ui, sans-serif',
         }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
             {i18n.t('errors:title', { defaultValue: 'Something went wrong' })}
           </h2>
-          <p style={{ fontSize: '0.875rem', color: '#888', marginBottom: '1.5rem' }}>
+          <p style={{ fontSize: '0.875rem', color: COLORS.muted, marginBottom: '1.5rem' }}>
             {error.message || i18n.t('errors:unexpected', { defaultValue: 'An unexpected error occurred.' })}
           </p>
           <button
@@ -42,8 +55,8 @@ export default function GlobalError({
             style={{
               padding: '0.625rem 1.5rem',
               borderRadius: '9999px',
-              background: '#e5a00d',
-              color: '#000',
+              background: COLORS.accent,
+              color: COLORS.accentText,
               border: 'none',
               fontWeight: 'bold',
               cursor: 'pointer',

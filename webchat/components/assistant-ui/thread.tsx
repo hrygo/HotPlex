@@ -15,6 +15,7 @@ import { AssistantMessage } from "./AssistantMessage";
 import { UserMessage } from "./UserMessage";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { PreAssistantIndicator } from "./PreAssistantIndicator";
+import { useTranslation } from "react-i18next";
 
 interface ThreadProps {
   skills?: SkillEntry[];
@@ -26,19 +27,22 @@ interface ThreadProps {
   isStopping?: boolean;
 }
 
-const connLabel: Record<ConnectionState, string> = {
-  connected: 'Connected',
-  connecting: 'Connecting...',
-  disconnected: 'Disconnected',
-};
+const connLabelKey = {
+  connected: 'status.connection.connected',
+  connecting: 'status.connection.connecting',
+  reconnecting: 'status.connection.reconnecting',
+  disconnected: 'status.connection.disconnected',
+} as const satisfies Record<ConnectionState, string>;
 
 const connDot: Record<ConnectionState, string> = {
   connected: 'bg-emerald-400',
   connecting: 'bg-amber-400 animate-pulse',
+  reconnecting: 'bg-amber-400 animate-pulse',
   disconnected: 'bg-red-400',
 };
 
 export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, onInteractionRespond, suggestions, isStopping: isStoppingProp }: ThreadProps) {
+  const { t } = useTranslation('chat');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(hasMore);
   const aui = useAui();
@@ -60,6 +64,10 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
     aui.composer().setText(prompt);
   }, [aui]);
 
+  // Resolve the connection badge once per render — the label is reused for both
+  // the dot's title and the sr-only text, avoiding a duplicate i18n lookup.
+  const connStatus = conn ? { dot: connDot[conn], label: t(connLabelKey[conn]) } : null;
+
   return (
     <ThreadPrimitive.Root className="flex flex-col h-full relative overflow-hidden bg-[var(--bg-base)]">
       <ThreadPrimitive.Viewport className="thread-viewport relative px-4 py-8">
@@ -77,9 +85,9 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
                     <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
                       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" strokeLinecap="round" />
                     </svg>
-                    Loading...
+                    {t('status.loading')}
                   </span>
-                ) : "Load earlier messages"}
+                ) : t('action.load_earlier')}
               </button>
             </div>
           )}
@@ -92,13 +100,19 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
             </svg>
-            <span>New</span>
+            <span>{t('action.new_messages')}</span>
           </ThreadPrimitive.ScrollToBottom>
           <PreAssistantIndicator />
         </div>
       </ThreadPrimitive.Viewport>
 
       <div className="composer-wrapper px-4 pb-12">
+        {(conn === 'disconnected' || conn === 'reconnecting') && (
+          <div className="max-w-3xl mx-auto mb-3 flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-coral)]/10 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] text-[11px] font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse" />
+            {t(conn === 'reconnecting' ? 'status.reconnecting_banner' : 'status.disconnected_banner')}
+          </div>
+        )}
         <ThreadComposer
           skills={skills}
           isRunning={isRunning}
@@ -107,17 +121,17 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
         <div className="mt-2 flex justify-between items-center max-w-3xl mx-auto px-2">
           <div className="flex gap-4">
             <span className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[9px]">Enter</kbd> to send
+              <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[9px]">Enter</kbd> {t('text.kbd_send_hint')}
             </span>
             <span className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[9px]">Shift</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[9px]">Enter</kbd> new line
+              <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[9px]">Shift</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[9px]">Enter</kbd> {t('text.kbd_newline_hint')}
             </span>
           </div>
           <span className="text-[10px] text-[var(--text-faint)] font-mono uppercase tracking-widest flex items-center gap-1.5">
-            {conn && (
+            {connStatus && (
               <>
-                <span className={`w-1.5 h-1.5 rounded-full ${connDot[conn]}`} title={connLabel[conn]} />
-                <span className="sr-only">{connLabel[conn]}</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${connStatus.dot}`} title={connStatus.label} />
+                <span className="sr-only">{connStatus.label}</span>
               </>
             )}
             v{version}-stable
@@ -135,6 +149,7 @@ interface ThreadComposerProps {
 }
 
 const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp }: ThreadComposerProps) {
+  const { t } = useTranslation('chat');
   const [localText, setLocalText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const aui = useAui();
@@ -182,7 +197,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
           {/* Left Side: Agent Skills */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar animate-fadeIn max-w-[70%]">
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 shadow-sm whitespace-nowrap">
-              <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">Agent Skills</span>
+              <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">{t('label.agent_skills')}</span>
               <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
             </div>
             {skills?.slice(0, 3).map(skill => (
@@ -202,7 +217,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
             <svg className="w-3.5 h-3.5 animate-bounce-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
             </svg>
-            <span className="text-[10px] font-bold uppercase tracking-widest">Latest Messages</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest">{t('label.latest_messages')}</span>
           </ThreadPrimitive.ScrollToBottom>
         </div>
 
@@ -213,7 +228,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
               rows={1}
               autoFocus
               submitMode="enter"
-              placeholder="Type a message or '/' for commands..."
+              placeholder={t('placeholder.composer')}
               value={localText}
               onChange={handleChange}
               onCompositionStart={handleCompositionStart}
@@ -221,7 +236,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
             />
             <div className="flex items-center gap-2">
               {(isRunning || isStoppingProp) && (
-                <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={isStoppingProp}>
+                <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={isStoppingProp} aria-label={t(isStoppingProp ? 'aria.stopping' : 'aria.stop')}>
                   {isStoppingProp ? (
                     <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx={12} cy={12} r="10" stroke="currentColor" strokeWidth="4" />
@@ -232,7 +247,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   )}
                 </ComposerPrimitive.Cancel>
               )}
-              <ComposerPrimitive.Send className="btn-icon btn-primary"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+              <ComposerPrimitive.Send className="btn-icon btn-primary" aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
             </div>
           </div>
         </ComposerPrimitive.Root>

@@ -61,6 +61,7 @@ export interface BrowserClientEvents {
   connected: (ack: InitAckData) => void;
   disconnected: (reason: string) => void;
   reconnecting: (attempt: number) => void;
+  reconnect_failed: (attempt: number) => void;
   delta: (data: MessageDeltaData, env: Envelope) => void;
   message: (data: MessageData, env: Envelope) => void;
   messageStart: (data: MessageStartData, env: Envelope) => void;
@@ -658,6 +659,17 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     if (this.shouldReconnect && !this.closed && this.reconnectAttempt < this.reconnectConfig.maxAttempts) {
       this._scheduleReconnect();
+    } else if (this.shouldReconnect && !this.closed && this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+      // Reconnect attempts exhausted — emit a terminal failure so the UI can
+      // stop promising "reconnecting…" forever (this path was previously silent).
+      // Note: 'reconnect_failed' is terminal and implies disconnection; it is
+      // intentionally NOT accompanied by a separate 'disconnected' event.
+      // Subscribers that track connection state must handle 'reconnect_failed'
+      // as well (the runtime adapter does — hotplex-runtime-adapter.ts). Kept
+      // singular to preserve observed event ordering; add a concurrent
+      // 'disconnected' emit here if a future consumer listens only to that event.
+      this._reconnecting = false;
+      this.emit('reconnect_failed', this.reconnectAttempt);
     } else if (!this.shouldReconnect || this.closed) {
       this.emit('disconnected', reason);
     }

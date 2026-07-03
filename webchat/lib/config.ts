@@ -52,7 +52,7 @@ export const allowedTools: string[] = rawAllowedTools
 
 // -- Derived -----------------------------------------------------------
 
-export type ConnectionState = 'connected' | 'connecting' | 'disconnected';
+export type ConnectionState = 'connected' | 'connecting' | 'reconnecting' | 'disconnected';
 
 export function httpBase(): string {
   return (

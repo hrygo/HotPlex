@@ -312,6 +312,14 @@ func setupRoutes(
 				_, _ = w.Write([]byte("[]"))
 			})))
 		}
+
+		// OPTIONS preflight for OAuth providers discovery (cross-origin fetch
+		// from the webchat dev server). Without this, ServeMux returns 405
+		// (no CORS headers) and the browser blocks getOAuthProviders() with a
+		// CORS error. Mirrors the /api/auth/* OPTIONS pattern above; registered
+		// once outside the if/else so it covers both the configured-providers
+		// branch and the empty-list fallback.
+		mux.Handle("OPTIONS /api/auth/oauth/providers", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 	}
 
 	// Global favicon fallback using docs logo

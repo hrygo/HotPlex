@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 
 interface ToolLoadingSkeletonProps {
   color?: string;
@@ -9,8 +10,10 @@ interface ToolLoadingSkeletonProps {
 
 export function ToolLoadingSkeleton({
   color = "var(--accent-emerald)",
-  label = "Loading...",
+  label,
 }: ToolLoadingSkeletonProps) {
+  const { t } = useTranslation('chat');
+  const displayLabel = label ?? t('status.loading');
   return (
     <div className="bg-[var(--bg-base)] px-4 py-4 flex items-center gap-3">
       <motion.div
@@ -26,7 +29,7 @@ export function ToolLoadingSkeleton({
           />
         ))}
       </motion.div>
-      <span className="text-[11px] font-mono text-[var(--text-faint)]">{label}</span>
+      <span className="text-[11px] font-mono text-[var(--text-faint)]">{displayLabel}</span>
     </div>
   );
 }

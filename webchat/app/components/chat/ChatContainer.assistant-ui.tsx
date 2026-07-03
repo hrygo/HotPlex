@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useTimeout } from "@/lib/hooks/useTimeout";
 import { useRouter } from "next/navigation";
 import {
     AssistantRuntimeProvider,
@@ -110,8 +111,95 @@ export default function ChatContainer() {
     const router = useRouter();
     const { t } = useTranslation(['chat', 'common']);
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    // Reactive mobile detection: the mobile drawer (fixed overlay) needs a11y
+    // behaviors (ESC / focus trap / scroll lock / aria-modal) that the desktop
+    // inline sidebar must NOT get. Updated on viewport resize.
+    const [isMobile, setIsMobile] = useState(false);
+    const asideRef = useRef<HTMLElement>(null);
     const [showNewModal, setShowNewModal] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+    // Hover-to-close for the workspace dropdown. The close is scheduled when
+    // the pointer leaves the floating panel (onMouseLeave) and cancelled when
+    // it (re-)enters the panel; the delay lets the pointer travel from the
+    // trigger onto the panel after opening without the menu snapping shut.
+    // The full-screen click-catcher is intentionally NOT used for hover-close
+    // — it sits under the cursor the moment the dropdown opens (the trigger
+    // is z-30, the catcher z-40), so its onMouseEnter would fire on the first
+    // tiny mouse movement and close the menu before the user can reach the
+    // panel. The catcher handles click-outside close only.
+    const wsCloseTimer = useTimeout();
+    const scheduleWsClose = useCallback(
+        () => wsCloseTimer.schedule(() => setWsDropdownOpen(false), 300),
+        [wsCloseTimer],
+    );
+
+    // Desktop keeps the sidebar open by default; on mobile the fixed drawer
+    // plus its backdrop would cover the chat on first paint, so collapse it.
+    // Also tracks `isMobile` reactively (resize-aware) so the drawer's a11y
+    // behaviors below apply only in overlay mode, never to the desktop inline
+    // sidebar. Runs after mount — SSR-safe (initial render stays `true`).
+    useEffect(() => {
+        const mq = window.matchMedia("(max-width: 767px)");
+        const sync = () => setIsMobile(mq.matches);
+        sync();
+        if (mq.matches) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time viewport detection (SSR-safe)
+            setSidebarOpen(false);
+        }
+        mq.addEventListener("change", sync);
+        return () => mq.removeEventListener("change", sync);
+    }, []);
+
+    // Mobile drawer accessibility (overlay mode only): Escape closes the
+    // drawer, body scroll is locked while open, and focus is trapped inside
+    // then restored to the previously-focused element on close. The desktop
+    // inline sidebar (isMobile=false) is intentionally unaffected.
+    useEffect(() => {
+        if (!isMobile || !sidebarOpen) return;
+
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                setSidebarOpen(false);
+                return;
+            }
+            if (e.key === "Tab" && asideRef.current) {
+                const focusable = asideRef.current.querySelectorAll<HTMLElement>(
+                    'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+                );
+                if (focusable.length === 0) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            }
+        };
+        document.addEventListener("keydown", onKeyDown);
+
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+
+        const previouslyFocused = document.activeElement as HTMLElement | null;
+        // Focus the first focusable child so keyboard users land on an actual
+        // control — the aside container is tabIndex={-1} with outline suppressed,
+        // so focusing it directly leaves no visible focus indicator until Tab is
+        // pressed. Falls back to the container when the drawer has no focusable
+        // descendants (defensive — SessionPanel always renders buttons).
+        const firstFocusable = asideRef.current?.querySelector<HTMLElement>(
+            'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        (firstFocusable ?? asideRef.current)?.focus();
+
+        return () => {
+            document.removeEventListener("keydown", onKeyDown);
+            document.body.style.overflow = prevOverflow;
+            previouslyFocused?.focus?.();
+        };
+    }, [isMobile, sidebarOpen]);
     const [authError, setAuthError] = useState(false);
     const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(
         null,
@@ -266,6 +354,7 @@ export default function ChatContainer() {
                     onClick={() => setSidebarOpen(!sidebarOpen)}
                     className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95"
                     title={sidebarOpen ? t("chat:action.collapse_sidebar") : t("chat:action.expand_sidebar")}
+                    aria-label={sidebarOpen ? t("chat:action.collapse_sidebar") : t("chat:action.expand_sidebar")}
                 >
                     <svg
                         className="w-5 h-5"
@@ -286,6 +375,7 @@ export default function ChatContainer() {
                 <div className="relative flex-shrink-0">
                     <button
                         onClick={() => setWsDropdownOpen((v) => !v)}
+                        onMouseEnter={wsCloseTimer.cancel}
                         className="flex items-center gap-2 pl-1.5 pr-2 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] text-sm font-bold text-[var(--text-primary)] transition-all"
                     >
                         <span className="w-6 h-6 rounded-md bg-[var(--accent-gold)] text-black flex items-center justify-center text-[10px] font-black uppercase tracking-wider">
@@ -310,11 +400,17 @@ export default function ChatContainer() {
                     </button>
                     {wsDropdownOpen && (
                         <>
+                            {/* Click-outside catcher. Hover-close must NOT live
+                                here (see scheduleWsClose note above). */}
                             <div
                                 className="fixed inset-0 z-40"
                                 onClick={() => setWsDropdownOpen(false)}
                             />
-                            <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50">
+                            <div
+                                onMouseEnter={wsCloseTimer.cancel}
+                                onMouseLeave={scheduleWsClose}
+                                className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50"
+                            >
                                 <p className="px-3 py-1 text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest">
                                     {t("chat:title.workspaces")}
                                 </p>
@@ -423,6 +519,7 @@ export default function ChatContainer() {
                         rel="noopener noreferrer"
                         className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none"
                         title={t("chat:action.docs")}
+                        aria-label={t("chat:action.docs")}
                     >
                         <svg
                             className="w-5 h-5"
@@ -451,6 +548,11 @@ export default function ChatContainer() {
                         }}
                         className={`relative p-2 rounded-lg transition-all ${authError ? "text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}
                         title={
+                            authError
+                                ? t("chat:status.session_expired_settings")
+                                : t("chat:label.settings")
+                        }
+                        aria-label={
                             authError
                                 ? t("chat:status.session_expired_settings")
                                 : t("chat:label.settings")
@@ -504,8 +606,21 @@ export default function ChatContainer() {
 
             {/* Body: session sidebar + chat */}
             <div className="flex flex-1 overflow-hidden">
+                {/* Mobile overlay backdrop — click to close the drawer (hidden on desktop) */}
+                {sidebarOpen && (
+                    <div
+                        className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+                        onClick={() => setSidebarOpen(false)}
+                        aria-hidden="true"
+                    />
+                )}
                 <aside
-                    className={`transition-all duration-300 ease-in-out ${sidebarOpen ? "w-[280px]" : "w-0"} overflow-hidden flex-shrink-0 relative z-20`}
+                    ref={asideRef}
+                    tabIndex={-1}
+                    role={isMobile && sidebarOpen ? "dialog" : undefined}
+                    aria-modal={isMobile && sidebarOpen ? "true" : undefined}
+                    aria-label={isMobile && sidebarOpen ? t("chat:aria.session_drawer") : undefined}
+                    className={`fixed inset-y-0 left-0 z-50 w-[280px] bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] transform transition-transform duration-300 ease-in-out focus:outline-none ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:relative md:z-20 md:translate-x-0 md:bg-transparent md:border-0 md:transition-all md:flex-shrink-0 md:overflow-hidden ${sidebarOpen ? "md:w-[280px]" : "md:w-0"}`}
                 >
                     <SessionPanel
                         sessions={sessions}

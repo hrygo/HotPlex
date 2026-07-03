@@ -3,8 +3,10 @@
 import { motion } from "framer-motion";
 import { useAuiState } from "@assistant-ui/store";
 import { BrandIcon } from "@/components/icons";
+import { useTranslation } from "react-i18next";
 
 export function PreAssistantIndicator() {
+  const { t } = useTranslation('chat');
   const isRunning = useAuiState((s) => s.thread.isRunning);
   const messages = useAuiState((s) => s.thread.messages);
   const lastMessage = messages[messages.length - 1];
@@ -35,7 +37,7 @@ export function PreAssistantIndicator() {
             <span className="thinking-dot" style={{ animationDelay: '0.4s' }} />
           </div>
           <span className="text-[11px] font-display font-bold text-[var(--accent-gold)] tracking-[0.1em] uppercase">
-            Synthesizing Strategy
+            {t('status.synthesizing')}
           </span>
         </div>
         <div className="flex flex-col gap-3 max-w-sm">

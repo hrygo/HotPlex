@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { ToolLoadingSkeleton } from "./ToolLoadingSkeleton";
+import { useTranslation } from "react-i18next";
 import { useCopyToClipboard } from "@/lib/hooks/useCopyToClipboard";
 
 interface FileDiffToolProps {
@@ -13,6 +14,7 @@ interface FileDiffToolProps {
 }
 
 export function FileDiffTool({ toolName, filePath, content, status, onToggle }: FileDiffToolProps) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const lines = content?.split("\n") ?? [];
   const displayPath = filePath || "unknown file";
@@ -77,7 +79,7 @@ export function FileDiffTool({ toolName, filePath, content, status, onToggle }: 
       {/* Running skeleton */}
       {status === "running" && !content && (
         <div className="bg-[var(--bg-base)] p-8">
-          <ToolLoadingSkeleton color="var(--accent-blue)" label="Synthesizing file patch..." />
+          <ToolLoadingSkeleton color="var(--accent-blue)" label={t("chat:tool.filediff.loading", { defaultValue: "Synthesizing file patch..." })} />
         </div>
       )}
 

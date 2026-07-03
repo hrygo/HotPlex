@@ -19,14 +19,17 @@ import { AgentTool } from "./tools/AgentTool";
 import { MessageActions } from "./MessageActions";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { getExt, messageVariants, extractCommand, extractFilePath, extractFileContent } from "./thread-helpers";
+import { useTranslation } from "react-i18next";
 
  
 const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, allowed: boolean) => void }) {
+  const { t } = useTranslation('chat');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const isError = message?.status === "error";
   const ext = getExt(message);
 
   return (
-    <motion.div className="group msg-assistant flex items-start gap-4 mb-8" variants={messageVariants} initial="hidden" animate="visible">
+    <motion.div className={`group msg-assistant flex items-start gap-4 mb-8 ${isError ? "border-l-2 border-[var(--accent-coral)] pl-3" : ""}`} variants={messageVariants} initial="hidden" animate="visible">
       <div className="flex-shrink-0">
         <div className="w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] shadow-sm flex items-center justify-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/5 to-transparent" />
@@ -64,7 +67,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                   return (
                     <CompactToolTab
                       toolName={p.toolName}
-                      summary={extractCommand(args) || extractFilePath(args) || "Action..."}
+                      summary={extractCommand(args) || extractFilePath(args) || t('text.action_default')}
                       status={status === "running" ? "complete" : status as "complete" | "error"}
                       onClick={toggle}
                     />
@@ -136,6 +139,9 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
           )}
         </div>
         <MessageActions message={message} />
+        {isError && (
+          <p className="mt-2 text-[11px] text-[var(--text-faint)]">{t('error.resend_hint')}</p>
+        )}
       </div>
     </motion.div>
   );
