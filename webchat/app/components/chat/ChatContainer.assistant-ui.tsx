@@ -118,15 +118,18 @@ export default function ChatContainer() {
     const asideRef = useRef<HTMLElement>(null);
     const [showNewModal, setShowNewModal] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
-    // Hover-to-close for the workspace dropdown. The close is delayed so the
-    // pointer can cross the gap between the trigger and the floating panel
-    // without the panel snapping shut; re-entering either element cancels it.
-    // The close is scheduled when the mouse moves onto the full-viewport
-    // click-catcher overlay (== moved off the panel/trigger) and cancelled
-    // when it re-enters the trigger or panel — see the dropdown JSX below.
+    // Hover-to-close for the workspace dropdown. The close is scheduled when
+    // the pointer leaves the floating panel (onMouseLeave) and cancelled when
+    // it (re-)enters the panel; the delay lets the pointer travel from the
+    // trigger onto the panel after opening without the menu snapping shut.
+    // The full-screen click-catcher is intentionally NOT used for hover-close
+    // — it sits under the cursor the moment the dropdown opens (the trigger
+    // is z-30, the catcher z-40), so its onMouseEnter would fire on the first
+    // tiny mouse movement and close the menu before the user can reach the
+    // panel. The catcher handles click-outside close only.
     const wsCloseTimer = useTimeout();
     const scheduleWsClose = useCallback(
-        () => wsCloseTimer.schedule(() => setWsDropdownOpen(false), 120),
+        () => wsCloseTimer.schedule(() => setWsDropdownOpen(false), 300),
         [wsCloseTimer],
     );
 
@@ -389,12 +392,17 @@ export default function ChatContainer() {
                     </button>
                     {wsDropdownOpen && (
                         <>
+                            {/* Click-outside catcher. Hover-close must NOT live
+                                here (see scheduleWsClose note above). */}
                             <div
                                 className="fixed inset-0 z-40"
                                 onClick={() => setWsDropdownOpen(false)}
-                                onMouseEnter={scheduleWsClose}
                             />
-                            <div onMouseEnter={wsCloseTimer.cancel} className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50">
+                            <div
+                                onMouseEnter={wsCloseTimer.cancel}
+                                onMouseLeave={scheduleWsClose}
+                                className="absolute top-full left-0 mt-1 w-64 bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-xl shadow-xl py-1.5 z-50"
+                            >
                                 <p className="px-3 py-1 text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-widest">
                                     {t("chat:title.workspaces")}
                                 </p>
