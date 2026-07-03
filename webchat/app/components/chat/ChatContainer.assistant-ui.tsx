@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
     AssistantRuntimeProvider,
@@ -112,6 +112,22 @@ export default function ChatContainer() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [showNewModal, setShowNewModal] = useState(false);
     const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+    // Hover-to-close for the workspace dropdown. The close is delayed so the
+    // pointer can cross the gap between the trigger and the floating panel
+    // without the panel snapping shut; re-entering either element cancels it.
+    const wsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const scheduleWsClose = useCallback(() => {
+        wsCloseTimer.current = setTimeout(() => setWsDropdownOpen(false), 120);
+    }, []);
+    const cancelWsClose = useCallback(() => {
+        if (wsCloseTimer.current) {
+            clearTimeout(wsCloseTimer.current);
+            wsCloseTimer.current = null;
+        }
+    }, []);
+    useEffect(() => () => {
+        if (wsCloseTimer.current) clearTimeout(wsCloseTimer.current);
+    }, []);
     const [authError, setAuthError] = useState(false);
     const [sessionMetrics, setSessionMetrics] = useState<SessionMetrics | null>(
         null,
@@ -283,7 +299,11 @@ export default function ChatContainer() {
                 </button>
 
                 {/* Workspace dropdown */}
-                <div className="relative flex-shrink-0">
+                <div
+                    className="relative flex-shrink-0"
+                    onMouseEnter={cancelWsClose}
+                    onMouseLeave={scheduleWsClose}
+                >
                     <button
                         onClick={() => setWsDropdownOpen((v) => !v)}
                         className="flex items-center gap-2 pl-1.5 pr-2 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] text-sm font-bold text-[var(--text-primary)] transition-all"
