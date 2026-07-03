@@ -224,7 +224,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
             />
             <div className="flex items-center gap-2">
               {(isRunning || isStoppingProp) && (
-                <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={isStoppingProp}>
+                <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={isStoppingProp} aria-label={t(isStoppingProp ? 'aria.stopping' : 'aria.stop')}>
                   {isStoppingProp ? (
                     <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx={12} cy={12} r="10" stroke="currentColor" strokeWidth="4" />
@@ -235,7 +235,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   )}
                 </ComposerPrimitive.Cancel>
               )}
-              <ComposerPrimitive.Send className="btn-icon btn-primary"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+              <ComposerPrimitive.Send className="btn-icon btn-primary" aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
             </div>
           </div>
         </ComposerPrimitive.Root>

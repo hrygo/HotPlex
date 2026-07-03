@@ -282,6 +282,7 @@ export default function ChatContainer() {
                     onClick={() => setSidebarOpen(!sidebarOpen)}
                     className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95"
                     title={sidebarOpen ? t("chat:action.collapse_sidebar") : t("chat:action.expand_sidebar")}
+                    aria-label={sidebarOpen ? t("chat:action.collapse_sidebar") : t("chat:action.expand_sidebar")}
                 >
                     <svg
                         className="w-5 h-5"
@@ -443,6 +444,7 @@ export default function ChatContainer() {
                         rel="noopener noreferrer"
                         className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-all active:scale-95 flex items-center justify-center relative overflow-hidden focus:outline-none"
                         title={t("chat:action.docs")}
+                        aria-label={t("chat:action.docs")}
                     >
                         <svg
                             className="w-5 h-5"
@@ -471,6 +473,11 @@ export default function ChatContainer() {
                         }}
                         className={`relative p-2 rounded-lg transition-all ${authError ? "text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"}`}
                         title={
+                            authError
+                                ? t("chat:status.session_expired_settings")
+                                : t("chat:label.settings")
+                        }
+                        aria-label={
                             authError
                                 ? t("chat:status.session_expired_settings")
                                 : t("chat:label.settings")

@@ -226,5 +226,13 @@
       "more_lines": "+ {{count}} more lines",
       "awaiting_response": "Awaiting response from shell..."
     }
+  },
+  "aria": {
+    "send": "Send message",
+    "stop": "Stop generating",
+    "stopping": "Stopping…",
+    "toggle_theme": "Toggle theme",
+    "toggle_language": "Switch language",
+    "scroll_to_latest": "Scroll to latest messages"
   }
 }

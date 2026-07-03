@@ -51,6 +51,7 @@ export function LanguageSwitcher({ variant = "icon" }: { variant?: "icon" | "inl
           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
       }`}
       title={tooltipText}
+      aria-label={tooltipText}
     >
       <AnimatePresence mode="wait" initial={false}>
         {locale === "zh-CN" ? (
