@@ -924,7 +924,7 @@ func TestRespondServerRequest(t *testing.T) {
 			Closer: io.NopCloser(nil),
 		}
 
-		err := mgr.RespondServerRequest("req-100", map[string]string{"decision": "accept"})
+		err := mgr.RespondServerRequest(context.Background(), "req-100", map[string]string{"decision": "accept"})
 		require.NoError(t, err)
 
 		// Entry should be deleted.
@@ -939,7 +939,7 @@ func TestRespondServerRequest(t *testing.T) {
 	t.Run("unknown_request", func(t *testing.T) {
 		t.Parallel()
 
-		err := mgr.RespondServerRequest("nonexistent", map[string]string{"decision": "decline"})
+		err := mgr.RespondServerRequest(context.Background(), "nonexistent", map[string]string{"decision": "decline"})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no pending server request")
 	})

@@ -83,7 +83,9 @@ func autoApproveTool(ctrl *ControlHandler, cr *ControlRequestPayload) bool {
 		return false
 	}
 	ctrl.log.Info("auto-approved permission request", "tool", cr.ToolName, "request_id", cr.RequestID)
-	_ = ctrl.SendPermissionResponse(cr.RequestID, true, "auto-approved")
+	ctx, cancel := context.WithTimeout(context.Background(), autoRespondCtx)
+	defer cancel()
+	_ = ctrl.SendPermissionResponse(ctx, cr.RequestID, true, "auto-approved")
 	return true
 }
 
@@ -441,7 +443,18 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		if stdin == nil {
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 		}
-		if err := writeStreamInputLocked(stdin, content); err != nil {
+		// writeStreamInputLocked issues syscall.Write which blocks indefinitely
+		// when the pipe buffer is full and the worker process stops reading.
+		// Guard with ctx cancellation so the caller is not pinned forever.
+		// The mutex stays held if we bail out — the orphaned goroutine holds it
+		// until the child exits and the pipe yields EPIPE. This mirrors the
+		// pattern proven by Worker.Compact.
+		if err := base.WriteWithCtx(ctx, func() error {
+			return writeStreamInputLocked(stdin, content)
+		}, 0); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("claudecode: input write cancelled: %w", err)
+			}
 			return fmt.Errorf("claudecode: input: %w", err)
 		}
 		baseConn.SetLastInputLocked(content)
@@ -474,26 +487,26 @@ func (w *Worker) CloseInput() error {
 	return nil
 }
 
-func (w *Worker) HandlePermissionResponse(_ context.Context, reqID string, allowed bool, reason string) error {
+func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
 	w.Log.Info("claudecode: sending permission response to stdin",
 		"request_id", reqID,
 		"allowed", allowed,
 		"session_id", w.sessionID)
-	if err := w.control.SendPermissionResponse(reqID, allowed, reason); err != nil {
+	if err := w.control.SendPermissionResponse(ctx, reqID, allowed, reason); err != nil {
 		return fmt.Errorf("claudecode: permission response: %w", err)
 	}
 	return nil
 }
 
-func (w *Worker) HandleQuestionResponse(_ context.Context, reqID string, answers map[string]string) error {
-	if err := w.control.SendQuestionResponse(reqID, answers); err != nil {
+func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	if err := w.control.SendQuestionResponse(ctx, reqID, answers); err != nil {
 		return fmt.Errorf("claudecode: question response: %w", err)
 	}
 	return nil
 }
 
-func (w *Worker) HandleElicitationResponse(_ context.Context, reqID, action string, content map[string]any) error {
-	if err := w.control.SendElicitationResponse(reqID, action, content); err != nil {
+func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
+	if err := w.control.SendElicitationResponse(ctx, reqID, action, content); err != nil {
 		return fmt.Errorf("claudecode: elicitation response: %w", err)
 	}
 	return nil
@@ -742,7 +755,9 @@ func (w *Worker) readOutput(ctx context.Context) {
 			w.BaseWorker.Log.Warn("claudecode: parse event", "session_id", w.sessionID, "err", err, "type", msg.Type)
 			// Deny unparseable control_request to prevent Worker from blocking.
 			if msg.Type == "control_request" && w.control != nil && msg.RequestID != "" {
-				_ = w.control.SendPermissionResponse(msg.RequestID, false, "gateway: parse error, auto-denied")
+				denyCtx, cancel := context.WithTimeout(context.Background(), autoRespondCtx)
+				_ = w.control.SendPermissionResponse(denyCtx, msg.RequestID, false, "gateway: parse error, auto-denied")
+				cancel()
 			}
 			continue
 		}
@@ -835,29 +850,18 @@ func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 	defer mu.Unlock()
 
 	// writeStreamInputLocked issues syscall.Write which blocks when the pipe
-	// buffer is full and the reader has stalled. Guard with context cancellation
-	// so the caller is not blocked indefinitely.
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- writeStreamInputLocked(stdin, "/compact")
-	}()
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		// Wait for the write goroutine to finish so we don't release mu while
-		// a write is in flight. However, syscall.Write blocks at the OS level
-		// and cannot be preempted — if the pipe buffer is full and the worker
-		// process is stalled, this blocks forever. Use a secondary timeout to
-		// bound the wait. The orphaned goroutine will complete when the process
-		// exits and the pipe read end closes (EPIPE).
-		select {
-		case <-errCh:
-		case <-time.After(30 * time.Second):
-			w.Log.Warn("claudecode: compact: write goroutine did not complete within 30s after ctx cancellation, releasing lock")
+	// buffer is full and the reader has stalled. Guard with ctx cancellation
+	// via the shared helper so the caller is not blocked indefinitely. See
+	// base.WriteWithCtx for the orphaned-goroutine rationale.
+	if err := base.WriteWithCtx(ctx, func() error {
+		return writeStreamInputLocked(stdin, "/compact")
+	}, 0); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("claudecode: compact: %w", err)
 		}
-		return fmt.Errorf("claudecode: compact: %w", ctx.Err())
+		return err
 	}
+	return nil
 }
 
 // Clear is not supported by Claude Code in non-interactive mode.

@@ -241,7 +241,7 @@ func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 
 // Call sends a JSON-RPC request to the app-server process and waits for a response.
 // The params argument is marshaled as JSON. If nil, no params field is sent.
-func (m *CodexAppServerManager) Call(method string, params any) (json.RawMessage, error) {
+func (m *CodexAppServerManager) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := m.nextReqID.Add(1)
 
 	req := JSONRPCRequest{
@@ -262,7 +262,7 @@ func (m *CodexAppServerManager) Call(method string, params any) (json.RawMessage
 	m.pending.Store(id, respCh)
 	defer m.pending.Delete(id)
 
-	if err := m.writeRequest(&req); err != nil {
+	if err := m.writeRequest(ctx, &req); err != nil {
 		return nil, fmt.Errorf("codex-app-server: write request: %w", err)
 	}
 
@@ -287,7 +287,7 @@ func (m *CodexAppServerManager) Call(method string, params any) (json.RawMessage
 }
 
 // Notify sends a JSON-RPC notification (no response expected) to the app-server process.
-func (m *CodexAppServerManager) Notify(method string, params any) error {
+func (m *CodexAppServerManager) Notify(ctx context.Context, method string, params any) error {
 	notif := JSONRPCNotification{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -301,7 +301,7 @@ func (m *CodexAppServerManager) Notify(method string, params any) error {
 		notif.Params = raw
 	}
 
-	return m.writeNotification(&notif)
+	return m.writeNotification(ctx, &notif)
 }
 
 // Shutdown forcefully terminates the process regardless of reference count.
@@ -420,12 +420,12 @@ func (m *CodexAppServerManager) startProcessLocked(ctx context.Context) error {
 }
 
 // handshake performs the JSON-RPC initialize/initialized handshake.
-func (m *CodexAppServerManager) handshake(_ context.Context) error {
+func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 	type initializeResult struct {
 		Capabilities json.RawMessage `json:"capabilities"`
 	}
 
-	resp, err := m.Call("initialize", map[string]any{
+	resp, err := m.Call(ctx, "initialize", map[string]any{
 		"clientInfo": map[string]string{
 			"name":    "hotplex",
 			"title":   "HotPlex Gateway",
@@ -444,7 +444,7 @@ func (m *CodexAppServerManager) handshake(_ context.Context) error {
 		return fmt.Errorf("parse initialize result: %w", err)
 	}
 
-	if err := m.Notify("initialized", map[string]any{}); err != nil {
+	if err := m.Notify(ctx, "initialized", map[string]any{}); err != nil {
 		return fmt.Errorf("initialized notification: %w", err)
 	}
 
@@ -454,20 +454,26 @@ func (m *CodexAppServerManager) handshake(_ context.Context) error {
 }
 
 // writeFrame serializes a JSON-RPC frame to stdin. Caller must not hold m.mu.
-func (m *CodexAppServerManager) writeFrame(v any) error {
+// The write is guarded by ctx: stdin.Encode blocks when the pipe buffer is
+// full and the app-server stops reading, so without ctx a single stalled
+// write would hold writeMu and deadlock every subsequent Call/Notify across
+// all codex sessions (the manager is a singleton).
+func (m *CodexAppServerManager) writeFrame(ctx context.Context, v any) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
-	return json.NewEncoder(m.stdin).Encode(v)
+	return base.WriteWithCtx(ctx, func() error {
+		return json.NewEncoder(m.stdin).Encode(v)
+	}, 0)
 }
 
 // writeRequest marshals and writes a JSON-RPC request to stdin.
-func (m *CodexAppServerManager) writeRequest(req *JSONRPCRequest) error {
-	return m.writeFrame(req)
+func (m *CodexAppServerManager) writeRequest(ctx context.Context, req *JSONRPCRequest) error {
+	return m.writeFrame(ctx, req)
 }
 
 // writeNotification marshals and writes a JSON-RPC notification to stdin.
-func (m *CodexAppServerManager) writeNotification(notif *JSONRPCNotification) error {
-	return m.writeFrame(notif)
+func (m *CodexAppServerManager) writeNotification(ctx context.Context, notif *JSONRPCNotification) error {
+	return m.writeFrame(ctx, notif)
 }
 
 // readNotifications reads JSON-RPC frames from stdout and routes them to
@@ -613,7 +619,7 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 // RespondServerRequest sends a JSON-RPC response to a server-initiated request.
 // reqID is the approval request's requestId; result is the response payload,
 // which should contain a "decision" or "behavior" key for server request handling.
-func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) error {
+func (m *CodexAppServerManager) RespondServerRequest(ctx context.Context, reqID string, result any) error {
 	// Validate before consuming reqID so validation failures don't orphan
 	// the codex process waiting for a response that will never arrive.
 	if check, ok := result.(map[string]any); ok {
@@ -644,14 +650,14 @@ func (m *CodexAppServerManager) RespondServerRequest(reqID string, result any) e
 		ID:      rpcID,
 		Result:  raw,
 	}
-	return m.writeFrame(resp)
+	return m.writeFrame(ctx, resp)
 }
 
 // ─── Thread Lifecycle ─────────────────────────────────────────────────────
 
 // ResumeThread resumes a paused or interrupted thread.
 func (m *CodexAppServerManager) ResumeThread(threadID string) (json.RawMessage, error) {
-	resp, err := m.Call("thread/resume", map[string]any{"threadId": threadID})
+	resp, err := m.Call(context.Background(), "thread/resume", map[string]any{"threadId": threadID})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: thread/resume: %w", err)
 	}
@@ -663,7 +669,7 @@ func (m *CodexAppServerManager) ForkThread(threadID string, params map[string]an
 	merged := make(map[string]any, len(params)+1)
 	maps.Copy(merged, params)
 	merged["threadId"] = threadID // authoritative value, overrides any caller-supplied threadId in params
-	resp, err := m.Call("thread/fork", merged)
+	resp, err := m.Call(context.Background(), "thread/fork", merged)
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: thread/fork: %w", err)
 	}
@@ -672,7 +678,7 @@ func (m *CodexAppServerManager) ForkThread(threadID string, params map[string]an
 
 // ArchiveThread archives a thread so it no longer appears in the active list.
 func (m *CodexAppServerManager) ArchiveThread(threadID string) error {
-	err := m.Notify("thread/archive", map[string]any{"threadId": threadID})
+	err := m.Notify(context.Background(), "thread/archive", map[string]any{"threadId": threadID})
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/archive: %w", err)
 	}
@@ -681,7 +687,7 @@ func (m *CodexAppServerManager) ArchiveThread(threadID string) error {
 
 // UnarchiveThread restores a previously archived thread.
 func (m *CodexAppServerManager) UnarchiveThread(threadID string) error {
-	err := m.Notify("thread/unarchive", map[string]any{"threadId": threadID})
+	err := m.Notify(context.Background(), "thread/unarchive", map[string]any{"threadId": threadID})
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/unarchive: %w", err)
 	}
@@ -690,7 +696,7 @@ func (m *CodexAppServerManager) UnarchiveThread(threadID string) error {
 
 // SetThreadName updates the display name of a thread.
 func (m *CodexAppServerManager) SetThreadName(threadID, name string) error {
-	err := m.Notify("thread/name/set", map[string]any{
+	err := m.Notify(context.Background(), "thread/name/set", map[string]any{
 		"threadId": threadID,
 		"name":     name,
 	})
@@ -703,7 +709,7 @@ func (m *CodexAppServerManager) SetThreadName(threadID, name string) error {
 // SetThreadGoal sets a goal for the specified thread.
 // Upstream ThreadGoalSetParams uses "objective" (thread.rs:746), not "goal".
 func (m *CodexAppServerManager) SetThreadGoal(threadID, objective string) error {
-	err := m.Notify("thread/goal/set", map[string]any{
+	err := m.Notify(context.Background(), "thread/goal/set", map[string]any{
 		"threadId":  threadID,
 		"objective": objective,
 	})
@@ -715,7 +721,7 @@ func (m *CodexAppServerManager) SetThreadGoal(threadID, objective string) error 
 
 // GetThreadGoal retrieves the current goal for the specified thread.
 func (m *CodexAppServerManager) GetThreadGoal(threadID string) (json.RawMessage, error) {
-	resp, err := m.Call("thread/goal/get", map[string]any{"threadId": threadID})
+	resp, err := m.Call(context.Background(), "thread/goal/get", map[string]any{"threadId": threadID})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: thread/goal/get: %w", err)
 	}
@@ -724,7 +730,7 @@ func (m *CodexAppServerManager) GetThreadGoal(threadID string) (json.RawMessage,
 
 // ClearThreadGoal removes the goal from the specified thread.
 func (m *CodexAppServerManager) ClearThreadGoal(threadID string) error {
-	err := m.Notify("thread/goal/clear", map[string]any{"threadId": threadID})
+	err := m.Notify(context.Background(), "thread/goal/clear", map[string]any{"threadId": threadID})
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/goal/clear: %w", err)
 	}
@@ -739,7 +745,7 @@ func (m *CodexAppServerManager) UpdateThreadSettings(threadID string, settings m
 	params := make(map[string]any, len(settings)+1)
 	maps.Copy(params, settings)
 	params["threadId"] = threadID // authoritative value, overrides any caller-supplied threadId in settings
-	err := m.Notify("thread/settings/update", params)
+	err := m.Notify(context.Background(), "thread/settings/update", params)
 	if err != nil {
 		return fmt.Errorf("codex-app-server: thread/settings/update: %w", err)
 	}
@@ -749,7 +755,7 @@ func (m *CodexAppServerManager) UpdateThreadSettings(threadID string, settings m
 // CompactThread starts context compaction for the specified thread, returning
 // the compaction result.
 func (m *CodexAppServerManager) CompactThread(threadID string) (json.RawMessage, error) {
-	resp, err := m.Call("thread/compact/start", map[string]any{"threadId": threadID})
+	resp, err := m.Call(context.Background(), "thread/compact/start", map[string]any{"threadId": threadID})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: thread/compact/start: %w", err)
 	}
@@ -763,7 +769,7 @@ func (m *CodexAppServerManager) RollbackThread(threadID string, numTurns uint32)
 	if numTurns < 1 {
 		numTurns = 1
 	}
-	resp, err := m.Call("thread/rollback", map[string]any{
+	resp, err := m.Call(context.Background(), "thread/rollback", map[string]any{
 		"threadId": threadID,
 		"numTurns": numTurns,
 	})
@@ -780,7 +786,7 @@ func (m *CodexAppServerManager) RollbackThread(threadID string, numTurns uint32)
 // expectedTurnId (the currently-active turn; the request fails if it does not
 // match). The text is wrapped as a single UserInput text item.
 func (m *CodexAppServerManager) SteerTurn(threadID, expectedTurnID, text string) (json.RawMessage, error) {
-	resp, err := m.Call("turn/steer", map[string]any{
+	resp, err := m.Call(context.Background(), "turn/steer", map[string]any{
 		"threadId":       threadID,
 		"expectedTurnId": expectedTurnID,
 		"input": []map[string]any{
@@ -796,7 +802,7 @@ func (m *CodexAppServerManager) SteerTurn(threadID, expectedTurnID, text string)
 // InterruptTurn interrupts the running turn in the specified thread.
 // Upstream TurnInterruptParams (turn.rs:188) requires both threadId and turnId.
 func (m *CodexAppServerManager) InterruptTurn(threadID, turnID string) error {
-	err := m.Notify("turn/interrupt", map[string]any{
+	err := m.Notify(context.Background(), "turn/interrupt", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
 	})
@@ -812,7 +818,7 @@ func (m *CodexAppServerManager) InterruptTurn(threadID, turnID string) error {
 // Upstream EnvironmentAddParams (environment.rs:9) requires environmentId and
 // execServerUrl — it is not a key/value env-var setter.
 func (m *CodexAppServerManager) AddEnvironment(environmentID, execServerURL string) error {
-	err := m.Notify("environment/add", map[string]any{
+	err := m.Notify(context.Background(), "environment/add", map[string]any{
 		"environmentId": environmentID,
 		"execServerUrl": execServerURL,
 	})
@@ -826,7 +832,7 @@ func (m *CodexAppServerManager) AddEnvironment(environmentID, execServerURL stri
 
 // ListMCPServerStatus returns the status of all configured MCP servers.
 func (m *CodexAppServerManager) ListMCPServerStatus() (json.RawMessage, error) {
-	resp, err := m.Call("mcpServerStatus/list", nil)
+	resp, err := m.Call(context.Background(), "mcpServerStatus/list", nil)
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: mcpServerStatus/list: %w", err)
 	}
@@ -836,7 +842,7 @@ func (m *CodexAppServerManager) ListMCPServerStatus() (json.RawMessage, error) {
 // ReadMCPResource reads a resource from a configured MCP server.
 // Upstream McpResourceReadParams (mcp.rs:77) requires both server and uri.
 func (m *CodexAppServerManager) ReadMCPResource(server, uri string) (json.RawMessage, error) {
-	resp, err := m.Call("mcpServer/resource/read", map[string]any{
+	resp, err := m.Call(context.Background(), "mcpServer/resource/read", map[string]any{
 		"server": server,
 		"uri":    uri,
 	})
@@ -858,7 +864,7 @@ func (m *CodexAppServerManager) CallMCPTool(threadID, server, tool string, args 
 	if args != nil {
 		params["arguments"] = args
 	}
-	resp, err := m.Call("mcpServer/tool/call", params)
+	resp, err := m.Call(context.Background(), "mcpServer/tool/call", params)
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: mcpServer/tool/call: %w", err)
 	}
@@ -868,7 +874,7 @@ func (m *CodexAppServerManager) CallMCPTool(threadID, server, tool string, args 
 // RefreshMCPServer reloads the global MCP server registry.
 // Upstream McpServerRefresh (common.rs:874) takes no params (undefined/None).
 func (m *CodexAppServerManager) RefreshMCPServer() error {
-	err := m.Notify("config/mcpServer/reload", nil)
+	err := m.Notify(context.Background(), "config/mcpServer/reload", nil)
 	if err != nil {
 		return fmt.Errorf("codex-app-server: config/mcpServer/reload: %w", err)
 	}
@@ -878,7 +884,7 @@ func (m *CodexAppServerManager) RefreshMCPServer() error {
 // MCPServerOAuthLogin initiates an OAuth login flow for the named MCP server.
 // Upstream McpServerOauthLoginParams (mcp.rs:187) uses "name", not "serverName".
 func (m *CodexAppServerManager) MCPServerOAuthLogin(name string) (json.RawMessage, error) {
-	resp, err := m.Call("mcpServer/oauth/login", map[string]any{"name": name})
+	resp, err := m.Call(context.Background(), "mcpServer/oauth/login", map[string]any{"name": name})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: mcpServer/oauth/login: %w", err)
 	}
@@ -890,7 +896,7 @@ func (m *CodexAppServerManager) MCPServerOAuthLogin(name string) (json.RawMessag
 // StartReview initiates a code review on the given thread.
 // Upstream ReviewStartParams (review.rs:17) requires both threadId and target.
 func (m *CodexAppServerManager) StartReview(threadID string, target map[string]any) (json.RawMessage, error) {
-	resp, err := m.Call("review/start", map[string]any{
+	resp, err := m.Call(context.Background(), "review/start", map[string]any{
 		"threadId": threadID,
 		"target":   target,
 	})

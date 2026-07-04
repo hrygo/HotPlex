@@ -721,7 +721,7 @@ func TestControlHandler_SendQuestionResponse(t *testing.T) {
 	var buf bytes.Buffer
 	ch := NewControlHandler(log, &buf)
 
-	err := ch.SendQuestionResponse("req_q1", map[string]string{"q1": "a1", "q2": "a2"})
+	err := ch.SendQuestionResponse(context.Background(), "req_q1", map[string]string{"q1": "a1", "q2": "a2"})
 	require.NoError(t, err)
 
 	var resp ControlResponse
@@ -736,7 +736,7 @@ func TestControlHandler_SendElicitationResponse(t *testing.T) {
 	var buf bytes.Buffer
 	ch := NewControlHandler(log, &buf)
 
-	err := ch.SendElicitationResponse("req_e1", "accept", map[string]any{"key": "value"})
+	err := ch.SendElicitationResponse(context.Background(), "req_e1", "accept", map[string]any{"key": "value"})
 	require.NoError(t, err)
 
 	var resp ControlResponse
