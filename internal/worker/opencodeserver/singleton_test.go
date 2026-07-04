@@ -4,13 +4,14 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -392,42 +393,28 @@ func TestSendCritical_Timeout(t *testing.T) {
 	}
 }
 
-// fakeBlockingProc simulates a process whose Kill() blocks until the test
-// releases it — reproducing the production condition from issue #836 where
-// cmd.Wait() hangs because orphaned descendant processes hold the stdout
-// pipe. It lets the test deterministically assert that idle-drain releases
-// s.mu BEFORE calling Kill (so Acquire is never pinned behind a blocking Kill).
-type fakeBlockingProc struct {
-	killStarted chan struct{} // closed on first Kill call
-	killRelease chan struct{} // closed by test/Cleanup to let Kill return
-}
-
-func (f *fakeBlockingProc) Start(context.Context, string, []string, []string, string) (*os.File, *os.File, *os.File, error) {
-	return nil, nil, nil, nil
-}
-func (f *fakeBlockingProc) Kill() error {
-	close(f.killStarted)
-	<-f.killRelease // block until the test unblocks us
-	return nil
-}
-func (f *fakeBlockingProc) Wait() (int, error) {
-	<-f.killRelease
-	return 0, nil
-}
-
-// TestSingletonProcessManager_IdleDrain_KillOutsideMu verifies the fix for
-// issue #836: the idle-drain timer callback must release s.mu BEFORE calling
-// proc.Kill(), because proc.Kill() synchronously waits on cmd.Wait()
-// (proc/manager.go), which blocks indefinitely when orphaned descendant
-// processes hold the stdout pipe. Holding s.mu across that deadlock would
-// permanently block every subsequent Acquire.
+// TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock verifies
+// the fix for issue #836 (review P1-1): the idle-drain timer must kill the
+// process via package-level proc.ForceKill(pgid), NOT via proc.Manager.Kill().
 //
-// The fakeBlockingProc blocks Kill on a channel. With the fix, Acquire
-// completes immediately (the lock is released before Kill runs). With the
-// regression (Kill under s.mu), Acquire would block until killRelease closes
-// and the 2s timeout fires.
-func TestSingletonProcessManager_IdleDrain_KillOutsideMu(t *testing.T) {
-	t.Parallel()
+// Why this matters: proc.Manager.Kill() acquires proc.mu and then calls
+// cmd.Wait(); meanwhile monitorProcess's Wait() already holds proc.mu inside
+// its own cmd.Wait(). Calling Kill() from the idle-drain callback would block
+// on proc.mu.Lock() forever, never reaching ForceKill, so the process is
+// never killed and the timer goroutine leaks. ForceKill sends SIGKILL by PGID
+// without touching proc.mu, letting monitorProcess's Wait() observe the exit.
+//
+// This test spawns a real long-lived subprocess and runs a background Wait()
+// (simulating monitorProcess holding proc.mu). Under the fix, idle-drain's
+// ForceKill kills the process and the background Wait() returns promptly.
+// Under the regression (proc.Kill under s.mu), neither happens → timeout.
+func TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires spawning a real subprocess")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on POSIX process groups")
+	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.OpenCodeServerConfig{
@@ -435,33 +422,35 @@ func TestSingletonProcessManager_IdleDrain_KillOutsideMu(t *testing.T) {
 	}
 	mgr := NewSingletonProcessManager(log, cfg)
 
-	fake := &fakeBlockingProc{
-		killStarted: make(chan struct{}),
-		killRelease: make(chan struct{}),
-	}
-	t.Cleanup(func() { close(fake.killRelease) }) // unblock any pending Kill/Wait
+	// Spawn a real long-lived process as if it were the OCS server.
+	pm := proc.New(proc.Opts{Logger: log})
+	_, _, _, err := pm.Start(context.Background(), "sleep", []string{"30"}, nil, "")
+	require.NoError(t, err)
+
+	// Simulate monitorProcess: a goroutine blocked in pm.Wait() (holding
+	// proc.mu via cmd.Wait) — the production deadlock condition.
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		_, _ = pm.Wait()
+	}()
 
 	mgr.mu.Lock()
 	mgr.state = stateRunning
 	mgr.refs = 0
-	mgr.proc = fake
+	mgr.proc = pm
+	mgr.pgid = pm.PGID()
 	mgr.startIdleDrainLocked()
 	mgr.mu.Unlock()
 
-	// Wait until the idle-drain timer has fired and entered Kill().
-	<-fake.killStarted
-
-	// Acquire must NOT be pinned behind the blocking Kill. Under the fix the
-	// lock is released before Kill; under the regression Acquire blocks here.
-	acquired := make(chan struct{})
-	go func() {
-		_, _, _, _, _ = mgr.Acquire(context.Background())
-		close(acquired)
-	}()
+	// Under the fix: idle-drain calls proc.ForceKill(pgid) (package-level,
+	// does NOT touch proc.mu) → process dies → pm.Wait() returns.
+	// Under the regression (proc.Kill under s.mu): Kill blocks on proc.mu
+	// (held by pm.Wait) → process never killed → pm.Wait never returns.
 	select {
-	case <-acquired:
-		// success: Acquire was not pinned behind proc.Kill()
-	case <-time.After(2 * time.Second):
-		t.Fatal("Acquire deadlocked behind idle-drain Kill (issue #836 regression)")
+	case <-monitorDone:
+		// success: idle-drain killed the process without deadlocking proc.mu
+	case <-time.After(3 * time.Second):
+		t.Fatal("idle-drain deadlocked on proc.mu — process never killed (P1-1 regression)")
 	}
 }

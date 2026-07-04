@@ -38,17 +38,6 @@ import (
 //
 // All methods are safe for concurrent use. Acquire serializes process startup
 // via mutex so only the first caller starts the process.
-// processController is the subset of *proc.Manager that SingletonProcessManager
-// depends on. Declared as an interface so tests can substitute a fake that
-// deterministically blocks inside Kill() — reproducing the production
-// deadlock condition (issue #836) where cmd.Wait() hangs on orphaned
-// descendant processes that inherited the stdout pipe.
-type processController interface {
-	Start(ctx context.Context, name string, args, env []string, dir string) (stdin, stdout, stderr *os.File, err error)
-	Kill() error
-	Wait() (int, error)
-}
-
 type SingletonProcessManager struct {
 	log       *slog.Logger
 	client    *http.Client // with Timeout for API calls
@@ -56,7 +45,8 @@ type SingletonProcessManager struct {
 	cfg       config.OpenCodeServerConfig
 
 	mu       sync.Mutex
-	proc     processController
+	proc     *proc.Manager
+	pgid     int // cached PGID for ForceKill outside proc.mu (see idle drain / Shutdown)
 	httpAddr string
 	refs     int
 	state    singletonState
@@ -209,8 +199,16 @@ func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 
 	if s.proc != nil {
 		s.log.Info("opencode-server-singleton: shutdown, killing process")
-		_ = s.proc.Kill()
+		// Use ForceKill(pgid) + ForceKillTree instead of proc.Kill() to avoid
+		// deadlock with monitorProcess's Wait() (see idle-drain comment).
+		if s.pgid > 0 {
+			_ = proc.ForceKill(s.pgid)
+			proc.ForceKillTree(s.pgid, s.log)
+		} else {
+			_ = s.proc.Kill()
+		}
 		s.proc = nil
+		s.pgid = 0
 		s.refs = 0
 	}
 
@@ -301,6 +299,7 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 	}
 
 	s.state = stateRunning
+	s.pgid = s.proc.PGID()
 
 	// Monitor process exit in background.
 	go s.monitorProcess()
@@ -403,8 +402,14 @@ func (s *SingletonProcessManager) monitorProcess() {
 	s.mu.Lock()
 	wasRunning := s.state == stateRunning
 	refs := s.refs
-	s.state = stateIdle
+	// Guard against overwriting stateStopped set by Shutdown: once stopped,
+	// the monitor goroutine must not flip the singleton back to idle (which
+	// would allow an unintended restart). Only Idle/Running transition to idle.
+	if s.state != stateStopped {
+		s.state = stateIdle
+	}
 	s.proc = nil
+	s.pgid = 0
 
 	// Cancel the global SSE reader so it doesn't leak into the next lifecycle.
 	if s.sseCancel != nil {
@@ -433,28 +438,30 @@ func (s *SingletonProcessManager) monitorProcess() {
 func (s *SingletonProcessManager) startIdleDrainLocked() {
 	s.log.Info("opencode-server-singleton: starting idle drain timer", "period", s.cfg.IdleDrainPeriod)
 	s.idleTimer = time.AfterFunc(s.cfg.IdleDrainPeriod, func() {
-		// Snapshot the proc reference under the lock, then release BEFORE
-		// calling Kill. proc.Kill() waits synchronously on cmd.Wait()
-		// (proc/manager.go), which blocks indefinitely when descendant
-		// processes that inherited the stdout pipe (OCS-spawned MCP servers,
-		// lsp-daemon, codegraph, …) survive SIGKILL of the main process
-		// group. Calling Kill while holding s.mu would deadlock every
-		// subsequent Acquire — see issue #836. monitorProcess (started in
-		// startProcessLocked) owns resetting state=stateIdle + closing
-		// subscribers after proc.Wait() returns; we only trigger the kill.
 		s.mu.Lock()
-		var procToKill processController
-		if s.refs == 0 && s.state == stateRunning && s.proc != nil {
-			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
-			procToKill = s.proc
+		if s.idleTimer == nil {
+			// Timer was already stopped (e.g. by Shutdown or Acquire).
+			s.mu.Unlock()
+			return
 		}
+		shouldKill := s.refs == 0 && s.state == stateRunning && s.pgid > 0
+		pgid := s.pgid
 		s.idleTimer = nil
 		s.mu.Unlock()
 
-		// Kill outside s.mu. If cmd.Wait() hangs (orphaned pipe holders),
-		// only this timer goroutine is pinned — Acquire is unaffected.
-		if procToKill != nil {
-			_ = procToKill.Kill()
+		if shouldKill {
+			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
+			// Use ForceKill + ForceKillTree instead of s.proc.Kill() to avoid
+			// deadlock: proc.Manager.Kill() acquires proc.mu and calls
+			// cmd.Wait(), which blocks until the child exits. Meanwhile
+			// monitorProcess's Wait() already holds proc.mu inside its own
+			// cmd.Wait() call. Kill() would block on proc.mu.Lock() while
+			// holding s.mu, making the entire singleton unusable. ForceKill
+			// sends SIGKILL by PGID without touching proc.mu, so
+			// monitorProcess's Wait() observes the exit and runs cleanup.
+			// Pattern aligned with internal/worker/codexcli/manager.go (#836).
+			_ = proc.ForceKill(pgid)
+			proc.ForceKillTree(pgid, s.log)
 		}
 	})
 }
