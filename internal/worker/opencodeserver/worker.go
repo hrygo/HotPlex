@@ -621,6 +621,14 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 
 	resp, err := w.client.Do(req)
 	if err != nil {
+		// Classify connection failures (e.g. the singleton was idle-drained
+		// between Acquire and this call) as Unavailable so the gateway maps
+		// them to ErrCodeSessionTerminated and runs crash cleanup — matching
+		// the conn.Send path. Without this, a bare wrapped error falls into
+		// the default ErrCodeInternalError bucket (see #836 review).
+		if isUnreachableError(err) {
+			return "", &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "opencodeserver: server unreachable", Cause: err}
+		}
 		return "", fmt.Errorf("http request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

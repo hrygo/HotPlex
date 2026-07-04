@@ -293,6 +293,12 @@ func (m *Manager) Wait() (int, error) {
 	if closeErr := m.closeLocked(); closeErr != nil {
 		m.log.Warn("proc: pipe close after wait", "err", closeErr)
 	}
+	// Close the Job Object handle so Windows KILL_ON_JOB_CLOSE reaps any
+	// surviving children. Required when a caller bypasses Kill() — e.g. the
+	// OCS singleton uses package-level ForceKill to avoid a proc.mu deadlock,
+	// leaving Wait() as the only cleanup path. No-op on Unix; idempotent
+	// (CloseJobHandle(0) returns immediately, and m.jobHandle is zeroed).
+	m.closeJobHandle()
 	return m.exitCode, m.waitErr
 }
 

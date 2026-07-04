@@ -416,6 +416,8 @@ func TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock(t *testing
 		t.Skip("relies on POSIX process groups")
 	}
 
+	t.Parallel()
+
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.OpenCodeServerConfig{
 		IdleDrainPeriod: 10 * time.Millisecond,
