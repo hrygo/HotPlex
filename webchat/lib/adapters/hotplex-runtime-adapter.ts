@@ -58,6 +58,7 @@ import {
     appendTextDelta,
     appendReasoningDelta,
     concatTextParts,
+    collectLastTurnMessages,
 } from "@/lib/adapters/merge-parts";
 
 // Re-export for consumers
@@ -694,24 +695,15 @@ export function useHotPlexRuntime({
                     direction: "latest",
                     limit: 50,
                 });
-                // Walk newest→oldest; collect message events whose seq is below
-                // the most recent done event (i.e. belong to the finished turn).
-                let seenDone = false;
-                const messageEvents = [];
-                for (const ev of page.events) {
-                    if (ev.type === "done") {
-                        seenDone = true;
-                        continue;
-                    }
-                    if (seenDone && ev.type === "message") {
-                        messageEvents.push(ev);
-                    }
-                    if (messageEvents.length >= 5) break;
-                }
+                // page.events is in ASC seq order (the store reverses DESC
+                // queries before returning — see eventstore query_shared.go).
+                // Collect the message events of the just-finished turn (after
+                // the most recent done), without crossing into previous turns.
+                const messageEvents = collectLastTurnMessages(page.events);
                 if (messageEvents.length === 0) return;
                 // message events store merged content (possibly across multiple
-                // size-flushed records); concatenate in seq order.
-                messageEvents.sort((a, b) => a.seq - b.seq);
+                // size-flushed records); collectLastTurnMessages returns ASC
+                // order so concatenation reproduces the original emit order.
                 const fullText = messageEvents
                     .map((ev) => ev.data?.content || "")
                     .join("");

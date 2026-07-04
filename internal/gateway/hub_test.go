@@ -285,12 +285,41 @@ func TestConn_TrySendData_MarksSessionDropped(t *testing.T) {
 
 	require.False(t, h.GetAndClearDropped("sess_conn_drop"), "no drop before trySendData")
 
-	// Next delta should drop silently and mark the session dropped exactly once.
+	// Next delta should drop silently and mark the session dropped. A burst of
+	// drops only locks hub.mu once thanks to MarkDropped's fast path.
 	require.NoError(t, c.trySendData([]byte(`{"type":"message.delta"}`)))
 	require.NoError(t, c.trySendData([]byte(`{"type":"message.delta"}`)))
 
 	require.True(t, h.GetAndClearDropped("sess_conn_drop"), "session marked dropped after conn-level drop")
 	require.False(t, h.GetAndClearDropped("sess_conn_drop"), "GetAndClear is destructive")
+}
+
+// TestHub_MarkDropped_AcrossTurns is a regression test for the bug where
+// a per-conn flag was never reset: after the first turn marked the session
+// dropped, subsequent turns on the same long-lived conn skipped marking and
+// silently lost deltas. Now MarkDropped keeps the flag on the hub (cleared
+// per-done via GetAndClearDropped), so each turn is fresh — and MarkDropped's
+// RLock fast path only short-circuits while the current turn's flag is set.
+func TestHub_MarkDropped_AcrossTurns(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+
+	// Turn 1: mark then done consumes the flag.
+	h.MarkDropped("sess_mt")
+	require.True(t, h.GetAndClearDropped("sess_mt"), "T1 marked")
+	require.False(t, h.GetAndClearDropped("sess_mt"), "T1 flag cleared")
+
+	// Turn 2: marking again must work — the fast path must not short-circuit
+	// because the previous GetAndClearDropped removed the entry.
+	h.MarkDropped("sess_mt")
+	require.True(t, h.GetAndClearDropped("sess_mt"), "T2 marked (no stale skip)")
+
+	// Turn 3 within the same turn (before done): fast path short-circuits,
+	// flag stays set and is consumed exactly once at done.
+	h.MarkDropped("sess_mt")
+	h.MarkDropped("sess_mt") // fast path — already marked
+	require.True(t, h.GetAndClearDropped("sess_mt"), "T3 marked exactly once")
+	require.False(t, h.GetAndClearDropped("sess_mt"), "T3 consumed")
 }
 
 func TestHub_SendToSession_GuaranteedQueueFull(t *testing.T) {

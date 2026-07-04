@@ -10,7 +10,6 @@ import type {
     MessagePart,
     ReasoningPart,
     TextPart,
-    ToolCallPart,
 } from "@/lib/types/message-parts";
 
 /**
@@ -62,38 +61,6 @@ export function appendReasoningDelta(
 }
 
 /**
- * Upsert a tool-call part by `toolCallId`. If a part with the same id exists,
- * merge `updates` into it (shallow); otherwise push a new part. Used by both
- * handleToolCall (new/updated call) and handleToolResult (result patch).
- *
- * De-dupes repeated tool-call events for the same id (#331 region) and applies
- * result patches without losing the original args/toolName.
- */
-export function upsertToolCallPart(
-    parts: MessagePart[],
-    updates: Partial<ToolCallPart> & Pick<ToolCallPart, "toolCallId">,
-): MessagePart[] {
-    const next = [...parts];
-    const idx = next.findIndex(
-        (p): p is ToolCallPart =>
-            p.type === "tool-call" &&
-            (p as ToolCallPart).toolCallId === updates.toolCallId,
-    );
-    if (idx !== -1) {
-        const existing = next[idx] as ToolCallPart;
-        next[idx] = { ...existing, ...updates };
-    } else {
-        next.push({
-            type: "tool-call",
-            toolName: updates.toolName ?? "",
-            args: updates.args ?? {},
-            ...updates,
-        } as ToolCallPart);
-    }
-    return next;
-}
-
-/**
  * Concatenate the text of all text parts in order. Used to compare streamed
  * length against the authoritative event-store content when reconciling
  * dropped deltas.
@@ -103,4 +70,52 @@ export function concatTextParts(parts: MessagePart[]): string {
         .filter((p): p is TextPart => p.type === "text")
         .map((p) => p.text)
         .join("");
+}
+
+/**
+ * Minimal shape of a stored event — only the fields this function reads.
+ * Avoids importing the full StoredEvent type (which carries auth/network
+ * concerns) into this pure module.
+ */
+interface StoredEventLike {
+    seq: number;
+    type: string;
+    data: { content?: string };
+}
+
+/**
+ * Collect the `message` events belonging to the latest turn from a page of
+ * stored events. The event store returns events in **ASC seq order** (DESC
+ * queries are reversed before return — see eventstore query_shared.go), so we
+ * walk newest→oldest (backwards) to find the most recent `done`, then gather
+ * the `message` events that precede it within the same turn, stopping at the
+ * previous turn's `done`. Returns the events in ASC seq order so the caller
+ * can concatenate `.data.content` directly.
+ *
+ * Returns an empty array if there is no `done` or no preceding `message` in
+ * the latest turn (e.g. the page only contains partial history).
+ */
+export function collectLastTurnMessages(
+    events: StoredEventLike[],
+    maxMessages = 20,
+): StoredEventLike[] {
+    let seenDone = false;
+    const collected: StoredEventLike[] = [];
+    for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (!seenDone) {
+            if (ev.type === "done") seenDone = true;
+            continue;
+        }
+        // Hit the previous turn's done → stop, don't cross turns.
+        if (ev.type === "done") break;
+        if (ev.type === "message") {
+            collected.push(ev);
+            if (collected.length >= maxMessages) break;
+        }
+    }
+    if (!seenDone || collected.length === 0) return [];
+    // collected is in DESC seq order (we walked backwards); sort to ASC so the
+    // caller concatenates content in the original emit order.
+    return collected.sort((a, b) => a.seq - b.seq);
 }

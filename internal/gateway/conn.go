@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -95,13 +94,6 @@ type Conn struct {
 	writeCh chan []byte
 
 	done chan struct{}
-
-	// droppedMarked is set the first time a message.delta is dropped on this conn
-	// (writeCh full). It gates MarkDropped so the hot path locks hub.mu at most
-	// once per drop burst rather than once per dropped delta. The flag is never
-	// reset: GetAndClearDropped clears the session-level map entry on each done,
-	// so subsequent turns mark fresh drops correctly.
-	droppedMarked atomic.Bool
 }
 
 // newConn creates a new Conn.
@@ -814,14 +806,14 @@ func (c *Conn) sendData(data []byte) error {
 // Silently drops the message if the channel is full (for droppable events).
 // On drop it marks the session so reconcileDroppedDeltas can flag the done
 // event, letting the client reconcile from the authoritative event store.
+// MarkDropped has a session-level fast path, so a burst of drops on the same
+// session locks hub.mu at most once per turn (the entry is cleared on done).
 func (c *Conn) trySendData(data []byte) error {
 	select {
 	case c.writeCh <- data:
 		return nil
 	default:
-		// Mark the session dropped once per conn so the hub locks at most once
-		// per drop burst; GetAndClearDropped clears the entry on each done.
-		if !c.droppedMarked.Swap(true) && c.hub != nil {
+		if c.hub != nil {
 			c.hub.MarkDropped(c.sessionID)
 		}
 		observability.GatewayDeltasDropped().Add(c.hub.ctx, 1)

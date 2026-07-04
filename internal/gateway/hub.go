@@ -627,12 +627,23 @@ func (h *Hub) GetAndClearDropped(sessionID string) bool {
 }
 
 // MarkDropped records that the session experienced a message.delta drop under
-// backpressure (e.g. a slow client's writeCh filled). Idempotent and safe to
-// call from hot paths — callers should gate on a per-conn atomic flag to avoid
-// repeated locking. The flag is consumed by GetAndClearDropped at turn end so
-// that reconcileDroppedDeltas can annotate the done event with Dropped=true,
+// backpressure (e.g. a slow client's writeCh filled). Safe to call from hot
+// paths — the common case (session already marked) takes only an RLock via a
+// fast-path check, so a burst of drops on the same session locks at most once
+// per turn. The flag is consumed and cleared by GetAndClearDropped at turn end
+// so reconcileDroppedDeltas can annotate the done event with Dropped=true,
 // letting the client fetch authoritative content from the event store.
 func (h *Hub) MarkDropped(sessionID string) {
+	// Fast path: if already marked for this session, nothing to do. RLock is
+	// cheaper than Lock and lets concurrent droppers on different sessions
+	// proceed in parallel.
+	h.mu.RLock()
+	if h.sessionDropped[sessionID] {
+		h.mu.RUnlock()
+		return
+	}
+	h.mu.RUnlock()
+
 	h.mu.Lock()
 	h.sessionDropped[sessionID] = true
 	h.mu.Unlock()
