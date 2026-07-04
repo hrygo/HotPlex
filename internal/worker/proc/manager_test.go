@@ -560,6 +560,122 @@ func TestManager_WaitOnce_KillThenWait(t *testing.T) {
 	})
 }
 
+// --- TestManager_Kill_AsyncWait (#838) ---------------------------------------
+// Verify Kill() no longer synchronously blocks on cmd.Wait(). See issue #838:
+// a grandchild holding an inherited stdout pipe write-end can keep cmd.Wait()
+// blocked indefinitely; the old Kill() held m.mu across that block, poisoning
+// every other Manager method (production incident #836 in the OCS singleton).
+// The fix moves cmd.Wait() to a background goroutine with killWaitTimeout.
+
+// TestManager_Kill_ReturnsDespiteStuckCmdWait is the core regression guard
+// for #838. It DETERMINISTICALLY reproduces the bug condition by pre-acquiring
+// waitOnce with a goroutine that blocks indefinitely (simulating a
+// cmd.Wait() that never returns because a grandchild holds the stdout pipe).
+//
+// Under the old (buggy) Kill(): the call to waitOnce.Do(cmd.Wait) ran
+// synchronously under m.mu and would block forever, deadlocking the Manager.
+// Under the fix: Kill()'s waitOnce.Do runs in a background goroutine and the
+// bounded select abandons it after killWaitTimeout, so Kill() returns.
+//
+// This test uses NO real subprocess — it constructs a Manager with a minimal
+// cmd stub and pre-arms waitOnce — so it runs under -race on all platforms.
+func TestManager_Kill_ReturnsDespiteStuckCmdWait(t *testing.T) {
+	t.Parallel()
+
+	log := slog.Default()
+	m := &Manager{
+		log:     log,
+		cmd:     &exec.Cmd{},
+		pgid:    0, // pgid==0 skips ForceKill/ForceKillTree in Kill()
+		started: true,
+		exited:  false,
+	}
+
+	// Pre-acquire waitOnce with a goroutine that NEVER returns until the test
+	// ends. This simulates the #838 condition: cmd.Wait() is stuck because a
+	// grandchild holds the inherited stdout pipe write-end.
+	release := make(chan struct{})
+	waitOnceAcquired := make(chan struct{})
+	go func() {
+		m.waitOnce.Do(func() {
+			close(waitOnceAcquired)
+			<-release // block forever (until test closes release in Cleanup)
+		})
+	}()
+	<-waitOnceAcquired
+	t.Cleanup(func() { close(release) })
+
+	// Kill must return within killWaitTimeout + margin despite the stuck
+	// waitOnce. Under the regression (synchronous cmd.Wait under m.mu) this
+	// would block forever.
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- m.Kill() }()
+
+	margin := 2 * time.Second
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		elapsed := time.Since(start)
+		require.Greater(t, elapsed, killWaitTimeout-200*time.Millisecond,
+			"Kill returned too fast (%v) — did it take the timeout branch?", elapsed)
+		require.Less(t, elapsed, killWaitTimeout+margin,
+			"Kill blocked longer than killWaitTimeout+margin (%v) — issue #838 regression", elapsed)
+		// IsRunning must report false even though we abandoned the reap.
+		require.False(t, m.IsRunning(),
+			"IsRunning() must be false after Kill's timeout branch (m.exited should be set)")
+	case <-time.After(killWaitTimeout + margin):
+		t.Fatalf("Kill() blocked for >%v — issue #838 regression (synchronous cmd.Wait under m.mu)",
+			killWaitTimeout+margin)
+	}
+}
+
+// TestManager_Kill_ReturnsPromptlyWhenProcessDies verifies the fast path:
+// when cmd.Wait() actually completes (process dies on SIGKILL), Kill() must
+// return quickly WITHOUT waiting for the full killWaitTimeout. This guards
+// against an overcorrection where Kill always sleeps for the timeout.
+//
+// This needs a real subprocess and skips under -race (TSAN OOM). The
+// deterministic test above covers the timeout branch.
+func TestManager_Kill_ReturnsPromptlyWhenProcessDies(t *testing.T) {
+	if testRaceEnabled {
+		t.Skip("skipping: real process tests cause TSAN OOM under -race")
+	}
+	t.Parallel()
+
+	m := New(Opts{Logger: slog.Default()})
+	ctx := context.Background()
+
+	_, _, _, err := m.Start(ctx, "sleep", []string{"30"}, nil, "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if pgid := m.PGID(); pgid > 0 {
+			_ = ForceKill(pgid)
+			ForceKillTree(pgid, slog.Default())
+		}
+		_ = m.Close()
+	})
+
+	// Background Wait mirrors monitorProcess: joins waitOnce before Kill.
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		_, _ = m.Wait()
+	}()
+
+	start := time.Now()
+	require.NoError(t, m.Kill())
+	elapsed := time.Since(start)
+	require.Less(t, elapsed, killWaitTimeout,
+		"Kill() should return fast on the happy path, took %v", elapsed)
+
+	select {
+	case <-monitorDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background Wait() never returned after Kill")
+	}
+}
+
 // --- TestManager_drainStderr -------------------------------------------------
 
 type mockReadCloser struct {

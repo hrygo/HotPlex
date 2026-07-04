@@ -38,6 +38,11 @@ type Mapper struct {
 	// to perform delta-based diff calculations. Sourced under mu.
 	sentTexts map[string]string
 
+	// driftCount counts delta prefix mismatches detected by getDeltaText
+	// (snapshot prefix ≠ already-sent text). Cumulative across turns for
+	// observability — NOT reset by Reset(). Accessed atomically.
+	driftCount atomic.Int64
+
 	// mu guards lastUsage, model, contextWindow, turnID, and sentTexts.
 	// trackTokenUsage and trackedUsageStats run in the readNotification
 	// goroutine; Reset runs in the monitorProcess goroutine; LastContextUsage
@@ -242,6 +247,11 @@ func (m *Mapper) mapItemCompleted(item *CodexItem) []*events.Envelope {
 	}
 	switch item.Type {
 	case ItemAgentMessage:
+		// Dead branch: item/completed dispatch (MapNotification line 87)
+		// short-circuits ItemAgentMessage to emit only MessageEnd + endMessage
+		// before reaching this method. Retained as defensive fallback in case
+		// the dispatch is ever reorganized; the snapshot-diff for agent
+		// messages lives exclusively in mapItemUpdated (item/updated path).
 		delta := m.getDeltaText(item.ID, item.Text)
 		if delta == "" {
 			return nil
@@ -721,7 +731,11 @@ func (m *Mapper) trackModelRerouted(params json.RawMessage) {
 func (m *Mapper) trackedUsageStats() map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.lastUsage == nil && m.model == "" {
+	// delta_drifts is read atomically and is NOT reset by Reset() — it reports
+	// cumulative drift since the Mapper was created. Include it in the early
+	// return decision so drift-only turns (no usage, no model) still surface.
+	drifts := m.driftCount.Load()
+	if m.lastUsage == nil && m.model == "" && drifts == 0 {
 		return nil
 	}
 	stats := make(map[string]any)
@@ -750,6 +764,11 @@ func (m *Mapper) trackedUsageStats() map[string]any {
 		stats["model_usage"] = map[string]any{
 			m.model: mu,
 		}
+	}
+	// delta_drifts is cumulative across turns (driftCount is NOT reset by
+	// Reset), so this reports total drift since the Mapper was created.
+	if drifts > 0 {
+		stats["delta_drifts"] = drifts
 	}
 	return stats
 }
@@ -815,10 +834,29 @@ func (m *Mapper) Reset() {
 // getDeltaText computes the newly appended characters for a given item ID
 // by comparing the current text against the previously recorded sent text.
 // It updates the recorded text to reflect the new state.
+//
+// Drift handling: the codex app-server emits two heterogenous streams sharing
+// one item ID — item/agentMessage/delta (true incremental deltas, recorded via
+// recordSentDelta) and item/updated (full snapshots so far). Naïve rune-length
+// tail diff assumes snapshot.HasPrefix(sentTexts). When this invariant breaks
+// (backend re-sampling/correction/truncation), the old impl silently dropped
+// (currLen<=lastLen) or returned a misaligned tail slice.
+//
+// This version validates the prefix. On mismatch it:
+//  1. Computes the longest common prefix of sentTexts[id] and currentText.
+//  2. Sends currentText[commonPrefix:] as a corrective delta so downstream
+//     append-only accumulators at least converge on the correct suffix.
+//  3. Resets sentTexts[id] = currentText (re-baseline to the snapshot).
+//  4. Increments driftCount (exposed via trackedUsageStats → DoneData.Stats
+//     as delta_drifts) and logs a Warning outside m.mu for observability.
+//
+// Limit: mapper cannot retract the already-emitted erroneous prefix from
+// downstream accumulators. Corrective delta guarantees future deltas are
+// based on the correct snapshot; it does not retroactively fix displayed text.
+//
 // Access to m.sentTexts is guarded under m.mu.
 func (m *Mapper) getDeltaText(itemID, currentText string) string {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.sentTexts == nil {
 		m.sentTexts = make(map[string]string)
@@ -826,18 +864,81 @@ func (m *Mapper) getDeltaText(itemID, currentText string) string {
 
 	sentRunes := []rune(m.sentTexts[itemID])
 	currRunes := []rune(currentText)
-
 	lastLen := len(sentRunes)
 	currLen := len(currRunes)
 
-	if currLen <= lastLen {
+	// Empty snapshot has no semantic content; preserve the existing baseline
+	// so a subsequent non-empty snapshot can diff against already-sent text.
+	// Without this guard, an empty snapshot would re-baseline sentTexts to "",
+	// causing the next snapshot to re-emit the full text as a "corrective"
+	// delta and corrupt downstream append-only accumulators.
+	if currLen == 0 {
+		m.mu.Unlock()
 		return ""
 	}
 
-	deltaRunes := currRunes[lastLen:]
-	delta := string(deltaRunes)
-	m.sentTexts[itemID] += delta
+	// Compute the common prefix once — used both for the consistency check
+	// and (on drift) for the corrective slice.
+	common := commonPrefixLen(sentRunes, currRunes)
+
+	var delta string
+	var drifted bool
+	switch {
+	case currLen == lastLen && common == lastLen:
+		// Idempotent: snapshot == already-sent, no new content.
+		delta = ""
+	case common == lastLen:
+		// Normal append: snapshot is sent + new tail (currLen > lastLen here,
+		// since currLen==lastLen with common==lastLen is handled above).
+		delta = string(currRunes[lastLen:])
+		m.sentTexts[itemID] += delta
+	default:
+		// Prefix drift (Type A: shorter/divergent; Type B: longer but prefix
+		// inconsistent). Send snapshot[common:] as a corrective delta and
+		// re-baseline to the snapshot. In the strict-truncation sub-case
+		// (snapshot is a proper prefix of sent, common==currLen<lastLen) the
+		// corrective is "" but we still re-baseline + count it as drift so
+		// operators see the backend's truncation event.
+		delta = string(currRunes[common:])
+		m.sentTexts[itemID] = string(currRunes)
+		m.driftCount.Add(1)
+		drifted = true
+	}
+	m.mu.Unlock()
+
+	// Log outside m.mu: slog.Warn may do blocking I/O; under a misbehaving
+	// backend that drifts every snapshot, holding the lock through the log
+	// call would serialize all mapper operations.
+	if drifted {
+		slog.Warn("codexcli: delta prefix drift detected, sending corrective delta",
+			"item_id", itemID,
+			"sent_len", lastLen,
+			"snapshot_len", currLen,
+			"common_prefix", common)
+	}
 	return delta
+}
+
+// DriftCount returns the cumulative number of delta prefix mismatches
+// detected since the Mapper was created. Not reset by Reset() — cumulative
+// across turns for observability. Safe to call concurrently with getDeltaText.
+func (m *Mapper) DriftCount() int64 {
+	return m.driftCount.Load()
+}
+
+// commonPrefixLen returns the length of the longest common prefix of two rune
+// slices. Zero if the first runes differ or either slice is empty.
+func commonPrefixLen(a, b []rune) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
 }
 
 // recordSentDelta appends the sent delta string for a given item ID

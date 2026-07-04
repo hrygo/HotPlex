@@ -65,6 +65,11 @@ func TestMapNotificationAgentMessageStateMachine(t *testing.T) {
 	me, ok := envs[0].Event.Data.(events.MessageEndData)
 	require.True(t, ok)
 	require.Equal(t, msgID, me.MessageID)
+
+	// Happy path: monotonic delta→completed must NOT trigger any drift.
+	// Locks in the invariant that the prefix-validation refactor doesn't
+	// misclassify consistent appends as drift.
+	require.Equal(t, int64(0), m.DriftCount(), "happy-path state machine must have zero drift")
 }
 
 func TestMapNotificationTurnFailed(t *testing.T) {
@@ -2297,4 +2302,246 @@ func TestManager_PerThreadConverterIsolation(t *testing.T) {
 			require.GreaterOrEqual(t, cu["totalTokens"], i*10)
 		}
 	})
+}
+
+// ─── getDeltaText drift handling Tests ─────────────────────────────────
+
+func TestGetDeltaText_DriftScenarios(t *testing.T) {
+	t.Parallel()
+
+	type tc struct {
+		name       string
+		seedSent   string // initial sentTexts[itemID] (set via recordSentDelta)
+		snapshot   string // currentText argument to getDeltaText
+		wantDelta  string // expected returned delta
+		wantSent   string // expected sentTexts[itemID] after call
+		wantDrifts int64  // expected driftCount delta
+	}
+
+	cases := []tc{
+		{
+			name:       "first call empty seed returns full snapshot",
+			seedSent:   "",
+			snapshot:   "Hello",
+			wantDelta:  "Hello",
+			wantSent:   "Hello",
+			wantDrifts: 0,
+		},
+		{
+			name:       "normal append prefix consistent",
+			seedSent:   "Hello",
+			snapshot:   "Hello world",
+			wantDelta:  " world",
+			wantSent:   "Hello world",
+			wantDrifts: 0,
+		},
+		{
+			name:       "idempotent snapshot equals sent",
+			seedSent:   "Hello",
+			snapshot:   "Hello",
+			wantDelta:  "",
+			wantSent:   "Hello",
+			wantDrifts: 0,
+		},
+		{
+			name:       "drift type A snapshot shorter and divergent",
+			seedSent:   "Hello",
+			snapshot:   "Hola",
+			wantDelta:  "ola",
+			wantSent:   "Hola",
+			wantDrifts: 1,
+		},
+		{
+			name:       "drift type A snapshot equal length divergent",
+			seedSent:   "Hello",
+			snapshot:   "Hallo",
+			wantDelta:  "allo",
+			wantSent:   "Hallo",
+			wantDrifts: 1,
+		},
+		{
+			name:       "drift type B snapshot longer prefix inconsistent",
+			seedSent:   "Hel",
+			snapshot:   "Hallo!",
+			wantDelta:  "allo!",
+			wantSent:   "Hallo!",
+			wantDrifts: 1,
+		},
+		{
+			name:       "empty snapshot with prior sent no change no drift",
+			seedSent:   "Hello",
+			snapshot:   "",
+			wantDelta:  "",
+			wantSent:   "Hello",
+			wantDrifts: 0,
+		},
+		{
+			name:       "both empty seed and snapshot returns empty no drift",
+			seedSent:   "",
+			snapshot:   "",
+			wantDelta:  "",
+			wantSent:   "",
+			wantDrifts: 0,
+		},
+		{
+			// Strict truncation: snapshot is a proper prefix of sentTexts.
+			// old impl silently returned "" (data loss); new impl treats it
+			// as drift (corrective is "" but re-baselines + counts it so
+			// operators see the backend's truncation event).
+			name:       "strict truncation snapshot is proper prefix of sent counts as drift",
+			seedSent:   "Hello world",
+			snapshot:   "Hello",
+			wantDelta:  "",
+			wantSent:   "Hello",
+			wantDrifts: 1,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := NewMapper("session-drift")
+			if c.seedSent != "" {
+				m.recordSentDelta("item_1", c.seedSent)
+			}
+			got := m.getDeltaText("item_1", c.snapshot)
+			require.Equal(t, c.wantDelta, got, "delta mismatch")
+
+			m.mu.Lock()
+			gotSent := m.sentTexts["item_1"]
+			m.mu.Unlock()
+			require.Equal(t, c.wantSent, gotSent, "sentTexts mismatch")
+
+			require.Equal(t, c.wantDrifts, m.driftCount.Load(), "driftCount mismatch")
+		})
+	}
+}
+
+// TestGetDeltaText_DriftCountAccumulates verifies driftCount is cumulative
+// across multiple getDeltaText calls and is NOT reset by Reset().
+func TestGetDeltaText_DriftCountAccumulates(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-accum")
+
+	// First drift.
+	m.recordSentDelta("item_a", "Hello")
+	m.getDeltaText("item_a", "Hola")
+	require.Equal(t, int64(1), m.driftCount.Load())
+
+	// Second drift on a different item ID.
+	m.recordSentDelta("item_b", "World")
+	m.getDeltaText("item_b", "Wurld")
+	require.Equal(t, int64(2), m.driftCount.Load())
+
+	// Reset clears sentTexts but NOT driftCount.
+	m.Reset()
+	require.Equal(t, int64(2), m.driftCount.Load(), "driftCount must survive Reset")
+
+	// DriftCount() public accessor matches the raw field.
+	require.Equal(t, int64(2), m.DriftCount(), "DriftCount() must expose the atomic counter")
+}
+
+// TestMapper_DriftCount_ExposedInDoneStats verifies that delta drifts are
+// surfaced in turn/completed DoneData.Stats under the "delta_drifts" key,
+// so operators can detect drift without grepping logs. driftCount is
+// cumulative and not reset by Reset().
+func TestMapper_DriftCount_ExposedInDoneStats(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-stats")
+
+	// No drift yet — stats should NOT carry delta_drifts (avoid noise).
+	m.mapNotifTurnCompleted()
+	stats0 := m.trackedUsageStats()
+	_, ok0 := stats0["delta_drifts"]
+	require.False(t, ok0, "delta_drifts should be absent when count is 0")
+
+	// Cause a drift.
+	m.recordSentDelta("item_x", "Hello")
+	m.getDeltaText("item_x", "Hallo") // common=1, corrective="allo", drift++
+	require.Equal(t, int64(1), m.DriftCount())
+
+	// Reset must NOT clear driftCount (cumulative across turns).
+	m.Reset()
+	require.Equal(t, int64(1), m.DriftCount(), "driftCount survives Reset")
+
+	// After drift, trackedUsageStats surfaces delta_drifts.
+	stats1 := m.trackedUsageStats()
+	got, ok := stats1["delta_drifts"]
+	require.True(t, ok, "delta_drifts must be surfaced in stats after drift")
+	require.Equal(t, int64(1), got, "delta_drifts value must match DriftCount()")
+}
+
+// TestGetDeltaText_SequenceDeltaThenSnapshot verifies the real-world path:
+// item/agentMessage/delta (recordSentDelta) then item/completed (getDeltaText)
+// with matching prefix emits only the appended remainder.
+func TestGetDeltaText_SequenceDeltaThenSnapshot(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-seq")
+
+	// Simulate 3 incremental deltas via the delta notification path.
+	for _, word := range []string{"Hello", " world", "!"} {
+		m.recordSentDelta("msg_1", word)
+	}
+
+	// Full snapshot arrives via item/completed (getDeltaText).
+	// Snapshot "Hello world!" has prefix matching sentTexts → append path.
+	// Since snapshot == sentTexts already, delta is "" (idempotent).
+	got := m.getDeltaText("msg_1", "Hello world!")
+	require.Equal(t, "", got, "snapshot == sentTexts should yield idempotent empty delta")
+
+	m.mu.Lock()
+	gotSent := m.sentTexts["msg_1"]
+	m.mu.Unlock()
+	require.Equal(t, "Hello world!", gotSent)
+	require.Equal(t, int64(0), m.driftCount.Load())
+}
+
+// TestGetDeltaText_SequenceDeltaThenSnapshotWithAppend verifies that a
+// snapshot arriving after deltas with additional content emits the appended
+// remainder only (no drift).
+func TestGetDeltaText_SequenceDeltaThenSnapshotWithAppend(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-seq-append")
+
+	// Deltas delivered "Hel"+"lo" via item/agentMessage/delta path.
+	m.recordSentDelta("msg_1", "Hel")
+	m.recordSentDelta("msg_1", "lo")
+
+	// Snapshot arrives with one extra character; prefix matches sentTexts.
+	got := m.getDeltaText("msg_1", "Hello!")
+	require.Equal(t, "!", got, "appended remainder after matching prefix")
+
+	m.mu.Lock()
+	gotSent := m.sentTexts["msg_1"]
+	m.mu.Unlock()
+	require.Equal(t, "Hello!", gotSent)
+	require.Equal(t, int64(0), m.driftCount.Load())
+}
+
+// TestGetDeltaText_SequenceDeltaThenSnapshotWithDrift verifies that a
+// snapshot diverging from already-sent deltas triggers drift handling:
+// corrective delta = snapshot[commonPrefix:], sentTexts re-baselined.
+func TestGetDeltaText_SequenceDeltaThenSnapshotWithDrift(t *testing.T) {
+	t.Parallel()
+
+	m := NewMapper("session-seq-drift")
+
+	// Deltas delivered "Hel"+"lo" via item/agentMessage/delta path.
+	m.recordSentDelta("msg_1", "Hel")
+	m.recordSentDelta("msg_1", "lo")
+
+	// Snapshot diverges: "Hola" — common prefix "H" (sentRunes[1]='e' vs 'o').
+	// Corrective delta = "ola", sentTexts reset to "Hola".
+	got := m.getDeltaText("msg_1", "Hola")
+	require.Equal(t, "ola", got, "corrective delta after drift")
+
+	m.mu.Lock()
+	gotSent := m.sentTexts["msg_1"]
+	m.mu.Unlock()
+	require.Equal(t, "Hola", gotSent)
+	require.Equal(t, int64(1), m.driftCount.Load())
 }
