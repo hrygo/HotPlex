@@ -79,6 +79,8 @@ func (h *ControlHandler) HandlePayload(payload *ControlRequestPayload) (*WorkerE
 // autoRespondCtx is the deadline for auto-generated control responses (auto
 // success / auto deny). These run inside the readOutput loop with no caller
 // ctx, so we bound them to avoid the loop stalling on a blocked stdin write.
+// Tighter than base.DefaultWriteTimeout (30s) because a stalled auto-respond
+// pins the entire stdout read loop, blocking all downstream event processing.
 const autoRespondCtx = 10 * time.Second
 
 // sendAutoSuccess sends a success response for auto-approved requests.

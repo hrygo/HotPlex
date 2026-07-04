@@ -438,18 +438,24 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	// Normal input: use Claude Code's stream-json format
 	// instead of AEP envelope format
 	if baseConn, ok := conn.(*base.Conn); ok {
-		stdin, mu := baseConn.StdinLocked()
-		defer mu.Unlock()
+		stdin, mu := baseConn.StdinUnlocked()
 		if stdin == nil {
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 		}
 		// writeStreamInputLocked issues syscall.Write which blocks indefinitely
 		// when the pipe buffer is full and the worker process stops reading.
 		// Guard with ctx cancellation so the caller is not pinned forever.
-		// The mutex stays held if we bail out — the orphaned goroutine holds it
-		// until the child exits and the pipe yields EPIPE. This mirrors the
-		// pattern proven by Worker.Compact.
+		//
+		// The mutex MUST be acquired inside the closure, not at the call site:
+		// if ctx cancels and we bail out, an orphaned goroutine may still be
+		// blocked inside syscall.Write. By locking/unlocking inside the closure
+		// (which runs in WriteWithCtx's goroutine), the orphan holds the mutex
+		// until WriteAll returns (child exits → EPIPE), preventing the next
+		// writer from racing on the same fd. This is the same pattern used by
+		// acp/client.go and codexcli/manager.go.
 		if err := base.WriteWithCtx(ctx, func() error {
+			mu.Lock()
+			defer mu.Unlock()
 			return writeStreamInputLocked(stdin, content)
 		}, 0); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -457,7 +463,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 			}
 			return fmt.Errorf("claudecode: input: %w", err)
 		}
-		baseConn.SetLastInputLocked(content)
+		baseConn.SetLastInput(content)
 	} else {
 		// Fallback to AEP envelope for tests with mock connections
 		msg := events.NewEnvelope(
@@ -842,18 +848,22 @@ func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 	if !ok {
 		return worker.ErrNotImplemented
 	}
-	stdin, mu := baseConn.StdinLocked()
+	stdin, mu := baseConn.StdinUnlocked()
 	if stdin == nil {
-		mu.Unlock()
 		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 	}
-	defer mu.Unlock()
 
 	// writeStreamInputLocked issues syscall.Write which blocks when the pipe
 	// buffer is full and the reader has stalled. Guard with ctx cancellation
-	// via the shared helper so the caller is not blocked indefinitely. See
-	// base.WriteWithCtx for the orphaned-goroutine rationale.
+	// via the shared helper so the caller is not blocked indefinitely.
+	//
+	// The mutex is acquired inside the closure so an orphaned goroutine (ctx
+	// cancelled while syscall.Write is still blocked) keeps the mutex until
+	// WriteAll returns — preventing the next writer from racing on the fd.
+	// See Worker.Input for the full rationale.
 	if err := base.WriteWithCtx(ctx, func() error {
+		mu.Lock()
+		defer mu.Unlock()
 		return writeStreamInputLocked(stdin, "/compact")
 	}, 0); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

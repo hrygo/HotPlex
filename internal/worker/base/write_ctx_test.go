@@ -69,3 +69,38 @@ func TestWriteWithCtx_DefaultFallbackConstant(t *testing.T) {
 	// too slow for unit tests.
 	require.Equal(t, 30*time.Second, DefaultWriteTimeout)
 }
+
+func TestWriteWithCtx_OrphanReturnsCtxErrWithinFallback(t *testing.T) {
+	// Not parallel: uses timing-sensitive goroutine coordination.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// writeFn blocks on a channel we control, simulating a stalled syscall.Write.
+	// We close the channel AFTER asserting, via defer, so the orphaned goroutine
+	// finishes and doesn't leak past the test.
+	release := make(chan struct{})
+	defer close(release)
+
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- WriteWithCtx(ctx, func() error {
+			close(started)
+			<-release
+			return errors.New("finished after orphan")
+		}, 50*time.Millisecond)
+	}()
+
+	// Wait for writeFn to start, then cancel ctx while it's "blocked writing".
+	<-started
+	cancel()
+
+	// WriteWithCtx should return ctx.Err() within fallback+epsilon (50ms + slop).
+	// It must NOT wait for writeFn to finish (that would defeat the purpose).
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled, "orphan path returns ctx.Err() after fallback")
+	case <-time.After(2 * time.Second):
+		t.Fatal("WriteWithCtx did not return within 2s of ctx cancel + fallback")
+	}
+}

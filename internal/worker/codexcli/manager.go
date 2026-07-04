@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -458,12 +459,32 @@ func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 // full and the app-server stops reading, so without ctx a single stalled
 // write would hold writeMu and deadlock every subsequent Call/Notify across
 // all codex sessions (the manager is a singleton).
+//
+// If ctx has no deadline (e.g. context.Background() from lifecycle wrappers),
+// wrap it with a default timeout so the write can never block forever — this
+// is especially important for Notify, which has no response-wait timeout
+// unlike Call.
 func (m *CodexAppServerManager) writeFrame(ctx context.Context, v any) error {
+	if _, ok := ctx.Deadline(); !ok && ctx.Err() == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, base.DefaultWriteTimeout)
+		defer cancel()
+	}
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
-	return base.WriteWithCtx(ctx, func() error {
+	err := base.WriteWithCtx(ctx, func() error {
 		return json.NewEncoder(m.stdin).Encode(v)
 	}, 0)
+	// An orphaned write (ctx cancelled while syscall.Write is blocked) leaves
+	// the goroutine holding writeMu until the child exits. Because the manager
+	// is a singleton shared across all codex sessions, this wedges EVERY
+	// session's writes until recovery. Log at warn so operators can correlate
+	// a multi-session stall with a stalled child process.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		m.log.Warn("codex-app-server: stdin write cancelled, writeMu may be held by orphaned goroutine until child exits",
+			"err", err)
+	}
+	return err
 }
 
 // writeRequest marshals and writes a JSON-RPC request to stdin.
