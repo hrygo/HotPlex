@@ -235,7 +235,7 @@ configs/   - 配置文件
 
 ### PR Review 修复循环
 
-push 后等待自动 review（CI 成功后由 GitHub 侧 webhook/Action 自动触发新一轮）。原 cron 定时触发（`pr-review-hotplex`）的 review job 已删除，不再可用——如需手动触发，走仓库配置的 GitHub Action `workflow_dispatch` 或 PR 评论指令，而非 `hotplex cron trigger`。
+push 后等待自动 review（CI 成功后由 GitHub 侧 webhook/Action 自动触发新一轮）。如需手动触发，走仓库配置的 GitHub Action `workflow_dispatch` 或 PR 评论指令。
 
 ```
 push → 等 review（自动）→ 一次性修 P0/P1 + 值得的 P2 → push → 重复
