@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -388,5 +389,79 @@ func TestSendCritical_Timeout(t *testing.T) {
 		// Completed (after timeout) — expected.
 	case <-time.After(criticalEventSendTimeout + 2*time.Second):
 		t.Fatal("sendCritical should have timed out")
+	}
+}
+
+// fakeBlockingProc simulates a process whose Kill() blocks until the test
+// releases it — reproducing the production condition from issue #836 where
+// cmd.Wait() hangs because orphaned descendant processes hold the stdout
+// pipe. It lets the test deterministically assert that idle-drain releases
+// s.mu BEFORE calling Kill (so Acquire is never pinned behind a blocking Kill).
+type fakeBlockingProc struct {
+	killStarted chan struct{} // closed on first Kill call
+	killRelease chan struct{} // closed by test/Cleanup to let Kill return
+}
+
+func (f *fakeBlockingProc) Start(context.Context, string, []string, []string, string) (*os.File, *os.File, *os.File, error) {
+	return nil, nil, nil, nil
+}
+func (f *fakeBlockingProc) Kill() error {
+	close(f.killStarted)
+	<-f.killRelease // block until the test unblocks us
+	return nil
+}
+func (f *fakeBlockingProc) Wait() (int, error) {
+	<-f.killRelease
+	return 0, nil
+}
+
+// TestSingletonProcessManager_IdleDrain_KillOutsideMu verifies the fix for
+// issue #836: the idle-drain timer callback must release s.mu BEFORE calling
+// proc.Kill(), because proc.Kill() synchronously waits on cmd.Wait()
+// (proc/manager.go), which blocks indefinitely when orphaned descendant
+// processes hold the stdout pipe. Holding s.mu across that deadlock would
+// permanently block every subsequent Acquire.
+//
+// The fakeBlockingProc blocks Kill on a channel. With the fix, Acquire
+// completes immediately (the lock is released before Kill runs). With the
+// regression (Kill under s.mu), Acquire would block until killRelease closes
+// and the 2s timeout fires.
+func TestSingletonProcessManager_IdleDrain_KillOutsideMu(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{
+		IdleDrainPeriod: 10 * time.Millisecond,
+	}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	fake := &fakeBlockingProc{
+		killStarted: make(chan struct{}),
+		killRelease: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(fake.killRelease) }) // unblock any pending Kill/Wait
+
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.refs = 0
+	mgr.proc = fake
+	mgr.startIdleDrainLocked()
+	mgr.mu.Unlock()
+
+	// Wait until the idle-drain timer has fired and entered Kill().
+	<-fake.killStarted
+
+	// Acquire must NOT be pinned behind the blocking Kill. Under the fix the
+	// lock is released before Kill; under the regression Acquire blocks here.
+	acquired := make(chan struct{})
+	go func() {
+		_, _, _, _, _ = mgr.Acquire(context.Background())
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		// success: Acquire was not pinned behind proc.Kill()
+	case <-time.After(2 * time.Second):
+		t.Fatal("Acquire deadlocked behind idle-drain Kill (issue #836 regression)")
 	}
 }

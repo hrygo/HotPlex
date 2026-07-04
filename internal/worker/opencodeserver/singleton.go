@@ -38,6 +38,17 @@ import (
 //
 // All methods are safe for concurrent use. Acquire serializes process startup
 // via mutex so only the first caller starts the process.
+// processController is the subset of *proc.Manager that SingletonProcessManager
+// depends on. Declared as an interface so tests can substitute a fake that
+// deterministically blocks inside Kill() — reproducing the production
+// deadlock condition (issue #836) where cmd.Wait() hangs on orphaned
+// descendant processes that inherited the stdout pipe.
+type processController interface {
+	Start(ctx context.Context, name string, args, env []string, dir string) (stdin, stdout, stderr *os.File, err error)
+	Kill() error
+	Wait() (int, error)
+}
+
 type SingletonProcessManager struct {
 	log       *slog.Logger
 	client    *http.Client // with Timeout for API calls
@@ -45,7 +56,7 @@ type SingletonProcessManager struct {
 	cfg       config.OpenCodeServerConfig
 
 	mu       sync.Mutex
-	proc     *proc.Manager
+	proc     processController
 	httpAddr string
 	refs     int
 	state    singletonState
@@ -422,15 +433,29 @@ func (s *SingletonProcessManager) monitorProcess() {
 func (s *SingletonProcessManager) startIdleDrainLocked() {
 	s.log.Info("opencode-server-singleton: starting idle drain timer", "period", s.cfg.IdleDrainPeriod)
 	s.idleTimer = time.AfterFunc(s.cfg.IdleDrainPeriod, func() {
+		// Snapshot the proc reference under the lock, then release BEFORE
+		// calling Kill. proc.Kill() waits synchronously on cmd.Wait()
+		// (proc/manager.go), which blocks indefinitely when descendant
+		// processes that inherited the stdout pipe (OCS-spawned MCP servers,
+		// lsp-daemon, codegraph, …) survive SIGKILL of the main process
+		// group. Calling Kill while holding s.mu would deadlock every
+		// subsequent Acquire — see issue #836. monitorProcess (started in
+		// startProcessLocked) owns resetting state=stateIdle + closing
+		// subscribers after proc.Wait() returns; we only trigger the kill.
 		s.mu.Lock()
-		defer s.mu.Unlock()
-
+		var procToKill processController
 		if s.refs == 0 && s.state == stateRunning && s.proc != nil {
 			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
-			_ = s.proc.Kill()
-			// monitorProcess will set state=stateIdle and clean up.
+			procToKill = s.proc
 		}
 		s.idleTimer = nil
+		s.mu.Unlock()
+
+		// Kill outside s.mu. If cmd.Wait() hangs (orphaned pipe holders),
+		// only this timer goroutine is pinned — Acquire is unaffected.
+		if procToKill != nil {
+			_ = procToKill.Kill()
+		}
 	})
 }
 
