@@ -4,12 +4,14 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -388,5 +390,69 @@ func TestSendCritical_Timeout(t *testing.T) {
 		// Completed (after timeout) — expected.
 	case <-time.After(criticalEventSendTimeout + 2*time.Second):
 		t.Fatal("sendCritical should have timed out")
+	}
+}
+
+// TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock verifies
+// the fix for issue #836 (review P1-1): the idle-drain timer must kill the
+// process via package-level proc.ForceKill(pgid), NOT via proc.Manager.Kill().
+//
+// Why this matters: proc.Manager.Kill() acquires proc.mu and then calls
+// cmd.Wait(); meanwhile monitorProcess's Wait() already holds proc.mu inside
+// its own cmd.Wait(). Calling Kill() from the idle-drain callback would block
+// on proc.mu.Lock() forever, never reaching ForceKill, so the process is
+// never killed and the timer goroutine leaks. ForceKill sends SIGKILL by PGID
+// without touching proc.mu, letting monitorProcess's Wait() observe the exit.
+//
+// This test spawns a real long-lived subprocess and runs a background Wait()
+// (simulating monitorProcess holding proc.mu). Under the fix, idle-drain's
+// ForceKill kills the process and the background Wait() returns promptly.
+// Under the regression (proc.Kill under s.mu), neither happens → timeout.
+func TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires spawning a real subprocess")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on POSIX process groups")
+	}
+
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.OpenCodeServerConfig{
+		IdleDrainPeriod: 10 * time.Millisecond,
+	}
+	mgr := NewSingletonProcessManager(log, cfg)
+
+	// Spawn a real long-lived process as if it were the OCS server.
+	pm := proc.New(proc.Opts{Logger: log})
+	_, _, _, err := pm.Start(context.Background(), "sleep", []string{"30"}, nil, "")
+	require.NoError(t, err)
+
+	// Simulate monitorProcess: a goroutine blocked in pm.Wait() (holding
+	// proc.mu via cmd.Wait) — the production deadlock condition.
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		_, _ = pm.Wait()
+	}()
+
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.refs = 0
+	mgr.proc = pm
+	mgr.pgid = pm.PGID()
+	mgr.startIdleDrainLocked()
+	mgr.mu.Unlock()
+
+	// Under the fix: idle-drain calls proc.ForceKill(pgid) (package-level,
+	// does NOT touch proc.mu) → process dies → pm.Wait() returns.
+	// Under the regression (proc.Kill under s.mu): Kill blocks on proc.mu
+	// (held by pm.Wait) → process never killed → pm.Wait never returns.
+	select {
+	case <-monitorDone:
+		// success: idle-drain killed the process without deadlocking proc.mu
+	case <-time.After(3 * time.Second):
+		t.Fatal("idle-drain deadlocked on proc.mu — process never killed (P1-1 regression)")
 	}
 }

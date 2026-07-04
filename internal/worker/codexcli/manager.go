@@ -997,7 +997,12 @@ func (m *CodexAppServerManager) monitorProcess() {
 	m.mu.Lock()
 	wasRunning := m.state == stateRunning
 	refs := m.refs
-	m.state = stateIdle
+	// Guard against overwriting stateStopped set by Shutdown (mirrors OCS
+	// singleton.go): once stopped, monitorProcess must not flip the manager
+	// back to idle, which would let a post-Shutdown Acquire restart it.
+	if m.state != stateStopped {
+		m.state = stateIdle
+	}
 	m.proc = nil
 	m.pgid = 0
 	m.stdin = nil
