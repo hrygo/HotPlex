@@ -322,8 +322,12 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 
 	if m.proc != nil {
 		m.log.Info("codex-app-server: shutdown, killing process")
-		// Use ForceKill(pgid) + ForceKillTree instead of proc.Kill() to
-		// avoid deadlock with monitorProcess's Wait() (see KillIfIdle).
+		// Call ForceKill(pgid) + ForceKillTree directly rather than
+		// proc.Manager.Kill(): proc.Kill() is now async-safe (#838), but the
+		// direct call is lighter (no proc.mu acquisition, no reap goroutine)
+		// and monitorProcess fully handles cleanup after Wait() observes the
+		// exit. The defensive m.proc.Kill() fallback covers the pgid==0
+		// case (should not happen in normal flow).
 		if m.pgid > 0 {
 			_ = proc.ForceKill(m.pgid)
 			proc.ForceKillTree(m.pgid, m.log)
@@ -1059,18 +1063,15 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 
 		if shouldKill {
 			m.log.Info("codex-app-server: idle drain expired, killing process")
-			// Use ForceKill + ForceKillTree instead of m.proc.Kill() to avoid
-			// deadlock: proc.Manager.Kill() acquires proc.mu and calls
-			// cmd.Wait(), which blocks until the child exits. Meanwhile
-			// monitorProcess's Wait() already holds proc.mu inside its own
-			// cmd.Wait() call. Kill() would block on proc.mu.Lock() while
-			// holding m.mu, making the entire manager unusable. ForceKill
-			// sends SIGKILL by PGID without touching proc.mu, so
-			// monitorProcess's Wait() observes the exit and runs cleanup.
+			// Call package-level ForceKill + ForceKillTree directly instead
+			// of m.proc.Kill(). proc.Manager.Kill() is now async-safe (#838),
+			// but the direct call is defense-in-depth: it sends SIGKILL by
+			// PGID via syscall.Kill WITHOUT touching proc.mu, guaranteeing
+			// no interaction with monitorProcess's concurrent Wait() — which
+			// is what owns the singleton's post-exit cleanup. monitorProcess
+			// will observe the exit, set state to stateIdle, and clean up.
 			_ = proc.ForceKill(pgid)
 			proc.ForceKillTree(pgid, m.log)
-			// monitorProcess will observe the exit, set state to stateIdle,
-			// and clean up.
 		}
 
 		m.mu.Lock()
@@ -1087,13 +1088,13 @@ func (m *CodexAppServerManager) startIdleDrainLocked() {
 // because an idle process has no active sessions — there is nothing to
 // drain or notify.
 //
-// We use ForceKill(pgid) directly instead of proc.Manager.Kill() to avoid
-// a deadlock: Manager.Kill() acquires proc.mu and then calls cmd.Wait(),
-// which blocks until the child exits; meanwhile monitorProcess's Wait()
-// (via waitOnce) is already holding proc.mu inside its own cmd.Wait()
-// call. These two concurrent cmd.Wait() acquisitions would deadlock.
-// ForceKill sends SIGKILL by PGID without touching proc.mu, so the
-// already-running monitorProcess.Wait() observes the exit and runs cleanup.
+// We call package-level ForceKill(pgid) directly instead of proc.Manager.Kill().
+// proc.Kill() is async-safe since #838 (cmd.Wait() moved off proc.mu), but
+// ForceKill here remains preferable: it sends SIGKILL by PGID via syscall.Kill
+// without ever acquiring proc.mu, guaranteeing zero interaction with the
+// monitorProcess goroutine's concurrent Wait() — which is the path that owns
+// the singleton's post-exit cleanup. This is defense-in-depth rather than a
+// required workaround.
 //
 // NOTE: There is a benign TOCTOU window between the shouldKill check (under
 // m.mu) and the ForceKill(pgid) call (after unlock). If the process exits

@@ -199,13 +199,14 @@ func (s *SingletonProcessManager) Shutdown(ctx context.Context) {
 
 	if s.proc != nil {
 		s.log.Info("opencode-server-singleton: shutdown, killing process")
-		// Use ForceKill(pgid) + ForceKillTree instead of proc.Kill() to avoid
-		// deadlock with monitorProcess's Wait() (see idle-drain comment).
-		// s.pgid is always > 0 when s.proc != nil (both are set together
-		// under s.mu in startProcessLocked and cleared together in
-		// monitorProcess); the else branch is defensive only and MUST NOT
-		// call proc.Kill() — that would reintroduce the very deadlock (#836)
-		// this code exists to prevent.
+		// Use ForceKill(pgid) + ForceKillTree directly rather than
+		// proc.Manager.Kill(). proc.Kill() is now async-safe (#838), but the
+		// direct call is kept as defense-in-depth: it avoids taking proc.mu
+		// at all on this shutdown hot path and sidesteps any interaction
+		// with monitorProcess's concurrent Wait(). s.pgid is always > 0 when
+		// s.proc != nil (both are set together under s.mu in
+		// startProcessLocked and cleared together in monitorProcess); the
+		// else branch is defensive only.
 		if s.pgid > 0 {
 			_ = proc.ForceKill(s.pgid)
 			proc.ForceKillTree(s.pgid, s.log)
@@ -467,13 +468,14 @@ func (s *SingletonProcessManager) startIdleDrainLocked() {
 			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
 			// Hold s.mu during the kill to close the TOCTOU window where a
 			// concurrent Acquire could grab the doomed process and hand the
-			// caller a httpAddr about to die. Safe because proc.ForceKill
-			// sends SIGKILL by PGID via syscall.Kill WITHOUT touching proc.mu
-			// — unlike proc.Manager.Kill(), which acquires proc.mu and calls
-			// cmd.Wait() while holding it, deadlocking against
-			// monitorProcess's Wait(). ForceKillTree walks the tree briefly
-			// under s.mu; matches the Shutdown pattern and is fine for an
-			// idle singleton's small tree. See #836.
+			// caller a httpAddr about to die. We call package-level
+			// proc.ForceKill / ForceKillTree directly instead of
+			// proc.Manager.Kill(): ForceKill sends SIGKILL by PGID via
+			// syscall.Kill WITHOUT touching proc.mu, so it cannot deadlock
+			// against monitorProcess's Wait() even under s.mu. (proc.Kill()
+			// is async-safe since #838, but the direct call is lighter — no
+			// proc.mu acquisition, no reap goroutine — and the singleton
+			// cleanup is fully handled by monitorProcess.) See #836 / #838.
 			_ = proc.ForceKill(s.pgid)
 			proc.ForceKillTree(s.pgid, s.log)
 		}

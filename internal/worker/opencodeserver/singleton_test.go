@@ -394,20 +394,25 @@ func TestSendCritical_Timeout(t *testing.T) {
 }
 
 // TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock verifies
-// the fix for issue #836 (review P1-1): the idle-drain timer must kill the
-// process via package-level proc.ForceKill(pgid), NOT via proc.Manager.Kill().
+// the singleton's idle-drain timer kills the process via package-level
+// proc.ForceKill(pgid) rather than proc.Manager.Kill().
 //
-// Why this matters: proc.Manager.Kill() acquires proc.mu and then calls
-// cmd.Wait(); meanwhile monitorProcess's Wait() already holds proc.mu inside
-// its own cmd.Wait(). Calling Kill() from the idle-drain callback would block
-// on proc.mu.Lock() forever, never reaching ForceKill, so the process is
-// never killed and the timer goroutine leaks. ForceKill sends SIGKILL by PGID
-// without touching proc.mu, letting monitorProcess's Wait() observe the exit.
+// Historical context (#836): proc.Manager.Kill() used to acquire proc.mu and
+// then call cmd.Wait() under it, deadlocking against monitorProcess's Wait()
+// which already held proc.mu. Calling Kill() from the idle-drain callback
+// would block on proc.mu forever, never reaching ForceKill, so the process
+// was never killed and the timer goroutine leaked. proc.Kill() has been
+// async-safe since #838 (cmd.Wait moved to a background goroutine), so this
+// deadlock can no longer occur via that path; the singleton nonetheless
+// keeps the ForceKill fast path (defense-in-depth, lighter than Kill()).
+// This test guards the fast path's correctness: ForceKill must not touch
+// proc.mu, letting monitorProcess's Wait() observe the exit.
 //
 // This test spawns a real long-lived subprocess and runs a background Wait()
-// (simulating monitorProcess holding proc.mu). Under the fix, idle-drain's
-// ForceKill kills the process and the background Wait() returns promptly.
-// Under the regression (proc.Kill under s.mu), neither happens → timeout.
+// (simulating monitorProcess holding proc.mu via its own waitOnce). Under the
+// fast path, idle-drain's ForceKill kills the process and the background
+// Wait() returns promptly. If anyone ever routed idle-drain back through
+// proc.Manager.Kill() while holding s.mu, neither would happen → timeout.
 func TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires spawning a real subprocess")

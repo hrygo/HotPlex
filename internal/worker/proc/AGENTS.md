@@ -30,7 +30,7 @@ proc/
 |------|----------|-------|
 | Start subprocess | `manager.go:97` Start() | `exec.CommandContext` + `SetSysProcAttr` + 3 个 os.Pipe |
 | Graceful termination | `manager.go:209` Terminate() | `GracefulTerminate(pgid)` → 等 gracePeriod → `Kill()` |
-| Force kill | `manager.go:250` Kill() | `closeJobHandle()` + `ForceKill(pgid)` + `ForceKillTree(pgid)` |
+| Force kill | `manager.go:250` Kill() | `closeJobHandle()` + `ForceKill(pgid)` + `ForceKillTree(pgid)`，然后后台 goroutine reap + `killWaitTimeout`(5s) 兜底（#838） |
 | Read stdout line | `manager.go:366` ReadLine() | 单 goroutine 串行，**不持 mu**；panic-recover 抓 `bufio.ErrTooLong` |
 | Drain stderr | `manager.go:408` drainStderr() | 后台 goroutine，stderr 句柄所有权转移 |
 | Pipe FD cleanup | `manager.go:447` closeLocked() | 幂等，跳过 `os.ErrClosed` |
@@ -67,9 +67,11 @@ proc/
 - Linux 用 `/proc/<pid>/task/<pid>/children` 快路径，macOS 用 sysctl 枚举
 
 **Manager 并发契约**
-- `mu sync.Mutex` 显式字段，保护 cmd/scanner/pgid/started/exited
+- `mu sync.Mutex` 显式字段，保护 cmd/scanner/pgid/started/exited/exitCode
 - `waitOnce sync.Once` 保证 `cmd.Wait()` 只调一次（Terminate/Wait/Kill 三入口竞争）
+- `waitErr` 由 `waitOnce.Do` 的 happens-before 边界同步，**不**由 `mu` 保护（#838 后 Kill 把 cmd.Wait 移到后台 goroutine）
 - `ReadLine` 故意不持 mu（避免阻塞 Terminate/Kill），调用方必须单 goroutine 串行
+- `Kill()` 异步：发 SIGKILL（持 mu）→ 后台 goroutine reap + `killWaitTimeout`(5s) 兜底（不持 mu）；timeout 分支标记 `exited=true` 保证 `IsRunning()` 正确
 
 **PID 文件追踪**
 - `InitTracker(dir, log)` 全局 atomic.Pointer，`Start` 时 `trackPID`，`Terminate/Kill/Wait` 时 `untrackPID`

@@ -247,6 +247,14 @@ func (m *Manager) Terminate(ctx context.Context, gracePeriod time.Duration) erro
 }
 
 // Kill force-kills the entire process group.
+//
+// cmd.Wait() runs in a background goroutine with a hard timeout (killWaitTimeout)
+// rather than synchronously under m.mu. This avoids the deadlock documented in
+// #838: when a grandchild process holds an inherited stdout pipe write-end,
+// cmd.Wait() blocks forever, and holding m.mu across that block poisons every
+// other Manager method (Terminate / Wait / ReadLine) — see #836 for the
+// production incident this caused in the OCS singleton. waitOnce still ensures
+// cmd.Wait() is invoked exactly once across the Terminate/Wait/Kill entry points.
 func (m *Manager) Kill() error {
 	m.mu.Lock()
 
@@ -255,27 +263,78 @@ func (m *Manager) Kill() error {
 		return nil
 	}
 
-	// closeJobHandle triggers KILL_ON_JOB_CLOSE on Windows, killing the
-	// entire process tree. On Unix, ForceKillTree walks the process tree
-	// to kill orphaned descendants that escaped the PGID.
+	pgid := m.pgid
+	pidKey := m.pidKey
+
+	// 1) Synchronously trigger the kill signal: Windows closeJobHandle fires
+	//    KILL_ON_JOB_CLOSE (must happen before releasing m.mu — the kernel
+	//    commits the tree termination when the last job handle closes); Unix
+	//    ForceKill broadcasts SIGKILL to the group and ForceKillTree sweeps
+	//    descendants that escaped the PGID.
 	m.closeJobHandle()
-	if m.pgid > 0 {
+	if pgid > 0 {
 		// ForceKill(pgid) is redundant here — ForceKillTree also calls it
 		// internally (idempotent SIGKILL). Kept for clarity: the explicit
 		// kill(-pgid) targets the main process group, while ForceKillTree
 		// handles orphaned children that created their own process groups.
-		_ = ForceKill(m.pgid)
-		ForceKillTree(m.pgid, m.log)
-		m.log.Info("proc: force killed", "pgid", m.pgid)
+		_ = ForceKill(pgid)
+		ForceKillTree(pgid, m.log)
+		m.log.Info("proc: force killed", "pgid", pgid)
 	}
-	m.waitOnce.Do(func() { m.waitErr = m.cmd.Wait() })
-	m.captureExitCodeLocked()
-	m.untrackPID(m.pidKey)
+
+	// 2) Reap asynchronously. waitOnce deduplicates against concurrent
+	//    Wait()/Terminate() callers — exactly one goroutine performs the
+	//    actual cmd.Wait(); the others' waitOnce.Do is a no-op.
+	waitDone := make(chan struct{})
+	go func() {
+		m.waitOnce.Do(func() { m.waitErr = m.cmd.Wait() })
+		close(waitDone)
+	}()
+
+	// 3) Drop the PID-file entry and the lock immediately; exit-code capture
+	//    and pipe close happen after the (bounded) reap below.
+	m.untrackPID(pidKey)
 	m.mu.Unlock()
+
+	// 4) Bounded reap. On the happy path cmd.Wait() returns within
+	//    milliseconds (the process is already SIGKILL'd). If a grandchild
+	//    keeps a pipe write-end open, this bounded wait abandons the reap
+	//    without blocking the caller; cmd.Wait() will finish in the
+	//    background whenever the pipe drains.
+	timer := time.NewTimer(killWaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-waitDone:
+		m.captureExitCode()
+	case <-timer.C:
+		// Reap did not complete in time (grandchild holds pipe, issue #838).
+		// Mark exited so IsRunning() reports false — SIGKILL was already
+		// delivered, the process IS dying, we just can't synchronously
+		// observe its exit code. The background goroutine will finish the
+		// reap and call captureExitCode via waitOnce whenever cmd.Wait
+		// eventually returns.
+		m.mu.Lock()
+		if !m.exited {
+			m.exited = true
+			m.exitCode = -1
+		}
+		m.mu.Unlock()
+		m.log.Warn("proc: cmd.Wait() did not return after kill, abandoning reap",
+			"pgid", pgid, "timeout", killWaitTimeout)
+	}
 
 	_ = m.Close()
 	return nil
 }
+
+// killWaitTimeout bounds how long Kill() waits for cmd.Wait() to reap the
+// killed process. It exists for the issue #838 failure mode: a grandchild
+// holding an inherited stdout pipe write-end can keep cmd.Wait() blocked
+// indefinitely. The timeout prevents goroutine leaks while letting the
+// background reap finish naturally in the common case. SIGKILL has already
+// been delivered when this elapses, so no process is left running; the
+// only thing abandoned is synchronous reap of the zombie.
+const killWaitTimeout = 5 * time.Second
 
 // Wait waits for the process to exit and returns the exit code.
 func (m *Manager) Wait() (int, error) {
@@ -295,9 +354,11 @@ func (m *Manager) Wait() (int, error) {
 	}
 	// Close the Job Object handle so Windows KILL_ON_JOB_CLOSE reaps any
 	// surviving children. Required when a caller bypasses Kill() — e.g. the
-	// OCS singleton uses package-level ForceKill to avoid a proc.mu deadlock,
-	// leaving Wait() as the only cleanup path. No-op on Unix; idempotent
-	// (CloseJobHandle(0) returns immediately, and m.jobHandle is zeroed).
+	// OCS / Codex singletons call package-level ForceKill directly as
+	// defense-in-depth (historically to dodge the #836 proc.mu deadlock,
+	// now fixed at #838), leaving Wait() as their only cleanup path. No-op
+	// on Unix; idempotent (CloseJobHandle(0) returns immediately, and
+	// m.jobHandle is zeroed).
 	m.closeJobHandle()
 	return m.exitCode, m.waitErr
 }
