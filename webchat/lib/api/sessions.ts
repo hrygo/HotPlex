@@ -147,45 +147,6 @@ export async function getSessionHistory(
   return res.json();
 }
 
-// A persisted AEP event (eventstore.StoredEvent mirror).
-export interface StoredEvent {
-  session_id: string;
-  seq: number;
-  type: string;
-  data: { content?: string; [k: string]: unknown };
-  direction: string;
-  source: string;
-  created_at: number;
-}
-
-export interface EventPage {
-  events: StoredEvent[];
-  oldest_seq: number;
-  newest_seq: number;
-  has_older: boolean;
-}
-
-// Fetch persisted events for a session from the event store. Used to reconcile
-// content after a dropped-delta signal: the store holds the authoritative,
-// backpressure-independent aggregation of every message.delta.
-export async function getSessionEvents(
-  sessionId: string,
-  options?: { cursor?: number; direction?: 'before' | 'after' | 'latest'; limit?: number; signal?: AbortSignal }
-): Promise<EventPage> {
-  if (!sessionId?.trim()) {
-    throw new Error('getSessionEvents: empty session ID');
-  }
-  const params = new URLSearchParams();
-  params.set('limit', String(options?.limit ?? 200));
-  if (options?.cursor) params.set('cursor', String(options.cursor));
-  if (options?.direction) params.set('direction', options.direction);
-  const url = `${BASE}/api/sessions/${sessionId}/events?${params.toString()}`;
-  const res = await fetch(url, { headers: withAuth({ 'Content-Type': 'application/json' }), ...authOpts(), signal: options?.signal });
-  throwIfAuthError('getSessionEvents', res.status);
-  if (!res.ok) throw new Error(await extractApiError(res, `getSessionEvents failed: ${res.status}`));
-  return res.json();
-}
-
 export function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();

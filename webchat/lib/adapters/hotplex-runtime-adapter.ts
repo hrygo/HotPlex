@@ -30,7 +30,7 @@ import {
 } from "@/lib/config";
 import { TODO_TOOLS } from "@/lib/tool-categories";
 import { useMetrics } from "@/lib/hooks/useMetrics";
-import { getSessionHistory, getSessionEvents, type ConversationRecord } from "@/lib/api/sessions";
+import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
 import { logger } from "@/lib/logger";
 import type {
@@ -58,7 +58,6 @@ import {
     appendTextDelta,
     appendReasoningDelta,
     concatTextParts,
-    collectLastTurnMessages,
 } from "@/lib/adapters/merge-parts";
 
 // Re-export for consumers
@@ -685,28 +684,38 @@ export function useHotPlexRuntime({
             }
         };
 
-        // Re-fetch the authoritative content for the just-completed turn from
-        // the event store and patch the last assistant message if it differs.
+        // Re-fetch the authoritative content for the just-completed turn and
+        // patch the last assistant message if it differs. Uses the turns table
+        // (history API) rather than raw message events: a TurnRecord.content is
+        // the complete, turn-scoped assistant text — no 4KB size-flush splits to
+        // re-stitch and no turn-boundary ambiguity across interleaved messages.
+        // The trade-off is write latency: captureAssistantTurn enqueues the
+        // record on done, but the collector flushes async (~1s batch interval),
+        // so the first fetch may miss it. We retry once after a short delay.
         const reconcileDroppedTurn = async () => {
             const sid = sessionIdRef.current;
             if (!sid) return;
+            const fetchLastAssistantContent = async (): Promise<string | null> => {
+                // history returns ASC by id; the latest assistant turn (if any)
+                // is the last assistant record in the page. A small limit is
+                // enough — we only need the most recent turn.
+                const res = await getSessionHistory(sid, { limit: 5 });
+                for (let i = res.records.length - 1; i >= 0; i--) {
+                    const rec = res.records[i];
+                    if (rec.role === "assistant" && rec.content) {
+                        return rec.content;
+                    }
+                }
+                return null;
+            };
             try {
-                const page = await getSessionEvents(sid, {
-                    direction: "latest",
-                    limit: 50,
-                });
-                // page.events is in ASC seq order (the store reverses DESC
-                // queries before returning — see eventstore query_shared.go).
-                // Collect the message events of the just-finished turn (after
-                // the most recent done), without crossing into previous turns.
-                const messageEvents = collectLastTurnMessages(page.events);
-                if (messageEvents.length === 0) return;
-                // message events store merged content (possibly across multiple
-                // size-flushed records); collectLastTurnMessages returns ASC
-                // order so concatenation reproduces the original emit order.
-                const fullText = messageEvents
-                    .map((ev) => ev.data?.content || "")
-                    .join("");
+                let fullText = await fetchLastAssistantContent();
+                if (!fullText) {
+                    // Turn record may still be in the collector's async batch
+                    // buffer — wait one flush interval and retry once.
+                    await new Promise((r) => setTimeout(r, 1200));
+                    fullText = await fetchLastAssistantContent();
+                }
                 if (!fullText) return;
                 setMessages((prev) => {
                     const last = prev[prev.length - 1];
@@ -714,13 +723,13 @@ export function useHotPlexRuntime({
                     // Only patch if the authoritative text is longer than the
                     // currently-streamed text (i.e. deltas really were lost).
                     const currentText = concatTextParts(last.parts);
-                    if (fullText.length <= currentText.length) return prev;
+                    if (fullText!.length <= currentText.length) return prev;
                     const parts = [...last.parts];
                     const textIdx = parts.findIndex((p) => p.type === "text");
                     if (textIdx !== -1) {
-                        parts[textIdx] = { type: "text", text: fullText };
+                        parts[textIdx] = { type: "text", text: fullText! };
                     } else {
-                        parts.unshift({ type: "text", text: fullText });
+                        parts.unshift({ type: "text", text: fullText! });
                     }
                     return [...prev.slice(0, -1), { ...last, parts }];
                 });

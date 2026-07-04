@@ -154,7 +154,12 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
   // references, but convertToThreadMessage rebuilds the array on every render,
   // so the reference always differs and the memo was effectively disabled —
   // every delta flush re-rendered every assistant message. Compare by value
-  // instead: text parts by text, tool-call parts by toolCallId + result.
+  // instead, covering the fields each part type actually mutates:
+  //  - text / reasoning: text
+  //  - tool-call: toolName + args + toolCallId + result + status
+  // Without args/toolName, a tool-call whose args are patched post-stream
+  // (e.g. reconcile) wouldn't re-render. Without reasoning text, a reconcile
+  // that rewrites completed reasoning content wouldn't update either.
   const pc = getExt(prev.message).content || [];
   const nc = getExt(next.message).content || [];
   if (pc.length !== nc.length) return false;
@@ -162,13 +167,14 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
     const a = pc[i] as Record<string, unknown>;
     const b = nc[i] as Record<string, unknown>;
     if (a?.type !== b?.type) return false;
-    if (a?.type === 'text') {
-      if ((a as Record<string, unknown>).text !== (b as Record<string, unknown>).text) return false;
-    } else {
-      // tool-call / reasoning / other: compare identity markers + result.
-      if (a?.toolCallId !== b?.toolCallId) return false;
-      if (a?.result !== b?.result) return false;
-      if (a?.status !== b?.status) return false;
+    if (a?.type === 'text' || a?.type === 'reasoning') {
+      if (a.text !== b.text) return false;
+    } else if (a?.type === 'tool-call') {
+      if (a.toolName !== b.toolName) return false;
+      if (a.args !== b.args) return false;
+      if (a.toolCallId !== b.toolCallId) return false;
+      if (a.result !== b.result) return false;
+      if (a.status !== b.status) return false;
     }
   }
   return true;

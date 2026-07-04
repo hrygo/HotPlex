@@ -235,23 +235,18 @@ configs/   - 配置文件
 
 ### PR Review 修复循环
 
-hotplex-ai review 由 cron 定时跑（30min）；CI 成功后 webhook 也自动触发同一 job（`RunningAtMs` CAS 去重，手动 `trigger` 安全，不并发）。
+push 后等待自动 review（CI 成功后由 GitHub 侧 webhook/Action 自动触发新一轮）。原 cron 定时触发（`pr-review-hotplex`）的 review job 已删除，不再可用——如需手动触发，走仓库配置的 GitHub Action `workflow_dispatch` 或 PR 评论指令，而非 `hotplex cron trigger`。
 
 ```
 push → 等 review（自动）→ 一次性修 P0/P1 + 值得的 P2 → push → 重复
 终止：最新 review 对当前 HEAD 为 APPROVED 且无新 P0/P1
 ```
 
-急用不等定时：`hotplex cron trigger pr-review-hotplex`。
-
 **修复前先核实**（review 可能针对旧 commit 或含误报）：① 发现指向的代码位置在当前 HEAD 仍存在；② 该发现未被后续 commit 修过。一轮 review 的所有发现**一次性修、一次 push**，避免逐条触发新轮次。
 
 ```bash
 # 最新 review（commit_id 标明针对哪个 commit；先核对它 == 当前 HEAD）
 gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | {state, commit_id, body}'
-
-# 手动触发新一轮
-hotplex cron trigger pr-review-hotplex
 ```
 
 **优先级**：P0/P1 必修 → P2 视价值修或提 Issue → P3 可忽略。
