@@ -39,6 +39,11 @@ type FeishuConn struct {
 	lastSummarySentMs atomic.Int64
 	voiceTriggered    atomic.Bool
 	paraBreaker       textutil.ParagraphBreaker
+
+	// rotateMu serializes proactive TTL rotation between the controller's
+	// timer callback and the lazy check inside writeContent, so concurrent
+	// triggers never double-rotate. See #839.
+	rotateMu sync.Mutex
 }
 
 func NewFeishuConn(adapter *Adapter, chatID, threadKey, workDir string) *FeishuConn {
@@ -124,9 +129,74 @@ func (c *FeishuConn) resetStreamCtrl() {
 		c.adapter.resolveDisplayName(), tc, m, br, wd,
 		c.adapter.phrases,
 	)
+	newCtrl.SetOnExpired(c.onCardExpired)
 	c.mu.Lock()
 	c.streamCtrl = newCtrl
 	c.mu.Unlock()
+}
+
+// onCardExpired is the proactive TTL-rotation callback wired into each
+// StreamingCardController via SetOnExpired. Invoked on the timer goroutine;
+// rotation runs under a bounded-time context so it never blocks the timer.
+func (c *FeishuConn) onCardExpired() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, rotated := c.rotateStreamingCard(ctx); rotated {
+		c.adapter.Log.Info("feishu: streaming card rotated (TTL timer)")
+	}
+}
+
+// rotateStreamingCard closes the expired streaming card and replaces it with
+// a fresh controller, so the next delta streams into a new card well before
+// Feishu's 10-min server hard limit. Serialized by rotateMu so concurrent
+// triggers (timer + lazy writeContent check) don't double-rotate. Returns the
+// controller the caller should use next and whether this call rotated.
+func (c *FeishuConn) rotateStreamingCard(ctx context.Context) (*StreamingCardController, bool) {
+	c.rotateMu.Lock()
+	defer c.rotateMu.Unlock()
+
+	c.mu.RLock()
+	cur := c.streamCtrl
+	c.mu.RUnlock()
+	// Re-check: a concurrent rotation may have just completed, or the card
+	// already closed.
+	if cur == nil || !cur.IsCreated() || !cur.Expired() {
+		return cur, false
+	}
+
+	// Close old card. Held under rotateMu (NOT c.mu) so a slow Close doesn't
+	// block other conn operations.
+	cur.MarkAllToolsDone()
+	oldMsgID := cur.MsgID()
+	closeCtx, closeCancel := context.WithTimeout(ctx, 5*time.Second)
+	// cur.Close currently always returns nil (streaming.go Close returns nil
+	// on all paths); the call is best-effort. If Close gains real error
+	// reporting, restore error handling + close_old metric here.
+	_ = cur.Close(closeCtx)
+	closeCancel()
+
+	observability.StreamingCardRotations().Add(ctx, 1)
+	c.adapter.Log.Info("feishu: streaming card rotated", "old_msg_id", oldMsgID)
+
+	c.mu.RLock()
+	tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
+	c.mu.RUnlock()
+	newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveDisplayName(), tc+1, m, br, wd, c.adapter.phrases)
+	newCtrl.SetOnExpired(c.onCardExpired)
+
+	c.mu.Lock()
+	// Only swap if cur is still current; a concurrent turn reset may have
+	// already replaced it.
+	swapped := c.streamCtrl == cur
+	if swapped {
+		c.streamCtrl = newCtrl
+		if oldMsgID != "" {
+			c.replyToMsgID = oldMsgID
+		}
+	}
+	ctrl := c.streamCtrl
+	c.mu.Unlock()
+	return ctrl, swapped
 }
 
 func (c *FeishuConn) SetTypingReactionID(rid string) {
@@ -513,38 +583,11 @@ func (c *FeishuConn) writeContent(ctx context.Context, env *events.Envelope, tex
 	)
 
 	// TTL rotation: proactively replace expired streaming cards before
-	// Feishu's 10-minute server limit kicks in.
+	// Feishu's 10-minute server limit kicks in. Triggered lazily here on
+	// delta arrival AND proactively by the controller's TTL timer (see #839);
+	// rotateMu serializes both so they never double-rotate.
 	if streamCtrl != nil && streamCtrl.IsCreated() && streamCtrl.Expired() {
-		// Mark all tools done so Close can flush done markers to the old card.
-		streamCtrl.MarkAllToolsDone()
-		oldMsgID := streamCtrl.MsgID()
-
-		// Synchronous close: ensures old card is fully finalized before
-		// creating the new one, avoiding API rate-limit collisions.
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := streamCtrl.Close(closeCtx); err != nil {
-			c.adapter.Log.Warn("feishu: failed to close rotated card",
-				"old_msg_id", oldMsgID, "err", err)
-			observability.StreamingCardRotationFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("phase", "close_old")))
-		}
-		closeCancel()
-
-		observability.StreamingCardRotations().Add(ctx, 1)
-		c.adapter.Log.Info("feishu: streaming card rotated",
-			"old_msg_id", oldMsgID)
-
-		c.mu.RLock()
-		tc, m, br, wd := c.turnCount, c.lastModel, c.lastBranch, c.workDir
-		c.mu.RUnlock()
-		newCtrl := NewStreamingCardController(c.adapter.larkClient, c.adapter.rateLimiter, c.adapter.Log, c.adapter.resolveDisplayName(), tc+1, m, br, wd, c.adapter.phrases)
-		c.mu.Lock()
-		c.streamCtrl = newCtrl
-		if oldMsgID != "" {
-			c.replyToMsgID = oldMsgID
-			replyToMsgID = oldMsgID
-		}
-		streamCtrl = newCtrl
-		c.mu.Unlock()
+		streamCtrl, _ = c.rotateStreamingCard(ctx)
 	}
 
 	if streamCtrl != nil {

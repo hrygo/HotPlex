@@ -126,6 +126,13 @@ type StreamingCardController struct {
 	flushStart   sync.Once
 	flushWg      sync.WaitGroup
 	flushTrigger chan struct{} // buffered 1: coalesces rapid signals
+
+	// Proactive TTL rotation — fires at StreamTTL to trigger conn-layer
+	// rotation even without a delta arrival (worker thinking / long compute).
+	// Without it, streaming hits Feishu's 10-min server hard limit while the
+	// controller waits idle for the next writeContent(). See #839.
+	onExpired   func()
+	rotateTimer *time.Timer // guarded by mu
 }
 
 const streamingElementID = "streaming_content"
@@ -164,6 +171,58 @@ func NewStreamingCardController(client *lark.Client, limiter *FeishuRateLimiter,
 // SetCloseMeta injects turn summary data before Close() for header enrichment.
 func (c *StreamingCardController) SetCloseMeta(d messaging.TurnSummaryData) {
 	c.closeMeta.Store(&d)
+}
+
+// SetOnExpired wires the conn-layer callback invoked when the proactive TTL
+// timer fires. Must be set before the controller enters PhaseStreaming to
+// enable proactive rotation; if unset, rotation stays lazy (delta-driven).
+//
+// Happens-before: all current callers (conn.go resetStreamCtrl/rotateStreamingCard,
+// handler.go) inject the callback before createAndEnable → startRotationTimer arms
+// time.AfterFunc. AfterFunc guarantees writes preceding its return are visible to
+// the timer's callback goroutine, so onExpired is safely published to triggerRotation
+// without explicit synchronization.
+func (c *StreamingCardController) SetOnExpired(fn func()) {
+	c.onExpired = fn
+}
+
+// startRotationTimer arms the proactive TTL timer. Called once after the
+// transition to PhaseStreaming. No-op if onExpired is unset (tests / legacy).
+func (c *StreamingCardController) startRotationTimer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.onExpired == nil {
+		return
+	}
+	c.rotateTimer = time.AfterFunc(StreamTTL, c.triggerRotation)
+}
+
+// stopRotationTimer stops the proactive timer; idempotent. Called on Close/Abort.
+func (c *StreamingCardController) stopRotationTimer() {
+	c.mu.Lock()
+	if c.rotateTimer != nil {
+		c.rotateTimer.Stop()
+		c.rotateTimer = nil
+	}
+	c.mu.Unlock()
+}
+
+// triggerRotation is the timer callback. It re-checks phase — Close may have
+// stopped the timer while this callback was already inflight — before invoking
+// the conn-layer rotation. Panics are recovered so a timer failure can never
+// crash the process.
+func (c *StreamingCardController) triggerRotation() {
+	defer func() {
+		if r := recover(); r != nil {
+			c.log.Error("feishu: panic in rotation timer", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	if c.getPhase() >= PhaseCompleted {
+		return
+	}
+	if c.onExpired != nil {
+		c.onExpired()
+	}
 }
 
 const maxToolEntries = 2
@@ -387,6 +446,7 @@ func (c *StreamingCardController) createAndEnable(ctx context.Context, msgID str
 		return fmt.Errorf("feishu: cannot transition to streaming")
 	}
 	c.startFlushLoop()
+	c.startRotationTimer()
 	return nil
 }
 
@@ -624,6 +684,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 	// This can happen when SendPlaceholder fails but the goroutine was already started.
 	if phase == PhaseCreationFailed {
 		c.stopFlushLoop()
+		c.stopRotationTimer()
 		return nil
 	}
 
@@ -632,6 +693,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 	}
 
 	c.stopFlushLoop()
+	c.stopRotationTimer()
 	c.MarkAllToolsDone()
 
 	// Flush tool activity with done markers before the final card rebuild.
@@ -733,6 +795,7 @@ func (c *StreamingCardController) Abort(ctx context.Context) error {
 	}
 
 	c.stopFlushLoop()
+	c.stopRotationTimer()
 	c.MarkAllToolsDone()
 
 	c.mu.Lock()

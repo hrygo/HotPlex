@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -386,4 +387,71 @@ func TestStreamingCardController_IntegrityCheck(t *testing.T) {
 	// Close should not panic with zero bytes.
 	err := c.Close(context.Background())
 	require.NoError(t, err)
+}
+
+// ─── Proactive TTL Rotation (#839) ──────────────────────────────────────────
+
+// TestStreamingCard_ProactiveRotation_TriggersCallback verifies that the TTL
+// timer's callback (triggerRotation) invokes the conn-layer onExpired hook
+// while the card is still streaming — this is what lets us proactively rotate
+// even when no worker delta arrives. See issue #839.
+func TestStreamingCard_ProactiveRotation_TriggersCallback(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctrl := NewStreamingCardController(nil, nil, log, "agent", 1, "m", "b", "w", nil)
+
+	called := make(chan struct{}, 1)
+	ctrl.SetOnExpired(func() { called <- struct{}{} })
+
+	ctrl.phase.Store(int32(PhaseStreaming)) // simulate active streaming
+	ctrl.triggerRotation()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	select {
+	case <-called:
+		// success: onExpired invoked by triggerRotation
+	case <-ctx.Done():
+		t.Fatal("triggerRotation did not invoke onExpired")
+	}
+}
+
+// TestStreamingCard_ProactiveRotation_SkipsAfterClose verifies the race where
+// Close() stops the timer but the callback was already inflight: phase has
+// advanced to Completed, so triggerRotation must NOT invoke onExpired (which
+// would rotate a card that no longer exists).
+func TestStreamingCard_ProactiveRotation_SkipsAfterClose(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctrl := NewStreamingCardController(nil, nil, log, "agent", 1, "m", "b", "w", nil)
+
+	called := make(chan struct{}, 1)
+	ctrl.SetOnExpired(func() { called <- struct{}{} })
+
+	ctrl.phase.Store(int32(PhaseCompleted)) // Close won the race
+	ctrl.triggerRotation()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	select {
+	case <-called:
+		t.Fatal("triggerRotation must not invoke onExpired after Close")
+	case <-ctx.Done():
+		// success: callback skipped
+	}
+}
+
+// TestStreamingCard_ProactiveRotation_NoopWithoutCallback verifies the legacy
+// / test path: if SetOnExpired was never called, startRotationTimer is a no-op
+// (no timer leaks) and triggerRotation is a safe no-op.
+func TestStreamingCard_ProactiveRotation_NoopWithoutCallback(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctrl := NewStreamingCardController(nil, nil, log, "agent", 1, "m", "b", "w", nil)
+
+	require.NotPanics(t, func() {
+		ctrl.startRotationTimer() // no-op: onExpired is nil
+		ctrl.triggerRotation()
+		ctrl.stopRotationTimer()
+	})
 }

@@ -225,6 +225,7 @@ func (a *Adapter) handleTextMessage(ctx context.Context, platformMsgID, channelI
 		} else {
 			turnNum, model, branch, workDir := conn.turnHeaderMeta()
 			ctrl := NewStreamingCardController(a.larkClient, a.rateLimiter, a.Log, a.resolveDisplayName(), turnNum+1, model, branch, workDir, a.phrases)
+			ctrl.SetOnExpired(conn.onCardExpired)
 			conn.EnableStreaming(ctrl)
 
 			// Send placeholder card immediately — same streaming card structure as real messages.

@@ -15,6 +15,7 @@ import (
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -393,6 +394,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		}
 
 		b.injectSessionStats(env, acc)
+		b.maybeSendDoneFallback(sessionID, acc, fc)
 		b.captureAssistantTurn(sessionID, env.Seq, acc, fc.turnText.String(),
 			fc.sessOwner, fc.sessPlatform, env.Timestamp)
 		acc.resetPerTurn()
@@ -403,6 +405,46 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount.Load())
 		}
 	}
+}
+
+// maybeSendDoneFallback synthesizes a user-facing Message event when a turn
+// did tool work but produced no assistant text — so feishu/slack don't show an
+// empty reply for tool-only turns (e.g. "build and deploy" tasks where the
+// worker only calls tools and never writes a reply). Mirrors sendCommandFeedback
+// (worker_cmds.go). Skipped for webchat (its UI renders the tool_call list
+// independently), and when the turn already produced text or made no tool calls.
+//
+// Must run BEFORE captureAssistantTurn: it backfills fc.turnText with the
+// fallback text so the turns table records it (history/replay shows the
+// fallback instead of an empty assistant turn). Also persists to the events
+// table via captureEvent so WS event replay surfaces it too.
+func (b *Bridge) maybeSendDoneFallback(sessionID string, acc *sessionAccumulator, fc *forwardContext) {
+	if fc.turnText.Len() != 0 || acc.ToolCallCount.Load() == 0 {
+		return
+	}
+	if fc.sessPlatform == platformWebChat {
+		return
+	}
+	d := messaging.TurnSummaryData{
+		ToolCallCount:  int(acc.ToolCallCount.Load()),
+		ToolNames:      acc.ToolNames,
+		TurnDurationMs: acc.TurnDurationMs,
+	}
+	text := messaging.FormatDoneFallback(d)
+	// Backfill turnText so captureAssistantTurn records the fallback to the
+	// turns table (history/replay shows it, not an empty assistant turn).
+	fc.turnText.WriteString(text)
+
+	env := events.NewEnvelope(
+		aep.NewID(), sessionID, b.hub.NextSeq(sessionID),
+		events.Message,
+		events.MessageData{Content: text},
+	)
+	if err := b.hub.SendToSession(context.Background(), env); err != nil {
+		b.log.Warn("bridge: done fallback send failed", "session_id", sessionID, "err", err)
+	}
+	// Persist to the events table so WS event replay also surfaces the fallback.
+	b.captureEvent(sessionID, env.Seq, events.Message, env.Event.Data)
 }
 
 // maybeTransitionIdleAfterDone transitions a messaging session to IDLE after

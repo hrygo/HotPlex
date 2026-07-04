@@ -58,6 +58,42 @@ func TestExtractTurnSummary_Full(t *testing.T) {
 	require.InDelta(t, 750.0, d.SessionDuration, 0.01)
 }
 
+func TestFormatDoneFallback(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		d    TurnSummaryData
+		want []string // substrings that must appear
+	}{
+		{
+			name: "tools and duration",
+			d: TurnSummaryData{
+				ToolCallCount:  6,
+				ToolNames:      map[string]int{"Bash": 3, "Read": 2, "Edit": 1},
+				TurnDurationMs: 90_000, // 1m30s
+			},
+			want: []string{"✅", "6", "Bash×3", "Read×2", "Edit×1", "1m30s"},
+		},
+		{
+			name: "no tool names only count",
+			d: TurnSummaryData{
+				ToolCallCount:  3,
+				TurnDurationMs: 5_000, // 5s
+			},
+			want: []string{"✅", "3", "5s"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := FormatDoneFallback(tc.d)
+			for _, s := range tc.want {
+				require.Contains(t, got, s)
+			}
+		})
+	}
+}
+
 func TestExtractTurnSummary_NilSession(t *testing.T) {
 	t.Parallel()
 	env := &events.Envelope{
