@@ -47,9 +47,9 @@ worker 在 delta 间隙（tool 思考、长计算）时 `writeContent` 不被调
 **`conn.go` — FeishuConn**：
 - 新增 `rotateMu sync.Mutex` —— 串行化轮转（timer vs writeContent 并发请求）
 - 抽离 `rotateStreamingCard(ctx) (newCtrl, rotated)` —— 从 `writeContent:515-548` 提取，复用
-- 新增 `onCardExpired()` —— timer 回调入口，`go rotateStreamingCard` 独立 goroutine 避免阻塞
+- 新增 `onCardExpired()` —— timer 回调入口，同步调用 `rotateStreamingCard`（`time.AfterFunc` 已在独立 goroutine，10s ctx 限时避免阻塞 timer）
 - `writeContent` 替换内联轮转逻辑为 `rotateStreamingCard` 调用
-- 3 个 controller 创建点（`handler.go:227`、`conn.go:122 resetStreamCtrl`、`conn.go:539`）
+- 3 个 controller 创建点（`handler.go:227`、`conn.go:122 resetStreamCtrl`、`conn.go:185 rotateStreamingCard`）
   在 `EnableStreaming` / 创建后 `SetOnExpired(c.onCardExpired)` 注入回调
 
 ### 3.3 并发安全（重点 — 见观察 #8465 历史 data race）
@@ -57,7 +57,7 @@ worker 在 delta 间隙（tool 思考、长计算）时 `writeContent` 不被调
 | 风险 | 缓解 |
 |------|------|
 | timer 与 writeContent 同时触发轮转 | `rotateMu` 串行化 + 进入后 `Expired()` 复检 |
-| Close 持锁阻塞 writeContent | Close 在 `rotateMu` 下但**不持 `c.mu`**；仅替换 ctrl 时短暂持 `c.mu` |
+| Close 持锁阻塞 writeContent | 轮转路径的 `cur.Close`（在 `rotateStreamingCard` 内）于 `rotateMu` 下调用，不持 `FeishuConn.mu`；仅 ctrl 替换时短暂持 `FeishuConn.mu`。注：`FeishuConn.Close()` 是另一路径（持 `FeishuConn.mu`，不涉及轮转） |
 | 旧 ctrl 已被并发替换 | 替换前校验 `c.streamCtrl == cur`，否则放弃 |
 | timer 在 Close 后触发 | `Close()` Stop timer；`triggerRotation` 检查 phase ≥ Completed 直接返回 |
 

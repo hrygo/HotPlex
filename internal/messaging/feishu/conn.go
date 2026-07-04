@@ -169,11 +169,10 @@ func (c *FeishuConn) rotateStreamingCard(ctx context.Context) (*StreamingCardCon
 	cur.MarkAllToolsDone()
 	oldMsgID := cur.MsgID()
 	closeCtx, closeCancel := context.WithTimeout(ctx, 5*time.Second)
-	if err := cur.Close(closeCtx); err != nil {
-		c.adapter.Log.Warn("feishu: failed to close rotated card",
-			"old_msg_id", oldMsgID, "err", err)
-		observability.StreamingCardRotationFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("phase", "close_old")))
-	}
+	// cur.Close currently always returns nil (streaming.go Close returns nil
+	// on all paths); the call is best-effort. If Close gains real error
+	// reporting, restore error handling + close_old metric here.
+	_ = cur.Close(closeCtx)
 	closeCancel()
 
 	observability.StreamingCardRotations().Add(ctx, 1)

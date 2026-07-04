@@ -176,6 +176,12 @@ func (c *StreamingCardController) SetCloseMeta(d messaging.TurnSummaryData) {
 // SetOnExpired wires the conn-layer callback invoked when the proactive TTL
 // timer fires. Must be set before the controller enters PhaseStreaming to
 // enable proactive rotation; if unset, rotation stays lazy (delta-driven).
+//
+// Happens-before: all current callers (conn.go resetStreamCtrl/rotateStreamingCard,
+// handler.go) inject the callback before createAndEnable → startRotationTimer arms
+// time.AfterFunc. AfterFunc guarantees writes preceding its return are visible to
+// the timer's callback goroutine, so onExpired is safely published to triggerRotation
+// without explicit synchronization.
 func (c *StreamingCardController) SetOnExpired(fn func()) {
 	c.onExpired = fn
 }
