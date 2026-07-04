@@ -147,7 +147,13 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
   );
 }, (prev, next) => {
   if (prev.message.id !== next.message.id) return false;
-  if (getExt(next.message).status?.type === 'running') return false;
+  // A status transition must always re-render: the streaming cursor and part
+  // status chips depend on ext.status, not just content. The previous check
+  // only forced re-render while next is 'running', missing the running→complete
+  // transition where text is unchanged but the cursor must disappear.
+  const prevRunning = getExt(prev.message).status?.type === 'running';
+  const nextRunning = getExt(next.message).status?.type === 'running';
+  if (prevRunning || nextRunning) return false;
   if (prev.onInteractionRespond !== next.onInteractionRespond) return false;
   // Shallow-compare the content array element-wise. The previous check
   // (`prev.message.content === next.message.content`) compared array
