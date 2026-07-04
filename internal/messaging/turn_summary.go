@@ -212,6 +212,16 @@ func FormatDuration(ms int64) string {
 	}
 }
 
+// FormatDoneFallback synthesizes a user-facing message when a turn completes
+// with tool calls but no assistant text — the worker did work (tool calls) but
+// produced no reply. Used by the bridge to avoid empty replies on feishu/slack
+// for tool-only turns. Reuses FormatToolNames + FormatDuration.
+func FormatDoneFallback(d TurnSummaryData) string {
+	tools := FormatToolNames(d.ToolNames, d.ToolCallCount)
+	dur := FormatDuration(d.TurnDurationMs)
+	return fmt.Sprintf("✅ 已完成 · 🔧 %s · ⏱ %s", tools, dur)
+}
+
 // FormatSessionDuration formats session elapsed seconds to human-readable string.
 func FormatSessionDuration(secs float64) string {
 	if secs <= 0 {
