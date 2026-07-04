@@ -149,7 +149,29 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
   if (prev.message.id !== next.message.id) return false;
   if (getExt(next.message).status?.type === 'running') return false;
   if (prev.onInteractionRespond !== next.onInteractionRespond) return false;
-  return prev.message.content === next.message.content;
+  // Shallow-compare the content array element-wise. The previous check
+  // (`prev.message.content === next.message.content`) compared array
+  // references, but convertToThreadMessage rebuilds the array on every render,
+  // so the reference always differs and the memo was effectively disabled —
+  // every delta flush re-rendered every assistant message. Compare by value
+  // instead: text parts by text, tool-call parts by toolCallId + result.
+  const pc = getExt(prev.message).content || [];
+  const nc = getExt(next.message).content || [];
+  if (pc.length !== nc.length) return false;
+  for (let i = 0; i < pc.length; i++) {
+    const a = pc[i] as Record<string, unknown>;
+    const b = nc[i] as Record<string, unknown>;
+    if (a?.type !== b?.type) return false;
+    if (a?.type === 'text') {
+      if ((a as Record<string, unknown>).text !== (b as Record<string, unknown>).text) return false;
+    } else {
+      // tool-call / reasoning / other: compare identity markers + result.
+      if (a?.toolCallId !== b?.toolCallId) return false;
+      if (a?.result !== b?.result) return false;
+      if (a?.status !== b?.status) return false;
+    }
+  }
+  return true;
 });
 
 export { AssistantMessage };

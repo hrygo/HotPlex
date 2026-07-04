@@ -30,7 +30,7 @@ import {
 } from "@/lib/config";
 import { TODO_TOOLS } from "@/lib/tool-categories";
 import { useMetrics } from "@/lib/hooks/useMetrics";
-import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
+import { getSessionHistory, getSessionEvents, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
 import { logger } from "@/lib/logger";
 import type {
@@ -54,6 +54,11 @@ import type {
     MessagePart,
 } from "@/lib/types/message-parts";
 import type { HotPlexMessage } from "@/lib/types/message";
+import {
+    appendTextDelta,
+    appendReasoningDelta,
+    concatTextParts,
+} from "@/lib/adapters/merge-parts";
 
 // Re-export for consumers
 export type { HotPlexMessage };
@@ -429,20 +434,7 @@ export function useHotPlexRuntime({
                     lastMessage?.role === "assistant" &&
                     lastMessage.status === "streaming"
                 ) {
-                    const parts = [...lastMessage.parts];
-                    // Append to last text part, or add new one
-                    if (
-                        parts.length > 0 &&
-                        parts[parts.length - 1].type === "text"
-                    ) {
-                        const last = parts[parts.length - 1] as TextPart;
-                        parts[parts.length - 1] = {
-                            type: "text",
-                            text: last.text + content,
-                        };
-                    } else {
-                        parts.push({ type: "text", text: content });
-                    }
+                    const parts = appendTextDelta(lastMessage.parts, content);
                     return [...prev.slice(0, -1), { ...lastMessage, parts }];
                 }
                 // No streaming message — create one (message.start may not have been sent)
@@ -475,6 +467,23 @@ export function useHotPlexRuntime({
             }
         };
 
+        // Flush any buffered delta synchronously. Must be called at every turn
+        // terminus (done/error/message/cleanup) so content received since the
+        // last animation frame is committed to state before the message is
+        // finalized or the subscription is torn down. Without this, deltas
+        // arriving in the same frame as a done/error/cleanup are lost.
+        const flushPendingDelta = () => {
+            if (deltaRafId) {
+                cancelAnimationFrame(deltaRafId);
+                deltaRafId = 0;
+            }
+            if (pendingDelta) {
+                const content = pendingDelta;
+                pendingDelta = "";
+                appendDelta(content);
+            }
+        };
+
         // Handle reasoning/thinking content (appends to last reasoning part or creates one)
         const handleReasoning = (data: ReasoningData, _env: Envelope) => {
             if (!data) return;
@@ -485,19 +494,10 @@ export function useHotPlexRuntime({
                     lastMessage?.role === "assistant" &&
                     lastMessage.status === "streaming"
                 ) {
-                    const parts = [...lastMessage.parts];
-                    const lastPart = parts[parts.length - 1];
-                    if (lastPart?.type === "reasoning") {
-                        parts[parts.length - 1] = {
-                            type: "reasoning",
-                            text: lastPart.text + data.content,
-                        };
-                    } else {
-                        parts.push({
-                            type: "reasoning",
-                            text: data.content || "",
-                        });
-                    }
+                    const parts = appendReasoningDelta(
+                        lastMessage.parts,
+                        data.content || "",
+                    );
                     return [...prev.slice(0, -1), { ...lastMessage, parts }];
                 }
                 const fallbackId = `assistant-${Date.now()}`;
@@ -527,6 +527,9 @@ export function useHotPlexRuntime({
         };
 
         const handleMessage = (data: MessageData, env: Envelope) => {
+            // Commit any buffered deltas before the full message overwrites the
+            // streaming content, so the final state reflects the complete text.
+            flushPendingDelta();
             const role: "user" | "assistant" =
                 data?.role === "user" ? "user" : "assistant";
             logger.debug("RuntimeAdapter", "message received", {
@@ -630,6 +633,8 @@ export function useHotPlexRuntime({
         };
 
         const handleDone = (data: DoneData, _env: Envelope) => {
+            // Finalize any buffered deltas before marking the turn complete.
+            flushPendingDelta();
             streamingFallbackId = null;
 
             if (data?.stats) {
@@ -668,9 +673,77 @@ export function useHotPlexRuntime({
                     // Non-critical — skills list stays empty
                 }
             }
+
+            // Backpressure reconciliation: when the server flagged deltas as
+            // dropped (done.stats.dropped === true), the streamed text may be
+            // incomplete. The event store holds the authoritative, drop-proof
+            // aggregation of every message.delta, so fetch the latest message
+            // events and replace the last assistant message's text with it.
+            if (data?.dropped) {
+                void reconcileDroppedTurn();
+            }
+        };
+
+        // Re-fetch the authoritative content for the just-completed turn from
+        // the event store and patch the last assistant message if it differs.
+        const reconcileDroppedTurn = async () => {
+            const sid = sessionIdRef.current;
+            if (!sid) return;
+            try {
+                const page = await getSessionEvents(sid, {
+                    direction: "latest",
+                    limit: 50,
+                });
+                // Walk newest→oldest; collect message events whose seq is below
+                // the most recent done event (i.e. belong to the finished turn).
+                let seenDone = false;
+                const messageEvents = [];
+                for (const ev of page.events) {
+                    if (ev.type === "done") {
+                        seenDone = true;
+                        continue;
+                    }
+                    if (seenDone && ev.type === "message") {
+                        messageEvents.push(ev);
+                    }
+                    if (messageEvents.length >= 5) break;
+                }
+                if (messageEvents.length === 0) return;
+                // message events store merged content (possibly across multiple
+                // size-flushed records); concatenate in seq order.
+                messageEvents.sort((a, b) => a.seq - b.seq);
+                const fullText = messageEvents
+                    .map((ev) => ev.data?.content || "")
+                    .join("");
+                if (!fullText) return;
+                setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role !== "assistant") return prev;
+                    // Only patch if the authoritative text is longer than the
+                    // currently-streamed text (i.e. deltas really were lost).
+                    const currentText = concatTextParts(last.parts);
+                    if (fullText.length <= currentText.length) return prev;
+                    const parts = [...last.parts];
+                    const textIdx = parts.findIndex((p) => p.type === "text");
+                    if (textIdx !== -1) {
+                        parts[textIdx] = { type: "text", text: fullText };
+                    } else {
+                        parts.unshift({ type: "text", text: fullText });
+                    }
+                    return [...prev.slice(0, -1), { ...last, parts }];
+                });
+            } catch (err) {
+                logger.warn(
+                    "RuntimeAdapter",
+                    "Reconcile dropped turn failed",
+                    { error: String(err) },
+                );
+            }
         };
 
         const handleError = (data: ErrorData, env: Envelope) => {
+            // Commit buffered deltas before any error branch finalizes the run.
+            flushPendingDelta();
             const isBusy = (data?.code as string) === "SESSION_BUSY";
             const isResumeRetry = (data?.code as string) === "RESUME_RETRY";
             const isShutdown = (data?.message || "").includes(
@@ -1074,7 +1147,9 @@ export function useHotPlexRuntime({
             });
 
         return () => {
-            if (deltaRafId) cancelAnimationFrame(deltaRafId);
+            // Flush any deltas that arrived since the last frame so a session
+            // switch / remount doesn't discard the tail of the streaming text.
+            flushPendingDelta();
             client.off("delta", handleDelta);
             client.off("message", handleMessage);
             client.off("done", handleDone);

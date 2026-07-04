@@ -265,6 +265,34 @@ func TestHub_SendToSession_DeltaDropSilently(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestConn_TrySendData_MarksSessionDropped verifies that when a conn's writeCh
+// is full, dropping a delta marks the session via hub.MarkDropped so the done
+// event's reconcileDroppedDeltas can flag the client. This closes the gap where
+// the most common slow-client drop was invisible to the reconcile path.
+func TestConn_TrySendData_MarksSessionDropped(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+
+	conn, server := newTestWSConnPair(t)
+	defer conn.Close()
+	defer server.Close()
+	c := newConn(h, conn, "sess_conn_drop", nil)
+
+	// Fill writeCh to capacity so the next send drops.
+	for i := 0; i < cap(c.writeCh); i++ {
+		c.writeCh <- []byte("x")
+	}
+
+	require.False(t, h.GetAndClearDropped("sess_conn_drop"), "no drop before trySendData")
+
+	// Next delta should drop silently and mark the session dropped exactly once.
+	require.NoError(t, c.trySendData([]byte(`{"type":"message.delta"}`)))
+	require.NoError(t, c.trySendData([]byte(`{"type":"message.delta"}`)))
+
+	require.True(t, h.GetAndClearDropped("sess_conn_drop"), "session marked dropped after conn-level drop")
+	require.False(t, h.GetAndClearDropped("sess_conn_drop"), "GetAndClear is destructive")
+}
+
 func TestHub_SendToSession_GuaranteedQueueFull(t *testing.T) {
 	cfg := config.Default()
 	cfg.Gateway.BroadcastQueueSize = 1

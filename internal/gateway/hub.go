@@ -626,6 +626,18 @@ func (h *Hub) GetAndClearDropped(sessionID string) bool {
 	return dropped
 }
 
+// MarkDropped records that the session experienced a message.delta drop under
+// backpressure (e.g. a slow client's writeCh filled). Idempotent and safe to
+// call from hot paths — callers should gate on a per-conn atomic flag to avoid
+// repeated locking. The flag is consumed by GetAndClearDropped at turn end so
+// that reconcileDroppedDeltas can annotate the done event with Dropped=true,
+// letting the client fetch authoritative content from the event store.
+func (h *Hub) MarkDropped(sessionID string) {
+	h.mu.Lock()
+	h.sessionDropped[sessionID] = true
+	h.mu.Unlock()
+}
+
 // Shutdown gracefully shuts down all connections and stops the hub.
 // It signals Run() to stop via context cancellation, waits for in-flight
 // broadcast messages to drain, then closes all WebSocket connections.
