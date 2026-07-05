@@ -783,7 +783,7 @@ func (c *Conn) writeDispatch(data []byte, eventType events.Kind) error {
 		return err
 	}
 	if isDroppable(eventType) {
-		return c.trySendData(data)
+		return c.trySendData(data, eventType)
 	}
 	return c.sendData(data)
 }
@@ -806,14 +806,17 @@ func (c *Conn) sendData(data []byte) error {
 // Silently drops the message if the channel is full (for droppable events).
 // On drop it marks the session so reconcileDroppedDeltas can flag the done
 // event, letting the client reconcile from the authoritative event store.
+// Only message.delta drops set the reconcile flag — Raw events are droppable
+// too (isDroppable) but are not streaming text, so flagging them would
+// mislead the client into a spurious delta reconcile.
 // MarkDropped has a session-level fast path, so a burst of drops on the same
 // session locks hub.mu at most once per turn (the entry is cleared on done).
-func (c *Conn) trySendData(data []byte) error {
+func (c *Conn) trySendData(data []byte, eventType events.Kind) error {
 	select {
 	case c.writeCh <- data:
 		return nil
 	default:
-		if c.hub != nil {
+		if c.hub != nil && eventType == events.MessageDelta {
 			c.hub.MarkDropped(c.sessionID)
 		}
 		observability.GatewayDeltasDropped().Add(c.hub.ctx, 1)

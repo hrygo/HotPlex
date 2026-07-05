@@ -453,11 +453,11 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		// until WriteAll returns (child exits → EPIPE), preventing the next
 		// writer from racing on the same fd. This is the same pattern used by
 		// acp/client.go and codexcli/manager.go.
-		if err := base.WriteWithCtx(ctx, func() error {
+		if err := base.WriteWithCtxBounded(ctx, func() error {
 			mu.Lock()
 			defer mu.Unlock()
 			return writeStreamInputLocked(stdin, content)
-		}, 0); err != nil {
+		}); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("claudecode: input write cancelled: %w", err)
 			}
@@ -861,11 +861,11 @@ func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 	// cancelled while syscall.Write is still blocked) keeps the mutex until
 	// WriteAll returns — preventing the next writer from racing on the fd.
 	// See Worker.Input for the full rationale.
-	if err := base.WriteWithCtx(ctx, func() error {
+	if err := base.WriteWithCtxBounded(ctx, func() error {
 		mu.Lock()
 		defer mu.Unlock()
 		return writeStreamInputLocked(stdin, "/compact")
-	}, 0); err != nil {
+	}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("claudecode: compact: %w", err)
 		}

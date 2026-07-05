@@ -115,10 +115,10 @@ func (h *ControlHandler) SendResponse(ctx context.Context, resp *ControlResponse
 	defer h.mu.Unlock()
 	// h.stdin.Write blocks when the pipe buffer is full and the CLI stops
 	// reading. Guard with ctx so the caller is not pinned forever.
-	if err := base.WriteWithCtx(ctx, func() error {
+	if err := base.WriteWithCtxBounded(ctx, func() error {
 		_, e := h.stdin.Write(data)
 		return e
-	}, 0); err != nil {
+	}); err != nil {
 		if base.IsDeadProcessError(err) {
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: err}
 		}
@@ -176,10 +176,10 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 	// Write the request under the shared mu so it doesn't interleave with
 	// control_response writes. Guard with ctx: stdin.Write blocks when the
 	// pipe buffer is full and the CLI stops reading.
-	writeErr := base.WriteWithCtx(ctx, func() error {
+	writeErr := base.WriteWithCtxBounded(ctx, func() error {
 		_, e := h.stdin.Write(data)
 		return e
-	}, 0)
+	})
 	h.mu.Unlock()
 	if writeErr != nil {
 		// Cleanup on write failure: defer is set up only after the success path,

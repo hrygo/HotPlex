@@ -406,6 +406,11 @@ export function useHotPlexRuntime({
         // value is a dead path the backend already ignores.
         if (allowedTools.length > 0) initConfig.allowed_tools = allowedTools;
 
+        // Guard against setState after the effect cleans up (session switch /
+        // remount). Async paths like reconcileDroppedTurn fetch then setMessages
+        // — without this flag they'd write into the unmounted hook's state.
+        let cancelled = false;
+
         const client = new BrowserHotPlexClient({
             url: wsUrl,
             workerType,
@@ -716,7 +721,7 @@ export function useHotPlexRuntime({
                     await new Promise((r) => setTimeout(r, 1200));
                     fullText = await fetchLastAssistantContent();
                 }
-                if (!fullText) return;
+                if (!fullText || cancelled) return;
                 setMessages((prev) => {
                     const last = prev[prev.length - 1];
                     if (last?.role !== "assistant") return prev;
@@ -1148,6 +1153,9 @@ export function useHotPlexRuntime({
             });
 
         return () => {
+            // Mark this effect instance as torn down so async paths
+            // (reconcileDroppedTurn) skip their setMessages after unmount.
+            cancelled = true;
             // Flush any deltas that arrived since the last frame so a session
             // switch / remount doesn't discard the tail of the streaming text.
             flushPendingDelta();

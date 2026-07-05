@@ -465,16 +465,15 @@ func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 // is especially important for Notify, which has no response-wait timeout
 // unlike Call.
 func (m *CodexAppServerManager) writeFrame(ctx context.Context, v any) error {
-	if _, ok := ctx.Deadline(); !ok && ctx.Err() == nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, base.DefaultWriteTimeout)
-		defer cancel()
-	}
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
-	err := base.WriteWithCtx(ctx, func() error {
+	// WriteWithCtxBounded wraps a deadline-less ctx with DefaultWriteTimeout
+	// internally, so callers passing context.Background() (the 22 lifecycle
+	// wrappers) are still protected. The grace period is fixed at fallbackGrace
+	// so total worst-case is DefaultWriteTimeout + fallbackGrace, not 2×.
+	err := base.WriteWithCtxBounded(ctx, func() error {
 		return json.NewEncoder(m.stdin).Encode(v)
-	}, 0)
+	})
 	// An orphaned write (ctx cancelled while syscall.Write is blocked) leaves
 	// the goroutine holding writeMu until the child exits. Because the manager
 	// is a singleton shared across all codex sessions, this wedges EVERY

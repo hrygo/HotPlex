@@ -13,6 +13,31 @@ import (
 // read end closes, yielding EPIPE).
 const DefaultWriteTimeout = 30 * time.Second
 
+// WriteWithCtxBounded is WriteWithCtx with a built-in deadline. If ctx has no
+// deadline (e.g. context.Background() from the gateway's ReadPump), it wraps
+// ctx with DefaultWriteTimeout so the write can never block forever. The
+// fallback grace period after cancellation is fixed at a short window so the
+// total worst-case wait is writeTimeout + fallbackGrace, not 2×writeTimeout.
+//
+// Use this instead of WriteWithCtx when the caller cannot guarantee its ctx
+// has a deadline (which is the common case for gateway-originated stdin writes).
+func WriteWithCtxBounded(ctx context.Context, writeFn func() error) error {
+	writeCtx := ctx
+	if _, ok := writeCtx.Deadline(); !ok && writeCtx.Err() == nil {
+		var cancel context.CancelFunc
+		writeCtx, cancel = context.WithTimeout(writeCtx, DefaultWriteTimeout)
+		defer cancel()
+	}
+	return WriteWithCtx(writeCtx, writeFn, fallbackGrace)
+}
+
+// fallbackGrace is the short grace period WriteWithCtxBounded gives an
+// in-flight write after ctx cancellation. It only needs to cover the brief
+// window where the write is finishing normally (e.g. EPIPE arriving a few
+// milliseconds after cancel) — it must NOT be large, because the orphaned
+// goroutine holds any caller-provided mutex for this duration.
+const fallbackGrace = 5 * time.Second
+
 // WriteWithCtx runs writeFn in a goroutine and returns its result, but bails
 // out when ctx is cancelled. It exists because writes to a child process's
 // stdin (pipe) block at the OS level when the pipe buffer is full and the

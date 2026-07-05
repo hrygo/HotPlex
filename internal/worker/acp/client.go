@@ -141,9 +141,9 @@ func (c *ACPClient) RespondRequest(ctx context.Context, id json.RawMessage, outc
 		Result:  mustMarshal(outcome),
 	}
 	c.writeMu.Lock()
-	err := base.WriteWithCtx(ctx, func() error {
+	err := base.WriteWithCtxBounded(ctx, func() error {
 		return WriteMessage(c.stdin, req)
-	}, 0)
+	})
 	c.writeMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("acp respond request: %w", err)
@@ -299,9 +299,9 @@ func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONR
 	// WriteMessage blocks when the pipe buffer is full and the agent process
 	// stops reading. Guard with ctx so the caller (and writeMu) are not held
 	// forever — the 30s fallback in WriteWithCtx bounds the wait after cancel.
-	err := base.WriteWithCtx(ctx, func() error {
+	err := base.WriteWithCtxBounded(ctx, func() error {
 		return WriteMessage(c.stdin, req)
-	}, 0)
+	})
 	c.writeMu.Unlock()
 	if err != nil {
 		return nil, err
