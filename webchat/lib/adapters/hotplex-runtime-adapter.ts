@@ -54,6 +54,11 @@ import type {
     MessagePart,
 } from "@/lib/types/message-parts";
 import type { HotPlexMessage } from "@/lib/types/message";
+import {
+    appendTextDelta,
+    appendReasoningDelta,
+    concatTextParts,
+} from "@/lib/adapters/merge-parts";
 
 // Re-export for consumers
 export type { HotPlexMessage };
@@ -401,6 +406,11 @@ export function useHotPlexRuntime({
         // value is a dead path the backend already ignores.
         if (allowedTools.length > 0) initConfig.allowed_tools = allowedTools;
 
+        // Guard against setState after the effect cleans up (session switch /
+        // remount). Async paths like reconcileTurnContent fetch then setMessages
+        // — without this flag they'd write into the unmounted hook's state.
+        let cancelled = false;
+
         const client = new BrowserHotPlexClient({
             url: wsUrl,
             workerType,
@@ -429,20 +439,7 @@ export function useHotPlexRuntime({
                     lastMessage?.role === "assistant" &&
                     lastMessage.status === "streaming"
                 ) {
-                    const parts = [...lastMessage.parts];
-                    // Append to last text part, or add new one
-                    if (
-                        parts.length > 0 &&
-                        parts[parts.length - 1].type === "text"
-                    ) {
-                        const last = parts[parts.length - 1] as TextPart;
-                        parts[parts.length - 1] = {
-                            type: "text",
-                            text: last.text + content,
-                        };
-                    } else {
-                        parts.push({ type: "text", text: content });
-                    }
+                    const parts = appendTextDelta(lastMessage.parts, content);
                     return [...prev.slice(0, -1), { ...lastMessage, parts }];
                 }
                 // No streaming message — create one (message.start may not have been sent)
@@ -461,19 +458,14 @@ export function useHotPlexRuntime({
             });
         };
 
-        // Delta batcher — accumulate streaming deltas and flush once per animation frame
-        // to reduce React re-renders from 30-60/s to at most 60fps (1 per frame).
-        let pendingDelta = "";
-        let deltaRafId = 0;
-
-        const flushDelta = () => {
-            const content = pendingDelta;
-            pendingDelta = "";
-            deltaRafId = 0;
-            if (content) {
-                appendDelta(content);
-            }
-        };
+        // Note: deltas are committed synchronously in handleDelta. React 18
+        // automatic batching coalesces multiple setMessages within the same
+        // microtask, so per-delta re-renders are already batched without
+        // requestAnimationFrame. RAF was previously used here but was removed:
+        // browsers throttle/pause RAF in background tabs, which caused deltas
+        // to accumulate unbounded in memory while flush callbacks never fired,
+        // losing the streamed tail when the WebSocket was paused by the page
+        // visibility policy. Synchronous commits have no such failure mode.
 
         // Handle reasoning/thinking content (appends to last reasoning part or creates one)
         const handleReasoning = (data: ReasoningData, _env: Envelope) => {
@@ -485,19 +477,10 @@ export function useHotPlexRuntime({
                     lastMessage?.role === "assistant" &&
                     lastMessage.status === "streaming"
                 ) {
-                    const parts = [...lastMessage.parts];
-                    const lastPart = parts[parts.length - 1];
-                    if (lastPart?.type === "reasoning") {
-                        parts[parts.length - 1] = {
-                            type: "reasoning",
-                            text: lastPart.text + data.content,
-                        };
-                    } else {
-                        parts.push({
-                            type: "reasoning",
-                            text: data.content || "",
-                        });
-                    }
+                    const parts = appendReasoningDelta(
+                        lastMessage.parts,
+                        data.content || "",
+                    );
                     return [...prev.slice(0, -1), { ...lastMessage, parts }];
                 }
                 const fallbackId = `assistant-${Date.now()}`;
@@ -520,10 +503,8 @@ export function useHotPlexRuntime({
 
         const handleDelta = (data: MessageDeltaData, _env: Envelope) => {
             if (!data) return;
-            pendingDelta += data.content || "";
-            if (!deltaRafId) {
-                deltaRafId = requestAnimationFrame(flushDelta);
-            }
+            // Synchronous commit — no RAF batching (see note above appendDelta).
+            appendDelta(data.content || "");
         };
 
         const handleMessage = (data: MessageData, env: Envelope) => {
@@ -667,6 +648,90 @@ export function useHotPlexRuntime({
                 } catch {
                     // Non-critical — skills list stays empty
                 }
+            }
+
+            // Unconditionally reconcile against the authoritative turns table.
+            // The server no longer annotates done with a dropped flag — that
+            // cross-layer marker protocol was removed as over-engineering (it
+            // had three P1 regressions and its only purpose was to save this
+            // one cheap REST call). reconcileTurnContent has prefix + length
+            // guards that make it a no-op when streaming was complete, so an
+            // unconditional trigger is safe and correct.
+            void reconcileTurnContent();
+        };
+
+        // Re-fetch the authoritative content for the just-completed turn and
+        // patch the last assistant message if it differs. Uses the turns table
+        // (history API) rather than raw message events: a TurnRecord.content is
+        // the complete, turn-scoped assistant text — no 4KB size-flush splits to
+        // re-stitch and no turn-boundary ambiguity across interleaved messages.
+        // The trade-off is write latency: captureAssistantTurn enqueues the
+        // record on done, but the collector flushes async (~1s batch interval),
+        // so the first fetch may miss it. We retry once after a short delay.
+        const reconcileTurnContent = async () => {
+            const sid = sessionIdRef.current;
+            if (!sid) return;
+            const fetchLastAssistantContent = async (): Promise<string | null> => {
+                // history returns ASC by id; the latest assistant turn (if any)
+                // is the last assistant record in the page. A small limit is
+                // enough — we only need the most recent turn.
+                const res = await getSessionHistory(sid, { limit: 5 });
+                for (let i = res.records.length - 1; i >= 0; i--) {
+                    const rec = res.records[i];
+                    if (rec.role === "assistant" && rec.content) {
+                        return rec.content;
+                    }
+                }
+                return null;
+            };
+            try {
+                let fullText = await fetchLastAssistantContent();
+                if (!fullText) {
+                    // Turn record may still be in the collector's async batch
+                    // buffer — wait past the flush interval (1s) + DB round-trip
+                    // margin and retry once.
+                    await new Promise((r) => setTimeout(r, 2000));
+                    if (cancelled) return;
+                    fullText = await fetchLastAssistantContent();
+                }
+                if (!fullText || cancelled) return;
+                const full = fullText; // const for closure narrowing (no `!` needed)
+                setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role !== "assistant") return prev;
+                    const currentText = concatTextParts(last.parts);
+                    // The streamed text must be a prefix of the authoritative
+                    // text — deltas are appended sequentially, so a dropped tail
+                    // means the authoritative version is the streamed prefix +
+                    // the missing suffix. If the prefix doesn't match, the
+                    // fetched record belongs to a DIFFERENT turn (collector
+                    // latency exceeded the retry, returning the previous turn's
+                    // record) — refuse to patch rather than overwrite with
+                    // wrong-turn content.
+                    if (currentText.length > 0 && !full.startsWith(currentText)) {
+                        return prev;
+                    }
+                    // Only patch if authoritative is longer (deltas really lost).
+                    if (full.length <= currentText.length) return prev;
+                    // Replace ALL text parts with the single authoritative text,
+                    // keeping the position of the first text part. A streaming
+                    // message can have interleaved [text, tool-call, text] parts
+                    // (text before and after a tool call). Patching only the
+                    // first text part would leave the trailing partial text part
+                    // in place, duplicating content. Collapse all text into one.
+                    const firstTextIdx = last.parts.findIndex((p) => p.type === "text");
+                    const nonTextParts: MessagePart[] = last.parts.filter((p) => p.type !== "text");
+                    const insertIdx = firstTextIdx === -1 ? 0 : firstTextIdx;
+                    const parts = [...nonTextParts];
+                    parts.splice(insertIdx, 0, { type: "text", text: full });
+                    return [...prev.slice(0, -1), { ...last, parts }];
+                });
+            } catch (err) {
+                logger.warn(
+                    "RuntimeAdapter",
+                    "Reconcile turn content failed",
+                    { error: String(err) },
+                );
             }
         };
 
@@ -1074,7 +1139,9 @@ export function useHotPlexRuntime({
             });
 
         return () => {
-            if (deltaRafId) cancelAnimationFrame(deltaRafId);
+            // Mark this effect instance as torn down so async paths
+            // (reconcileTurnContent) skip their setMessages after unmount.
+            cancelled = true;
             client.off("delta", handleDelta);
             client.off("message", handleMessage);
             client.off("done", handleDone);

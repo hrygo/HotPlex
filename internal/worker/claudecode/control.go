@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"sync"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
@@ -31,7 +32,10 @@ type ResponsePayload struct {
 
 // ControlHandler handles bidirectional control protocol.
 type ControlHandler struct {
-	mu              *sync.Mutex
+	mu        *sync.Mutex // stdin write lock (shared with Conn via SetWriteMu)
+	pendingMu sync.Mutex  // protects pendingRequests map only — distinct from
+	// mu so that map cleanup in SendControlRequest's error path can't deadlock
+	// against an orphaned stdin-write goroutine that holds mu.
 	log             *slog.Logger
 	stdin           io.Writer // CLI stdin
 	pendingRequests map[string]chan map[string]any
@@ -75,15 +79,24 @@ func (h *ControlHandler) HandlePayload(payload *ControlRequestPayload) (*WorkerE
 	}
 }
 
+// autoRespondCtx is the deadline for auto-generated control responses (auto
+// success / auto deny). These run inside the readOutput loop with no caller
+// ctx, so we bound them to avoid the loop stalling on a blocked stdin write.
+// Tighter than base.DefaultWriteTimeout (30s) because a stalled auto-respond
+// pins the entire stdout read loop, blocking all downstream event processing.
+const autoRespondCtx = 10 * time.Second
+
 // sendAutoSuccess sends a success response for auto-approved requests.
 func (h *ControlHandler) sendAutoSuccess(reqID string) error {
-	return h.sendResponse(reqID, map[string]any{"status": "ok"})
+	ctx, cancel := context.WithTimeout(context.Background(), autoRespondCtx)
+	defer cancel()
+	return h.sendResponse(ctx, reqID, map[string]any{"status": "ok"})
 }
 
 // sendResponse is the internal helper that constructs and sends the control_response
 // envelope, eliminating duplication between sendAutoSuccess and SendPermissionResponse.
-func (h *ControlHandler) sendResponse(reqID string, body map[string]any) error {
-	return h.SendResponse(&ControlResponse{
+func (h *ControlHandler) sendResponse(ctx context.Context, reqID string, body map[string]any) error {
+	return h.SendResponse(ctx, &ControlResponse{
 		Type: "control_response",
 		Response: ResponsePayload{
 			Subtype:   "success",
@@ -94,17 +107,25 @@ func (h *ControlHandler) sendResponse(reqID string, body map[string]any) error {
 }
 
 // SendResponse sends a control_response to Claude Code via stdin.
-func (h *ControlHandler) SendResponse(resp *ControlResponse) error {
+func (h *ControlHandler) SendResponse(ctx context.Context, resp *ControlResponse) error {
 	data, err := json.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("control: marshal response: %w", err)
 	}
 	data = append(data, '\n')
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, err = h.stdin.Write(data)
-	if err != nil {
+	// Lock inside the closure so an orphaned write (ctx cancelled while
+	// syscall.Write is blocked) keeps h.mu until the write completes,
+	// preventing concurrent writes on the shared stdin fd.
+	if err := base.WriteWithCtxBounded(ctx, func() error {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		_, e := h.stdin.Write(data)
+		return e
+	}); err != nil {
+		if base.IsDeadProcessError(err) {
+			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: err}
+		}
 		return fmt.Errorf("control: write response: %w", err)
 	}
 
@@ -113,16 +134,16 @@ func (h *ControlHandler) SendResponse(resp *ControlResponse) error {
 }
 
 // SendPermissionResponse sends a user's permission decision back to Claude Code.
-func (h *ControlHandler) SendPermissionResponse(reqID string, allowed bool, reason string) error {
-	return h.sendResponse(reqID, map[string]any{
+func (h *ControlHandler) SendPermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
+	return h.sendResponse(ctx, reqID, map[string]any{
 		"allowed": allowed,
 		"reason":  reason,
 	})
 }
 
 // SendQuestionResponse sends a user's answers to an AskUserQuestion back to Claude Code.
-func (h *ControlHandler) SendQuestionResponse(reqID string, answers map[string]string) error {
-	return h.sendResponse(reqID, map[string]any{
+func (h *ControlHandler) SendQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	return h.sendResponse(ctx, reqID, map[string]any{
 		"behavior": "allow",
 		"updatedInput": map[string]any{
 			"answers": answers,
@@ -131,8 +152,8 @@ func (h *ControlHandler) SendQuestionResponse(reqID string, answers map[string]s
 }
 
 // SendElicitationResponse sends a user's response to an MCP Elicitation back to Claude Code.
-func (h *ControlHandler) SendElicitationResponse(reqID, action string, content map[string]any) error {
-	return h.sendResponse(reqID, map[string]any{
+func (h *ControlHandler) SendElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
+	return h.sendResponse(ctx, reqID, map[string]any{
 		"action":  action,
 		"content": content,
 	})
@@ -154,26 +175,39 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 	data = append(data, '\n')
 
 	ch := make(chan map[string]any, 1)
-	h.mu.Lock()
+	// Register the pending entry under pendingMu (a separate lock from the
+	// stdin write lock h.mu) BEFORE issuing the write. This way:
+	//   - DeliverResponse (read side) takes pendingMu and finds the entry.
+	//   - The stdin write inside WriteWithCtxBounded takes only h.mu; if it
+	//     orphans (ctx cancelled, syscall.Write blocked), it holds h.mu but
+	//     NOT pendingMu — so error-cleanup below can still acquire pendingMu
+	//     to delete the stale entry without deadlocking.
+	h.pendingMu.Lock()
 	h.pendingRequests[reqID] = ch
-	_, err = h.stdin.Write(data)
-	h.mu.Unlock()
-	if err != nil {
-		// Cleanup on write failure: defer is set up only after the success path,
-		// so the stale pending entry must be removed before returning.
+	h.pendingMu.Unlock()
+
+	writeErr := base.WriteWithCtxBounded(ctx, func() error {
 		h.mu.Lock()
+		defer h.mu.Unlock()
+		_, e := h.stdin.Write(data)
+		return e
+	})
+	if writeErr != nil {
+		// Cleanup the stale pending entry. Safe: pendingMu is independent of
+		// h.mu (which the orphan may still hold).
+		h.pendingMu.Lock()
 		delete(h.pendingRequests, reqID)
-		h.mu.Unlock()
-		if base.IsDeadProcessError(err) {
-			return nil, &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: err}
+		h.pendingMu.Unlock()
+		if base.IsDeadProcessError(writeErr) {
+			return nil, &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: writeErr}
 		}
-		return nil, fmt.Errorf("control: write request: %w", err)
+		return nil, fmt.Errorf("control: write request: %w", writeErr)
 	}
 
 	defer func() {
-		h.mu.Lock()
+		h.pendingMu.Lock()
 		delete(h.pendingRequests, reqID)
-		h.mu.Unlock()
+		h.pendingMu.Unlock()
 		select {
 		case <-ch:
 		default:
@@ -205,8 +239,8 @@ func buildRequestBody(subtype string, body map[string]any) map[string]any {
 
 // DeliverResponse routes a control_response back to the pending SendControlRequest caller.
 func (h *ControlHandler) DeliverResponse(reqID string, resp map[string]any) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.pendingMu.Lock()
+	defer h.pendingMu.Unlock()
 
 	ch, ok := h.pendingRequests[reqID]
 	if !ok {

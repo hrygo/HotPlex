@@ -130,6 +130,20 @@ func (c *Conn) StdinLocked() (*os.File, *sync.Mutex) {
 	return c.stdin, &c.mu
 }
 
+// StdinUnlocked returns the stdin file and its protecting mutex without
+// locking. The caller MUST acquire the returned mutex before writing to stdin
+// (use WriteMu for the same lock). This is intended for the ctx-guarded write
+// pattern where the lock is taken inside a closure that may outlive the caller
+// (see base.WriteWithCtx): acquiring the lock at the call site would risk
+// releasing it via defer while the write goroutine is still in flight.
+//
+// The returned file is safe to read for nil-checking; concurrent Close may
+// set it to nil, so callers that need a stable snapshot should use StdinLocked
+// under the lock instead.
+func (c *Conn) StdinUnlocked() (*os.File, *sync.Mutex) {
+	return c.stdin, &c.mu
+}
+
 // SetLastInput records the content of the most recent user message.
 // Worker adapters should call this when they deliver user input through
 // protocol-specific channels, so the bridge crash recovery mechanism

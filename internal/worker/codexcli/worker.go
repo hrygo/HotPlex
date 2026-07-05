@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -239,8 +240,18 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		},
 	}
 
-	resp, err := w.manager.Call("turn/start", params)
+	resp, err := w.manager.Call(ctx, "turn/start", params)
 	if err != nil {
+		// A stalled stdin write (singleton writeMu held by orphan goroutine)
+		// wedges ALL codex sessions. Classify as Unavailable so the gateway
+		// kills the app-server process and unblocks the goroutine (EPIPE).
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return &worker.WorkerError{
+				Kind:    worker.ErrKindUnavailable,
+				Message: "codexcli: stdin write stalled (app-server not reading input)",
+				Cause:   err,
+			}
+		}
 		return fmt.Errorf("codexcli: turn/start: %w", err)
 	}
 
@@ -301,7 +312,7 @@ func (w *AppServerWorker) cleanupOldThread() {
 		_ = oldConn.Close()
 	}
 	if oldThreadID != "" && w.manager != nil {
-		_ = w.manager.Notify("thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
+		_ = w.manager.Notify(context.Background(), "thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
 		w.manager.Unsubscribe(oldThreadID)
 	}
 }
@@ -332,7 +343,7 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 	cfg := resolveConfig()
 	params := buildThreadStartParams(session, cfg)
 
-	resp, err := w.manager.Call("thread/start", params)
+	resp, err := w.manager.Call(context.Background(), "thread/start", params)
 	if err != nil {
 		w.mu.Lock()
 		w.closeAndMarkDone()
@@ -537,7 +548,7 @@ func (w *AppServerWorker) release() {
 	}
 
 	if mgr != nil && tid != "" {
-		_ = mgr.Notify("thread/unsubscribe", ThreadUnsubscribeParams{
+		_ = mgr.Notify(context.Background(), "thread/unsubscribe", ThreadUnsubscribeParams{
 			ThreadID: tid,
 		})
 		mgr.Unsubscribe(tid)
@@ -599,7 +610,7 @@ func (w *AppServerWorker) LastIO() time.Time {
 	return w.BaseWorker.LastIO()
 }
 
-func (w *AppServerWorker) HandlePermissionResponse(_ context.Context, reqID string, allowed bool, reason string) error {
+func (w *AppServerWorker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
 	decision := "decline"
 	if allowed {
 		decision = "accept"
@@ -608,7 +619,7 @@ func (w *AppServerWorker) HandlePermissionResponse(_ context.Context, reqID stri
 	if reason != "" {
 		result["reason"] = reason
 	}
-	return w.manager.RespondServerRequest(reqID, result)
+	return w.manager.RespondServerRequest(ctx, reqID, result)
 }
 
 func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
@@ -618,7 +629,7 @@ func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID stri
 			"answers": answers,
 		},
 	}
-	return w.manager.RespondServerRequest(reqID, result)
+	return w.manager.RespondServerRequest(ctx, reqID, result)
 }
 
 func (w *AppServerWorker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
@@ -626,7 +637,7 @@ func (w *AppServerWorker) HandleElicitationResponse(ctx context.Context, reqID, 
 		"action":  action,
 		"content": content,
 	}
-	return w.manager.RespondServerRequest(reqID, result)
+	return w.manager.RespondServerRequest(ctx, reqID, result)
 }
 
 func (w *AppServerWorker) Compact(ctx context.Context, args map[string]any) error {

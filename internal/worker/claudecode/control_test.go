@@ -112,7 +112,7 @@ func TestControlHandlerSendResponse(t *testing.T) {
 			Response:  map[string]any{"status": "ok"},
 		},
 	}
-	require.NoError(t, h.SendResponse(resp))
+	require.NoError(t, h.SendResponse(context.Background(), resp))
 
 	var parsed ControlResponse
 	require.NoError(t, json.Unmarshal(bytes.TrimSpace(lb.Bytes()), &parsed))
@@ -127,7 +127,7 @@ func TestControlHandlerSendPermissionResponse(t *testing.T) {
 	var lb lockedBuffer
 	h := NewControlHandler(slog.Default(), &lb)
 
-	require.NoError(t, h.SendPermissionResponse("req-002", true, "user approved"))
+	require.NoError(t, h.SendPermissionResponse(context.Background(), "req-002", true, "user approved"))
 
 	var parsed ControlResponse
 	require.NoError(t, json.Unmarshal(bytes.TrimSpace(lb.Bytes()), &parsed))
@@ -144,7 +144,7 @@ func TestControlHandlerSendQuestionResponse(t *testing.T) {
 	h := NewControlHandler(slog.Default(), &lb)
 
 	answers := map[string]string{"q1": "option_a"}
-	require.NoError(t, h.SendQuestionResponse("req-003", answers))
+	require.NoError(t, h.SendQuestionResponse(context.Background(), "req-003", answers))
 
 	var parsed ControlResponse
 	require.NoError(t, json.Unmarshal(bytes.TrimSpace(lb.Bytes()), &parsed))

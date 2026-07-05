@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -43,6 +45,7 @@
     "@types/react": "^19.2.15",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.9",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   }
 }

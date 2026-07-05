@@ -35,7 +35,7 @@ testutil/       # WebSocket mock helpers for tests
 - Run() loop: select on broadcast channel + ctx.Done()
 - broadcast chan *EnvelopeWithConn (buffered, size from config)
 - seqGen *SeqGen: per-session monotonic seq allocation
-- sessionDropped map: tracks delta drops per session
+- droppable events use trySendBroadcast (non-blocking); guaranteed events use sendBroadcast (blocks on ctx.Done)
 
 **Conn pumps (conn.go)**
 - ReadPump: reads WS frames, dispatches via Handler, defers cleanup
