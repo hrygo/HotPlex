@@ -619,6 +619,26 @@ type SecurityConfig struct {
 	// Defaults to "lax" to preserve same-origin webchat compatibility;
 	// cross-origin HTTPS deployments should set to "none".
 	CookieSameSite string `mapstructure:"cookie_same_site"`
+
+	// RateLimit configures per-API-key request rate limiting. Disabled by default
+	// (backward compatible); enable to protect the gateway from a single abusive
+	// or misconfigured client.
+	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+}
+
+// RateLimitConfig configures the per-API-key token-bucket rate limiter.
+// The zero value (Enabled=false) disables limiting entirely.
+type RateLimitConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// RequestsPerSec is the sustained refill rate: tokens added to each key's
+	// bucket per second.
+	RequestsPerSec float64 `mapstructure:"requests_per_sec"`
+	// Burst is the bucket capacity — the largest instantaneous spike a single key
+	// may send before being throttled to RequestsPerSec.
+	Burst int `mapstructure:"burst"`
+	// AdminKey, when set, bypasses rate limiting entirely (health probes,
+	// internal schedulers).
+	AdminKey string `mapstructure:"admin_key"`
 }
 
 // SessionConfig holds session lifecycle settings.

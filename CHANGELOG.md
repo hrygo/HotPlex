@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Security**: per-API-key rate limiting (`security.KeyRateLimiter`) — an opt-in
+  token-bucket limiter that caps how fast a single API key can drive the gateway.
+  Configure via `security.rate_limit` (`enabled`, `requests_per_sec`, `burst`,
+  `admin_key`); disabled by default (backward compatible). A throttled key is
+  rejected from `AuthenticateRequest` with `ErrRateLimited` (HTTP 429).
+
 ## [1.31.1] - 2026-07-03
 
 ### Summary

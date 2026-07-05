@@ -39,6 +39,7 @@ type Authenticator struct {
 	devModeLocked bool              // true once any key has existed; prevents dev mode re-enable
 	cookieAuth    *CookieAuth       // optional; HMAC cookie auth (3rd priority after header/query)
 	idp           IdentityProvider  // optional; account-login provider (LocalAccountProvider / future OAuth)
+	rateLimiter   *KeyRateLimiter   // optional; per-API-key token-bucket rate limiter. nil = unlimited
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -47,12 +48,17 @@ func NewAuthenticator(cfg *config.SecurityConfig) *Authenticator {
 	for _, k := range cfg.APIKeys {
 		hashes[sha256.Sum256([]byte(k))] = true
 	}
+	var rl *KeyRateLimiter
+	if cfg.RateLimit.Enabled {
+		rl = NewKeyRateLimiter(cfg.RateLimit)
+	}
 	return &Authenticator{
 		cfg:           cfg,
 		validKeyHash:  hashes,
 		dbKeyHash:     make(map[[32]byte]bool),
 		numValidKeys:  len(hashes),
 		devModeLocked: len(hashes) > 0,
+		rateLimiter:   rl,
 	}
 }
 
@@ -82,6 +88,10 @@ func (a *Authenticator) IdentityProvider() IdentityProvider {
 
 // ErrUnauthorized is returned when authentication fails.
 var ErrUnauthorized = errors.New("security: unauthorized")
+
+// ErrRateLimited is returned when a valid API key has exhausted its rate-limit
+// budget. Callers should map it to HTTP 429 Too Many Requests.
+var ErrRateLimited = errors.New("security: rate limit exceeded")
 
 // AuthenticateRequest validates the request's API key.
 // Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
@@ -115,6 +125,14 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if !a.authenticateKey(key) {
 		a.mu.RUnlock()
 		return "", "", ErrUnauthorized
+	}
+
+	// Per-key rate limiting (optional): a valid key that has exhausted its
+	// token bucket is rejected with ErrRateLimited so one client can't starve
+	// the gateway for everyone else.
+	if a.rateLimiter != nil && !a.rateLimiter.Allow(key) {
+		a.mu.RUnlock()
+		return "", "", ErrRateLimited
 	}
 
 	// Snapshot resolver under lock, then release before calling external resolver.
