@@ -1001,7 +1001,7 @@ func (m *CodexAppServerManager) sendEnvelope(ch chan *events.Envelope, env *even
 			m.log.Debug("codex-app-server: send on closed channel, subscriber gone")
 		}
 	}()
-	if env.Event.Type == events.MessageDelta {
+	if env.Event.Type == events.MessageDelta || env.Event.Type == events.Reasoning {
 		select {
 		case ch <- env:
 		default:

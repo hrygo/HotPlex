@@ -254,11 +254,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// Stats accumulation.
 	b.accumulateStats(env, w, opts, fc)
 
-	// Done processing: mark received, reconcile dropped deltas.
+	// Done processing: mark received.
 	if env.Event.Type == events.Done {
 		fc.doneReceived = true
 		b.resetCrashLoop(sessionID)
-		b.reconcileDroppedDeltas(env, fc)
 		// Messaging sessions transition to IDLE on turn completion (Fix A,
 		// issue #815): otherwise they stay RUNNING and get reaped by the 30m
 		// zombie ExecutionTimeout, forcing codex into a fresh-start that loses
@@ -463,28 +462,6 @@ func (b *Bridge) maybeTransitionIdleAfterDone(sessionID string, fc *forwardConte
 	if err := b.sm.Transition(context.Background(), sessionID, events.StateIdle); err != nil {
 		b.log.Debug("bridge: post-done transition to idle rejected",
 			"session_id", sessionID, "platform", fc.sessPlatform, "err", err)
-	}
-}
-
-// reconcileDroppedDeltas marks the done event when deltas were dropped under backpressure.
-func (b *Bridge) reconcileDroppedDeltas(env *events.Envelope, fc *forwardContext) {
-	if !b.hub.GetAndClearDropped(fc.sessionID) {
-		return
-	}
-	b.log.Warn("bridge: handling dropped deltas before done", "session_id", fc.sessionID, "worker_type", fc.workerType)
-
-	if dataMap, ok := env.Event.Data.(map[string]any); ok {
-		if stats, ok := dataMap["stats"].(map[string]any); ok {
-			stats["dropped"] = true
-		} else {
-			dataMap["stats"] = map[string]any{"dropped": true}
-		}
-	} else if doneData, ok := env.Event.Data.(events.DoneData); ok {
-		doneData.Dropped = true
-		env.Event.Data = doneData
-	} else if doneDataPtr, ok := env.Event.Data.(*events.DoneData); ok {
-		doneDataPtr.Dropped = true
-		env.Event.Data = doneDataPtr
 	}
 }
 

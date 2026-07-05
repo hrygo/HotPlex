@@ -34,11 +34,14 @@ func isReadTimeout(err error) bool {
 	return errors.Is(err, os.ErrDeadlineExceeded)
 }
 
-// isDroppable reports whether an event kind can be dropped under backpressure.
-// Note: Reasoning is NOT droppable — see opencodeserver.singleton.isDroppable for rationale.
+// isDroppable reports whether an event kind can be silently dropped under
+// backpressure. All streaming-append content (text delta, reasoning, raw) is
+// droppable — losing a few frames only affects streaming cosmetics; the
+// authoritative turns table is the source of truth and reconciles on done.
+// Non-droppable events (state/done/error/...) use guaranteed delivery.
 // Keep in sync with: opencodeserver.singleton.isDroppable, acp.conn.isDroppable.
 func isDroppable(kind events.Kind) bool {
-	return kind == events.MessageDelta || kind == events.Raw
+	return kind == events.MessageDelta || kind == events.Reasoning || kind == events.Raw
 }
 
 // broadcastQueueSize returns the broadcast channel buffer size from config.
@@ -105,8 +108,6 @@ type Hub struct {
 
 	// Sequence generation per session
 	seqGen *SeqGen
-	// Backpressure drop tracking per session
-	sessionDropped map[string]bool
 
 	// Shutdown signals.
 	ctx    context.Context
@@ -141,17 +142,16 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 	cfg := cfgStore.Load()
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Hub{
-		log:            log,
-		cfgStore:       cfgStore,
-		conns:          make(map[*Conn]struct{}),
-		sessions:       make(map[string]map[SessionWriter]bool),
-		everHadConn:    make(map[string]bool),
-		seqGen:         NewSeqGen(),
-		sessionDropped: make(map[string]bool),
-		broadcast:      make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
-		ctx:            ctx,
-		cancel:         cancel,
-		InitThrottle:   newHandshakeThrottle(),
+		log:          log,
+		cfgStore:     cfgStore,
+		conns:        make(map[*Conn]struct{}),
+		sessions:     make(map[string]map[SessionWriter]bool),
+		everHadConn:  make(map[string]bool),
+		seqGen:       NewSeqGen(),
+		broadcast:    make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
+		ctx:          ctx,
+		cancel:       cancel,
+		InitThrottle: newHandshakeThrottle(),
 	}
 
 	h.upgrader = websocket.Upgrader{
@@ -188,8 +188,8 @@ func (h *Hub) RegisterConn(conn *Conn) {
 }
 
 // UnregisterConn removes a connection and cleans up session mappings.
-// Session-level entries (seqGen, sessionDropped) are cleaned up when a session
-// has no remaining connections.
+// Session-level entries (seqGen) are cleaned up when a session has no
+// remaining connections.
 func (h *Hub) UnregisterConn(conn *Conn) {
 	h.mu.Lock()
 	delete(h.conns, conn)
@@ -235,8 +235,8 @@ func (h *Hub) JoinSession(sessionID string, conn *Conn) {
 }
 
 // LeaveSession unsubscribes conn from a session.
-// If the session has no remaining connections, session-level entries (seqGen,
-// sessionDropped) are cleaned up to prevent memory leaks.
+// If the session has no remaining connections, session-level entries (seqGen)
+// are cleaned up to prevent memory leaks.
 func (h *Hub) LeaveSession(sessionID string, conn *Conn) {
 	h.mu.Lock()
 	h.removeSession(sessionID, conn)
@@ -250,7 +250,6 @@ func (h *Hub) removeSession(sessionID string, conn SessionWriter) {
 		delete(conns, conn)
 		if len(conns) == 0 {
 			delete(h.sessions, sessionID)
-			delete(h.sessionDropped, sessionID)
 			delete(h.everHadConn, sessionID)
 			h.seqGen.Remove(sessionID)
 		}
@@ -302,11 +301,29 @@ func (h *Hub) JoinPlatformSession(sessionID string, pc messaging.PlatformConn) {
 // sendBroadcast sends to the broadcast channel. Returns false if the hub is
 // shutting down (ctx cancelled). Uses select with ctx.Done() instead of
 // close(channel)+recover() to avoid the send-on-closed-channel data race.
+//
+// Used for guaranteed-delivery events (state/done/error/...). Never use this
+// for droppable events — a full broadcast channel would block Hub.Run and
+// cascade backpressure to unrelated sessions. Use trySendBroadcast instead.
 func (h *Hub) sendBroadcast(msg *EnvelopeWithConn) (sent bool) {
 	select {
 	case h.broadcast <- msg:
 		return true
 	case <-h.ctx.Done():
+		return false
+	}
+}
+
+// trySendBroadcast sends to the broadcast channel without blocking. Returns
+// false immediately if the channel is full. Used for droppable events
+// (message.delta/reasoning/raw) so a slow session cannot stall Hub.Run and
+// cause cross-session delta loss. The dropped delta is cosmetic — the UI
+// reconciles against the authoritative turns table on done.
+func (h *Hub) trySendBroadcast(msg *EnvelopeWithConn) (sent bool) {
+	select {
+	case h.broadcast <- msg:
+		return true
+	default:
 		return false
 	}
 }
@@ -366,13 +383,13 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 	// before calling SendToSession, so this is a bridge-owned copy. The Hub.Run
 	// goroutine reads it from the channel for routing without mutation.
 	if isDroppable(env.Event.Type) {
-		if h.sendBroadcast(&EnvelopeWithConn{Env: env, afterDrain: afterDrainCallback}) {
+		// Non-blocking send — droppable events must never stall Hub.Run.
+		// A full broadcast channel means a slow consumer is already being
+		// protected at the per-conn writeCh layer; dropping here is the
+		// intended backpressure semantics. The UI self-heals on done.
+		if h.trySendBroadcast(&EnvelopeWithConn{Env: env, afterDrain: afterDrainCallback}) {
 			return nil
 		}
-		// sendBroadcast returned false = channel closed; drop delta silently.
-		h.mu.Lock()
-		h.sessionDropped[env.SessionID] = true
-		h.mu.Unlock()
 		observability.GatewayDeltasDropped().Add(context.Background(), 1)
 		return nil
 	}
@@ -612,41 +629,6 @@ func (h *Hub) ConnectionsOpen() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.conns)
-}
-
-// GetAndClearDropped returns true if the session experienced any message.delta drops
-// since the last time this method was called, and clears the dropped flag.
-func (h *Hub) GetAndClearDropped(sessionID string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	dropped := h.sessionDropped[sessionID]
-	if dropped {
-		delete(h.sessionDropped, sessionID)
-	}
-	return dropped
-}
-
-// MarkDropped records that the session experienced a message.delta drop under
-// backpressure (e.g. a slow client's writeCh filled). Safe to call from hot
-// paths — the common case (session already marked) takes only an RLock via a
-// fast-path check, so a burst of drops on the same session locks at most once
-// per turn. The flag is consumed and cleared by GetAndClearDropped at turn end
-// so reconcileDroppedDeltas can annotate the done event with Dropped=true,
-// letting the client fetch authoritative content from the event store.
-func (h *Hub) MarkDropped(sessionID string) {
-	// Fast path: if already marked for this session, nothing to do. RLock is
-	// cheaper than Lock and lets concurrent droppers on different sessions
-	// proceed in parallel.
-	h.mu.RLock()
-	if h.sessionDropped[sessionID] {
-		h.mu.RUnlock()
-		return
-	}
-	h.mu.RUnlock()
-
-	h.mu.Lock()
-	h.sessionDropped[sessionID] = true
-	h.mu.Unlock()
 }
 
 // Shutdown gracefully shuts down all connections and stops the hub.

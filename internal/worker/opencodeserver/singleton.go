@@ -757,16 +757,11 @@ var (
 const criticalEventSendTimeout = 5 * time.Second
 
 // isDroppable reports whether an event kind can be silently dropped under
-// backpressure (same logic as gateway/hub.go isDroppable).
-//
-// Reasoning is intentionally NOT droppable: chain-of-thought content is
-// user-visible and may be the only output for reasoning-heavy tasks.
-// Dropping it would silently lose substantive work product. If sustained
-// backpressure makes Reasoning delta delivery a bottleneck, the fix is
-// to coalesce deltas server-side (like MessageDelta aggregation), not to
-// drop them.
+// backpressure. All streaming-append content (text delta, reasoning, raw) is
+// droppable; the authoritative turns table reconciles on done.
+// Keep in sync with gateway/hub.go isDroppable and acp/conn.go isDroppable.
 func isDroppable(kind events.Kind) bool {
-	return kind == events.MessageDelta || kind == events.Raw
+	return kind == events.MessageDelta || kind == events.Reasoning || kind == events.Raw
 }
 
 // closeAllSubscribers closes and removes all subscriber channels.

@@ -407,7 +407,7 @@ export function useHotPlexRuntime({
         if (allowedTools.length > 0) initConfig.allowed_tools = allowedTools;
 
         // Guard against setState after the effect cleans up (session switch /
-        // remount). Async paths like reconcileDroppedTurn fetch then setMessages
+        // remount). Async paths like reconcileTurnContent fetch then setMessages
         // — without this flag they'd write into the unmounted hook's state.
         let cancelled = false;
 
@@ -458,36 +458,14 @@ export function useHotPlexRuntime({
             });
         };
 
-        // Delta batcher — accumulate streaming deltas and flush once per animation frame
-        // to reduce React re-renders from 30-60/s to at most 60fps (1 per frame).
-        let pendingDelta = "";
-        let deltaRafId = 0;
-
-        const flushDelta = () => {
-            const content = pendingDelta;
-            pendingDelta = "";
-            deltaRafId = 0;
-            if (content) {
-                appendDelta(content);
-            }
-        };
-
-        // Flush any buffered delta synchronously. Must be called at every turn
-        // terminus (done/error/message/cleanup) so content received since the
-        // last animation frame is committed to state before the message is
-        // finalized or the subscription is torn down. Without this, deltas
-        // arriving in the same frame as a done/error/cleanup are lost.
-        const flushPendingDelta = () => {
-            if (deltaRafId) {
-                cancelAnimationFrame(deltaRafId);
-                deltaRafId = 0;
-            }
-            if (pendingDelta) {
-                const content = pendingDelta;
-                pendingDelta = "";
-                appendDelta(content);
-            }
-        };
+        // Note: deltas are committed synchronously in handleDelta. React 18
+        // automatic batching coalesces multiple setMessages within the same
+        // microtask, so per-delta re-renders are already batched without
+        // requestAnimationFrame. RAF was previously used here but was removed:
+        // browsers throttle/pause RAF in background tabs, which caused deltas
+        // to accumulate unbounded in memory while flush callbacks never fired,
+        // losing the streamed tail when the WebSocket was paused by the page
+        // visibility policy. Synchronous commits have no such failure mode.
 
         // Handle reasoning/thinking content (appends to last reasoning part or creates one)
         const handleReasoning = (data: ReasoningData, _env: Envelope) => {
@@ -525,16 +503,11 @@ export function useHotPlexRuntime({
 
         const handleDelta = (data: MessageDeltaData, _env: Envelope) => {
             if (!data) return;
-            pendingDelta += data.content || "";
-            if (!deltaRafId) {
-                deltaRafId = requestAnimationFrame(flushDelta);
-            }
+            // Synchronous commit — no RAF batching (see note above appendDelta).
+            appendDelta(data.content || "");
         };
 
         const handleMessage = (data: MessageData, env: Envelope) => {
-            // Commit any buffered deltas before the full message overwrites the
-            // streaming content, so the final state reflects the complete text.
-            flushPendingDelta();
             const role: "user" | "assistant" =
                 data?.role === "user" ? "user" : "assistant";
             logger.debug("RuntimeAdapter", "message received", {
@@ -638,8 +611,6 @@ export function useHotPlexRuntime({
         };
 
         const handleDone = (data: DoneData, _env: Envelope) => {
-            // Finalize any buffered deltas before marking the turn complete.
-            flushPendingDelta();
             streamingFallbackId = null;
 
             if (data?.stats) {
@@ -679,14 +650,14 @@ export function useHotPlexRuntime({
                 }
             }
 
-            // Backpressure reconciliation: when the server flags the done event
-            // with dropped === true (top-level DoneData.dropped, set by
-            // reconcileDroppedDeltas when deltas were silently dropped under
-            // backpressure), the streamed text may be incomplete. Fetch the
-            // events and replace the last assistant message's text with it.
-            if (data?.dropped) {
-                void reconcileDroppedTurn();
-            }
+            // Unconditionally reconcile against the authoritative turns table.
+            // The server no longer annotates done with a dropped flag — that
+            // cross-layer marker protocol was removed as over-engineering (it
+            // had three P1 regressions and its only purpose was to save this
+            // one cheap REST call). reconcileTurnContent has prefix + length
+            // guards that make it a no-op when streaming was complete, so an
+            // unconditional trigger is safe and correct.
+            void reconcileTurnContent();
         };
 
         // Re-fetch the authoritative content for the just-completed turn and
@@ -697,7 +668,7 @@ export function useHotPlexRuntime({
         // The trade-off is write latency: captureAssistantTurn enqueues the
         // record on done, but the collector flushes async (~1s batch interval),
         // so the first fetch may miss it. We retry once after a short delay.
-        const reconcileDroppedTurn = async () => {
+        const reconcileTurnContent = async () => {
             const sid = sessionIdRef.current;
             if (!sid) return;
             const fetchLastAssistantContent = async (): Promise<string | null> => {
@@ -758,15 +729,13 @@ export function useHotPlexRuntime({
             } catch (err) {
                 logger.warn(
                     "RuntimeAdapter",
-                    "Reconcile dropped turn failed",
+                    "Reconcile turn content failed",
                     { error: String(err) },
                 );
             }
         };
 
         const handleError = (data: ErrorData, env: Envelope) => {
-            // Commit buffered deltas before any error branch finalizes the run.
-            flushPendingDelta();
             const isBusy = (data?.code as string) === "SESSION_BUSY";
             const isResumeRetry = (data?.code as string) === "RESUME_RETRY";
             const isShutdown = (data?.message || "").includes(
@@ -1170,13 +1139,8 @@ export function useHotPlexRuntime({
             });
 
         return () => {
-            // Flush FIRST, before marking cancelled: the flush's setMessages
-            // must land on the still-mounted hook instance to preserve the
-            // streaming tail. Setting cancelled first would make the flush a
-            // no-op on an unmounting component, losing the tail content.
-            flushPendingDelta();
             // Mark this effect instance as torn down so async paths
-            // (reconcileDroppedTurn) skip their setMessages after unmount.
+            // (reconcileTurnContent) skip their setMessages after unmount.
             cancelled = true;
             client.off("delta", handleDelta);
             client.off("message", handleMessage);

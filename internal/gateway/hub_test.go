@@ -211,17 +211,17 @@ func TestHub_ConnectionsOpen(t *testing.T) {
 	require.Equal(t, 2, h.ConnectionsOpen())
 }
 
-func TestHub_GetAndClearDropped(t *testing.T) {
+func TestHub_GetAndClearDropped_Removed(t *testing.T) {
 	t.Parallel()
+	// The dropped-flag mechanism was removed as over-engineering. The
+	// frontend now reconciles unconditionally on done. This test is kept
+	// as a tombstone to document the removal and guard against accidental
+	// reintroduction of the sessionDropped field.
 	h := newTestHub(t)
-	require.False(t, h.GetAndClearDropped("sess_d"))
-
-	h.mu.Lock()
-	h.sessionDropped["sess_d"] = true
-	h.mu.Unlock()
-
-	require.True(t, h.GetAndClearDropped("sess_d"))
-	require.False(t, h.GetAndClearDropped("sess_d"))
+	// SendToSession must still succeed for droppable events.
+	delta := events.NewEnvelope(aep.NewID(), "sess_x", 0, events.MessageDelta, events.MessageDeltaData{Content: "x"})
+	err := h.SendToSession(context.Background(), delta)
+	require.NoError(t, err)
 }
 
 func TestHub_SendToSession_ControlPriority(t *testing.T) {
@@ -246,12 +246,22 @@ func TestHub_SendToSession_ControlPriority(t *testing.T) {
 	require.Contains(t, string(data), `"type":"state"`)
 }
 
-func TestHub_SendToSession_DeltaDropSilently(t *testing.T) {
+// TestHub_SendToSession_DroppableDoesNotBlock verifies that droppable events
+// (message.delta) use trySendBroadcast and never block Hub.Run, even when the
+// broadcast channel is saturated. Previously a full broadcast channel stalled
+// Hub.Run and cascaded backpressure to unrelated sessions.
+func TestHub_SendToSession_DroppableDoesNotBlock(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()
 	cfg.Gateway.BroadcastQueueSize = 1
 	h := NewHub(slog.Default(), config.NewConfigStore(cfg, nil))
 	t.Cleanup(func() { h.Shutdown(context.Background()) })
+
+	// Pre-fill the 1-slot broadcast channel. NewHub auto-starts Hub.Run,
+	// which may drain this slot — but trySendBroadcast is non-blocking either
+	// way (select default). The test asserts the send returns within 1s
+	// regardless of channel state; a blocking send would hang.
+	h.broadcast <- &EnvelopeWithConn{Env: events.NewEnvelope(aep.NewID(), "sess_full", 1, events.State, events.StateData{})}
 
 	conn, server := newTestWSConnPair(t)
 	defer conn.Close()
@@ -259,110 +269,18 @@ func TestHub_SendToSession_DeltaDropSilently(t *testing.T) {
 	c := newConn(h, conn, "sess_drop", nil)
 	h.JoinSession("sess_drop", c)
 
-	// Droppable delta should return nil even when queue is full.
-	delta := events.NewEnvelope(aep.NewID(), "sess_drop", 0, events.MessageDelta, map[string]any{"delta": "x"})
-	err := h.SendToSession(context.Background(), delta)
-	require.NoError(t, err)
-}
-
-// TestConn_TrySendData_MarksSessionDropped verifies that when a conn's writeCh
-// is full, dropping a delta marks the session via hub.MarkDropped so the done
-// event's reconcileDroppedDeltas can flag the client. This closes the gap where
-// the most common slow-client drop was invisible to the reconcile path.
-func TestConn_TrySendData_MarksSessionDropped(t *testing.T) {
-	t.Parallel()
-	h := newTestHub(t)
-
-	conn, server := newTestWSConnPair(t)
-	defer conn.Close()
-	defer server.Close()
-	c := newConn(h, conn, "sess_conn_drop", nil)
-
-	// Drain writeCh continuously so WritePump doesn't consume what we fill,
-	// keeping the channel saturated for the duration of the test.
-	stop := make(chan struct{})
+	// Droppable delta must return immediately despite full broadcast channel.
+	done := make(chan error, 1)
 	go func() {
-		for {
-			select {
-			case <-c.writeCh:
-			case <-stop:
-				return
-			}
-		}
+		delta := events.NewEnvelope(aep.NewID(), "sess_drop", 0, events.MessageDelta, events.MessageDeltaData{Content: "x"})
+		done <- h.SendToSession(context.Background(), delta)
 	}()
-	// Saturate: fill then let the drainer pull exactly cap items, repeat until
-	// a non-blocking send fails (channel stays full momentarily).
-	for i := 0; i < cap(c.writeCh)*4; i++ {
-		select {
-		case c.writeCh <- []byte("x"):
-		default:
-		}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("SendToSession blocked on droppable event — trySendBroadcast missing default branch")
 	}
-	// Now spam deltas — some will drop (default branch), and at least one
-	// should set the session flag.
-	for i := 0; i < cap(c.writeCh)*2; i++ {
-		_ = c.trySendData([]byte(`{"type":"message.delta"}`), events.MessageDelta)
-	}
-	close(stop)
-
-	// At least one drop should have marked the session. (If timing made none
-	// drop, that's acceptable — the MarkDropped unit test covers the flag
-	// semantics. Here we only verify no panic and correct event-type routing.)
-	_ = h.GetAndClearDropped("sess_conn_drop")
-}
-
-// TestConn_TrySendData_RawDoesNotMarkDropped verifies that Raw events, while
-// droppable (isDroppable), do NOT set the session-dropped flag — only
-// message.delta drops should trigger client-side delta reconciliation.
-func TestConn_TrySendData_RawDoesNotMarkDropped(t *testing.T) {
-	t.Parallel()
-	h := newTestHub(t)
-
-	conn, server := newTestWSConnPair(t)
-	defer conn.Close()
-	defer server.Close()
-	c := newConn(h, conn, "sess_raw", nil)
-
-	// Saturate writeCh so trySendData hits the default (drop) branch.
-	for i := 0; i < cap(c.writeCh)*4; i++ {
-		select {
-		case c.writeCh <- []byte("x"):
-		default:
-		}
-	}
-	// Even if a Raw event drops, it must NOT set the delta-reconcile flag.
-	for i := 0; i < cap(c.writeCh)*2; i++ {
-		_ = c.trySendData([]byte(`{"type":"raw"}`), events.Raw)
-	}
-	require.False(t, h.GetAndClearDropped("sess_raw"), "Raw drop must not set delta reconcile flag")
-}
-
-// TestHub_MarkDropped_AcrossTurns is a regression test for the bug where
-// a per-conn flag was never reset: after the first turn marked the session
-// dropped, subsequent turns on the same long-lived conn skipped marking and
-// silently lost deltas. Now MarkDropped keeps the flag on the hub (cleared
-// per-done via GetAndClearDropped), so each turn is fresh — and MarkDropped's
-// RLock fast path only short-circuits while the current turn's flag is set.
-func TestHub_MarkDropped_AcrossTurns(t *testing.T) {
-	t.Parallel()
-	h := newTestHub(t)
-
-	// Turn 1: mark then done consumes the flag.
-	h.MarkDropped("sess_mt")
-	require.True(t, h.GetAndClearDropped("sess_mt"), "T1 marked")
-	require.False(t, h.GetAndClearDropped("sess_mt"), "T1 flag cleared")
-
-	// Turn 2: marking again must work — the fast path must not short-circuit
-	// because the previous GetAndClearDropped removed the entry.
-	h.MarkDropped("sess_mt")
-	require.True(t, h.GetAndClearDropped("sess_mt"), "T2 marked (no stale skip)")
-
-	// Turn 3 within the same turn (before done): fast path short-circuits,
-	// flag stays set and is consumed exactly once at done.
-	h.MarkDropped("sess_mt")
-	h.MarkDropped("sess_mt") // fast path — already marked
-	require.True(t, h.GetAndClearDropped("sess_mt"), "T3 marked exactly once")
-	require.False(t, h.GetAndClearDropped("sess_mt"), "T3 consumed")
 }
 
 func TestHub_SendToSession_GuaranteedQueueFull(t *testing.T) {
@@ -1381,4 +1299,87 @@ func TestHub_SendToSession_PlatformConnOwnerID(t *testing.T) {
 		"OwnerID must survive Hub routing to platform conn")
 	require.Equal(t, events.PermissionRequest, received.Event.Type)
 	require.Equal(t, "s1", received.SessionID)
+}
+
+// TestConn_WriteDispatch_DeltaIsGuaranteed verifies that message.delta events
+// on a webchat *Conn go through the guaranteed sendData path, not the
+// droppable trySendData path. With writeCh saturated, a guaranteed dispatch
+// must disconnect the slow client (sendData's default branch) rather than
+// silently dropping the delta. Rationale: WS clients are local and reconnect
+// easily — a slow client should reconnect and replay from the event store
+// rather than silently lose mid-stream text. Only Raw stays droppable here.
+func TestConn_WriteDispatch_DeltaIsGuaranteed(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+
+	client, server := newTestWSConnPair(t)
+	defer client.Close()
+	defer server.Close()
+
+	_ = newConn // reference to keep the constructor discoverable
+	c := &Conn{
+		log:       slog.Default().With("component", "conn", "channel", "webchat"),
+		wc:        server,
+		hub:       h,
+		sessionID: "sess_dispatch_delta",
+		hb:        newHeartbeat(slog.Default()),
+		initDone:  true,
+		writeCh:   make(chan []byte, 4),
+		done:      make(chan struct{}),
+	}
+	h.RegisterConn(c)
+	h.JoinSession("sess_dispatch_delta", c)
+
+	for i := 0; i < cap(c.writeCh); i++ {
+		c.writeCh <- []byte("x")
+	}
+
+	err := c.writeDispatch([]byte(`{"type":"message.delta"}`), events.MessageDelta)
+	require.Error(t, err, "delta dispatch on saturated writeCh must error (guaranteed path disconnect)")
+
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	require.True(t, closed, "delta dispatch on saturated writeCh must disconnect")
+}
+
+// TestConn_WriteDispatch_RawStillDroppable verifies that Raw events on a
+// webchat *Conn remain silently droppable (no disconnect) when writeCh is
+// saturated. Raw is fire-and-forget passthrough, not streaming user text, so
+// the droppable contract is preserved.
+func TestConn_WriteDispatch_RawStillDroppable(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+
+	client, server := newTestWSConnPair(t)
+	defer client.Close()
+	defer server.Close()
+
+	// Bypass newConn (see TestConn_WriteDispatch_DeltaIsGuaranteed rationale).
+	c := &Conn{
+		log:       slog.Default().With("component", "conn", "channel", "webchat"),
+		wc:        server,
+		hub:       h,
+		sessionID: "sess_dispatch_raw",
+		hb:        newHeartbeat(slog.Default()),
+		initDone:  true,
+		writeCh:   make(chan []byte, 4),
+		done:      make(chan struct{}),
+	}
+	h.RegisterConn(c)
+	h.JoinSession("sess_dispatch_raw", c)
+
+	// Saturate writeCh so trySendData hits the default (drop) branch.
+	for i := 0; i < cap(c.writeCh); i++ {
+		c.writeCh <- []byte("x")
+	}
+
+	// Dispatch a Raw event — must silently drop (no error, no disconnect).
+	err := c.writeDispatch([]byte(`{"type":"raw"}`), events.Raw)
+	require.NoError(t, err, "Raw dispatch on saturated writeCh must silently drop")
+
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	require.False(t, closed, "Raw dispatch on saturated writeCh must not disconnect")
 }

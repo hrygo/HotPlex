@@ -1370,52 +1370,6 @@ func TestBridge_ForwardEvents_NormalEvent(t *testing.T) {
 	<-done
 }
 
-// TestBridge_ForwardEvents_DoneWithDroppedFlag verifies that when dropped deltas
-// were recorded, the Done event carries dropped=true in stats.
-func TestBridge_ForwardEvents_DoneWithDroppedFlag(t *testing.T) {
-	t.Parallel()
-
-	ch := make(chan *events.Envelope, 1)
-	doneEnv := events.NewEnvelope(aep.NewID(), "", 0, events.Done, events.DoneData{Success: true})
-	ch <- doneEnv
-	close(ch)
-
-	fw := &mockBridgeWorker{
-		workerType: worker.TypeClaudeCode,
-		conn:       &fakeWorkerConn{ch: ch},
-	}
-
-	h := newTestHub(t)
-	conn, server := newTestWSConnPair(t)
-	defer conn.Close()
-	defer server.Close()
-	c := newConn(h, conn, "sess_drop", nil)
-	h.JoinSession("sess_drop", c)
-
-	// Mark deltas as dropped before calling forwardEvents.
-	h.mu.Lock()
-	h.sessionDropped["sess_drop"] = true
-	h.mu.Unlock()
-
-	_, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
-	done := make(chan struct{})
-	go func() {
-		b.forwardEvents(fw, "sess_drop", forwardOpts{})
-		close(done)
-	}()
-
-	_ = server.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, data, err := server.ReadMessage()
-	require.NoError(t, err, "forwardEvents should have sent the done event")
-	require.Contains(t, string(data), `"type":"done"`)
-	require.Contains(t, string(data), `"dropped":true`)
-
-	<-done
-}
-
 // TestBridge_ForwardEvents_CrashExitCode verifies that a non-zero worker exit
 // code causes a crash done event to be sent to the hub.
 func TestBridge_ForwardEvents_CrashExitCode(t *testing.T) {

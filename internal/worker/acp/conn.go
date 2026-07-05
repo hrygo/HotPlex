@@ -73,10 +73,12 @@ func (c *acpConn) TrySend(env *events.Envelope) bool {
 	return c.safeSend(env)
 }
 
-// isDroppable reports whether an event type can be silently discarded under backpressure.
+// isDroppable reports whether an event type can be silently discarded under
+// backpressure. All streaming-append content (text delta, reasoning, raw) is
+// droppable; the authoritative turns table reconciles on done.
 // Keep in sync with: gateway/hub.isDroppable, opencodeserver.singleton.isDroppable.
 func isDroppable(kind events.Kind) bool {
-	return kind == events.MessageDelta || kind == events.Raw
+	return kind == events.MessageDelta || kind == events.Reasoning || kind == events.Raw
 }
 
 // trySendNonBlocking attempts a non-blocking send with panic recovery.

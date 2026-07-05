@@ -91,6 +91,13 @@ type Conn struct {
 	// sends pre-encoded messages to writeCh (non-blocking); WritePump drains
 	// and writes to the WebSocket. Prevents head-of-line blocking where one
 	// slow client blocks all sessions for up to writeWait (10s).
+	//
+	// Buffer size 256: deltas are committed synchronously (no RAF batching —
+	// browser-throttled APIs in background tabs caused unbounded accumulation
+	// and tail loss). Synchronous commits mean every delta hits writeCh
+	// individually; the larger buffer absorbs per-delta bursts that the
+	// previous ≤60fps frame coalescer smoothed. Do not reduce without
+	// re-introducing client-side batching that is safe in background tabs.
 	writeCh chan []byte
 
 	done chan struct{}
@@ -110,7 +117,7 @@ func newConn(hub *Hub, wc *websocket.Conn, sessionID string, starter SessionStar
 		sessionID: sessionID,
 		hb:        newHeartbeat(log),
 		initDone:  true, // true by default; performInit sets false during handshake
-		writeCh:   make(chan []byte, 64),
+		writeCh:   make(chan []byte, 256),
 		done:      make(chan struct{}),
 	}
 	// Start the write pump immediately so WriteCtx/WriteMessage deliver data.
@@ -777,13 +784,20 @@ func (c *Conn) RouteWriteData(data []byte, eventType events.Kind) error {
 
 // writeDispatch is the shared write-path for both RouteWrite and RouteWriteData.
 // It handles metrics, init-phase buffering, and droppable vs reliable dispatch.
+//
+// *Conn is always webchat. webchat deltas are delivered via the guaranteed
+// path (sendData): WS clients are local and a drop is silent data loss with
+// no recovery signal — a slow client should be disconnected (and reconnect)
+// rather than lose mid-stream text. Only Raw remains droppable here, since it
+// is a fire-and-forget passthrough, not streaming user text. Platform (feishu/
+// slack) deltas stay droppable via their own pcEntry.WriteCtx path.
 func (c *Conn) writeDispatch(data []byte, eventType events.Kind) error {
 	observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "outgoing"), attribute.String("event_type", string(eventType))))
 	if handled, err := c.bufferOrReject(data); handled {
 		return err
 	}
-	if isDroppable(eventType) {
-		return c.trySendData(data, eventType)
+	if eventType == events.Raw {
+		return c.trySendData(data)
 	}
 	return c.sendData(data)
 }
@@ -803,22 +817,15 @@ func (c *Conn) sendData(data []byte) error {
 }
 
 // trySendData attempts to write pre-encoded data without blocking.
-// Silently drops the message if the channel is full (for droppable events).
-// On drop it marks the session so reconcileDroppedDeltas can flag the done
-// event, letting the client reconcile from the authoritative event store.
-// Only message.delta drops set the reconcile flag — Raw events are droppable
-// too (isDroppable) but are not streaming text, so flagging them would
-// mislead the client into a spurious delta reconcile.
-// MarkDropped has a session-level fast path, so a burst of drops on the same
-// session locks hub.mu at most once per turn (the entry is cleared on done).
-func (c *Conn) trySendData(data []byte, eventType events.Kind) error {
+// Silently drops the message if the channel is full (for Raw events on
+// webchat — fire-and-forget passthrough). Platform deltas stay droppable
+// via their own pcEntry.WriteCtx path; webchat deltas use the guaranteed
+// sendData path (slow client disconnects and replays from the event store).
+func (c *Conn) trySendData(data []byte) error {
 	select {
 	case c.writeCh <- data:
 		return nil
 	default:
-		if c.hub != nil && eventType == events.MessageDelta {
-			c.hub.MarkDropped(c.sessionID)
-		}
 		observability.GatewayDeltasDropped().Add(c.hub.ctx, 1)
 		return nil
 	}
