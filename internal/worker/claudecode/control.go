@@ -111,11 +111,12 @@ func (h *ControlHandler) SendResponse(ctx context.Context, resp *ControlResponse
 	}
 	data = append(data, '\n')
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	// h.stdin.Write blocks when the pipe buffer is full and the CLI stops
-	// reading. Guard with ctx so the caller is not pinned forever.
+	// Lock inside the closure so an orphaned write (ctx cancelled while
+	// syscall.Write is blocked) keeps h.mu until the write completes,
+	// preventing concurrent writes on the shared stdin fd.
 	if err := base.WriteWithCtxBounded(ctx, func() error {
+		h.mu.Lock()
+		defer h.mu.Unlock()
 		_, e := h.stdin.Write(data)
 		return e
 	}); err != nil {
@@ -171,16 +172,19 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 	data = append(data, '\n')
 
 	ch := make(chan map[string]any, 1)
-	h.mu.Lock()
-	h.pendingRequests[reqID] = ch
-	// Write the request under the shared mu so it doesn't interleave with
-	// control_response writes. Guard with ctx: stdin.Write blocks when the
-	// pipe buffer is full and the CLI stops reading.
+	// Both the pendingRequests map registration and the stdin write happen
+	// inside the closure under h.mu, so an orphaned write (ctx cancelled
+	// while syscall.Write is blocked) keeps the mutex until the write
+	// completes. This prevents: (a) concurrent stdin writes interleaving
+	// frames, and (b) a response arriving for a half-registered request.
+	// The map entry is cleaned up after the write completes (success or orphan).
 	writeErr := base.WriteWithCtxBounded(ctx, func() error {
+		h.mu.Lock()
+		h.pendingRequests[reqID] = ch
+		defer h.mu.Unlock()
 		_, e := h.stdin.Write(data)
 		return e
 	})
-	h.mu.Unlock()
 	if writeErr != nil {
 		// Cleanup on write failure: defer is set up only after the success path,
 		// so the stale pending entry must be removed before returning.

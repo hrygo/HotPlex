@@ -459,7 +459,16 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 			return writeStreamInputLocked(stdin, content)
 		}); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return fmt.Errorf("claudecode: input write cancelled: %w", err)
+				// A stalled stdin write leaves an orphaned goroutine holding the
+				// conn mutex until the child exits. The worker is effectively
+				// dead — classify as Unavailable so the gateway's
+				// cleanupCrashedWorker kills the process (which unblocks the
+				// goroutine via EPIPE and recovers the session).
+				return &worker.WorkerError{
+					Kind:    worker.ErrKindUnavailable,
+					Message: "claudecode: stdin write stalled (worker not reading input)",
+					Cause:   err,
+				}
 			}
 			return fmt.Errorf("claudecode: input: %w", err)
 		}

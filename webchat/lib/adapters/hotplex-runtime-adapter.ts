@@ -717,24 +717,37 @@ export function useHotPlexRuntime({
                 let fullText = await fetchLastAssistantContent();
                 if (!fullText) {
                     // Turn record may still be in the collector's async batch
-                    // buffer — wait one flush interval and retry once.
-                    await new Promise((r) => setTimeout(r, 1200));
+                    // buffer — wait past the flush interval (1s) + DB round-trip
+                    // margin and retry once.
+                    await new Promise((r) => setTimeout(r, 2000));
+                    if (cancelled) return;
                     fullText = await fetchLastAssistantContent();
                 }
                 if (!fullText || cancelled) return;
+                const full = fullText; // const for closure narrowing (no `!` needed)
                 setMessages((prev) => {
                     const last = prev[prev.length - 1];
                     if (last?.role !== "assistant") return prev;
-                    // Only patch if the authoritative text is longer than the
-                    // currently-streamed text (i.e. deltas really were lost).
                     const currentText = concatTextParts(last.parts);
-                    if (fullText!.length <= currentText.length) return prev;
+                    // The streamed text must be a prefix of the authoritative
+                    // text — deltas are appended sequentially, so a dropped tail
+                    // means the authoritative version is the streamed prefix +
+                    // the missing suffix. If the prefix doesn't match, the
+                    // fetched record belongs to a DIFFERENT turn (collector
+                    // latency exceeded the retry, returning the previous turn's
+                    // record) — refuse to patch rather than overwrite with
+                    // wrong-turn content.
+                    if (currentText.length > 0 && !full.startsWith(currentText)) {
+                        return prev;
+                    }
+                    // Only patch if authoritative is longer (deltas really lost).
+                    if (full.length <= currentText.length) return prev;
                     const parts = [...last.parts];
                     const textIdx = parts.findIndex((p) => p.type === "text");
                     if (textIdx !== -1) {
-                        parts[textIdx] = { type: "text", text: fullText! };
+                        parts[textIdx] = { type: "text", text: full };
                     } else {
-                        parts.unshift({ type: "text", text: fullText! });
+                        parts.unshift({ type: "text", text: full });
                     }
                     return [...prev.slice(0, -1), { ...last, parts }];
                 });
@@ -1153,12 +1166,14 @@ export function useHotPlexRuntime({
             });
 
         return () => {
+            // Flush FIRST, before marking cancelled: the flush's setMessages
+            // must land on the still-mounted hook instance to preserve the
+            // streaming tail. Setting cancelled first would make the flush a
+            // no-op on an unmounting component, losing the tail content.
+            flushPendingDelta();
             // Mark this effect instance as torn down so async paths
             // (reconcileDroppedTurn) skip their setMessages after unmount.
             cancelled = true;
-            // Flush any deltas that arrived since the last frame so a session
-            // switch / remount doesn't discard the tail of the streaming text.
-            flushPendingDelta();
             client.off("delta", handleDelta);
             client.off("message", handleMessage);
             client.off("done", handleDone);

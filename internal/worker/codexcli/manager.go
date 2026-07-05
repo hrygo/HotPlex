@@ -465,13 +465,17 @@ func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 // is especially important for Notify, which has no response-wait timeout
 // unlike Call.
 func (m *CodexAppServerManager) writeFrame(ctx context.Context, v any) error {
-	m.writeMu.Lock()
-	defer m.writeMu.Unlock()
-	// WriteWithCtxBounded wraps a deadline-less ctx with DefaultWriteTimeout
-	// internally, so callers passing context.Background() (the 22 lifecycle
-	// wrappers) are still protected. The grace period is fixed at fallbackGrace
-	// so total worst-case is DefaultWriteTimeout + fallbackGrace, not 2×.
+	// The mutex MUST be acquired inside the closure, not at the call site:
+	// if ctx cancels and WriteWithCtxBounded bails out, an orphaned goroutine
+	// may still be blocked inside Encode → syscall.Write. By locking/unlocking
+	// inside the closure (which runs in the helper's goroutine), the orphan
+	// holds writeMu until the write completes (child exits → EPIPE),
+	// preventing the next writer from racing on the shared stdin fd. This is
+	// especially critical for codexcli: the manager is a singleton, so an
+	// interleaved write would corrupt the protocol stream for ALL sessions.
 	err := base.WriteWithCtxBounded(ctx, func() error {
+		m.writeMu.Lock()
+		defer m.writeMu.Unlock()
 		return json.NewEncoder(m.stdin).Encode(v)
 	})
 	// An orphaned write (ctx cancelled while syscall.Write is blocked) leaves
@@ -480,7 +484,7 @@ func (m *CodexAppServerManager) writeFrame(ctx context.Context, v any) error {
 	// session's writes until recovery. Log at warn so operators can correlate
 	// a multi-session stall with a stalled child process.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		m.log.Warn("codex-app-server: stdin write cancelled, writeMu may be held by orphaned goroutine until child exits",
+		m.log.Warn("codex-app-server: stdin write cancelled, writeMu held by orphaned goroutine until child exits",
 			"err", err)
 	}
 	return err
