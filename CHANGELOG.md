@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.31.2] - 2026-07-05
+
+### Summary
+
+v1.31.2 是一次 patch 版本更新，核心主题是**流式 delta 传输链路的端到端修复与稳定性加固**。WebChat 前端修复了流式消息 delta 在 turn 终结点和背压场景下的丢失问题（#842），引入历史记录 reconcile 兜底机制；Gateway Core 新增 droppable 事件的非阻塞广播与 reasoning 背压语义统一；飞书适配器修复 streaming card 因长 delta 间隔导致 TTL 过期的静默关闭问题（#839）；Worker 层面修复了 proc.Kill() 在孙子进程持有管道时 cmd.Wait() 死锁（#838）、stdin 写入无 ctx 保护导致会话挂死、以及 CodexCLI mapper snapshot 前缀漂移等多个深层竞态和死锁问题。附带一篇架构文档（Streaming-Delta-Pipeline）。
+
+### Added
+
+- **Gateway Core**: 流式 delta 链路架构文档（`docs/architecture/Streaming-Delta-Pipeline.md`）— 四段九跳全链路 ASCII 图解（Worker 4 适配器 / Bridge 12 步 / Hub / Conn / WebChat），三层背压不对称设计说明，设计准则三条。
+- **WebChat UI**: vitest 测试框架引入 + merge-parts 纯函数单测（15 个）— 抽取 `appendTextDelta` / `appendReasoningDelta` / `concatTextParts` 纯函数，独立验证 delta 合并逻辑。
+- **Worker**: `base.WriteWithCtx` 共享 helper（`write_ctx.go`）— 为所有 stdin 写入提供 goroutine + ctx + grace period 保护，消除 worker 进程停止读 stdin 时 gateway 会话挂死。
+- **Docs**: 飞书 streaming card TTL rotation spec（`docs/specs/Feishu-Streaming-Card-TTL-Rotation-Spec.md`）、CodexCLI delta integrity fix spec。
+
+### Changed
+
+- **Gateway Core**: Hub.sendBroadcast 拆出 trySendBroadcast（default 非阻塞），droppable 事件（delta/reasoning/raw）满时立即丢弃，消除单慢 session 阻塞跨 session 级联丢失；writeCh cap 64→256。Reasoning 加入 isDroppable 统一背压语义。
+- **Gateway Core**: 删除 dropped 标记端到端协议（sessionDropped map / MarkDropped / GetAndClearDropped），前端 reconcile 改为无条件触发（内部已有前缀+长度+cancelled 三重保护）。
+- **WebChat UI**: AssistantMessage memo 改为内容浅比较（替换失效的引用比较），修复 streaming cursor 不消失的 regression。
+
+### Fixed
+
+- **WebChat UI**: 流式 delta 在多个环节丢失（#842）— RAF 批处理在 done/error/unmount 时不 flush 残留 pendingDelta；trySendData 丢弃 delta 时不标记 done.dropped；reconcile 事件顺序错配（ASC vs DESC）导致 100% 死路径；memo 引用比较实质失效致每次 delta 重渲染所有消息。
+- **WebChat UI**: 多 turn dropped 标记永不重置 — Conn.droppedMarked 跨 turn 长生命周期，Swap(true) 永久置位后 done.dropped 永不上报。改为 session 级去重（RLock fast path）。
+- **WebChat UI**: reconcile 从 events API 改用 history API 的 TurnRecord — 消除 4KB size-flush 截断风险和 turn 边界歧义；加 collector 未落库重试窗口（2s）。
+- **WebChat UI**: reasoning-content 的 `white-space:pre-wrap` 与 ReactMarkdown 渲染矛盾导致冗余换行。
+- **Messaging (Feishu)**: streaming card 因长 delta 间隔（工具思考/长计算）错过 ~100s TTL rotation 窗口，被飞书 10min 硬限制静默关闭（#839）— 新增 proactive `time.AfterFunc(StreamTTL)` 独立于 delta 到达触发轮转。
+- **Messaging (Feishu)**: 纯工具型 turn 空回复 — 全程只调工具不产出 message 时，飞书卡片/Slack 收到空回复；bridge 在 done 时合成含工具调用摘要的兜底 Message。
+- **Worker (proc)**: proc.Manager.Kill() 持 m.mu 等待 cmd.Wait() 死锁（#838）— 孙子进程持有继承的 stdout 管道时 cmd.Wait() 永久阻塞，毒化所有 Manager 方法。修复：cmd.Wait() 移至后台 goroutine，Kill() 用 killWaitTimeout (5s) 限时返回。
+- **Worker (OCS)**: idle drain 持 s.mu 调 proc.Kill() 死锁（#836）— 改用 proc.ForceKill(pgid) 不触碰 proc.mu；补充 TOCTOU 防护与 monitorProcess 状态守卫。
+- **Worker**: stdin 写入无 ctx 保护致会话挂死 — 3 个适配器共 11 个未保护的写入点（claudecode 6 / codexcli 3 / acp 2），修复后全部经 base.WriteWithCtx 保护；orphan goroutine mutex 泄漏致并发写竞争也一并修复。
+- **Worker (CodexCLI)**: mapper getDeltaText 在后端 re-sample/truncation 时前缀不变量被打破，静默丢弃或错位 delta — 新增 prefix 校验与 corrective delta 机制，drift 计数暴露至 DoneData.Stats。
+- **Worker (ClaudeCode)**: Input/Compact stdin 写入 stall 不触发 worker recovery — DeadlineExceeded 归为 ErrKindUnavailable，gateway handler 识别后清理崩溃 worker。
+- **Worker (CodexCLI)**: singleton manager 无 deadline 的 Notify wrapper 无超时保护 — writeFrame 检测 ctx 无 deadline 时自动包装 30s 超时。
+
 ## [1.31.1] - 2026-07-03
 
 ### Summary
