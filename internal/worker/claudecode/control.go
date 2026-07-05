@@ -32,7 +32,10 @@ type ResponsePayload struct {
 
 // ControlHandler handles bidirectional control protocol.
 type ControlHandler struct {
-	mu              *sync.Mutex
+	mu        *sync.Mutex // stdin write lock (shared with Conn via SetWriteMu)
+	pendingMu sync.Mutex  // protects pendingRequests map only — distinct from
+	// mu so that map cleanup in SendControlRequest's error path can't deadlock
+	// against an orphaned stdin-write goroutine that holds mu.
 	log             *slog.Logger
 	stdin           io.Writer // CLI stdin
 	pendingRequests map[string]chan map[string]any
@@ -172,25 +175,29 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 	data = append(data, '\n')
 
 	ch := make(chan map[string]any, 1)
-	// Both the pendingRequests map registration and the stdin write happen
-	// inside the closure under h.mu, so an orphaned write (ctx cancelled
-	// while syscall.Write is blocked) keeps the mutex until the write
-	// completes. This prevents: (a) concurrent stdin writes interleaving
-	// frames, and (b) a response arriving for a half-registered request.
-	// The map entry is cleaned up after the write completes (success or orphan).
+	// Register the pending entry under pendingMu (a separate lock from the
+	// stdin write lock h.mu) BEFORE issuing the write. This way:
+	//   - DeliverResponse (read side) takes pendingMu and finds the entry.
+	//   - The stdin write inside WriteWithCtxBounded takes only h.mu; if it
+	//     orphans (ctx cancelled, syscall.Write blocked), it holds h.mu but
+	//     NOT pendingMu — so error-cleanup below can still acquire pendingMu
+	//     to delete the stale entry without deadlocking.
+	h.pendingMu.Lock()
+	h.pendingRequests[reqID] = ch
+	h.pendingMu.Unlock()
+
 	writeErr := base.WriteWithCtxBounded(ctx, func() error {
 		h.mu.Lock()
-		h.pendingRequests[reqID] = ch
 		defer h.mu.Unlock()
 		_, e := h.stdin.Write(data)
 		return e
 	})
 	if writeErr != nil {
-		// Cleanup on write failure: defer is set up only after the success path,
-		// so the stale pending entry must be removed before returning.
-		h.mu.Lock()
+		// Cleanup the stale pending entry. Safe: pendingMu is independent of
+		// h.mu (which the orphan may still hold).
+		h.pendingMu.Lock()
 		delete(h.pendingRequests, reqID)
-		h.mu.Unlock()
+		h.pendingMu.Unlock()
 		if base.IsDeadProcessError(writeErr) {
 			return nil, &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "control: worker process is not running or stdin is closed", Cause: writeErr}
 		}
@@ -198,9 +205,9 @@ func (h *ControlHandler) SendControlRequest(ctx context.Context, subtype string,
 	}
 
 	defer func() {
-		h.mu.Lock()
+		h.pendingMu.Lock()
 		delete(h.pendingRequests, reqID)
-		h.mu.Unlock()
+		h.pendingMu.Unlock()
 		select {
 		case <-ch:
 		default:
@@ -232,8 +239,8 @@ func buildRequestBody(subtype string, body map[string]any) map[string]any {
 
 // DeliverResponse routes a control_response back to the pending SendControlRequest caller.
 func (h *ControlHandler) DeliverResponse(reqID string, resp map[string]any) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.pendingMu.Lock()
+	defer h.pendingMu.Unlock()
 
 	ch, ok := h.pendingRequests[reqID]
 	if !ok {

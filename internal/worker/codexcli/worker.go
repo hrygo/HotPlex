@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -241,6 +242,16 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 
 	resp, err := w.manager.Call(ctx, "turn/start", params)
 	if err != nil {
+		// A stalled stdin write (singleton writeMu held by orphan goroutine)
+		// wedges ALL codex sessions. Classify as Unavailable so the gateway
+		// kills the app-server process and unblocks the goroutine (EPIPE).
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return &worker.WorkerError{
+				Kind:    worker.ErrKindUnavailable,
+				Message: "codexcli: stdin write stalled (app-server not reading input)",
+				Cause:   err,
+			}
+		}
 		return fmt.Errorf("codexcli: turn/start: %w", err)
 	}
 

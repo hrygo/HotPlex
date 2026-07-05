@@ -460,10 +460,11 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		}); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				// A stalled stdin write leaves an orphaned goroutine holding the
-				// conn mutex until the child exits. The worker is effectively
-				// dead — classify as Unavailable so the gateway's
-				// cleanupCrashedWorker kills the process (which unblocks the
-				// goroutine via EPIPE and recovers the session).
+				// conn mutex until the child process exits. Classify as
+				// Unavailable so the gateway surfaces a SESSION_TERMINATED and
+				// runs crash cleanup (detach worker). The orphaned goroutine
+				// unblocks when the process eventually exits (EPIPE) — via the
+				// turn timeout, external kill, or resume-replacement path.
 				return &worker.WorkerError{
 					Kind:    worker.ErrKindUnavailable,
 					Message: "claudecode: stdin write stalled (worker not reading input)",
@@ -876,7 +877,14 @@ func (w *Worker) Compact(ctx context.Context, _ map[string]any) error {
 		return writeStreamInputLocked(stdin, "/compact")
 	}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("claudecode: compact: %w", err)
+			// A stalled stdin write leaves an orphaned goroutine holding the
+			// conn mutex until the child exits. Classify as Unavailable so the
+			// gateway kills the process and unblocks the goroutine (EPIPE).
+			return &worker.WorkerError{
+				Kind:    worker.ErrKindUnavailable,
+				Message: "claudecode: compact write stalled (worker not reading input)",
+				Cause:   err,
+			}
 		}
 		return err
 	}

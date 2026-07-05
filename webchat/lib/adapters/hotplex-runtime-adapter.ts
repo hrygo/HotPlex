@@ -679,10 +679,10 @@ export function useHotPlexRuntime({
                 }
             }
 
-            // Backpressure reconciliation: when the server flagged deltas as
-            // dropped (done.stats.dropped === true), the streamed text may be
-            // incomplete. The event store holds the authoritative, drop-proof
-            // aggregation of every message.delta, so fetch the latest message
+            // Backpressure reconciliation: when the server flags the done event
+            // with dropped === true (top-level DoneData.dropped, set by
+            // reconcileDroppedDeltas when deltas were silently dropped under
+            // backpressure), the streamed text may be incomplete. Fetch the
             // events and replace the last assistant message's text with it.
             if (data?.dropped) {
                 void reconcileDroppedTurn();
@@ -742,13 +742,17 @@ export function useHotPlexRuntime({
                     }
                     // Only patch if authoritative is longer (deltas really lost).
                     if (full.length <= currentText.length) return prev;
-                    const parts = [...last.parts];
-                    const textIdx = parts.findIndex((p) => p.type === "text");
-                    if (textIdx !== -1) {
-                        parts[textIdx] = { type: "text", text: full };
-                    } else {
-                        parts.unshift({ type: "text", text: full });
-                    }
+                    // Replace ALL text parts with the single authoritative text,
+                    // keeping the position of the first text part. A streaming
+                    // message can have interleaved [text, tool-call, text] parts
+                    // (text before and after a tool call). Patching only the
+                    // first text part would leave the trailing partial text part
+                    // in place, duplicating content. Collapse all text into one.
+                    const firstTextIdx = last.parts.findIndex((p) => p.type === "text");
+                    const nonTextParts: MessagePart[] = last.parts.filter((p) => p.type !== "text");
+                    const insertIdx = firstTextIdx === -1 ? 0 : firstTextIdx;
+                    const parts = [...nonTextParts];
+                    parts.splice(insertIdx, 0, { type: "text", text: full });
                     return [...prev.slice(0, -1), { ...last, parts }];
                 });
             } catch (err) {
