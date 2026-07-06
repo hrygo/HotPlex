@@ -179,6 +179,19 @@ func Default() *Config {
 		Events: EventsConfig{
 			Retention: 720 * time.Hour, // 30 days
 		},
+		Audit: AuditConfig{
+			Enabled:   true,
+			Retention: 26280 * time.Hour, // 3 years
+			Collector: AuditCollectorConfig{
+				ChannelCap:    4096,
+				BatchInterval: 1 * time.Second,
+				BatchSize:     100,
+				SpillDir:      filepath.Join(HotplexHome(), "data", "audit-spill"),
+			},
+			Sinks: []AuditSinkConfig{
+				{Name: "noop", Type: "noop", Config: map[string]any{}},
+			},
+		},
 	}
 }
 

@@ -26,6 +26,7 @@ type Config struct {
 	Webhook     WebhookConfig   `mapstructure:"webhook"`
 	OAuth       OAuthConfig     `mapstructure:"oauth"`
 	Events      EventsConfig    `mapstructure:"events"`
+	Audit       AuditConfig     `mapstructure:"audit"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 
 	// ResolvedAPIKeyUsers is the runtime map of expanded API key value → userID.
@@ -674,4 +675,27 @@ type CronConfig struct {
 // EventsConfig holds event and turn retention settings.
 type EventsConfig struct {
 	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 720h (30 days)
+}
+
+// AuditConfig holds user behavior audit system settings.
+type AuditConfig struct {
+	Enabled   bool                `mapstructure:"enabled"`
+	Retention time.Duration       `mapstructure:"retention"`
+	Collector AuditCollectorConfig `mapstructure:"collector"`
+	Sinks     []AuditSinkConfig    `mapstructure:"sinks"`
+}
+
+// AuditCollectorConfig holds audit event collector tuning parameters.
+type AuditCollectorConfig struct {
+	ChannelCap    int           `mapstructure:"channel_cap"`
+	BatchInterval time.Duration `mapstructure:"batch_interval"`
+	BatchSize     int           `mapstructure:"batch_size"`
+	SpillDir      string        `mapstructure:"spill_dir"`
+}
+
+// AuditSinkConfig defines a single audit event sink.
+type AuditSinkConfig struct {
+	Name   string         `mapstructure:"name"`
+	Type   string         `mapstructure:"type"`
+	Config map[string]any `mapstructure:"config"`
 }
