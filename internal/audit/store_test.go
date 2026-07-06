@@ -63,6 +63,39 @@ func newTestSQLiteStore(t *testing.T) Store {
 	return store
 }
 
+// newTestSQLiteStoreWithPool is like newTestSQLiteStore but configures the
+// connection pool to maxOpen (mirrors production's MaxOpenConns=3). A pool
+// larger than 1 is required to reproduce SQLITE_BUSY races between two
+// concurrently-open write transactions; with MaxOpenConns=1 the single
+// connection serializes all access and masks the missing writeMu on the
+// transaction path.
+func newTestSQLiteStoreWithPool(t *testing.T, maxOpen int) Store {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "audit_test.db")
+	db, err := sql.Open(sqlutil.DriverName, dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxOpen)
+	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	require.NoError(t, err)
+	// Lower busy_timeout so a lock contention surfaces as SQLITE_BUSY
+	// quickly (default 5s would make the test slow and flaky). 100ms is
+	// long enough to ride out normal scheduling but short enough to fail
+	// fast when writeMu is absent on the Tx path.
+	_, err = db.Exec("PRAGMA busy_timeout=100")
+	require.NoError(t, err)
+
+	_, err = db.Exec(testSchemaSQL)
+	require.NoError(t, err)
+
+	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+	log := slog.Default()
+	store, err := NewStore(db, dbutil.DialectSQLite, writeMu, log)
+	require.NoError(t, err)
+	return store
+}
+
 func TestNewStore_SQLite(t *testing.T) {
 	t.Parallel()
 	store := newTestSQLiteStore(t)

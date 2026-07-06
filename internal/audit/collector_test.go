@@ -5,7 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -542,6 +544,117 @@ func TestCollector_SpillFlushFailure_ReSpills(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond, "expected re-spilled records to survive flush failure")
 
 	require.Equal(t, int64(0), c.Dropped(), "zero-loss: re-spill must not count as drop")
+}
+
+// TestCollector_ConcurrentGcNoBusyLock is a regression test for the
+// SQLITE_BUSY errors observed when the GC goroutine (SaveCheckpoint /
+// DeleteBefore) and the collector writer (BeginTx → Append → Commit)
+// concurrently write to the shared SQLite DB without write-serialization
+// on the transaction path.
+//
+// Before the fix, sqliteStore.BeginTx did not acquire writeMu, so a GC
+// Tick (which does hold writeMu) running concurrently with a collector
+// flush would surface as "database is locked (SQLITE_BUSY)" on the hot
+// append path, failing the flush and (per zero-loss) forcing a re-spill.
+//
+// This test drives both writers hard in parallel and asserts that no GC
+// Tick returns a SQLITE_BUSY / "database is locked" error: the writeMu
+// held across the collector's BeginTx→Commit must serialize against the
+// GC's locked writes. Zero-loss (Dropped()==0) is also asserted.
+func TestCollector_ConcurrentGcNoBusyLock(t *testing.T) {
+	t.Parallel()
+
+	// Shared store + writeMu across collector and GC, mirroring production
+	// wiring (gateway_run.go passes one writeMu to all stores). Pool size 3
+	// matches the production default — without writeMu on the Tx path, two
+	// concurrently-open write transactions on different pool connections
+	// race for SQLite's single writer slot and surface SQLITE_BUSY.
+	store := newTestSQLiteStoreWithPool(t, 3)
+	gc := NewGC(store, GCConfig{
+		Retention: 1 * time.Microsecond, // prune everything older than 1µs immediately
+		Interval:  1 * time.Hour,        // we drive Tick manually, not via Run
+	}, slog.Default())
+
+	c := NewCollector(store, nil, nil, slog.Default(), CollectorConfig{
+		ChannelCap:    64,
+		BatchSize:     8,
+		BatchInterval: 10 * time.Millisecond, // flush frequently to maximize overlap with GC
+	})
+	c.Start()
+	t.Cleanup(func() { _ = c.Close() })
+
+	// stopC signals both the enqueuers and the GC goroutines to exit, so
+	// neither path is interrupted mid-operation by context cancellation
+	// (which would otherwise look like an error).
+	stopC := make(chan struct{})
+
+	const enqueuers = 4
+	const eventsEach = 40
+	var wg sync.WaitGroup
+	for w := 0; w < enqueuers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < eventsEach; i++ {
+				select {
+				case <-stopC:
+					return
+				default:
+				}
+				ua := &UserActivity{
+					Ts:         time.Now().UnixMilli(),
+					UserID:     "u1",
+					UserIDType: UserIDTypePlatform,
+					Platform:   PlatformTest,
+					Action:     ActionAuthLogin,
+					Outcome:    OutcomeSuccess,
+					DetailJSON: `{}`,
+				}
+				_ = c.Enqueue(context.Background(), ua)
+			}
+		}()
+	}
+
+	// GC hammer: run Tick concurrently with collector flushes. GC uses
+	// context.Background() so an in-flight Tick is never cancelled — a
+	// cancel would mask/conflate with a genuine SQLITE_BUSY.
+	const gcTickers = 2
+	var busyErrs atomic.Int32
+	var gcWg sync.WaitGroup
+	for g := 0; g < gcTickers; g++ {
+		gcWg.Add(1)
+		go func() {
+			defer gcWg.Done()
+			for {
+				select {
+				case <-stopC:
+					return
+				default:
+				}
+				// Only count SQLITE_BUSY-class errors. Other errors (e.g.
+				// concurrent writes racing on the single-conn test pool)
+				// that are NOT "database is locked" indicate a different
+				// problem worth surfacing, but the regression we guard
+				// against here is specifically the busy-lock.
+				if _, err := gc.Tick(context.Background()); err != nil &&
+					(strings.Contains(err.Error(), "database is locked") ||
+						strings.Contains(err.Error(), "SQLITE_BUSY")) {
+					busyErrs.Add(1)
+				}
+				time.Sleep(2 * time.Millisecond)
+			}
+		}()
+	}
+
+	// Let the load run for a short window, then signal stop and wait.
+	time.Sleep(300 * time.Millisecond)
+	close(stopC)
+	wg.Wait()
+	gcWg.Wait()
+
+	require.Equal(t, int32(0), busyErrs.Load(),
+		"GC must not see SQLITE_BUSY — writeMu serializes GC and collector writes")
+	require.Equal(t, int64(0), c.Dropped(), "zero-loss maintained under concurrent GC")
 }
 
 // PlatformTest is a convenience constant for tests (not in the public API).

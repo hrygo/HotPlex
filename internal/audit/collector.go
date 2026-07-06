@@ -303,10 +303,21 @@ func (c *Collector) flushBatch(uas []*UserActivity) error {
 		observability.AuditWriteFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("action", "begin_tx")))
 		return fmt.Errorf("audit: begin tx: %w", err)
 	}
+	// committedTx guards the deferred Rollback: once Commit succeeds it is
+	// set true so the deferred Rollback is a no-op (tx.done also guards, but
+	// the flag keeps the intent explicit and avoids relying on internal state).
+	// The defer also guarantees writeMu release on panic between BeginTx and
+	// Commit/Rollback — without it, a panic would leak the writeMu and
+	// permanently deadlock the audit writer.
+	committedTx := false
+	defer func() {
+		if !committedTx {
+			_ = tx.Rollback() // Rollback is a no-op if already rolled back/committed
+		}
+	}()
 
 	tail, err := tx.TailHash(ctx)
 	if err != nil {
-		_ = tx.Rollback()
 		return fmt.Errorf("audit: read tail: %w", err)
 	}
 
@@ -315,14 +326,12 @@ func (c *Collector) flushBatch(uas []*UserActivity) error {
 		ua.PrevHash = tail
 		h, err := ComputeSelfHash(tail, ua)
 		if err != nil {
-			_ = tx.Rollback()
 			return fmt.Errorf("audit: compute hash: %w", err)
 		}
 		ua.SelfHash = h
 		if err := tx.Append(ctx, ua); err != nil {
-			_ = tx.Rollback()
 			observability.AuditWriteFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("action", "append")))
-			return fmt.Errorf("audit: append: %w", err)
+			return fmt.Errorf("audit: flush: %w", err)
 		}
 		committed = append(committed, ua)
 		tail = h
@@ -332,6 +341,7 @@ func (c *Collector) flushBatch(uas []*UserActivity) error {
 		observability.AuditWriteFailures().Add(ctx, 1, metric.WithAttributes(attribute.String("action", "commit")))
 		return fmt.Errorf("audit: commit: %w", err)
 	}
+	committedTx = true
 
 	for _, ua := range committed {
 		observability.AuditEvents().Add(context.Background(), 1,

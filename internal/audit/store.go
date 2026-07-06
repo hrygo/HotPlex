@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/dbutil"
@@ -137,9 +138,21 @@ func newSQLiteStore(db *sql.DB, writeMu *sqlutil.WriteMu, log *slog.Logger) *sql
 
 func (s *sqliteStore) Dialect() dbutil.Dialect { return s.d }
 
+// BeginTx starts a write transaction. The process-wide writeMu is held for
+// the entire transaction lifetime to serialize against concurrent GC writes
+// (SaveCheckpoint/DeleteBefore) and other stores sharing the SQLite file,
+// preventing SQLITE_BUSY on the hot append path. writeMu is released in
+// Commit/Rollback. PostgreSQL ignores writeMu (no-op), so it relies on
+// pg_advisory_xact_lock acquired in the PG BeginTx instead.
+//
+// Lock ordering: Collector callers already hold c.mu, so the consistent
+// order is c.mu → writeMu. GC acquires only writeMu. No path acquires them
+// in reverse, so there is no deadlock cycle.
 func (s *sqliteStore) BeginTx(ctx context.Context) (Tx, error) {
+	s.writeMu.Lock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		s.writeMu.Unlock()
 		return nil, fmt.Errorf("audit: begin tx: %w", err)
 	}
 	return &sqliteTx{store: s, tx: tx}, nil
@@ -270,11 +283,21 @@ func (s *sqliteStore) LatestCheckpoint(ctx context.Context) (*Checkpoint, error)
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
 
-// sqliteTx implements Tx for SQLite.
+// sqliteTx implements Tx for SQLite. The store's writeMu is acquired in
+// BeginTx and held until Commit or Rollback releases it (exactly once, via
+// releaseOnce — safe against double Commit/Rollback and panics).
 type sqliteTx struct {
-	store *sqliteStore
-	tx    *sql.Tx
-	done  bool
+	store       *sqliteStore
+	tx          *sql.Tx
+	done        bool
+	releaseOnce sync.Once
+}
+
+// releaseWriteMu releases the writeMu acquired in BeginTx. Idempotent via
+// releaseOnce, so it is safe to call from Commit, Rollback, and a deferred
+// panic-recovery guard.
+func (t *sqliteTx) releaseWriteMu() {
+	t.releaseOnce.Do(func() { t.store.writeMu.Unlock() })
 }
 
 func (t *sqliteTx) Append(ctx context.Context, ua *UserActivity) error {
@@ -346,6 +369,7 @@ func (t *sqliteTx) Commit() error {
 		return nil
 	}
 	t.done = true
+	defer t.releaseWriteMu()
 	return t.tx.Commit()
 }
 
@@ -354,6 +378,7 @@ func (t *sqliteTx) Rollback() error {
 		return nil
 	}
 	t.done = true
+	defer t.releaseWriteMu()
 	return t.tx.Rollback()
 }
 
