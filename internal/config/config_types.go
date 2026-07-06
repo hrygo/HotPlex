@@ -679,8 +679,8 @@ type EventsConfig struct {
 
 // AuditConfig holds user behavior audit system settings.
 type AuditConfig struct {
-	Enabled   bool                `mapstructure:"enabled"`
-	Retention time.Duration       `mapstructure:"retention"`
+	Enabled   bool                 `mapstructure:"enabled"`
+	Retention time.Duration        `mapstructure:"retention"`
 	Collector AuditCollectorConfig `mapstructure:"collector"`
 	Sinks     []AuditSinkConfig    `mapstructure:"sinks"`
 }

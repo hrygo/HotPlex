@@ -1099,6 +1099,27 @@ func TestMessagingLevelEnvVars(t *testing.T) {
 	require.Equal(t, 4, cfg.Messaging.MossCpuThreads)
 }
 
+// TestNormalizePaths_EventsPathRemoved verifies that normalizePaths()
+// no longer expands ~ or resolves EventsPath (spec §11.2 cleanup).
+// The EventsPath field remains in the struct for backward compatibility,
+// but it is no longer normalized.
+func TestNormalizePaths_EventsPathRemoved(t *testing.T) {
+	t.Parallel()
+
+	cfg := Default()
+	// Set a tilde path that would be expanded if normalization were still active.
+	cfg.DB.EventsPath = "~/some/events/path"
+	cfg.normalizePaths()
+
+	// EventsPath must remain exactly as set — no tilde expansion, no abs resolution.
+	require.Equal(t, "~/some/events/path", cfg.DB.EventsPath,
+		"EventsPath should NOT be normalized by normalizePaths()")
+
+	// Verify other path fields ARE still normalized.
+	require.True(t, filepath.IsAbs(cfg.DB.Path),
+		"DB.Path should still be normalized (absolute path)")
+}
+
 func TestResolveAPIKeyUsers(t *testing.T) {
 	t.Run("nil input returns nil", func(t *testing.T) {
 		result := resolveAPIKeyUsers(nil, []string{"sk-1"})

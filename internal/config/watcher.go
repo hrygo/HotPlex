@@ -33,6 +33,10 @@ var hotReloadableFields = map[string]bool{
 	"admin.burst":               true,
 	"admin.tokens":              true,
 	"admin.allowed_cidrs":       true,
+	// Audit fields (spec §8): retention and collector tuning are safe to hot-reload.
+	"audit.retention":                true,
+	"audit.collector.batch_interval": true,
+	"audit.collector.batch_size":     true,
 }
 
 // staticFields are config fields that require a restart to take effect.
@@ -48,6 +52,11 @@ var staticFields = map[string]bool{
 	"security.tls_key_file":        true,
 	"db.path":                      true,
 	"db.wal_mode":                  true,
+	"db.events_path":               true, // Deprecated: kept for restart-warning
+	// Audit fields (spec §8): enabled and collector path/capacity are NOT hot-reloadable.
+	"audit.enabled":               true,
+	"audit.collector.spill_dir":   true,
+	"audit.collector.channel_cap": true,
 }
 
 // ConfigChange represents a single configuration change for audit logging.
