@@ -35,6 +35,10 @@ func setupRoutes(
 	})
 
 	gatewayAPI := gateway.NewGatewayAPI(log, auth, sm, bridge, deps.ConfigStore, deps.EventStore, deps.EventStore, deps.WorkspaceStore)
+	if deps.AuditCollector != nil {
+		gatewayAPI.SetAuditCollector(deps.AuditCollector)
+		sm.SetAuditCollector(deps.AuditCollector)
+	}
 
 	// CORS middleware reads allowed origins from config (supports hot-reload).
 	corsOriginsFn := func() []string {

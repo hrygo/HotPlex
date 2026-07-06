@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -33,14 +35,21 @@ type apiSM interface {
 }
 
 type GatewayAPI struct {
-	auth       *security.Authenticator
-	sm         apiSM
-	bridge     SessionStarter
-	cfgStore   *config.ConfigStore
-	turnsStore eventstore.TurnQuerier
-	eventStore EventStoreReader
-	wsStore    WorkspaceReader // WebChat 多租户 workspace 归属校验（spec ①）；nil = 未启用
-	log        *slog.Logger
+	auth           *security.Authenticator
+	sm             apiSM
+	bridge         SessionStarter
+	cfgStore       *config.ConfigStore
+	turnsStore     eventstore.TurnQuerier
+	eventStore     EventStoreReader
+	wsStore        WorkspaceReader // WebChat 多租户 workspace 归属校验（spec ①）；nil = 未启用
+	log            *slog.Logger
+	auditCollector *audit.Collector // issue #833 P1; nil = audit disabled
+}
+
+// SetAuditCollector injects the audit collector for session.delete instrumentation.
+// Nil disables audit emission (no-op).
+func (g *GatewayAPI) SetAuditCollector(c *audit.Collector) {
+	g.auditCollector = c
 }
 
 // EventStoreReader defines the subset of EventStore needed by the events API.
@@ -393,7 +402,7 @@ func (g *GatewayAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  admin.ErrorResponse  "Failed to delete session"
 // @Router       /api/sessions/{id} [delete]
 func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := g.authorizeSession(w, r)
+	id, si, ok := g.authorizeSession(w, r)
 	if !ok {
 		return
 	}
@@ -406,10 +415,38 @@ func (g *GatewayAPI) DeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	if err := g.sm.DeletePhysical(r.Context(), id); err != nil {
 		g.log.Error("gateway: delete session failed", "session_id", id, "method", r.Method, "path", r.URL.Path, "err", err)
+		g.emitSessionDeleteAudit(r, si, id, audit.OutcomeFailure, err.Error())
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to delete session")
 		return
 	}
+	g.emitSessionDeleteAudit(r, si, id, audit.OutcomeSuccess, "")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// emitSessionDeleteAudit enqueues a session.delete audit event.
+// Uses context.Background() so audit never blocks on request cancellation.
+func (g *GatewayAPI) emitSessionDeleteAudit(r *http.Request, si *session.SessionInfo, sessionID, outcome, errMsg string) {
+	if g.auditCollector == nil {
+		return
+	}
+	detail := ""
+	if errMsg != "" {
+		detail = fmt.Sprintf(`{"error":%q}`, errMsg)
+	}
+	_ = g.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
+		Ts:           time.Now().UnixMilli(),
+		UserID:       si.UserID,
+		UserIDType:   audit.UserIDTypePlatform,
+		Platform:     si.Platform,
+		SessionID:    sessionID,
+		Action:       audit.ActionSessionDelete,
+		ResourceType: "session",
+		ResourceID:   sessionID,
+		Outcome:      outcome,
+		DetailJSON:   detail,
+		IP:           r.RemoteAddr,
+		UserAgent:    r.UserAgent(),
+	})
 }
 
 // SwitchWorkDir changes the working directory for a session.
