@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.32.0] - 2026-07-06
+
+### Summary
+
+v1.32.0 是一次 minor 版本更新，核心主题是**用户行为审计子系统（#833）的完整交付**。新增 `internal/audit/` 模块——涵盖 SHA-256 hash chain 不可变存储、zero-loss WAL spill collector、双数据库（SQLite/PostgreSQL）支持、retention GC + chain verifier、AlertSink 可扩展告警接口、Admin 活动查询 API（按用户查询 + PII 脱敏 + JSON/CSV 导出），以及 auth/session/gateway 三个维度的审计埋点。Worker 层面修复了 OCS 1.17 V1 协议 cursor-spin bug（#6562ac35）。
+
+### Added
+
+- **Audit**: 完整用户行为审计子系统（#833）— `internal/audit/` 模块，包括：
+  - **类型与 Hash Chain**: 16 列 `user_activity` schema + SHA-256 hash chain（prev → self 链式校验）+ checkpoint rebase 支持
+  - **双数据库存储**: SQLite（WriteMu 序列化）+ PostgreSQL（advisory lock 819207），NewStore 工厂自动选择
+  - **Zero-loss Collector**: 3 级 Enqueue 回退（channel → WAL spill O_SYNC → bounded block 5s），fan-out 到 AlertSink
+  - **WAL Spill**: 崩溃安全的磁盘溢出（4-byte BE length + JSON payload，自动跳过截断记录）
+  - **Retention GC**: 基于时间窗口的保留裁剪 + checkpoint 保存，支持 full-prune edge case
+  - **Chain Verifier**: 流式分页验证（O(batchSize) 内存，不 OOM），检测 hash chain 断裂
+  - **AlertSink 接口**: Noop/Log 内置实现 + 类型安全注册表，P2 可扩展 Webhook/Slack/SIEM
+  - **数据库迁移**: `023_user_activity.sql`（SQLite + PG），含 BEFORE UPDATE 不可变触发器 + 3 个查询索引
+- **Admin API**: 活动查询端点 — `GET /admin/users/{id}/activity`、`GET /admin/activity`，支持 PII 脱敏（IPv4 末段置零、IPv6 后 4 组置零、UA 截断）+ JSON/CSV 导出（CSV formula injection 防护，OWASP CWE-1236）
+- **Gateway Core**: 审计埋点 — auth（6 条路径）、conn init（3 条）、deliverToWorker（7 条）、session lifecycle（5 条）全覆盖
+- **Configuration**: AuditConfig 热重载支持 — `audit.retention` / `batch_interval` / `batch_size` 运行时更新，`audit.enabled` 需重启
+- **Observability**: 5 个审计专属 Prometheus 指标 — events / chain_breaks / spill / write_failures / sink_failures
+
+### Fixed
+
+- **Audit**: SQLITE_BUSY 竞态 — GC tick 与 collector flush 并发写 SQLite 时缺少序列化，导致 SQLITE_BUSY 错误和 zero-loss re-spill。修复：BeginTx 获取 writeMu，Commit/Rollback 释放（releaseOnce 防重入 + panic-safe）
+- **Audit**: Atomic spill drain — Drain() 拆分为 ReadAll + Truncate 两步操作，中间 Enqueue 写入被 Truncate 丢弃（zero-loss 违反）。修复：单次 mu 锁内原子读取+截断
+- **Audit**: EventID 碰撞 — `fmt.Sprintf("ev_%d_%x", ts, hash)` 在同一毫秒内产生相同 ID，破坏 sink 去重契约。修复：UUIDv7（RFC 9562）原生实现（48-bit unix ms + 12-bit atomic counter + 62-bit crypto/rand）
+- **Audit**: CSV formula injection — user_id / user_agent 字段可被攻击者控制，CSV 导出未做防护。修复：`= + - @ Tab/CR` 前缀加单引号
+- **Audit**: GC retention 热重载未生效 — watcher 接受 `audit.retention` 变更但未传播到 GC 实例。修复：mutex-guarded `UpdateRetention` 回调
+- **Worker (OCS)**: OCS 1.17+ V1 协议 cursor-spin — `session.status(idle)` + `session.idle` 标记 turn 结束但不 emit `session.next.step.ended`（usage 唯一来源），旧 Done 门控依赖 stats 非空导致 turn terminator 被静默吞掉，WebChat cursor 永远不停止。修复：Done 去耦于 stats，`consumeDone()` 首次调用无条件发射
+
 ## [1.31.2] - 2026-07-05
 
 ### Summary
