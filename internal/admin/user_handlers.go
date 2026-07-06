@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/web"
@@ -27,6 +28,7 @@ type UserAdminHandlers struct {
 	auth       *security.Authenticator
 	cookieAuth *security.CookieAuth
 	idp        *security.LocalAccountProvider
+	audit      *audit.Collector
 	now        func() time.Time
 }
 
@@ -35,34 +37,70 @@ func NewUserAdminHandlers(store session.UserWorkspaceStore, auth *security.Authe
 	return &UserAdminHandlers{store: store, auth: auth, cookieAuth: cookieAuth, idp: idp, now: time.Now}
 }
 
+func (h *UserAdminHandlers) SetAuditCollector(collector *audit.Collector) {
+	h.audit = collector
+}
+
 func (h *UserAdminHandlers) nowUnix() int64 { return h.now().Unix() }
 
 // requireAdmin validates the current user is an active admin.
-// Returns (uid, true) on success; writes an error and returns ("", false) otherwise.
+// Returns (uid, true) on success. On denial it writes the response and returns
+// the resolved uid when available so the outer audit middleware can attribute it.
 func (h *UserAdminHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (string, bool) {
 	uid, ok := h.cookieAuth.Authenticate(r)
 	if !ok {
-		AdminAudit("anonymous", AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "not authenticated")
 		return "", false
 	}
 	if h.idp == nil {
-		AdminAudit(uid, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusServiceUnavailable, "NO_IDP", "no identity provider")
-		return "", false
+		return uid, false
 	}
 	u, err := h.idp.Lookup(r.Context(), uid)
 	if err != nil || u.Status != "active" {
-		AdminAudit(uid, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusForbidden, "USER_DISABLED", "user disabled")
-		return "", false
+		return uid, false
 	}
 	if u.Role != "admin" {
-		AdminAudit(uid, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 		web.WriteAppError(w, http.StatusForbidden, "FORBIDDEN", "admin only")
-		return "", false
+		return uid, false
 	}
 	return uid, true
+}
+
+func (h *UserAdminHandlers) auditWrite(r *http.Request, status int, actor, action string) {
+	result := AuditResultOk
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		result = AuditResultDenied
+	} else if status >= 400 {
+		result = AuditResultFailed
+	}
+	if actor == "" {
+		actor = audit.AnonymousUserID
+	}
+	AdminAudit(actor, action, r.URL.Path, result)
+	enqueueAdminActivity(h.audit, r, status, actor, action)
+}
+
+// AuditWrite wraps the complete write pipeline, including middleware that may
+// reject a request before the business handler (for example CSRF checks).
+func (h *UserAdminHandlers) AuditWrite(action string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actor := audit.AnonymousUserID
+		if uid, ok := h.cookieAuth.Authenticate(r); ok && uid != "" {
+			actor = uid
+		}
+		sw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		defer func() { h.auditWrite(r, sw.status, actor, action) }()
+		next.ServeHTTP(sw, r)
+	})
+}
+
+func auditDeniedRead(r *http.Request, actor string) {
+	if actor == "" {
+		actor = audit.AnonymousUserID
+	}
+	AdminAudit(actor, AuditAuthDenied, r.URL.Path, AuditResultDenied)
 }
 
 type createInvitationRequest struct {
@@ -100,17 +138,16 @@ func (h *UserAdminHandlers) CreateInvitation(w http.ResponseWriter, r *http.Requ
 		Role: req.Role, ExpiresAt: h.nowUnix() + int64(ttl),
 	}
 	if err := h.store.CreateInvitation(r.Context(), inv, h.nowUnix()); err != nil {
-		AdminAudit(uid, AuditInvitationCreate, r.URL.Path, AuditResultFailed)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "create invitation failed")
 		return
 	}
-	AdminAudit(uid, AuditInvitationCreate, r.URL.Path, AuditResultOk)
 	respondJSON(w, map[string]any{"id": inv.ID, "code": code, "role": inv.Role, "expires_at": inv.ExpiresAt})
 }
 
 // ListInvitations: GET /api/admin/invitations
 func (h *UserAdminHandlers) ListInvitations(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	if uid, ok := h.requireAdmin(w, r); !ok {
+		auditDeniedRead(r, uid)
 		return
 	}
 	limit, offset := web.ParsePagination(r)
@@ -136,23 +173,22 @@ func (h *UserAdminHandlers) ListInvitations(w http.ResponseWriter, r *http.Reque
 
 // DeleteInvitation: DELETE /api/admin/invitations/{id}
 func (h *UserAdminHandlers) DeleteInvitation(w http.ResponseWriter, r *http.Request) {
-	uid, ok := h.requireAdmin(w, r)
+	_, ok := h.requireAdmin(w, r)
 	if !ok {
 		return
 	}
 	id := r.PathValue("id")
 	if err := h.store.DeleteInvitation(r.Context(), id); err != nil {
-		AdminAudit(uid, AuditInvitationDelete, r.URL.Path, AuditResultFailed)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "delete failed")
 		return
 	}
-	AdminAudit(uid, AuditInvitationDelete, r.URL.Path, AuditResultOk)
 	w.WriteHeader(http.StatusOK)
 }
 
 // ListUsers: GET /api/admin/users
 func (h *UserAdminHandlers) ListUsers(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	if uid, ok := h.requireAdmin(w, r); !ok {
+		auditDeniedRead(r, uid)
 		return
 	}
 	limit, offset := web.ParsePagination(r)
@@ -170,7 +206,7 @@ type updateUserStatusRequest struct {
 
 // UpdateUserStatus: PATCH /api/admin/users/{id}
 func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
-	uid, ok := h.requireAdmin(w, r)
+	_, ok := h.requireAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -185,10 +221,8 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.store.UpdateUserStatus(r.Context(), id, req.Status, h.nowUnix()); err != nil {
-		AdminAudit(uid, AuditMemberStatusUpdate, r.URL.Path, AuditResultFailed)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
 		return
 	}
-	AdminAudit(uid, AuditMemberStatusUpdate, r.URL.Path, AuditResultOk)
 	w.WriteHeader(http.StatusOK)
 }

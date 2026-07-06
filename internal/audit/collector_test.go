@@ -512,7 +512,6 @@ func TestCollector_SpillFlushFailure_ReSpills(t *testing.T) {
 		BatchSize:     100, // large so events accumulate without auto-flushing
 		BatchInterval: 5 * time.Second,
 	})
-	c.Start(context.Background())
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 
 	ctx := context.Background()
@@ -531,6 +530,7 @@ func TestCollector_SpillFlushFailure_ReSpills(t *testing.T) {
 	}
 	// At least one event must have spilled (channel cap is only 4).
 	require.Greater(t, c.Spilled(), int64(0), "expected some events to spill")
+	c.Start(context.Background())
 
 	// Trigger a manual drain via the spill sentinel. The DB flush will
 	// fail (failingCommitStore), so the spilled records must be re-spilled.
@@ -667,6 +667,104 @@ const PlatformTest = "test"
 type blockingSink struct {
 	release chan struct{}
 	called  chan struct{} // signals OnAuditEvent was entered
+}
+
+type panicSink struct {
+	called chan struct{}
+}
+
+func (s *panicSink) OnAuditEvent(_ context.Context, _ AuditEvent) error {
+	select {
+	case s.called <- struct{}{}:
+	default:
+	}
+	panic("test sink panic")
+}
+
+type lifecycleSink struct {
+	testSink
+	closed chan struct{}
+}
+
+func (s *lifecycleSink) Close(context.Context) error {
+	close(s.closed)
+	return nil
+}
+
+func testAuditActivity() *UserActivity {
+	return &UserActivity{
+		Ts: time.Now().UnixMilli(), UserID: "u1", UserIDType: UserIDTypePlatform,
+		Platform: PlatformTest, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`,
+	}
+}
+
+func TestCollector_BlockingSinkDoesNotStallPersistence(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	sink := &blockingSink{release: make(chan struct{}), called: make(chan struct{}, 1)}
+	c := NewCollector(store, nil, []AlertSink{sink}, slog.Default(), CollectorConfig{
+		ChannelCap: 8, BatchSize: 1, BatchInterval: 10 * time.Millisecond, SinkTimeout: time.Second,
+	})
+	c.Start(context.Background())
+	t.Cleanup(func() {
+		select {
+		case <-sink.release:
+		default:
+			close(sink.release)
+		}
+		_ = c.Close(context.Background())
+	})
+
+	require.NoError(t, c.Enqueue(context.Background(), testAuditActivity()))
+	select {
+	case <-sink.called:
+	case <-time.After(time.Second):
+		t.Fatal("sink was not called")
+	}
+	require.NoError(t, c.Enqueue(context.Background(), testAuditActivity()))
+	require.NoError(t, c.Enqueue(context.Background(), testAuditActivity()))
+	require.Eventually(t, func() bool {
+		rows, err := store.Query(context.Background(), Query{})
+		return err == nil && len(rows) == 3
+	}, 500*time.Millisecond, 10*time.Millisecond)
+}
+
+func TestCollector_RecoversSinkPanicAndContinues(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	sink := &panicSink{called: make(chan struct{}, 2)}
+	c := NewCollector(store, nil, []AlertSink{sink}, slog.Default(), CollectorConfig{
+		ChannelCap: 8, BatchSize: 1, BatchInterval: 10 * time.Millisecond,
+	})
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+
+	require.NoError(t, c.Enqueue(context.Background(), testAuditActivity()))
+	require.NoError(t, c.Enqueue(context.Background(), testAuditActivity()))
+	require.Eventually(t, func() bool { return len(sink.called) == 2 }, time.Second, 10*time.Millisecond)
+}
+
+func TestCollector_ClosesLifecycleSink(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	sink := &lifecycleSink{closed: make(chan struct{})}
+	c := NewCollector(store, nil, []AlertSink{sink}, slog.Default(), CollectorConfig{})
+	c.Start(context.Background())
+	require.NoError(t, c.Close(context.Background()))
+	select {
+	case <-sink.closed:
+	case <-time.After(time.Second):
+		t.Fatal("lifecycle sink was not closed")
+	}
+}
+
+func TestCollector_CloseBeforeStart(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	c := NewCollector(store, nil, nil, slog.Default(), CollectorConfig{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, c.Close(ctx))
 }
 
 func (s *blockingSink) OnAuditEvent(_ context.Context, _ AuditEvent) error {

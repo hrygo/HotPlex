@@ -107,3 +107,9 @@ type AuditEvent struct {
 type AlertSink interface {
 	OnAuditEvent(ctx context.Context, e AuditEvent) error
 }
+
+// AlertSinkCloser is an optional lifecycle contract. The collector invokes it
+// after the sink worker has drained its bounded queue.
+type AlertSinkCloser interface {
+	Close(ctx context.Context) error
+}

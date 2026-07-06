@@ -219,18 +219,26 @@ func mapOutcome(slogResult string) string {
 // unified table. detail_json carries the method, path, and status — enough to
 // reconstruct the request without re-reading slog.
 func (a *AdminAPI) enqueueAdminActivity(r *http.Request, status int, actor, slogAction string) {
-	c := a.auditCollector
+	enqueueAdminActivity(a.auditCollector, r, status, actor, slogAction)
+}
+
+func enqueueAdminActivity(c *audit.Collector, r *http.Request, status int, actor, slogAction string) {
 	if c == nil {
 		return
 	}
 	userID := actor
 	userIDType := audit.UserIDTypeRegistered // admin cookie → users.id
-	if actor == "" || actor == "anonymous" || actor == "admin-token" {
+	switch actor {
+	case "", "anonymous":
 		userID = audit.AnonymousUserID
 		userIDType = audit.UserIDTypeAnonymous
+	case "admin-token":
+		userIDType = audit.UserIDTypeSystem
 	}
 	outcome := audit.OutcomeSuccess
-	if status >= 400 {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		outcome = audit.OutcomeDenied
+	} else if status >= 400 {
 		outcome = audit.OutcomeFailure
 	}
 	detail, _ := json.Marshal(map[string]any{

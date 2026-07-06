@@ -29,6 +29,7 @@ func TestAuditConfigDiff_DetectsFields(t *testing.T) {
 	prev := config.Default().Audit
 	next := config.Default().Audit
 	next.Retention = 48 * time.Hour
+	next.FullContentRetention = 96 * time.Hour
 	next.Collector.BatchInterval = 2 * time.Second
 	next.Collector.BatchSize = 200
 	next.Collector.ChannelCap = 8192
@@ -37,7 +38,7 @@ func TestAuditConfigDiff_DetectsFields(t *testing.T) {
 	next.Sinks = []config.AuditSinkConfig{{Name: "log", Type: "log", Config: nil}}
 
 	changes := auditConfigDiff(prev, next)
-	require.Len(t, changes, 7, "all tracked fields should appear in diff")
+	require.Len(t, changes, 8, "all tracked fields should appear in diff")
 
 	byField := map[string]map[string]string{}
 	for _, c := range changes {
@@ -45,6 +46,7 @@ func TestAuditConfigDiff_DetectsFields(t *testing.T) {
 	}
 	require.Contains(t, byField, "audit.enabled")
 	require.Contains(t, byField, "audit.retention")
+	require.Contains(t, byField, "audit.full_content_retention")
 	require.Contains(t, byField, "audit.collector.batch_interval")
 	require.Contains(t, byField, "audit.collector.batch_size")
 	require.Contains(t, byField, "audit.collector.channel_cap")
@@ -53,6 +55,27 @@ func TestAuditConfigDiff_DetectsFields(t *testing.T) {
 	// Spot-check old/new values.
 	require.Equal(t, prev.Retention.String(), byField["audit.retention"]["old"])
 	require.Equal(t, next.Retention.String(), byField["audit.retention"]["new"])
+}
+
+func TestAuditConfigDiff_RedactsSinkSecrets(t *testing.T) {
+	t.Parallel()
+	prev := config.Default().Audit
+	next := config.Default().Audit
+	prev.Sinks = []config.AuditSinkConfig{{
+		Name: "siem", Type: "webhook",
+		Config: map[string]any{"url": "https://example.test/audit", "secret": "OLD_FAKE_SECRET"},
+	}}
+	next.Sinks = []config.AuditSinkConfig{{
+		Name: "siem", Type: "webhook",
+		Config: map[string]any{"url": "https://example.test/audit", "secret": "NEW_FAKE_SECRET"},
+	}}
+
+	changes := auditConfigDiff(prev, next)
+	require.Len(t, changes, 1)
+	require.Equal(t, "audit.sinks", changes[0]["field"])
+	require.NotContains(t, changes[0]["old"], "OLD_FAKE_SECRET")
+	require.NotContains(t, changes[0]["new"], "NEW_FAKE_SECRET")
+	require.Contains(t, changes[0]["old"], "[REDACTED]")
 }
 
 // TestEmitAuditConfigChange_Enqueues end-to-end: the callback produced by

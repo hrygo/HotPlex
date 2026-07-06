@@ -83,6 +83,13 @@ func (a *sinkAdapter) OnAuditEvent(ctx context.Context, e audit.AuditEvent) erro
 	})
 }
 
+func (a *sinkAdapter) Close(ctx context.Context) error {
+	if closer, ok := a.sink.(sinks.Closer); ok {
+		return closer.Close(ctx)
+	}
+	return nil
+}
+
 // emitAuditConfigChange returns a ConfigStore observer callback that emits a
 // system.audit_config_changed meta-audit row whenever any audit config field
 // changes at runtime (spec §5.2). The callback is non-blocking and silently
@@ -124,15 +131,39 @@ func auditConfigDiff(prev, next config.AuditConfig) []map[string]string {
 	}
 	add("audit.enabled", strconv.FormatBool(prev.Enabled), strconv.FormatBool(next.Enabled))
 	add("audit.retention", prev.Retention.String(), next.Retention.String())
+	add("audit.full_content_retention", prev.FullContentRetention.String(), next.FullContentRetention.String())
 	add("audit.collector.channel_cap", strconv.Itoa(prev.Collector.ChannelCap), strconv.Itoa(next.Collector.ChannelCap))
 	add("audit.collector.batch_interval", prev.Collector.BatchInterval.String(), next.Collector.BatchInterval.String())
 	add("audit.collector.batch_size", strconv.Itoa(prev.Collector.BatchSize), strconv.Itoa(next.Collector.BatchSize))
 	add("audit.collector.spill_dir", prev.Collector.SpillDir, next.Collector.SpillDir)
-	// Sinks: compare by marshalling (config is small).
-	prevSinks, _ := json.Marshal(prev.Sinks)
-	nextSinks, _ := json.Marshal(next.Sinks)
-	add("audit.sinks", string(prevSinks), string(nextSinks))
+	// Compare raw values so secret-only changes remain observable, but serialize
+	// only sanitized copies into the tamper-evident audit trail.
+	prevSinksRaw, _ := json.Marshal(prev.Sinks)
+	nextSinksRaw, _ := json.Marshal(next.Sinks)
+	if string(prevSinksRaw) != string(nextSinksRaw) {
+		changes = append(changes, map[string]string{
+			"field": "audit.sinks",
+			"old":   sanitizedJSONString(prev.Sinks),
+			"new":   sanitizedJSONString(next.Sinks),
+		})
+	}
 	return changes
+}
+
+func sanitizedJSONString(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "null"
+	}
+	sanitized, err := json.Marshal(audit.SanitizeValue(decoded))
+	if err != nil {
+		return "null"
+	}
+	return string(sanitized)
 }
 
 // GatewayDeps holds all dependencies constructed during gateway initialization.

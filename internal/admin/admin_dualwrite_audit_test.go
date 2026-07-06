@@ -152,9 +152,9 @@ func TestAdminDualWrite_WriteEmitsBoth(t *testing.T) {
 	require.Equal(t, audit.OutcomeSuccess, r.Outcome)
 	require.Equal(t, "bot", r.ResourceType)
 	require.Equal(t, audit.PlatformAdmin, r.Platform)
-	// Bearer auth → actor="admin-token" → anonymous user_id_type.
-	require.Equal(t, audit.AnonymousUserID, r.UserID)
-	require.Equal(t, audit.UserIDTypeAnonymous, r.UserIDType)
+	// Bearer auth is a distinct service identity, not an anonymous actor.
+	require.Equal(t, "admin-token", r.UserID)
+	require.Equal(t, audit.UserIDTypeSystem, r.UserIDType)
 	// detail_json must carry method/path/status + slog_action for dashboard migration.
 	var d map[string]any
 	require.NoError(t, json.Unmarshal([]byte(r.DetailJSON), &d))

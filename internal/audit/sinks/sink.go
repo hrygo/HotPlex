@@ -35,3 +35,9 @@ type Sink interface {
 	// Errors are non-fatal; the audit collector continues regardless.
 	OnAlertEvent(ctx context.Context, e AlertEvent) error
 }
+
+// Closer is an optional lifecycle contract. Collectors call it after all
+// queued events have been handed to the sink.
+type Closer interface {
+	Close(ctx context.Context) error
+}

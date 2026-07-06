@@ -113,10 +113,9 @@ func TestBuildToolCallDetail_SensitiveTool(t *testing.T) {
 	// Full input present (not just a sha256/preview pair).
 	input, ok := d["input"].(string)
 	require.True(t, ok, "sensitive tool should store full 'input'")
-	// The secret payload after the prefix must be masked.
-	require.Contains(t, input, "hpk_")
+	// The structurally sensitive API_KEY field must be fully redacted.
 	require.NotContains(t, input, "FAKEPLACEHOLDER1234", "raw secret must be masked")
-	require.Contains(t, input, "…", "masked secret should carry ellipsis")
+	require.Contains(t, input, audit.RedactedValue)
 }
 
 // TestBuildToolCallDetail_NonSensitiveTool verifies non-sensitive tools store
@@ -145,6 +144,35 @@ func TestBuildToolCallDetail_NonSensitiveTool(t *testing.T) {
 	// sha256 must be a 64-char hex string.
 	sha, _ := d["input_sha256"].(string)
 	require.Len(t, sha, 64)
+}
+
+func TestBuildToolCallDetail_NonSensitiveToolRedactsCredentials(t *testing.T) {
+	t.Parallel()
+	tc := events.ToolCallData{
+		ID:   "tc-secret-preview",
+		Name: "Read",
+		Input: map[string]any{
+			"path":          "/tmp/config.json",
+			"authorization": "Bearer FAKE_PREVIEW_TOKEN_123456",
+			"nested": map[string]any{
+				"private_key": "-----BEGIN PRIVATE KEY-----\nFAKE_PRIVATE_BODY\n-----END PRIVATE KEY-----",
+			},
+		},
+	}
+	detail := buildToolCallDetail(&tc)
+	require.NotContains(t, detail, "FAKE_PREVIEW_TOKEN_123456")
+	require.NotContains(t, detail, "FAKE_PRIVATE_BODY")
+	require.Contains(t, detail, "[REDACTED]")
+}
+
+func TestBuildToolCallDetail_LowercaseBashIsSensitive(t *testing.T) {
+	t.Parallel()
+	tc := events.ToolCallData{ID: "tc-bash", Name: "bash", Input: map[string]any{"command": "pwd"}}
+	detail := buildToolCallDetail(&tc)
+	var d map[string]any
+	require.NoError(t, json.Unmarshal([]byte(detail), &d))
+	require.Equal(t, true, d["sensitive"])
+	require.Contains(t, d, "input")
 }
 
 // TestBuildToolCallDetail_NoInput covers parameterless tools.
@@ -247,12 +275,12 @@ func TestMaskSensitiveInput_NoFalsePositives(t *testing.T) {
 // named in spec §5.2 are flagged sensitive.
 func TestSensitiveToolNames_Coverage(t *testing.T) {
 	t.Parallel()
-	must := []string{"Bash", "Write", "Edit", "MultiEdit", "WebFetch", "WebSearch"}
+	must := []string{"bash", "write", "edit", "multiedit", "webfetch", "websearch"}
 	for _, name := range must {
 		require.True(t, sensitiveToolNames[name], "%s must be in sensitiveToolNames (spec §5.2)", name)
 	}
-	require.False(t, sensitiveToolNames["Read"], "Read is non-sensitive")
-	require.False(t, sensitiveToolNames["Glob"], "Glob is non-sensitive")
+	require.False(t, sensitiveToolNames["read"], "Read is non-sensitive")
+	require.False(t, sensitiveToolNames["glob"], "Glob is non-sensitive")
 }
 
 // TestEmitToolCallAudit_Enqueues verifies the full bridge path: calling

@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/admin"
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
@@ -153,7 +155,7 @@ func TestAcceptInvite_CreatesUserAndIssuesCookie(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
 	req.Header.Set("Cookie", cookie)
 	w := httptest.NewRecorder()
-	env.userAdmin.CreateInvitation(w, req)
+	env.userAdmin.AuditWrite(admin.AuditInvitationCreate, http.HandlerFunc(env.userAdmin.CreateInvitation)).ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var resp struct {
 		Code string `json:"code"`
@@ -199,6 +201,45 @@ func TestAdminEndpoint_RequiresAdmin(t *testing.T) {
 	w := httptest.NewRecorder()
 	env.userAdmin.ListInvitations(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code, "普通用户不能访问 admin 端点")
+}
+
+func TestUserAdminWrites_DualWriteAllOutcomes(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	collector, query := gwTestCollector(t)
+	env.userAdmin.SetAuditCollector(collector)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	// Successful write.
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
+	req.Header.Set("Cookie", cookie)
+	w := httptest.NewRecorder()
+	env.userAdmin.AuditWrite(admin.AuditInvitationCreate, http.HandlerFunc(env.userAdmin.CreateInvitation)).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Validation failure after successful authentication.
+	badReq := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{`)))
+	badReq.Header.Set("Cookie", cookie)
+	badW := httptest.NewRecorder()
+	env.userAdmin.AuditWrite(admin.AuditInvitationCreate, http.HandlerFunc(env.userAdmin.CreateInvitation)).ServeHTTP(badW, badReq)
+	require.Equal(t, http.StatusBadRequest, badW.Code)
+
+	// Authentication denial.
+	deniedReq := httptest.NewRequest(http.MethodPost, "/api/admin/invitations", bytes.NewReader([]byte(`{"role":"user"}`)))
+	deniedW := httptest.NewRecorder()
+	env.userAdmin.AuditWrite(admin.AuditInvitationCreate, http.HandlerFunc(env.userAdmin.CreateInvitation)).ServeHTTP(deniedW, deniedReq)
+	require.Equal(t, http.StatusUnauthorized, deniedW.Code)
+
+	require.Eventually(t, func() bool { return len(query(t)) == 3 }, 2*time.Second, 5*time.Millisecond)
+	rows := query(t)
+	require.Equal(t, audit.OutcomeSuccess, rows[0].Outcome)
+	require.Equal(t, audit.OutcomeFailure, rows[1].Outcome)
+	require.Equal(t, audit.OutcomeDenied, rows[2].Outcome)
+	require.Equal(t, "u-admin", rows[0].UserID)
+	require.Equal(t, audit.AnonymousUserID, rows[2].UserID)
+	for _, row := range rows {
+		require.Equal(t, "admin."+admin.AuditInvitationCreate, row.Action)
+	}
 }
 
 // TestAdminListUsers_OmitsPasswordHash 验证 AdminListUsers 不泄漏 bcrypt 哈希（spec §11.2）。

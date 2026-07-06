@@ -46,7 +46,7 @@ func TestWebhookSink_DeliversAndSigns(t *testing.T) {
 		"url": srv.URL, "secret": secret,
 	}, slog.Default())
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close(context.Background())) }()
 
 	err = s.OnAlertEvent(context.Background(), AlertEvent{
 		EventID: "e1", UserID: "u1", Action: "auth.login", Outcome: "success",
@@ -85,7 +85,7 @@ func TestWebhookSink_NoSecretOmitsSignature(t *testing.T) {
 
 	s, err := NewWebhookSink(map[string]any{"url": srv.URL}, slog.Default())
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close(context.Background())) }()
 
 	require.NoError(t, s.OnAlertEvent(context.Background(), AlertEvent{EventID: "e2"}))
 	require.Eventually(t, func() bool { return s.Delivered() >= 1 }, 2*time.Second, 5*time.Millisecond)
@@ -110,7 +110,7 @@ func TestWebhookSink_ServerErrorRetriesThenDrops(t *testing.T) {
 
 	s, err := NewWebhookSink(map[string]any{"url": srv.URL}, slog.Default())
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close(context.Background())) }()
 
 	require.NoError(t, s.OnAlertEvent(context.Background(), AlertEvent{EventID: "e-fail"}))
 	// 3 attempts with 1s/2s backoff → ~3s. Wait up to 8s.
@@ -140,7 +140,7 @@ func TestWebhookSink_QueueFullDrops(t *testing.T) {
 		"url": srv.URL, "queue_cap": 2,
 	}, slog.Default())
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close(context.Background())) }()
 
 	// First event grabs the delivery goroutine (sleeps 500ms). Next 2 fill the
 	// queue (cap 2). The 4th must be dropped, not block.
@@ -174,13 +174,34 @@ func TestWebhookSink_RetrySucceeds(t *testing.T) {
 
 	s, err := NewWebhookSink(map[string]any{"url": srv.URL}, slog.Default())
 	require.NoError(t, err)
-	defer s.Close()
+	defer func() { require.NoError(t, s.Close(context.Background())) }()
 
 	require.NoError(t, s.OnAlertEvent(context.Background(), AlertEvent{EventID: "e-retry"}))
 	require.Eventually(t, func() bool { return s.Delivered() >= 1 },
 		8*time.Second, 10*time.Millisecond)
 	require.Equal(t, int64(0), s.Failures())
 	require.GreaterOrEqual(t, atomic.LoadInt32(&attempts), int32(2))
+}
+
+func TestWebhookSink_CloseDrainsQueue(t *testing.T) {
+	t.Parallel()
+	var delivered atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		delivered.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s, err := NewWebhookSink(map[string]any{"url": srv.URL, "queue_cap": 8}, slog.Default())
+	require.NoError(t, err)
+	for i := 0; i < 5; i++ {
+		require.NoError(t, s.OnAlertEvent(context.Background(), AlertEvent{EventID: "drain"}))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, s.Close(ctx))
+	require.Equal(t, int32(5), delivered.Load())
+	require.Error(t, s.OnAlertEvent(context.Background(), AlertEvent{EventID: "closed"}))
 }
 
 // TestWebhookSink_ConfigErrors covers required-field validation.
@@ -208,7 +229,7 @@ func TestWebhookSink_BuildViaRegistry(t *testing.T) {
 	require.NotNil(t, s)
 	// Clean up the background goroutine if it's a WebhookSink.
 	if ws, ok := s.(*WebhookSink); ok {
-		defer ws.Close()
+		defer func() { require.NoError(t, ws.Close(context.Background())) }()
 	}
 }
 

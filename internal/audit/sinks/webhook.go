@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -45,6 +46,9 @@ type WebhookSink struct {
 	log       *slog.Logger
 	cancel    context.CancelFunc
 	done      chan struct{}
+	mu        sync.Mutex
+	closeOnce sync.Once
+	closed    bool
 }
 
 // webhookConfig keys.
@@ -98,6 +102,11 @@ func NewWebhookSink(cfg map[string]any, log *slog.Logger) (*WebhookSink, error) 
 // than it takes to push onto a buffered channel — when the queue is full the
 // event is dropped and Failures() increments (spec §5.6 backpressure).
 func (s *WebhookSink) OnAlertEvent(_ context.Context, e AlertEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return fmt.Errorf("audit webhook sink: closed")
+	}
 	select {
 	case s.queue <- e:
 	default:
@@ -112,10 +121,25 @@ func (s *WebhookSink) Failures() int64 { return s.failures.Load() }
 // Delivered returns the count of successfully POSTed events.
 func (s *WebhookSink) Delivered() int64 { return s.delivered.Load() }
 
-// Close drains pending events (best-effort) and stops the delivery goroutine.
-func (s *WebhookSink) Close() {
-	s.cancel()
-	<-s.done
+// Close drains pending events within ctx and stops the delivery goroutine.
+func (s *WebhookSink) Close(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		close(s.queue)
+		s.mu.Unlock()
+	})
+	select {
+	case <-s.done:
+		s.cancel()
+		return nil
+	case <-ctx.Done():
+		s.cancel()
+		return ctx.Err()
+	}
 }
 
 // run is the single delivery goroutine. Events are delivered sequentially to
@@ -123,13 +147,8 @@ func (s *WebhookSink) Close() {
 // (ordering matters for audit chains).
 func (s *WebhookSink) run(ctx context.Context) {
 	defer close(s.done)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case e := <-s.queue:
-			s.deliverWithRetry(ctx, e)
-		}
+	for e := range s.queue {
+		s.deliverWithRetry(ctx, e)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,17 +60,18 @@ type Collector struct {
 	closeC    chan struct{}
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
+	startMu   sync.Mutex
+	started   bool
 
-	// sinkWg tracks in-flight fan-out goroutines so Close can drain them
-	// before the spill file is closed (review I3: previously Close returned
-	// while sink goroutines were still running, leaking and risking
-	// use-after-close on sink resources).
-	sinkWg sync.WaitGroup
-	// sinkSem bounds concurrent fan-out goroutines to len(sinks) so a burst
-	// of committed events can't spawn an unbounded number of goroutines.
-	// Each sink's OnAlertEvent contract already requires "return quickly",
-	// so one in-flight call per sink is the natural concurrency ceiling.
-	sinkSem chan struct{}
+	sinkWorkers   []*sinkWorker
+	sinkWg        sync.WaitGroup
+	sinkStopOnce  sync.Once
+	sinksDone     chan struct{}
+	sinkCtx       context.Context
+	sinkCancel    context.CancelFunc
+	sinkCloseOnce sync.Once
+	sinkCloseErr  error
+	sinkCloseMu   sync.Mutex
 
 	// lifecycleCtx is set by Start and used for normal (ticker/batch-full/
 	// sentinel) flushes. shutdownCtx is set by Close and used for the final
@@ -83,6 +85,11 @@ type Collector struct {
 	enqueued atomic.Int64
 	spilled  atomic.Int64
 	dropped  atomic.Int64
+}
+
+type sinkWorker struct {
+	sink  AlertSink
+	queue chan AuditEvent
 }
 
 // spillSentinel is a sentinel *UserActivity value that tells runWriter to drain
@@ -99,22 +106,23 @@ func NewCollector(store Store, spill *SpillFile, sinks []AlertSink, log *slog.Lo
 	if sinks == nil {
 		sinks = []AlertSink{}
 	}
-	// Bound fan-out concurrency to len(sinks) (min 1). Each sink's
-	// OnAlertEvent must "return quickly" per its contract, so one in-flight
-	// call per sink is the natural ceiling; events serialize behind it.
-	semCap := len(sinks)
-	if semCap < 1 {
-		semCap = 1
+	workers := make([]*sinkWorker, 0, len(sinks))
+	for _, sink := range sinks {
+		workers = append(workers, &sinkWorker{
+			sink:  sink,
+			queue: make(chan AuditEvent, cfg.ChannelCap),
+		})
 	}
 	return &Collector{
-		store:    store,
-		spill:    spill,
-		sinks:    sinks,
-		log:      log,
-		cfg:      cfg,
-		captureC: make(chan *UserActivity, cfg.ChannelCap),
-		closeC:   make(chan struct{}),
-		sinkSem:  make(chan struct{}, semCap),
+		store:       store,
+		spill:       spill,
+		sinks:       sinks,
+		log:         log,
+		cfg:         cfg,
+		captureC:    make(chan *UserActivity, cfg.ChannelCap),
+		closeC:      make(chan struct{}),
+		sinkWorkers: workers,
+		sinksDone:   make(chan struct{}),
 	}
 }
 
@@ -123,12 +131,28 @@ func NewCollector(store Store, spill *SpillFile, sinks []AlertSink, log *slog.Lo
 // pass the gateway's long-lived context so a normal flush can't outlive it.
 // A nil ctx falls back to context.Background() (test convenience).
 func (c *Collector) Start(ctx context.Context) {
+	c.startMu.Lock()
+	if c.started {
+		c.startMu.Unlock()
+		return
+	}
+	c.started = true
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	c.lifecycleCtx = ctx
+	c.sinkCtx, c.sinkCancel = context.WithCancel(context.Background())
+	for _, worker := range c.sinkWorkers {
+		c.sinkWg.Add(1)
+		go c.runSinkWorker(worker)
+	}
+	go func() {
+		c.sinkWg.Wait()
+		close(c.sinksDone)
+	}()
 	c.closeWg.Add(1)
 	go c.runWriter()
+	c.startMu.Unlock()
 }
 
 // Enqueue submits an audit event with zero-loss semantics:
@@ -213,13 +237,93 @@ func (c *Collector) Close(ctx context.Context) error {
 		}
 		close(c.closeC)
 	})
+	c.startMu.Lock()
+	if !c.started {
+		c.started = true
+		close(c.sinksDone)
+	}
+	c.startMu.Unlock()
 	c.closeWg.Wait()
-	c.sinkWg.Wait()
+	c.sinkStopOnce.Do(func() {
+		for _, worker := range c.sinkWorkers {
+			close(worker.queue)
+		}
+	})
+	waitCtx := ctx
+	if waitCtx == nil {
+		waitCtx = context.Background()
+	}
+	var waitErr error
+	select {
+	case <-c.sinksDone:
+		c.closeSinkLifecycles(waitCtx)
+	case <-waitCtx.Done():
+		waitErr = waitCtx.Err()
+		if c.sinkCancel != nil {
+			c.sinkCancel()
+		}
+	}
+	if c.sinkCancel != nil {
+		c.sinkCancel()
+	}
 	if c.spill != nil {
 		spillErr = c.spill.Close()
 		c.spill = nil
 	}
-	return spillErr
+	c.sinkCloseMu.Lock()
+	sinkErr := c.sinkCloseErr
+	c.sinkCloseMu.Unlock()
+	return errors.Join(waitErr, spillErr, sinkErr)
+}
+
+func (c *Collector) runSinkWorker(worker *sinkWorker) {
+	defer c.sinkWg.Done()
+	for event := range worker.queue {
+		c.callSink(worker.sink, event)
+	}
+}
+
+func (c *Collector) callSink(sink AlertSink, event AuditEvent) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			observability.AuditSinkFailures().Add(context.Background(), 1, metric.WithAttributes(
+				attribute.String("sink", fmt.Sprintf("%T", sink)),
+			))
+			c.log.Error("audit: sink panic recovered",
+				"sink", fmt.Sprintf("%T", sink),
+				"panic", recovered,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+	ctx := c.sinkCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sctx, cancel := context.WithTimeout(ctx, c.cfg.SinkTimeout)
+	defer cancel()
+	if err := sink.OnAuditEvent(sctx, event); err != nil {
+		observability.AuditSinkFailures().Add(context.Background(), 1, metric.WithAttributes(
+			attribute.String("sink", fmt.Sprintf("%T", sink)),
+		))
+		c.log.Warn("audit: sink failed", "err", err, "event_id", event.EventID, "action", event.Action)
+	}
+}
+
+func (c *Collector) closeSinkLifecycles(ctx context.Context) {
+	c.sinkCloseOnce.Do(func() {
+		var closeErr error
+		for _, sink := range c.sinks {
+			closer, ok := sink.(AlertSinkCloser)
+			if !ok {
+				continue
+			}
+			closeErr = errors.Join(closeErr, closer.Close(ctx))
+		}
+		c.sinkCloseMu.Lock()
+		c.sinkCloseErr = closeErr
+		c.sinkCloseMu.Unlock()
+	})
 }
 
 func (c *Collector) runWriter() {
@@ -417,44 +521,29 @@ func (c *Collector) flushBatch(ctx context.Context, uas []*UserActivity) error {
 		)
 	}
 
-	c.fanOutSinks(context.Background(), committed)
+	c.fanOutSinks(committed)
 	return nil
 }
 
 // fanOutSinks dispatches every committed event to every sink. Concurrency is
-// bounded by sinkSem (cap = len(sinks)) and every spawned goroutine is tracked
-// by sinkWg so Close can drain them before the spill file closes (review I3:
-// previously unbounded goroutines with no shutdown sync, leaking at Close and
-// risking use-after-close on sink resources).
-func (c *Collector) fanOutSinks(ctx context.Context, uas []*UserActivity) {
-	for _, sink := range c.sinks {
-		sink := sink
-		for _, ua := range uas {
-			ua := ua
-			// Bounded acquire: at most len(sinks) fan-out goroutines run at
-			// once. This is non-blocking in practice (sinks return quickly)
-			// but caps the worst case under a burst of large batches.
-			c.sinkSem <- struct{}{}
-			c.sinkWg.Add(1)
-			go func() {
-				defer func() {
-					<-c.sinkSem
-					c.sinkWg.Done()
-				}()
-				ev := userActivityToAuditEvent(ua)
-				sctx, cancel := context.WithTimeout(ctx, c.cfg.SinkTimeout)
-				defer cancel()
-				if err := sink.OnAuditEvent(sctx, ev); err != nil {
-					observability.AuditSinkFailures().Add(ctx, 1, metric.WithAttributes(
-						attribute.String("sink", fmt.Sprintf("%T", sink)),
-					))
-					c.log.Warn("audit: sink failed",
-						"err", err,
-						"event_id", ev.EventID,
-						"action", ev.Action,
-					)
-				}
-			}()
+// bounded by the per-sink worker queue capacity (ChannelCap). If a queue is
+// full, events are dropped for that sink to prevent blocking the main collector.
+func (c *Collector) fanOutSinks(uas []*UserActivity) {
+	for _, ua := range uas {
+		ev := userActivityToAuditEvent(ua)
+		for _, worker := range c.sinkWorkers {
+			select {
+			case worker.queue <- ev:
+			default:
+				observability.AuditSinkFailures().Add(context.Background(), 1, metric.WithAttributes(
+					attribute.String("sink", fmt.Sprintf("%T", worker.sink)),
+				))
+				c.log.Warn("audit: sink queue full, event dropped",
+					"sink", fmt.Sprintf("%T", worker.sink),
+					"event_id", ev.EventID,
+					"action", ev.Action,
+				)
+			}
 		}
 	}
 }

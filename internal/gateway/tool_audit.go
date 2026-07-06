@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,15 +19,13 @@ import (
 // command surfaces, MultiEdit bulk edits, and network-fetch tools fall here.
 // Add with care — every entry means audit rows grow with full input.
 var sensitiveToolNames = map[string]bool{
-	"Bash":        true,
+	"bash":        true,
 	"write":       true, // codex/opencode naming
 	"edit":        true,
-	"Write":       true,
-	"Edit":        true,
-	"MultiEdit":   true,
+	"multiedit":   true,
 	"str_replace": true, // opencode
-	"WebFetch":    true,
-	"WebSearch":   true,
+	"webfetch":    true,
+	"websearch":   true,
 	"web_fetch":   true,
 	"web_search":  true,
 }
@@ -51,42 +48,12 @@ const toolInputPreviewLimit = 200
 //	group 2 = the secret payload to mask
 //
 // maskSensitiveInput relies on this two-group contract.
-var sensitiveInputPatterns = []*regexp.Regexp{
-	// Prefixed API keys: prefix (group 1) + secret payload (group 2).
-	regexp.MustCompile(`(?i)((?:hpk_|sk-|sk_|AKIA|ghp_|gho_|ghs_|xox[baprs]-))([A-Za-z0-9]{4,})`),
-	// Bearer tokens: literal "Bearer " (group 1) + opaque token (group 2).
-	regexp.MustCompile(`(?i)(Bearer\s+)([A-Za-z0-9._\-+]{4,})`),
-	// password=/passwd=/pwd=/secret=/token=/api_key= assignments: key (group 1)
-	// + secret value (group 2).
-	regexp.MustCompile(`(?i)(?:(password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*"?)([^\s"']{4,})`),
-}
-
 // maskSensitiveInput redacts secret-like substrings from a rendered tool-input
 // string. Returns the sanitized string. Non-matching input is returned as-is.
 // Each match is replaced with a prefix(4)+… token so the audit row shows enough
 // to identify which key was used without exposing it (spec §5.9 prefix+mask).
 func maskSensitiveInput(s string) string {
-	for _, re := range sensitiveInputPatterns {
-		s = re.ReplaceAllStringFunc(s, func(match string) string {
-			loc := re.FindStringSubmatchIndex(match)
-			// Need at least 3 pairs (full match + 2 capture groups) for the
-			// prefix/secret split; otherwise fall back to whole-match masking.
-			if len(loc) < 6 || loc[2] < 0 || loc[4] < 0 {
-				if utf8.RuneCountInString(match) <= 4 {
-					return strings.Repeat("*", len(match))
-				}
-				return string([]rune(match)[:4]) + "…"
-			}
-			prefix := match[loc[2]:loc[3]]
-			secret := match[loc[4]:loc[5]]
-			if utf8.RuneCountInString(secret) <= 4 {
-				return prefix + strings.Repeat("*", utf8.RuneCountInString(secret))
-			}
-			runes := []rune(secret)
-			return prefix + string(runes[:4]) + "…"
-		})
-	}
-	return s
+	return audit.MaskSensitiveText(s)
 }
 
 // renderToolInput converts a tool's Input map to a stable JSON string for the
@@ -95,7 +62,8 @@ func renderToolInput(input map[string]any) string {
 	if len(input) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(input)
+	sanitized, _ := audit.SanitizeValue(input).(map[string]any)
+	b, err := json.Marshal(sanitized)
 	if err != nil {
 		return ""
 	}
@@ -159,7 +127,7 @@ func (b *Bridge) emitToolCallAudit(fc *forwardContext, tc *events.ToolCallData) 
 // Always records: name, success (true at emit time), kind (if present), title.
 func buildToolCallDetail(tc *events.ToolCallData) string {
 	rawInput := renderToolInput(tc.Input)
-	sensitive := sensitiveToolNames[tc.Name]
+	sensitive := sensitiveToolNames[strings.ToLower(tc.Name)]
 	d := map[string]any{
 		"name":    tc.Name,
 		"success": true, // tool was invoked; failure correlation is P3
@@ -168,7 +136,7 @@ func buildToolCallDetail(tc *events.ToolCallData) string {
 		d["kind"] = tc.Kind
 	}
 	if tc.Title != "" {
-		d["title"] = tc.Title
+		d["title"] = audit.MaskSensitiveText(tc.Title)
 	}
 	switch {
 	case sensitive:
