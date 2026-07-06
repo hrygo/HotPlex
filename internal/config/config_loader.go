@@ -122,6 +122,7 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("webhook.target_job_name")
 	_ = v.BindEnv("audit.enabled")
 	_ = v.BindEnv("audit.retention")
+	_ = v.BindEnv("audit.full_content_retention")
 	_ = v.BindEnv("audit.collector.channel_cap")
 	_ = v.BindEnv("audit.collector.batch_interval")
 	_ = v.BindEnv("audit.collector.batch_size")

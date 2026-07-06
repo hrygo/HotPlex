@@ -180,8 +180,9 @@ func Default() *Config {
 			Retention: 720 * time.Hour, // 30 days
 		},
 		Audit: AuditConfig{
-			Enabled:   true,
-			Retention: 26280 * time.Hour, // 3 years
+			Enabled:              true,
+			Retention:            26280 * time.Hour, // 3 years
+			FullContentRetention: 2160 * time.Hour,  // 90 days (spec §5.3)
 			Collector: AuditCollectorConfig{
 				ChannelCap:    4096,
 				BatchInterval: 1 * time.Second,

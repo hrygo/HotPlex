@@ -35,6 +35,7 @@ var hotReloadableFields = map[string]bool{
 	"admin.allowed_cidrs":       true,
 	// Audit fields (spec §8): retention and collector tuning are safe to hot-reload.
 	"audit.retention":                true,
+	"audit.full_content_retention":   true,
 	"audit.collector.batch_interval": true,
 	"audit.collector.batch_size":     true,
 }

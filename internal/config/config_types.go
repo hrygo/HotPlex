@@ -681,10 +681,32 @@ type EventsConfig struct {
 
 // AuditConfig holds user behavior audit system settings.
 type AuditConfig struct {
-	Enabled   bool                 `mapstructure:"enabled"`
-	Retention time.Duration        `mapstructure:"retention"`
-	Collector AuditCollectorConfig `mapstructure:"collector"`
-	Sinks     []AuditSinkConfig    `mapstructure:"sinks"`
+	Enabled              bool                 `mapstructure:"enabled"`
+	Retention            time.Duration        `mapstructure:"retention"`
+	FullContentRetention time.Duration        `mapstructure:"full_content_retention"` // spec §5.3: extends events/turns TTL so audit event_ref drill-down stays valid (default 90d)
+	Collector            AuditCollectorConfig `mapstructure:"collector"`
+	Sinks                []AuditSinkConfig    `mapstructure:"sinks"`
+}
+
+// EffectiveEventsRetention computes the events/turns TTL to use at startup.
+// Per spec §5.3: when audit is enabled, the effective retention is
+// max(events.retention, audit.full_content_retention) so that audit event_ref
+// drill-down stays valid for the full-content window. When audit is disabled,
+// events.retention is returned unchanged (audit must not silently shorten the
+// events TTL when the operator turns audit off). A zero events.retention falls
+// back to the package default (720h) before the max is taken.
+func EffectiveEventsRetention(cfg *Config) time.Duration {
+	if cfg == nil {
+		return 720 * time.Hour
+	}
+	ev := cfg.Events.Retention
+	if ev <= 0 {
+		ev = 720 * time.Hour // 30 days, matches Default()
+	}
+	if cfg.Audit.Enabled && cfg.Audit.FullContentRetention > ev {
+		return cfg.Audit.FullContentRetention
+	}
+	return ev
 }
 
 // AuditCollectorConfig holds audit event collector tuning parameters.
