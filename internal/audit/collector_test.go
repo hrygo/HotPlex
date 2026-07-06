@@ -66,12 +66,12 @@ func TestCollector_OrderingPreserved(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		ua := &UserActivity{
-			Ts:        int64(1700000000000 + i*1000),
-			UserID:    "u1",
+			Ts:         int64(1700000000000 + i*1000),
+			UserID:     "u1",
 			UserIDType: UserIDTypePlatform,
-			Platform:  PlatformTest,
-			Action:    ActionAuthLogin,
-			Outcome:   OutcomeSuccess,
+			Platform:   PlatformTest,
+			Action:     ActionAuthLogin,
+			Outcome:    OutcomeSuccess,
 			DetailJSON: `{}`,
 		}
 		require.NoError(t, c.Enqueue(context.Background(), ua))
@@ -106,12 +106,12 @@ func TestCollector_SpillOnFull(t *testing.T) {
 	n := 20
 	for i := 0; i < n; i++ {
 		ua := &UserActivity{
-			Ts:        int64(i),
-			UserID:    "u1",
+			Ts:         int64(i),
+			UserID:     "u1",
 			UserIDType: UserIDTypePlatform,
-			Platform:  PlatformTest,
-			Action:    ActionMessageInbound,
-			Outcome:   OutcomeSuccess,
+			Platform:   PlatformTest,
+			Action:     ActionMessageInbound,
+			Outcome:    OutcomeSuccess,
 			DetailJSON: `{}`,
 		}
 		err := c.Enqueue(ctx, ua)
@@ -147,12 +147,12 @@ func TestCollector_SinkFanout(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		ua := &UserActivity{
-			Ts:        int64(1000 + i),
-			UserID:    "u1",
+			Ts:         int64(1000 + i),
+			UserID:     "u1",
 			UserIDType: UserIDTypeRegistered,
-			Platform:  PlatformWebChat,
-			Action:    ActionSessionCreate,
-			Outcome:   OutcomeSuccess,
+			Platform:   PlatformWebChat,
+			Action:     ActionSessionCreate,
+			Outcome:    OutcomeSuccess,
 			DetailJSON: `{}`,
 		}
 		require.NoError(t, c.Enqueue(ctx, ua))
@@ -179,12 +179,12 @@ func TestCollector_CloseDrainsSpill(t *testing.T) {
 	n := 12
 	for i := 0; i < n; i++ {
 		ua := &UserActivity{
-			Ts:        int64(1700000000000 + i),
-			UserID:    "u1",
+			Ts:         int64(1700000000000 + i),
+			UserID:     "u1",
 			UserIDType: UserIDTypePlatform,
-			Platform:  PlatformSlack,
-			Action:    ActionAuthLogin,
-			Outcome:   OutcomeSuccess,
+			Platform:   PlatformSlack,
+			Action:     ActionAuthLogin,
+			Outcome:    OutcomeSuccess,
 			DetailJSON: `{}`,
 		}
 		require.NoError(t, c.Enqueue(ctx, ua))
@@ -218,12 +218,12 @@ func TestCollector_DroppedIsZero(t *testing.T) {
 	n := 50
 	for i := 0; i < n; i++ {
 		ua := &UserActivity{
-			Ts:        int64(i),
-			UserID:    "u1",
+			Ts:         int64(i),
+			UserID:     "u1",
 			UserIDType: UserIDTypePlatform,
-			Platform:  PlatformTest,
-			Action:    ActionAuthLogin,
-			Outcome:   OutcomeSuccess,
+			Platform:   PlatformTest,
+			Action:     ActionAuthLogin,
+			Outcome:    OutcomeSuccess,
 			DetailJSON: `{}`,
 		}
 		err := c.Enqueue(ctx, ua)
@@ -247,12 +247,12 @@ func TestCollector_HashChainIntegrity(t *testing.T) {
 			outcome = OutcomeFailure
 		}
 		ua := &UserActivity{
-			Ts:        int64(1700000000000 + i*1000),
-			UserID:    "u1",
+			Ts:         int64(1700000000000 + i*1000),
+			UserID:     "u1",
 			UserIDType: UserIDTypeRegistered,
-			Platform:  PlatformWebChat,
-			Action:    ActionMessageInbound,
-			Outcome:   outcome,
+			Platform:   PlatformWebChat,
+			Action:     ActionMessageInbound,
+			Outcome:    outcome,
 			DetailJSON: `{"seq":` + string(rune('0'+i%10)) + `}`,
 		}
 		require.NoError(t, c.Enqueue(ctx, ua))
@@ -332,12 +332,12 @@ func TestCollector_StartEnqueuedSpilledCounters(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		ua := &UserActivity{
-			Ts:        int64(i),
-			UserID:    "u1",
+			Ts:         int64(i),
+			UserID:     "u1",
 			UserIDType: UserIDTypePlatform,
-			Platform:  PlatformTest,
-			Action:    ActionAuthLogin,
-			Outcome:   OutcomeSuccess,
+			Platform:   PlatformTest,
+			Action:     ActionAuthLogin,
+			Outcome:    OutcomeSuccess,
 			DetailJSON: `{}`,
 		}
 		require.NoError(t, c.Enqueue(ctx, ua))
