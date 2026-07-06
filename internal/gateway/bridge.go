@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
@@ -82,6 +83,11 @@ type Bridge struct {
 
 	crashTracker   map[string]*crashHistory // per-session crash loop detection
 	crashTrackerMu sync.Mutex
+
+	// auditCollector emits tool.call audit events (issue #833 P2, spec §5.2).
+	// Optional: nil means tool-call audit is disabled (mirrors the pattern on
+	// Handler/Hub/Conn). Injected via SetAuditCollector during gateway init.
+	auditCollector *audit.Collector
 }
 
 type crashHistory struct {
@@ -154,6 +160,12 @@ func (b *Bridge) GetWorkspaceByID(ctx context.Context, id string) (*session.Work
 		return nil, fmt.Errorf("bridge: workspace store is not configured")
 	}
 	return b.wsStore.GetWorkspaceByID(ctx, id)
+}
+
+// SetAuditCollector injects the audit collector for tool.call audit events
+// (issue #833 P2, spec §5.2). Optional: nil leaves tool-call audit disabled.
+func (b *Bridge) SetAuditCollector(ac *audit.Collector) {
+	b.auditCollector = ac
 }
 
 // StartSession creates a new session and starts a worker.

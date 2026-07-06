@@ -455,6 +455,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	})
 	handler.SetAuditCollector(auditCollector)
 	hub.SetAuditCollector(auditCollector)
+	bridge.SetAuditCollector(auditCollector) // tool.call audit (issue #833 P2)
 
 	if cfg.Worker.AutoRetry.Enabled {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
@@ -669,7 +670,17 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Warn("Brain initialization failed (fail-open)", "error", err)
 	}
 
-	go runEventsGC(ctx, stores, log, cfg.Events.Retention)
+	// Effective events/turns retention: when audit is enabled, extend the TTL
+	// to max(events.retention, audit.full_content_retention) so audit event_ref
+	// drill-down stays valid for the full-content window (spec §5.3). Hot-reload
+	// of this effective value requires a gateway restart (the GC goroutine
+	// captures the value at startup), consistent with audit.collector.batch_interval.
+	eventsRetention := config.EffectiveEventsRetention(cfg)
+	if eventsRetention != cfg.Events.Retention {
+		log.Info("audit: extending events/turns retention for full-content drill-down",
+			"original", cfg.Events.Retention, "effective", eventsRetention)
+	}
+	go runEventsGC(ctx, stores, log, eventsRetention)
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 

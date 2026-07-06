@@ -375,6 +375,13 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 				acc.ToolNames = make(map[string]int)
 			}
 			acc.ToolNames[tc.Name]++
+			// tool.call audit (issue #833 P2, spec §5.2). Emit after stats
+			// accumulation so a slow/nil collector never blocks forwarding.
+			// Outcome is success at this point — tool failure correlation via
+			// the later ToolResult event is deferred to P3 (spec §5.2 table
+			// lists failure as a possible outcome, but matching result→call by
+			// ID at emit-time is speculative and error-prone without buffering).
+			b.emitToolCallAudit(fc, &tc)
 		}
 	case events.Done:
 		if fc.turnTimer != nil {
