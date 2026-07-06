@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
@@ -90,21 +91,23 @@ func (s *ActivityService) Export(ctx context.Context, q audit.Query, format, exp
 	return data, contentType, nil
 }
 
-// maskPII redacts ip (last octet → 0 for IPv4, last 4 groups → 0 for IPv6)
-// and truncates user_agent to browser family (first 50 chars + "...").
-// Per spec §5.9.
+// maskPII redacts ip (last octet → 0 for IPv4, /64 for IPv6) and truncates
+// user_agent to browser family (first 50 chars + "..."). Per spec §5.9.
+//
+// IPv6 handling uses net.ParseIP so that all notations — full form, shorthand
+// (::1, fe80::1), and IPv4-mapped (::ffff:192.168.1.1) — are masked correctly.
 func maskPII(ua *audit.UserActivity) {
 	if ua.IP != "" {
-		if idx := strings.LastIndex(ua.IP, "."); idx > 0 {
-			// IPv4: zero last octet
-			ua.IP = ua.IP[:idx+1] + "0"
-		} else if idx := strings.LastIndex(ua.IP, ":"); idx > 0 {
-			// IPv6: keep first 4 groups, zero the rest
-			groups := strings.Split(ua.IP, ":")
-			if len(groups) > 4 {
-				ua.IP = strings.Join(groups[:4], ":") + ":0:0:0:0"
+		if ip := net.ParseIP(ua.IP); ip != nil {
+			if ip4 := ip.To4(); ip4 != nil {
+				ua.IP = ip4.Mask(net.CIDRMask(24, 32)).String()
+			} else {
+				// IPv6: zero the interface/host bits beyond the /64 prefix.
+				ua.IP = ip.Mask(net.CIDRMask(64, 128)).String()
 			}
 		}
+		// If the string isn't a valid IP literal (rare — could be a
+		// malformed actor input), leave it untouched rather than guess.
 	}
 	if ua.UserAgent != "" && len(ua.UserAgent) > 50 {
 		ua.UserAgent = ua.UserAgent[:50] + "..."
@@ -129,13 +132,42 @@ func encodeCSV(rows []audit.UserActivity) ([]byte, error) {
 		if err := w.Write([]string{
 			fmt.Sprintf("%d", r.ID),
 			time.UnixMilli(r.Ts).UTC().Format(time.RFC3339Nano),
-			r.UserID, r.UserIDType, r.Platform, r.SessionID,
-			r.Action, r.ResourceType, r.ResourceID, r.Outcome,
-			r.IP, r.UserAgent, r.SelfHash,
+			sanitizeCSVCell(r.UserID),
+			sanitizeCSVCell(r.UserIDType),
+			sanitizeCSVCell(r.Platform),
+			sanitizeCSVCell(r.SessionID),
+			sanitizeCSVCell(r.Action),
+			sanitizeCSVCell(r.ResourceType),
+			sanitizeCSVCell(r.ResourceID),
+			sanitizeCSVCell(r.Outcome),
+			sanitizeCSVCell(r.IP),
+			sanitizeCSVCell(r.UserAgent),
+			sanitizeCSVCell(r.SelfHash),
 		}); err != nil {
 			return nil, err
 		}
 	}
 	w.Flush()
 	return buf.Bytes(), w.Error()
+}
+
+// csvFormulaChars are the leading characters spreadsheet applications treat
+// as formula introducers. Prefixing with a single quote forces the cell to
+// be treated as text, neutralizing formula-injection payloads (OWASP CSV
+// Injection / CWE-1236). The user_id and user_agent fields are fully
+// attacker-controllable, so every text cell is sanitized defensively.
+var csvFormulaChars = string([]byte{'=', '+', '-', '@', '\t', '\r'})
+
+// sanitizeCSVCell prevents CSV formula injection (CWE-1236). If a cell
+// value begins with a character that spreadsheet apps interpret as a
+// formula (=, +, -, @, tab, CR), a single quote is prepended so the cell
+// renders as text. Empty values are returned as-is.
+func sanitizeCSVCell(s string) string {
+	if s == "" {
+		return ""
+	}
+	if strings.ContainsRune(csvFormulaChars, rune(s[0])) {
+		return "'" + s
+	}
+	return s
 }

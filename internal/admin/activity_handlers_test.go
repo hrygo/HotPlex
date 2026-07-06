@@ -31,6 +31,9 @@ func (m *mockAuditStoreForHandler) Query(ctx context.Context, q audit.Query) ([]
 	}
 	return nil, nil
 }
+func (m *mockAuditStoreForHandler) QueryAsc(ctx context.Context, fromID int64, limit int) ([]audit.UserActivity, error) {
+	return nil, nil // handler tests don't exercise the verifier path
+}
 func (m *mockAuditStoreForHandler) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	return 0, nil
 }

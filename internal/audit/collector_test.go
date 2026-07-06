@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -406,6 +407,141 @@ func reverseRows(rows []UserActivity) []UserActivity {
 		rows[i], rows[j] = rows[j], rows[i]
 	}
 	return rows
+}
+
+// --- newEventID / UUIDv7 tests (review issue #1) ---
+
+func TestNewEventID_IsUUIDv7Shape(t *testing.T) {
+	t.Parallel()
+	id := newEventID()
+	// Canonical 8-4-4-4-12 = 36 chars including dashes.
+	require.Len(t, id, 36)
+	// Version nibble at position 14 must be '7'.
+	require.Equal(t, "7", string(id[14]))
+	// Variant bits: char at position 19 must be 8/9/a/b.
+	c := id[19]
+	require.Contains(t, "89ab", string(c), "invalid variant char %q", c)
+}
+
+func TestNewEventID_UniqueWithinMillisecond(t *testing.T) {
+	t.Parallel()
+	// Spec §5.6 requires EventID to be unique for sink dedup/idempotency.
+	// Two IDs minted in the same millisecond must differ (regression for
+	// the old ev_<ts>_<hash(ts)> scheme which collided within 1ms).
+	const n = 5000
+	seen := make(map[string]struct{}, n)
+	for i := 0; i < n; i++ {
+		id := newEventID()
+		_, dup := seen[id]
+		require.False(t, dup, "duplicate EventID after %d minted: %s", i, id)
+		seen[id] = struct{}{}
+	}
+}
+
+func TestUserActivityToAuditEvent_DecodesDetail(t *testing.T) {
+	t.Parallel()
+	// Regression for decodeDetail stub (review issue #2): sinks must
+	// receive the structured Detail map, not nil.
+	ua := &UserActivity{
+		Ts:         1700000000000,
+		UserID:     "u1",
+		UserIDType: UserIDTypePlatform,
+		Platform:   PlatformTest,
+		Action:     ActionAuthLogin,
+		Outcome:    OutcomeSuccess,
+		DetailJSON: `{"seq":42,"tool":"Bash","ok":true}`,
+	}
+	ev := userActivityToAuditEvent(ua)
+	require.Equal(t, "u1", ev.UserID)
+	require.NotNil(t, ev.Detail, "Detail must be decoded, not nil")
+	require.Equal(t, float64(42), ev.Detail["seq"])
+	require.Equal(t, "Bash", ev.Detail["tool"])
+	require.Equal(t, true, ev.Detail["ok"])
+}
+
+func TestUserActivityToAuditEvent_DecodeDetailEmptyIsNil(t *testing.T) {
+	t.Parallel()
+	ua := &UserActivity{DetailJSON: ""}
+	require.Nil(t, userActivityToAuditEvent(ua).Detail)
+	// Malformed JSON must not panic — returns nil defensively.
+	ua.DetailJSON = "{not json"
+	require.Nil(t, userActivityToAuditEvent(ua).Detail)
+}
+
+// --- Spill re-spill on DB failure tests (review issue #6) ---
+
+// failingCommitStore wraps a real SQLite store but always fails Commit,
+// simulating a DB outage during drain. Every other method passes through.
+type failingCommitStore struct {
+	Store
+}
+
+type failingCommitTx struct {
+	Tx
+}
+
+func (f *failingCommitTx) Commit() error {
+	return errors.New("simulated db commit failure")
+}
+
+func (f *failingCommitStore) BeginTx(ctx context.Context) (Tx, error) {
+	tx, err := f.Store.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &failingCommitTx{Tx: tx}, nil
+}
+
+// TestCollector_SpillFlushFailure_ReSpills verifies the zero-loss
+// guarantee (spec §5.10) when the DB flush fails during a spill drain:
+// the spilled records must be re-spilled so they survive for the next
+// drain attempt, rather than being permanently lost.
+func TestCollector_SpillFlushFailure_ReSpills(t *testing.T) {
+	t.Parallel()
+
+	store := &failingCommitStore{Store: newTestSQLiteStore(t)}
+	spillPath := filepath.Join(t.TempDir(), "spill_respill.wal")
+	spill, err := OpenSpill(spillPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = spill.Close() })
+
+	c := NewCollector(store, spill, nil, slog.Default(), CollectorConfig{
+		ChannelCap:    4,
+		BatchSize:     100, // large so events accumulate without auto-flushing
+		BatchInterval: 5 * time.Second,
+	})
+	c.Start()
+	t.Cleanup(func() { _ = c.Close() })
+
+	ctx := context.Background()
+	const n = 6 // > channel cap → at least some will spill
+	for i := 0; i < n; i++ {
+		ua := &UserActivity{
+			Ts:         int64(1700000000000 + i),
+			UserID:     "u1",
+			UserIDType: UserIDTypePlatform,
+			Platform:   PlatformTest,
+			Action:     ActionAuthLogin,
+			Outcome:    OutcomeSuccess,
+			DetailJSON: `{}`,
+		}
+		require.NoError(t, c.Enqueue(ctx, ua))
+	}
+	// At least one event must have spilled (channel cap is only 4).
+	require.Greater(t, c.Spilled(), int64(0), "expected some events to spill")
+
+	// Trigger a manual drain via the spill sentinel. The DB flush will
+	// fail (failingCommitStore), so the spilled records must be re-spilled.
+	require.NoError(t, c.Enqueue(ctx, spillSentinel))
+
+	// Eventually the spill file should be NON-empty (records re-spilled),
+	// and Dropped() should still be 0 (zero-loss maintained).
+	require.Eventually(t, func() bool {
+		records, rErr := spill.ReadAll()
+		return rErr == nil && len(records) > 0
+	}, 5*time.Second, 50*time.Millisecond, "expected re-spilled records to survive flush failure")
+
+	require.Equal(t, int64(0), c.Dropped(), "zero-loss: re-spill must not count as drop")
 }
 
 // PlatformTest is a convenience constant for tests (not in the public API).

@@ -174,6 +174,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// GC prunes old rows; Verifier checks hash chain integrity.
 	var auditCollector *audit.Collector
 	var auditStore audit.Store
+	var auditGC *audit.GC
 	if cfg.Audit.Enabled {
 		auditStore, err = audit.NewStore(stores.sqlDB, stores.dialect, stores.writeMu, log)
 		if err != nil {
@@ -215,7 +216,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		})
 		auditCollector.Start()
 
-		auditGC := audit.NewGC(auditStore, audit.GCConfig{
+		auditGC = audit.NewGC(auditStore, audit.GCConfig{
 			Retention: cfg.Audit.Retention,
 			Interval:  1 * time.Hour,
 		}, log)
@@ -466,8 +467,14 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
 		if prev.Audit.Retention != next.Audit.Retention {
-			log.Info("audit: retention changed (next GC tick applies)",
-				"old", prev.Audit.Retention, "new", next.Audit.Retention)
+			if auditGC != nil {
+				auditGC.UpdateRetention(next.Audit.Retention)
+				log.Info("audit: retention updated (next GC tick applies)",
+					"old", prev.Audit.Retention, "new", next.Audit.Retention)
+			} else {
+				log.Warn("audit: retention changed but GC is not running (audit disabled?)",
+					"old", prev.Audit.Retention, "new", next.Audit.Retention)
+			}
 		}
 		if prev.Audit.Collector.BatchInterval != next.Audit.Collector.BatchInterval {
 			log.Warn("audit: batch_interval changed, requires restart to take effect")

@@ -850,6 +850,9 @@ func (mockAuditStore) BeginTx(_ context.Context) (audit.Tx, error) { return mock
 func (mockAuditStore) Query(_ context.Context, _ audit.Query) ([]audit.UserActivity, error) {
 	return nil, nil
 }
+func (mockAuditStore) QueryAsc(_ context.Context, _ int64, _ int) ([]audit.UserActivity, error) {
+	return nil, nil // security tests don't exercise the verifier path
+}
 func (mockAuditStore) DeleteBefore(_ context.Context, _ time.Time) (int64, error) { return 0, nil }
 func (mockAuditStore) SaveCheckpoint(_ context.Context, _ audit.Checkpoint) error { return nil }
 func (mockAuditStore) LatestCheckpoint(_ context.Context) (*audit.Checkpoint, error) {

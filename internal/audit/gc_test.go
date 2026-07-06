@@ -176,3 +176,48 @@ func TestGC_Defaults(t *testing.T) {
 	require.Equal(t, 3*365*24*time.Hour, cfg.Retention)
 	require.Equal(t, 1*time.Hour, cfg.Interval)
 }
+
+// TestGC_UpdateRetention_HotReload verifies that UpdateRetention atomically
+// swaps the effective retention and the next Tick observes it. This is the
+// regression for review issue #4 (config watcher accepted audit.retention
+// but never propagated the value to the GC instance).
+func TestGC_UpdateRetention_HotReload(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	// Write a row that is 10 minutes old — old enough for any sub-10m retention.
+	oldTs := time.Now().Add(-10 * time.Minute).UnixMilli()
+	writeChainWithTimestamps(t, store, []int64{oldTs})
+
+	// Start GC at 3-year retention; the 10-minute-old row survives.
+	gc := NewGC(store, GCConfig{Retention: 3 * 365 * 24 * time.Hour}, nil)
+	require.Equal(t, 3*365*24*time.Hour, gc.Retention())
+
+	deleted, err := gc.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(0), deleted, "3-year retention should keep the 10m-old row")
+
+	// Hot-reload to 1-minute retention; now the row should be pruned.
+	gc.UpdateRetention(1 * time.Minute)
+	require.Equal(t, 1*time.Minute, gc.Retention())
+
+	deleted, err = gc.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted, "1-minute retention should prune the 10m-old row")
+}
+
+// TestGC_UpdateRetention_IgnoresNonPositive verifies defensive clamping —
+// a zero or negative duration must not wipe the entire table.
+func TestGC_UpdateRetention_IgnoresNonPositive(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	writeChain(t, store, 3)
+
+	gc := NewGC(store, GCConfig{Retention: 1 * time.Hour}, nil)
+	gc.UpdateRetention(0)
+	gc.UpdateRetention(-5 * time.Second)
+	require.Equal(t, 1*time.Hour, gc.Retention(), "non-positive update must be ignored")
+
+	deleted, err := gc.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(0), deleted)
+}

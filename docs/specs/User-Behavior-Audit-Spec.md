@@ -356,6 +356,20 @@ audit:
 | `internal/config` hot-reload 不支持 `audit.*` | 新增字段未登记到 `hotReloadableFields`/`BindEnv` | 加入 watcher + loader + 默认值 | `9cdb76c7` |
 | `events_path` 配置仍被 `normalizePaths` 处理 | spec §11.2 要求废弃但保留字段 | 从 normalizePaths 移除 + 加 deprecation 注释 | `9cdb76c7` + `690d49ad` |
 
+### P1 review 第二轮 (code-reviewer subagent 发现,全部修复)
+
+| Issue | 严重度 | 根因 | 修复 |
+|-------|--------|------|------|
+| `EventID` 非 UUIDv7,同毫秒碰撞 | Critical (§5.6 数据契约) | `fmt.Sprintf("ev_%d_%x", ts, hash(ts))` 是纯时间函数,同毫秒多事件 ID 完全相同 | 按 RFC 9562 原生实现 UUIDv7(48bit ms + 12bit 进程计数器 + 62bit crypto/rand),无需升 google/uuid |
+| `decodeDetail` 永远返回 nil | Important (§5.6 sink 契约) | stub 未实现,sink 永远收 `Detail==nil` | 实现 `json.Unmarshal`,空串/坏 JSON 返 nil 不 panic |
+| CSV 导出无公式注入防护 | Important (OWASP CWE-1236) | `encodeCSV` 直接写值,`user_agent`/`user_id` 可被攻击者控制成 `=cmd|...` | 新增 `sanitizeCSVCell` 前缀 `'`,覆盖 `=+-@` 与 Tab/CR |
+| `audit.retention` hot-reload 不生效 | Important (§8 静默合规 bug) | watcher 接受新值但 GC 实例从未收到(`auditGC` 局部作用域) | 提升变量作用域 + 新增 `GC.UpdateRetention`(mutex 保护),reload callback 调用 |
+| Verifier 全表载入内存 | Important (生产 OOM 风险) | `collectAllRows` 翻页后把所有行追加到单个 slice 再验证,3 年保留下 ~10B 行会 OOM | 重写为流式:新增 `Store.QueryAsc`,`VerifyOnce` 每批只载 1000 行,批间用滚动 `cursor` 串联 |
+| spill drain 时 DB flush 失败丢记录 | Critical (§5.10 零丢失) | `Drain()` 先截断后 `flushBatch`,DB 写失败则已读出的记录永久丢失 | 新增 `reSpillLocked`:flush 失败时把记录写回 spill 文件 |
+| IPv6 掩码脆弱(Minor,顺带修) | Minor (§5.9) | 字符串 split 漏掉简写(`::1`)/v4-mapped 形式 | 改用 `net.ParseIP` + `Mask(CIDRMask)`,全形式/简写/v4-mapped 统一处理 |
+
+**测试新增**:UUIDv7 形状/同毫秒唯一性(5000 次)、decodeDetail 真解码/坏 JSON 不 panic、CSV 公式注入中和、`sanitizeCSVCell` 全 introducer 覆盖、`GC.UpdateRetention` hot-reload 生效 + 非正值忽略、spill flush 失败 re-spill 零丢失、流式 verifier 2500 行分页 + 第二批断链检测。
+
 ### 评审反馈 / 待办(给 reviewer)
 
 - [ ] PG migration 在 PR 环境未跑(syntax 匹配 022+009);建议 reviewer 在 staging PG 实例验证 `023_user_activity.pg.sql`

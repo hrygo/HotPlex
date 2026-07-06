@@ -30,6 +30,9 @@ func (m *mockAuditStore) Query(ctx context.Context, q audit.Query) ([]audit.User
 	}
 	return nil, nil
 }
+func (m *mockAuditStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]audit.UserActivity, error) {
+	return nil, nil // service tests don't exercise the verifier path
+}
 func (m *mockAuditStore) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	return 0, nil
 }
@@ -225,10 +228,28 @@ func TestMaskPII_IPv4(t *testing.T) {
 
 func TestMaskPII_IPv6(t *testing.T) {
 	t.Parallel()
-	ua := &audit.UserActivity{IP: "2001:0db8:85a3:0000:0000:8a2e:0370:7334"}
-	maskPII(ua)
-	// Should keep first 4 groups
-	require.Equal(t, "2001:0db8:85a3:0000:0:0:0:0", ua.IP)
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// Full 8-group form: /64 mask keeps the first 4 groups, zeros the rest.
+		// net.IP returns the canonical (shortened) representation.
+		{"full_form", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", "2001:db8:85a3::"},
+		// Shorthand forms must now be masked correctly (previously skipped).
+		{"loopback", "::1", "::"},
+		{"link_local", "fe80::1", "fe80::"},
+		// IPv4-mapped IPv6 is parsed as IPv4 by To4(), so it masks to /24.
+		{"v4_mapped", "::ffff:192.168.1.5", "192.168.1.0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ua := &audit.UserActivity{IP: tc.in}
+			maskPII(ua)
+			require.Equal(t, tc.want, ua.IP)
+		})
+	}
 }
 
 func TestMaskPII_ShortUserAgent(t *testing.T) {
@@ -279,4 +300,57 @@ func TestEncodeCSV(t *testing.T) {
 	require.Equal(t, "u1", records[1][2])
 	require.Equal(t, "2", records[2][0])
 	require.Equal(t, "u2", records[2][2])
+}
+
+// TestEncodeCSV_FormulaInjectionSanitized verifies that attacker-controlled
+// fields (user_id, user_agent) starting with =, +, -, @ get a single-quote
+// prefix so spreadsheet apps render them as text, not formulae. This is
+// OWASP CSV Injection / CWE-1236 mitigation (review issue #3).
+func TestEncodeCSV_FormulaInjectionSanitized(t *testing.T) {
+	t.Parallel()
+	rows := []audit.UserActivity{
+		{
+			ID:        1,
+			Ts:        1700000000000,
+			UserID:    "=cmd|'/c calc'!A0", // classic Excel injection
+			Action:    "auth.login",
+			Outcome:   "success",
+			UserAgent: "@SUM(1+1)*cmd|'/c calc'!A0", // multi-prefix coverage
+		},
+	}
+	data, err := encodeCSV(rows)
+	require.NoError(t, err)
+	r := csv.NewReader(strings.NewReader(string(data)))
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2) // header + 1 row
+	// user_id column index 2; user_agent column index 11 (see encodeCSV header).
+	require.Equal(t, "'=cmd|'/c calc'!A0", records[1][2], "user_id must be prefixed to neutralize formula")
+	require.Equal(t, "'@SUM(1+1)*cmd|'/c calc'!A0", records[1][11], "user_agent must be prefixed")
+}
+
+// TestSanitizeCSVCell verifies the cell sanitizer covers all OWASP-listed
+// formula introducers and leaves benign values untouched.
+func TestSanitizeCSVCell(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"normal_value", "normal_value"},
+		{"=SUM(A1:A2)", "'=SUM(A1:A2)"},
+		{"+1234", "'+1234"},
+		{"-5", "'-5"},
+		{"@admin", "'@admin"},
+		{"\ttab-led", "'\ttab-led"},
+		{"\rCR-led", "'\rCR-led"},
+		{"hello=world", "hello=world"}, // = only dangerous as the FIRST char
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, c.want, sanitizeCSVCell(c.in))
+		})
+	}
 }

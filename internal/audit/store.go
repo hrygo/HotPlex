@@ -40,6 +40,11 @@ type Query struct {
 type Store interface {
 	BeginTx(ctx context.Context) (Tx, error)
 	Query(ctx context.Context, q Query) ([]UserActivity, error)
+	// QueryAsc returns rows in ascending id order starting at FromID
+	// (inclusive). Used by the verifier to stream the chain without
+	// loading the whole table into memory (spec §5.5 chain verification).
+	// At most Limit rows are returned (Limit<=0 → no rows).
+	QueryAsc(ctx context.Context, fromID int64, limit int) ([]UserActivity, error)
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 	SaveCheckpoint(ctx context.Context, c Checkpoint) error
 	LatestCheckpoint(ctx context.Context) (*Checkpoint, error)
@@ -68,6 +73,51 @@ func NewStore(db *sql.DB, dialect dbutil.Dialect, writeMu *sqlutil.WriteMu, log 
 	default:
 		return nil, fmt.Errorf("audit: unknown dialect %q", dialect)
 	}
+}
+
+// queryAsc is the shared ascending-order reader backing both dialects'
+// QueryAsc. It returns rows with id >= fromID in ascending id order, at
+// most `limit` rows (limit<=0 → empty result). The columns scanned must
+// match the canonical 16-field user_activity projection used by Query.
+func queryAsc(db *sql.DB, d dbutil.Dialect, ctx context.Context, fromID int64, limit int) ([]UserActivity, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	sqlStr := d.Rebind(
+		"SELECT id, ts, user_id, user_id_type, platform, session_id, action, " +
+			"resource_type, resource_id, outcome, detail_json, event_ref, " +
+			"ip, user_agent, prev_hash, self_hash FROM user_activity" +
+			" WHERE id >= ? ORDER BY id ASC LIMIT ?")
+	rows, err := db.QueryContext(ctx, sqlStr, fromID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("audit: query_asc: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var results []UserActivity
+	for rows.Next() {
+		var ua UserActivity
+		var sessionID, resourceType, resourceID, eventRef, ip, userAgent sql.NullString
+		if err := rows.Scan(
+			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
+			&sessionID, &ua.Action, &resourceType, &resourceID,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.PrevHash, &ua.SelfHash,
+		); err != nil {
+			return nil, fmt.Errorf("audit: query_asc scan: %w", err)
+		}
+		ua.SessionID = sessionID.String
+		ua.ResourceType = resourceType.String
+		ua.ResourceID = resourceID.String
+		ua.EventRef = eventRef.String
+		ua.IP = ip.String
+		ua.UserAgent = userAgent.String
+		results = append(results, ua)
+	}
+	return results, rows.Err()
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +220,10 @@ func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error
 		results = append(results, ua)
 	}
 	return results, rows.Err()
+}
+
+func (s *sqliteStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]UserActivity, error) {
+	return queryAsc(s.db, s.d, ctx, fromID, limit)
 }
 
 func (s *sqliteStore) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
@@ -408,6 +462,10 @@ func (s *pgStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
 		results = append(results, ua)
 	}
 	return results, rows.Err()
+}
+
+func (s *pgStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]UserActivity, error) {
+	return queryAsc(s.db, s.d, ctx, fromID, limit)
 }
 
 func (s *pgStore) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {

@@ -2,6 +2,9 @@ package audit
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -257,8 +260,33 @@ func (c *Collector) drainSpillLocked() {
 		}
 	}
 	if err := c.flushBatch(uas); err != nil {
-		c.log.Error("audit: spill flush failed", "err", err)
+		// DB flush failed — the spill file was already truncated by Drain,
+		// so re-spill the records we just read to preserve the zero-loss
+		// guarantee (spec §5.10). Without this, a transient DB outage
+		// during drain would permanently lose every spilled event.
+		c.reSpillLocked(records)
+		c.log.Error("audit: spill flush failed, records re-spilled", "err", err, "count", len(records))
 		return
+	}
+}
+
+// reSpillLocked appends the given records back to the spill file. It must
+// be called with c.mu held (the caller — drainSpillLocked — already holds it).
+// The spill file's own mutex serializes the writes against concurrent Enqueue.
+func (c *Collector) reSpillLocked(records []SpillRecord) {
+	if c.spill == nil {
+		return
+	}
+	for _, r := range records {
+		if r.UA == nil {
+			continue
+		}
+		if err := c.spill.Write(SpillRecord{TsMs: r.TsMs, UA: r.UA}); err != nil {
+			// Last-resort: spill write failed (disk full?). We cannot do
+			// anything more — log and count so it's visible to monitoring.
+			c.dropped.Add(1)
+			c.log.Error("audit: re-spill write failed (record lost)", "err", err)
+		}
 	}
 }
 
@@ -344,7 +372,7 @@ func (c *Collector) fanOutSinks(ctx context.Context, uas []*UserActivity) {
 
 func userActivityToAuditEvent(ua *UserActivity) AuditEvent {
 	return AuditEvent{
-		EventID:      fmt.Sprintf("ev_%d_%x", ua.Ts, hashUint64(uint64(ua.Ts))),
+		EventID:      newEventID(),
 		Ts:           time.UnixMilli(ua.Ts),
 		UserID:       ua.UserID,
 		UserIDType:   ua.UserIDType,
@@ -361,16 +389,86 @@ func userActivityToAuditEvent(ua *UserActivity) AuditEvent {
 	}
 }
 
-func hashUint64(v uint64) uint64 {
-	h := uint64(14695981039346656037)
-	h ^= v
-	h *= 1099511628211
-	return h
+// eventIDCounter is a per-process monotonic counter combined with the
+// millisecond timestamp to guarantee uniqueness for two IDs generated in
+// the same millisecond on the same process (RFC 9562 §6.2 "monotonic
+// random" method). The counter wraps at 12 bits (rand_a field); within a
+// single millisecond a single process can mint at most 4096 UUIDv7s
+// before the counter would collide — far above the audit collector's
+// realistic throughput.
+var eventIDCounter atomic.Uint32
+
+// newEventID generates a UUIDv7 per RFC 9562.
+//
+// Layout (big-endian, 128 bits):
+//
+//	xxxxxxxx-xxxx-7xxx-yxxx  (48-bit unix-ms | 4-bit ver=7 | 12-bit counter)
+//	xxxxxxxxxxxx             (2-bit var=10 | 62-bit crypto-random)
+//
+// The 12-bit per-process counter guarantees uniqueness within a single
+// millisecond on one process (up to 4096 IDs/ms). The 62 crypto-random
+// bits in the trailing field give vanishingly low cross-process collision
+// probability for IDs minted in the same millisecond.
+//
+// Spec §5.6 requires EventID to be UUIDv7 for sink dedup/idempotency.
+func newEventID() string {
+	var b [16]byte
+
+	// 48-bit big-endian unix milliseconds (bytes 0..5).
+	ms := uint64(time.Now().UnixMilli())
+	b[0] = byte(ms >> 40)
+	b[1] = byte(ms >> 32)
+	b[2] = byte(ms >> 24)
+	b[3] = byte(ms >> 16)
+	b[4] = byte(ms >> 8)
+	b[5] = byte(ms)
+
+	// 12-bit monotonic counter into rand_a (low 12 bits of bytes 6..7).
+	// Version nibble (0x7) occupies the high 4 bits of byte 6.
+	ctr := uint16(eventIDCounter.Add(1) & 0x0FFF)
+	b[6] = 0x70 | byte(ctr>>8)
+	b[7] = byte(ctr)
+
+	// Draw 62 crypto-random bits into bytes 8..15. We overwrite the top
+	// 2 bits of byte 8 with the RFC 4122 variant (10) afterwards.
+	//
+	// crypto/rand should never fail on Linux/macOS/Windows in normal
+	// operation; if it does, we fall back to whatever bytes happen to be
+	// in b[8:] (zeros) and proceed anyway — a structurally-valid UUID with
+	// weak randomness is preferable to dropping an audit event. The
+	// monotonic counter still guarantees per-ms uniqueness.
+	_, _ = rand.Read(b[8:])
+
+	// Force the RFC 4122 variant bits (top two bits of byte 8 = 10).
+	b[8] = (b[8] & 0x3F) | 0x80
+
+	// Canonical 8-4-4-4-12 hex form with dashes.
+	dst := make([]byte, 36)
+	hex.Encode(dst[0:8], b[0:4])
+	dst[8] = '-'
+	hex.Encode(dst[9:13], b[4:6])
+	dst[13] = '-'
+	hex.Encode(dst[14:18], b[6:8])
+	dst[18] = '-'
+	hex.Encode(dst[19:23], b[8:10])
+	dst[23] = '-'
+	hex.Encode(dst[24:36], b[10:16])
+	return string(dst)
 }
 
 func decodeDetail(raw string) map[string]any {
-	_ = raw
-	return nil
+	if raw == "" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		// Malformed detail_json should never reach the store (callers
+		// write valid JSON), but we must not let a sink fan-out panic
+		// the collector. Return nil so the sink sees no detail rather
+		// than crashing.
+		return nil
+	}
+	return m
 }
 
 var ErrCollectorClosed = errors.New("audit: collector closed")

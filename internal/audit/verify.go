@@ -72,80 +72,68 @@ func (v *Verifier) Run(ctx context.Context) {
 	}
 }
 
-// VerifyOnce runs a single chain verification pass from the latest checkpoint.
-// Returns VerifyResult with chain status.
+// VerifyOnce runs a single streaming chain verification pass from the
+// latest checkpoint. It pages through the store in ascending id order
+// holding only one batch in memory at a time, so memory use is
+// O(batchSize) regardless of table size (prevents OOM at 3-year retention
+// scale). Spec §5.5 chain verification.
+//
+// Verification walks the hash chain forward: starting from the
+// checkpoint's LastSelfHash (or "" if no checkpoint), each row's
+// prev_hash must equal the running cursor and its self_hash must equal
+// ComputeSelfHash(cursor, row). The first violation short-circuits.
 func (v *Verifier) VerifyOnce(ctx context.Context) (VerifyResult, error) {
 	cp, err := v.store.LatestCheckpoint(ctx)
 	if err != nil {
 		return VerifyResult{}, fmt.Errorf("audit verify: latest checkpoint: %w", err)
 	}
 
-	// Collect all rows via pagination (Query returns DESC, we need ASC).
-	allRows, err := v.collectAllRows(ctx)
-	if err != nil {
-		return VerifyResult{}, fmt.Errorf("audit verify: collect rows: %w", err)
-	}
+	const batchSize = 1000
 
-	// If we have a checkpoint, filter to rows with id >= cp.NextID.
+	// Anchor: the hash the first surviving row's prev_hash must equal.
+	cursor := ""
+	fromID := int64(1) // ids start at 1
 	if cp != nil {
-		filtered := make([]UserActivity, 0, len(allRows))
-		for i := range allRows {
-			if allRows[i].ID >= cp.NextID {
-				filtered = append(filtered, allRows[i])
-			}
-		}
-		allRows = filtered
+		cursor = cp.LastSelfHash
+		fromID = cp.NextID
 	}
 
-	if len(allRows) == 0 {
-		return VerifyResult{Checkpoint: cp, RowsChecked: 0}, nil
-	}
-
-	// Determine the checkpoint hash for VerifyChain.
-	checkpointHash := ""
-	if cp != nil {
-		checkpointHash = cp.LastSelfHash
-	}
-
-	// Walk the chain using the existing VerifyChain function.
-	brokenID, reason := VerifyChain(allRows, checkpointHash)
-	if brokenID != 0 {
-		observability.AuditChainBreaks().Add(ctx, 1,
-			metric.WithAttributes(attribute.String("reason", reason)))
-	}
-
-	return VerifyResult{
-		Checkpoint:  cp,
-		RowsChecked: len(allRows),
-		BrokenID:    brokenID,
-		Reason:      reason,
-	}, nil
-}
-
-// collectAllRows paginates through all rows in the store and returns them
-// in ascending ID order. Query returns DESC, so we collect all batches
-// and then reverse the entire result.
-func (v *Verifier) collectAllRows(ctx context.Context) ([]UserActivity, error) {
-	const batchSize = 1000 // max allowed by Query
-	var allRows []UserActivity
-	offset := 0
+	var rowsChecked int
 	for {
-		batch, err := v.store.Query(ctx, Query{Limit: batchSize, Offset: offset})
+		batch, err := v.store.QueryAsc(ctx, fromID, batchSize)
 		if err != nil {
-			return nil, err
+			return VerifyResult{}, fmt.Errorf("audit verify: query_asc: %w", err)
 		}
 		if len(batch) == 0 {
 			break
 		}
-		allRows = append(allRows, batch...)
+		// Verify this batch against the running cursor. Each row links to
+		// the previous one; the batch starts from the cursor carried over
+		// from the prior batch (or the checkpoint).
+		brokenID, reason := VerifyChain(batch, cursor)
+		if brokenID != 0 {
+			observability.AuditChainBreaks().Add(ctx, 1,
+				metric.WithAttributes(attribute.String("reason", reason)))
+			return VerifyResult{
+				Checkpoint:  cp,
+				RowsChecked: rowsChecked,
+				BrokenID:    brokenID,
+				Reason:      reason,
+			}, nil
+		}
+		rowsChecked += len(batch)
+		// Advance cursor and fromID to just past this batch.
+		cursor = batch[len(batch)-1].SelfHash
+		fromID = batch[len(batch)-1].ID + 1
 		if len(batch) < batchSize {
 			break
 		}
-		offset += batchSize
 	}
-	// Reverse to get ASC order (Query returns DESC)
-	for i, j := 0, len(allRows)-1; i < j; i, j = i+1, j-1 {
-		allRows[i], allRows[j] = allRows[j], allRows[i]
-	}
-	return allRows, nil
+
+	return VerifyResult{
+		Checkpoint:  cp,
+		RowsChecked: rowsChecked,
+		BrokenID:    0,
+		Reason:      "",
+	}, nil
 }

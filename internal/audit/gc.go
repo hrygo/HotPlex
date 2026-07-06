@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,8 @@ type GC struct {
 	store Store
 	cfg   GCConfig
 	log   *slog.Logger
+
+	mu sync.Mutex // guards cfg.Retention against concurrent UpdateRetention/Tick
 }
 
 // NewGC creates a GC with the given store, config, and logger.
@@ -39,6 +42,27 @@ func NewGC(store Store, cfg GCConfig, log *slog.Logger) *GC {
 		log = slog.Default()
 	}
 	return &GC{store: store, cfg: cfg, log: log}
+}
+
+// UpdateRetention atomically swaps the retention window. Safe to call
+// concurrently with Tick; the next Tick observes the new value. Called
+// from the config hot-reload callback (spec §8 lists retention as
+// hot-reloadable). A non-positive duration is ignored (defensive).
+func (g *GC) UpdateRetention(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	g.mu.Lock()
+	g.cfg.Retention = d
+	g.mu.Unlock()
+}
+
+// Retention returns the currently effective retention window. Useful for
+// tests and observability.
+func (g *GC) Retention() time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.cfg.Retention
 }
 
 // Run launches a background ticker that calls Tick on each interval.
@@ -67,7 +91,10 @@ func (g *GC) Run(ctx context.Context) {
 //  4. DELETE rows where ts < cutoff (using last pruned row's ts + 1ms as boundary)
 //  5. First-prune edge case: if 0 rows survive, next row's prev_hash should be "" (genesis)
 func (g *GC) Tick(ctx context.Context) (int64, error) {
-	cutoff := time.Now().Add(-g.cfg.Retention)
+	g.mu.Lock()
+	retention := g.cfg.Retention
+	g.mu.Unlock()
+	cutoff := time.Now().Add(-retention)
 
 	// 1. Find the last row to be pruned (highest id with ts <= cutoff).
 	// Query returns rows in DESC order, so Limit=1 gives us the highest-id row.
