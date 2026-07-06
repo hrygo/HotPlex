@@ -736,16 +736,16 @@ func RetryExhaustion() metric.Int64Counter {
 // ─── Audit Instruments ──────────────────────────────────────────────
 
 var (
-	auditEvents          metric.Int64Counter
-	auditEventsInit      sync.Once
-	auditChainBreaks          metric.Int64Counter
-	auditChainBreaksInit      sync.Once
-	auditSpill          metric.Int64Counter
-	auditSpillInit      sync.Once
-	auditWriteFailures          metric.Int64Counter
-	auditWriteFailuresInit      sync.Once
-	auditSinkFailures          metric.Int64Counter
-	auditSinkFailuresInit      sync.Once
+	auditEvents            metric.Int64Counter
+	auditEventsInit        sync.Once
+	auditChainBreaks       metric.Int64Counter
+	auditChainBreaksInit   sync.Once
+	auditSpill             metric.Int64Counter
+	auditSpillInit         sync.Once
+	auditWriteFailures     metric.Int64Counter
+	auditWriteFailuresInit sync.Once
+	auditSinkFailures      metric.Int64Counter
+	auditSinkFailuresInit  sync.Once
 )
 
 func AuditEvents() metric.Int64Counter {
