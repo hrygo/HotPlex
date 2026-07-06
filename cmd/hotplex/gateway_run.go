@@ -312,6 +312,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	auth := security.NewAuthenticator(&cfg.Security)
+	if auditCollector != nil {
+		auth.SetAuditCollector(auditCollector)
+	}
 
 	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
 	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
@@ -387,6 +390,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Bridge:        bridge,
 		SkillsLocator: skillsLocator,
 	})
+	handler.SetAuditCollector(auditCollector)
+	hub.SetAuditCollector(auditCollector)
 
 	if cfg.Worker.AutoRetry.Enabled {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
