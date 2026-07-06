@@ -182,14 +182,19 @@ jobs:
       - name: Resolve versions
         id: versions
         run: |
-          OPENCODE_VER=$(curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest \
-            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | sed 's/^v//')
+          OPENCODE_VER=$(curl -sf https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | jq -r .tag_name 2>/dev/null | sed 's/^v//')
+          if [[ -z "$OPENCODE_VER" ]]; then
+            echo "::error::Failed to resolve latest OpenCode version from GitHub API (rate limit?)"
+            exit 1
+          fi
           OMO_VER=$(npm view oh-my-opencode version 2>/dev/null || echo "unknown")
           echo "opencode=${OPENCODE_VER}" >> "$GITHUB_OUTPUT"
           echo "omo=${OMO_VER}" >> "$GITHUB_OUTPUT"
           echo "OpenCode: ${OPENCODE_VER}, OMO: ${OMO_VER}"
 
       - name: Pack bundles
+        if: steps.versions.outputs.opencode != ''
         run: |
           chmod +x scripts/pack-offline-bundle.sh
 

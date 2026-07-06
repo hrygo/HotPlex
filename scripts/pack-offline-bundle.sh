@@ -108,8 +108,8 @@ resolve_platform() {
 # ── Resolve versions ────────────────────────────────────────────────────────
 
 resolve_latest_opencode() {
-    curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | sed 's/^v//'
+    curl -sf https://api.github.com/repos/anomalyco/opencode/releases/latest \
+        | jq -r .tag_name 2>/dev/null | sed 's/^v//'
 }
 
 resolve_latest_omo() {
