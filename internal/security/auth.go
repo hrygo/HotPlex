@@ -4,11 +4,15 @@ package security
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 )
 
@@ -29,16 +33,17 @@ const botIDQueryParam = "bot_id"
 // request and eliminates timing side-channels (map lookup is constant-time
 // regardless of key count).
 type Authenticator struct {
-	mu            sync.RWMutex
-	cfg           *config.SecurityConfig
-	validKeyHash  map[[32]byte]bool // SHA256 hashes of config-sourced keys
-	dbKeyHash     map[[32]byte]bool // SHA256 hashes of database-sourced keys
-	numValidKeys  int               // count of config keys (for dev-mode check)
-	numDBKeys     int               // count of DB keys (for dev-mode check)
-	keyResolver   APIKeyResolver    // optional; maps API keys to user identities. nil = "api_user"
-	devModeLocked bool              // true once any key has existed; prevents dev mode re-enable
-	cookieAuth    *CookieAuth       // optional; HMAC cookie auth (3rd priority after header/query)
-	idp           IdentityProvider  // optional; account-login provider (LocalAccountProvider / future OAuth)
+	mu             sync.RWMutex
+	cfg            *config.SecurityConfig
+	validKeyHash   map[[32]byte]bool // SHA256 hashes of config-sourced keys
+	dbKeyHash      map[[32]byte]bool // SHA256 hashes of database-sourced keys
+	numValidKeys   int               // count of config keys (for dev-mode check)
+	numDBKeys      int               // count of DB keys (for dev-mode check)
+	keyResolver    APIKeyResolver    // optional; maps API keys to user identities. nil = "api_user"
+	devModeLocked  bool              // true once any key has existed; prevents dev mode re-enable
+	cookieAuth     *CookieAuth       // optional; HMAC cookie auth (3rd priority after header/query)
+	idp            IdentityProvider  // optional; account-login provider (LocalAccountProvider / future OAuth)
+	auditCollector *audit.Collector  // optional; non-blocking audit event sink (spec §5)
 }
 
 // NewAuthenticator creates a new authenticator.
@@ -80,12 +85,63 @@ func (a *Authenticator) IdentityProvider() IdentityProvider {
 	return a.idp
 }
 
+// SetAuditCollector wires the audit collector for non-blocking auth event
+// emission (spec §5.2). Nil disables audit events. Safe to call before or
+// after authentication begins; the field is read without lock because the
+// collector pointer is immutable after startup wiring.
+func (a *Authenticator) SetAuditCollector(c *audit.Collector) {
+	a.auditCollector = c
+}
+
+// emitAuthEvent enqueues a non-blocking audit event for an authentication
+// outcome. No-op when auditCollector is nil. Errors are silently ignored to
+// keep the auth path fast and non-blocking.
+func (a *Authenticator) emitAuthEvent(action, outcome, userID, ip, userAgent, path, method string) {
+	c := a.auditCollector
+	if c == nil {
+		return
+	}
+	idType := audit.UserIDTypeAnonymous
+	if userID != "" && userID != audit.AnonymousUserID {
+		idType = audit.UserIDTypePlatform
+	}
+	detail, _ := json.Marshal(map[string]string{
+		"path":   path,
+		"method": method,
+	})
+	ua := &audit.UserActivity{
+		Ts:         time.Now().UnixMilli(),
+		UserID:     userID,
+		UserIDType: idType,
+		Platform:   audit.PlatformAPI,
+		Action:     action,
+		Outcome:    outcome,
+		DetailJSON: string(detail),
+		IP:         ip,
+		UserAgent:  userAgent,
+	}
+	_ = c.Enqueue(context.Background(), ua)
+}
+
+func extractClientIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx > 0 {
+		ip = ip[:idx]
+	}
+	return ip
+}
+
 // ErrUnauthorized is returned when authentication fails.
 var ErrUnauthorized = errors.New("security: unauthorized")
 
 // AuthenticateRequest validates the request's API key.
 // Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
 func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, error) {
+	ip := extractClientIP(r)
+	ua := r.UserAgent()
+	path := r.URL.Path
+	method := r.Method
+
 	a.mu.RLock()
 
 	key, found := a.extractAPIKey(r)
@@ -97,9 +153,11 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		if a.cookieAuth != nil {
 			if uid, ok := a.AuthenticateActiveCookie(r); ok {
 				botID := BotIDFromRequest(r)
+				a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, uid, ip, ua, path, method)
 				return uid, botID, nil
 			}
 		}
+		a.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, audit.AnonymousUserID, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
 
@@ -108,12 +166,14 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if a.numValidKeys == 0 && a.numDBKeys == 0 && !a.devModeLocked {
 		a.mu.RUnlock()
 		botID := BotIDFromRequest(r)
+		a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, audit.AnonymousUserID, ip, ua, path, method)
 		return "anonymous", botID, nil
 	}
 
 	// Key lookup using constant-time comparison to prevent timing attacks.
 	if !a.authenticateKey(key) {
 		a.mu.RUnlock()
+		a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
 
@@ -126,11 +186,13 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if idp != nil && uid != "anonymous" && uid != "api_user" {
 		u, err := idp.Lookup(r.Context(), uid)
 		if err != nil || u.Status == "disabled" {
+			a.emitAuthEvent(audit.ActionAuthTokenValidated, audit.OutcomeFailure, audit.AnonymousUserID, ip, ua, path, method)
 			return "", "", ErrUnauthorized
 		}
 	}
 
 	botID := BotIDFromRequest(r)
+	a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeSuccess, uid, ip, ua, path, method)
 	return uid, botID, nil
 }
 

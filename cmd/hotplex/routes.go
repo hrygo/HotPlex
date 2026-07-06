@@ -35,6 +35,10 @@ func setupRoutes(
 	})
 
 	gatewayAPI := gateway.NewGatewayAPI(log, auth, sm, bridge, deps.ConfigStore, deps.EventStore, deps.EventStore, deps.WorkspaceStore)
+	if deps.AuditCollector != nil {
+		gatewayAPI.SetAuditCollector(deps.AuditCollector)
+		sm.SetAuditCollector(deps.AuditCollector)
+	}
 
 	// CORS middleware reads allowed origins from config (supports hot-reload).
 	corsOriginsFn := func() []string {
@@ -104,6 +108,15 @@ func setupRoutes(
 		WriteMu:      deps.WriteMu,
 	})
 
+	// Wire audit subsystem (issue #833) - activity endpoints + meta-audit emission
+	if deps.AuditStore != nil {
+		activitySvc := admin.NewActivityService(deps.AuditStore, log)
+		adminAPI.SetActivityService(activitySvc)
+	}
+	if deps.AuditCollector != nil {
+		adminAPI.SetAuditCollector(deps.AuditCollector)
+	}
+
 	if cfg.Admin.RateLimitEnabled {
 		limiter := admin.NewRateLimiter(cfg.Admin.RequestsPerSec, cfg.Admin.Burst)
 		adminAPI.SetRateLimiter(limiter)
@@ -147,6 +160,12 @@ func setupRoutes(
 	adminMux.HandleFunc("DELETE /admin/sessions/{id}", adminAPI.DeleteSession)
 	adminMux.HandleFunc("POST /admin/sessions/{id}/terminate", adminAPI.TerminateSession)
 	adminMux.HandleFunc("GET /admin/sessions/{id}/stats", adminAPI.HandleSessionStats)
+
+	// User activity API (issue #833) - by-user audit query + export
+	adminMux.HandleFunc("GET /admin/users/{id}/activity", adminAPI.HandleUserActivity)
+	adminMux.HandleFunc("GET /admin/users/{id}/activity/export", adminAPI.HandleUserActivityExport)
+	adminMux.HandleFunc("GET /admin/activity", adminAPI.HandleAdminActivity)
+	adminMux.HandleFunc("GET /admin/activity/export", adminAPI.HandleAdminActivityExport)
 
 	// Cron API
 	adminMux.HandleFunc("GET /admin/cron/jobs", adminAPI.HandleCronList)

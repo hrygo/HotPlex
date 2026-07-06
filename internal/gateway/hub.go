@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -120,6 +121,9 @@ type Hub struct {
 
 	// InitThrottle prevents handshake loops.
 	InitThrottle *handshakeThrottle
+
+	// auditCollector is propagated to each Conn at creation time (issue #833).
+	auditCollector *audit.Collector
 }
 
 // EnvelopeWithConn pairs a message with its originating connection.
@@ -176,6 +180,11 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 	}, observability.GatewayConnections())
 
 	return h
+}
+
+// SetAuditCollector sets the audit collector propagated to each new Conn.
+func (h *Hub) SetAuditCollector(ac *audit.Collector) {
+	h.auditCollector = ac
 }
 
 // RegisterConn registers a new WebSocket connection.
@@ -471,6 +480,7 @@ func (h *Hub) HandleHTTP(
 		}
 
 		c := newConn(h, wc, sessionID, bridge)
+		c.SetAuditCollector(h.auditCollector)
 		c.pendingAuth = pendingAuth
 		if !pendingAuth {
 			c.userID = userID

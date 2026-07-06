@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -101,6 +102,10 @@ type Conn struct {
 	writeCh chan []byte
 
 	done chan struct{}
+
+	// auditCollector is the optional audit log collector (issue #833).
+	// When non-nil, authentication and message events are recorded.
+	auditCollector *audit.Collector
 }
 
 // newConn creates a new Conn.
@@ -124,6 +129,32 @@ func newConn(hub *Hub, wc *websocket.Conn, sessionID string, starter SessionStar
 	// Conn.Close() (via done channel) handles cleanup.
 	go c.WritePump()
 	return c
+}
+
+// SetAuditCollector injects the audit collector for authentication event recording.
+func (c *Conn) SetAuditCollector(ac *audit.Collector) {
+	c.auditCollector = ac
+}
+
+// emitAudit enqueues a non-blocking audit event. No-op when collector is nil.
+func (c *Conn) emitAudit(action, outcome, userID, platform, sessionID, ip string) {
+	if c.auditCollector == nil {
+		return
+	}
+	if userID == "" {
+		userID = audit.AnonymousUserID
+	}
+	_ = c.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
+		Ts:         time.Now().UnixMilli(),
+		UserID:     userID,
+		UserIDType: audit.UserIDTypePlatform,
+		Platform:   platform,
+		SessionID:  sessionID,
+		Action:     action,
+		Outcome:    outcome,
+		DetailJSON: `{}`,
+		IP:         ip,
+	})
 }
 
 // RemoteAddr returns the remote address of the client.
@@ -313,15 +344,18 @@ func (c *Conn) authenticateInit(auth connAuth, initData InitData) error {
 	if c.pendingAuth {
 		if initData.Auth.Token == "" {
 			c.sendInitError(events.ErrCodeUnauthorized, "authentication required")
+			c.emitAudit(audit.ActionAuthDenied, audit.OutcomeDenied, "", platformWebChat, c.sessionID, c.RemoteAddr())
 			return fmt.Errorf("deferred auth: no token in init envelope")
 		}
 		uid, ok := auth.AuthenticateKey(context.Background(), initData.Auth.Token)
 		if !ok {
 			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
+			c.emitAudit(audit.ActionAuthTokenValidated, audit.OutcomeFailure, "", platformWebChat, c.sessionID, c.RemoteAddr())
 			return fmt.Errorf("deferred auth: invalid token")
 		}
 		c.userID = uid
 		c.pendingAuth = false
+		c.emitAudit(audit.ActionAuthTokenValidated, audit.OutcomeSuccess, c.userID, platformWebChat, c.sessionID, c.RemoteAddr())
 	}
 
 	if c.botID == "" && initData.Auth.BotID != "" {

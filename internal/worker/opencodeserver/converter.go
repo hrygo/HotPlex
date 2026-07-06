@@ -46,6 +46,7 @@ type turnState struct {
 	tokens          tokenAccum
 	reasoningActive bool   // true between reasoning.started and reasoning.ended
 	model           string // "providerID/modelID" from step.started
+	doneShown       bool   // true once Done has been emitted for this turn (dedup)
 }
 
 type tokenAccum struct {
@@ -161,8 +162,11 @@ func (c *Converter) handleStepFailed(sessionID string, props json.RawMessage) []
 	if evt.Error.Message != "" {
 		msg = evt.Error.Message
 	}
-	// Snapshot stats before clearing state so downstream Done still has token data.
-	stats := c.takeStats(sessionID)
+	// Dedup via consumeDone: if a Done was already emitted for this turn, skip.
+	stats, first := c.consumeDone(sessionID)
+	if !first {
+		return nil
+	}
 	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 			Code:    events.ErrCodeInternalError,
@@ -289,8 +293,8 @@ func (c *Converter) handleSessionStatus(sessionID string, props json.RawMessage)
 
 	switch data.Status.Type {
 	case "idle":
-		stats := c.takeStats(sessionID)
-		if stats == nil {
+		stats, first := c.consumeDone(sessionID)
+		if !first {
 			return nil
 		}
 		return []*events.Envelope{
@@ -298,6 +302,9 @@ func (c *Converter) handleSessionStatus(sessionID string, props json.RawMessage)
 				events.DoneData{Success: true, Stats: stats}),
 		}
 	case "busy":
+		// busy marks the start of a new turn — reset per-turn accumulation so
+		// a prior turn's doneShown/stats do not leak into this one.
+		c.resetForNewTurn(sessionID)
 		return []*events.Envelope{
 			events.NewEnvelope(aep.NewID(), sessionID, 0, events.State,
 				map[string]any{"state": "running"}),
@@ -313,10 +320,10 @@ func (c *Converter) handleSessionStatus(sessionID string, props json.RawMessage)
 }
 
 func (c *Converter) handleSessionIdle(sessionID string) []*events.Envelope {
-	stats := c.takeStats(sessionID)
-	// If state was already cleared by handleStepFailed or handleSessionError,
-	// a Done was already emitted — skip to prevent duplicate Done events.
-	if stats == nil {
+	stats, first := c.consumeDone(sessionID)
+	// Dedup: if Done was already emitted (by handleStepFailed,
+	// handleSessionError, or an earlier session.status(idle)), skip.
+	if !first {
 		return nil
 	}
 	return []*events.Envelope{
@@ -342,18 +349,18 @@ func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) 
 	} else if data.Error.Name != "" {
 		msg = data.Error.Name
 	}
-	// Snapshot stats and clear state before emitting Done, so a subsequent
-	// session.idle on the same session (v1 path) does not produce a duplicate
-	// Done{Success:true} on top of Done{Success:false}.
-	stats := c.takeStats(sessionID)
-	envs := []*events.Envelope{
+	// Dedup via consumeDone: if a Done was already emitted for this turn, skip.
+	stats, first := c.consumeDone(sessionID)
+	if !first {
+		return nil
+	}
+	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 			Code:    events.ErrCodeInternalError,
 			Message: msg,
 		}),
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: false, Stats: stats}),
 	}
-	return envs
 }
 
 func (c *Converter) handlePermAsked(sessionID string, props json.RawMessage) []*events.Envelope {
@@ -414,15 +421,46 @@ func (c *Converter) getOrCreateState(sessionID string) *turnState {
 	return st
 }
 
-// takeStats returns accumulated usage as a Stats map for DoneData and clears the entry.
-// Returns nil if no usage was recorded.
-func (c *Converter) takeStats(sessionID string) map[string]any {
+// consumeDone is the single entry point for emitting a Done event. It returns
+// the accumulated stats (for DoneData.Stats) and a `first` flag indicating
+// whether this is the first Done for the current turn.
+//
+// Dedup is driven by turnState.doneShown — NOT by whether stats are non-nil.
+// This is critical because OCS 1.17+ (V1 protocol) does not emit
+// session.next.step.ended events, so usage is never accumulated and stats are
+// always nil at idle time. Done must still be emitted in that case (it is the
+// turn terminator and unlocks the webchat UI), otherwise the streaming cursor
+// spins forever.
+//
+// On the first call for a turn it marks doneShown and resets reasoningActive
+// (a turn boundary ends any in-flight reasoning phase). A subsequent call
+// within the same turn returns first=false so callers can suppress duplicate
+// Done events. The turn resets when session.status(busy) arrives.
+func (c *Converter) consumeDone(sessionID string) (stats map[string]any, first bool) {
+	st := c.getOrCreateState(sessionID) // always create so doneShown dedup works
+	if st.doneShown {
+		return nil, false
+	}
+	st.doneShown = true
+	st.reasoningActive = false // turn boundary ends any in-flight reasoning phase
+	return buildStats(st), true
+}
+
+// resetForNewTurn clears per-turn accumulation (stats, doneShown, reasoning
+// phase) for the next turn. Called when OCS signals a new turn is starting
+// (session.status(busy)). The model is preserved across turns.
+func (c *Converter) resetForNewTurn(sessionID string) {
 	st, ok := c.states[sessionID]
 	if !ok {
-		return nil
+		return
 	}
-	delete(c.states, sessionID)
+	model := st.model
+	*st = turnState{model: model}
+}
 
+// buildStats renders accumulated usage as a Stats map for DoneData.
+// Returns nil when no usage was recorded (zero cost and zero tokens).
+func buildStats(st *turnState) map[string]any {
 	if st.cost == 0 && st.tokens == (tokenAccum{}) {
 		return nil
 	}

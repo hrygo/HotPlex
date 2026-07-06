@@ -23,6 +23,8 @@ import (
 	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/assets"
+	"github.com/hrygo/hotplex/internal/audit"
+	"github.com/hrygo/hotplex/internal/audit/sinks"
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/cron"
@@ -54,6 +56,32 @@ type eventStoreProvider interface {
 	Close() error
 }
 
+// sinkAdapter bridges sinks.Sink (which uses sinks.AlertEvent) to audit.AlertSink
+// (which uses audit.AuditEvent). The two event types have identical fields but live
+// in different packages to avoid circular imports.
+type sinkAdapter struct {
+	sink sinks.Sink
+}
+
+func (a *sinkAdapter) OnAuditEvent(ctx context.Context, e audit.AuditEvent) error {
+	return a.sink.OnAlertEvent(ctx, sinks.AlertEvent{
+		EventID:      e.EventID,
+		Ts:           e.Ts,
+		UserID:       e.UserID,
+		UserIDType:   e.UserIDType,
+		Platform:     e.Platform,
+		SessionID:    e.SessionID,
+		Action:       e.Action,
+		ResourceType: e.ResourceType,
+		ResourceID:   e.ResourceID,
+		Outcome:      e.Outcome,
+		Detail:       e.Detail,
+		EventRef:     e.EventRef,
+		IP:           e.IP,
+		UserAgent:    e.UserAgent,
+	})
+}
+
 // GatewayDeps holds all dependencies constructed during gateway initialization.
 // These are passed to various components and registrations.
 type GatewayDeps struct {
@@ -81,6 +109,9 @@ type GatewayDeps struct {
 	WriteMu         *sqlutil.WriteMu
 	ConfigPath      string
 	DevMode         bool
+	// Audit subsystem (issue #833 P1). Nil when audit.enabled=false.
+	AuditCollector *audit.Collector
+	AuditStore     audit.Store
 }
 
 const defaultConfigPath = config.DefaultConfigPath
@@ -137,6 +168,71 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	defer stores.close(log)
 
 	releaseDBStatsManual(log)
+
+	// Audit subsystem (issue #833 P1): construct Store + Collector + GC + Verifier
+	// when audit.enabled=true. The collector batches events and fans out to sinks.
+	// GC prunes old rows; Verifier checks hash chain integrity.
+	var auditCollector *audit.Collector
+	var auditStore audit.Store
+	var auditGC *audit.GC
+	if cfg.Audit.Enabled {
+		auditStore, err = audit.NewStore(stores.sqlDB, stores.dialect, stores.writeMu, log)
+		if err != nil {
+			return fmt.Errorf("audit store init: %w", err)
+		}
+
+		var auditSinks []audit.AlertSink
+		for _, sc := range cfg.Audit.Sinks {
+			s, sErr := sinks.Build(sc.Type, sc.Config, log)
+			if sErr != nil {
+				log.Warn("audit: sink build failed; using noop", "name", sc.Name, "type", sc.Type, "err", sErr)
+				s = sinks.NewNoopSink()
+			}
+			auditSinks = append(auditSinks, &sinkAdapter{sink: s})
+		}
+		if len(auditSinks) == 0 {
+			auditSinks = []audit.AlertSink{&sinkAdapter{sink: sinks.NewNoopSink()}}
+		}
+
+		spillDir := cfg.Audit.Collector.SpillDir
+		if spillDir == "" {
+			spillDir = filepath.Join(config.HotplexHome(), "data", "audit-spill")
+		}
+		if mkErr := os.MkdirAll(spillDir, 0o700); mkErr != nil {
+			log.Warn("audit: spill dir create", "dir", spillDir, "err", mkErr)
+		}
+		spillFile := filepath.Join(spillDir, "audit-spill.wal")
+		spill, spillErr := audit.OpenSpill(spillFile)
+		if spillErr != nil {
+			return fmt.Errorf("audit spill open: %w", spillErr)
+		}
+
+		auditCollector = audit.NewCollector(auditStore, spill, auditSinks, log, audit.CollectorConfig{
+			ChannelCap:        cfg.Audit.Collector.ChannelCap,
+			BatchSize:         cfg.Audit.Collector.BatchSize,
+			BatchInterval:     cfg.Audit.Collector.BatchInterval,
+			SinkTimeout:       5 * time.Second,
+			SpillBlockTimeout: 5 * time.Second,
+		})
+		auditCollector.Start()
+
+		auditGC = audit.NewGC(auditStore, audit.GCConfig{
+			Retention: cfg.Audit.Retention,
+			Interval:  1 * time.Hour,
+		}, log)
+		auditVerifier := audit.NewVerifier(auditStore, audit.VerifierConfig{
+			Interval: 1 * time.Hour,
+		}, log)
+		go auditGC.Run(ctx)
+		go auditVerifier.Run(ctx)
+
+		log.Info("audit: subsystem initialized",
+			"retention", cfg.Audit.Retention,
+			"channel_cap", cfg.Audit.Collector.ChannelCap,
+			"batch_size", cfg.Audit.Collector.BatchSize,
+			"sinks", len(auditSinks),
+		)
+	}
 
 	sm, err := session.NewManager(ctx, log, cfg, cfgStore, stores.session)
 	if err != nil {
@@ -217,6 +313,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	auth := security.NewAuthenticator(&cfg.Security)
+	if auditCollector != nil {
+		auth.SetAuditCollector(auditCollector)
+	}
 
 	// API key → user identity resolver: YAML config takes priority over DB (Admin API CRUD).
 	// ChainResolver tries config map first, falls back to DB. Either source may be empty.
@@ -292,6 +391,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Bridge:        bridge,
 		SkillsLocator: skillsLocator,
 	})
+	handler.SetAuditCollector(auditCollector)
+	hub.SetAuditCollector(auditCollector)
 
 	if cfg.Worker.AutoRetry.Enabled {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
@@ -362,6 +463,21 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		if prev.Worker.DefaultPermissionMode != next.Worker.DefaultPermissionMode {
 			bridge.UpdateDefaultPermissionMode(next.Worker.DefaultPermissionMode)
 			log.Info("config: worker default_permission_mode updated", "value", next.Worker.DefaultPermissionMode)
+		}
+	})
+	cfgStore.RegisterFunc(func(prev, next *config.Config) {
+		if prev.Audit.Retention != next.Audit.Retention {
+			if auditGC != nil {
+				auditGC.UpdateRetention(next.Audit.Retention)
+				log.Info("audit: retention updated (next GC tick applies)",
+					"old", prev.Audit.Retention, "new", next.Audit.Retention)
+			} else {
+				log.Warn("audit: retention changed but GC is not running (audit disabled?)",
+					"old", prev.Audit.Retention, "new", next.Audit.Retention)
+			}
+		}
+		if prev.Audit.Collector.BatchInterval != next.Audit.Collector.BatchInterval {
+			log.Warn("audit: batch_interval changed, requires restart to take effect")
 		}
 	})
 
@@ -482,6 +598,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WriteMu:         stores.writeMu,
 		ConfigPath:      configPath,
 		DevMode:         devMode,
+		AuditCollector:  auditCollector,
+		AuditStore:      auditStore,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
@@ -1012,6 +1130,15 @@ func shutdownGateway(
 	if deps.EventCollector != nil {
 		if err := deps.EventCollector.Close(); err != nil {
 			log.Warn("gateway: event collector close", "err", err)
+		}
+	}
+
+	// Close audit collector AFTER eventstore (so final events can still be
+	// processed) but BEFORE SessionMgr (so audit rows persist before session
+	// metadata closes). Per AGENTS.md shutdown order.
+	if deps.AuditCollector != nil {
+		if err := deps.AuditCollector.Close(); err != nil {
+			log.Warn("audit: collector close", "err", err)
 		}
 	}
 

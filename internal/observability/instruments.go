@@ -732,3 +732,88 @@ func RetryExhaustion() metric.Int64Counter {
 	})
 	return retryExhaustion
 }
+
+// ─── Audit Instruments ──────────────────────────────────────────────
+
+var (
+	auditEvents            metric.Int64Counter
+	auditEventsInit        sync.Once
+	auditChainBreaks       metric.Int64Counter
+	auditChainBreaksInit   sync.Once
+	auditSpill             metric.Int64Counter
+	auditSpillInit         sync.Once
+	auditWriteFailures     metric.Int64Counter
+	auditWriteFailuresInit sync.Once
+	auditSinkFailures      metric.Int64Counter
+	auditSinkFailuresInit  sync.Once
+)
+
+func AuditEvents() metric.Int64Counter {
+	auditEventsInit.Do(func() {
+		var err error
+		auditEvents, err = Meter().Int64Counter(
+			"hotplex.audit.events",
+			metric.WithDescription("User activity audit events by action and outcome"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.audit.events", err)
+		}
+	})
+	return auditEvents
+}
+
+func AuditChainBreaks() metric.Int64Counter {
+	auditChainBreaksInit.Do(func() {
+		var err error
+		auditChainBreaks, err = Meter().Int64Counter(
+			"hotplex.audit.chain_breaks",
+			metric.WithDescription("Hash chain break detections"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.audit.chain_breaks", err)
+		}
+	})
+	return auditChainBreaks
+}
+
+func AuditSpill() metric.Int64Counter {
+	auditSpillInit.Do(func() {
+		var err error
+		auditSpill, err = Meter().Int64Counter(
+			"hotplex.audit.spill",
+			metric.WithDescription("Audit events spilled to WAL on channel full"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.audit.spill", err)
+		}
+	})
+	return auditSpill
+}
+
+func AuditWriteFailures() metric.Int64Counter {
+	auditWriteFailuresInit.Do(func() {
+		var err error
+		auditWriteFailures, err = Meter().Int64Counter(
+			"hotplex.audit.write_failures",
+			metric.WithDescription("Audit DB write failures"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.audit.write_failures", err)
+		}
+	})
+	return auditWriteFailures
+}
+
+func AuditSinkFailures() metric.Int64Counter {
+	auditSinkFailuresInit.Do(func() {
+		var err error
+		auditSinkFailures, err = Meter().Int64Counter(
+			"hotplex.audit.sink_failures",
+			metric.WithDescription("AlertSink fan-out failures"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.audit.sink_failures", err)
+		}
+	})
+	return auditSinkFailures
+}

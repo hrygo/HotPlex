@@ -93,7 +93,7 @@ func TestConverter_StepEnded_MultipleAccumulates(t *testing.T) {
 	require.Equal(t, int64(150), st.tokens.output)
 }
 
-func TestConverter_TakeStats_ModelUsage(t *testing.T) {
+func TestConverter_ConsumeDone_ModelUsage(t *testing.T) {
 	c := newTestConverter()
 	// step.started sets model
 	c.Convert("s1", ocsStepStarted, rawProps(t, map[string]any{
@@ -105,7 +105,8 @@ func TestConverter_TakeStats_ModelUsage(t *testing.T) {
 		"tokens": map[string]any{"input": 1000, "output": 200, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}},
 	}))
 
-	stats := c.takeStats("s1")
+	stats, first := c.consumeDone("s1")
+	require.True(t, first, "first Done for the turn")
 	require.NotNil(t, stats)
 	require.Equal(t, 0.005, stats["cost"])
 
@@ -115,16 +116,21 @@ func TestConverter_TakeStats_ModelUsage(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(1000), inner["input_tokens"])
 	require.Equal(t, int64(200), inner["output_tokens"])
+
+	// Second call must report non-first (dedup).
+	_, first2 := c.consumeDone("s1")
+	require.False(t, first2, "second consumeDone must be deduped")
 }
 
-func TestConverter_TakeStats_NoModel(t *testing.T) {
+func TestConverter_ConsumeDone_NoModel(t *testing.T) {
 	c := newTestConverter()
 	c.Convert("s1", ocsStepEnded, rawProps(t, map[string]any{
 		"cost":   0.001,
 		"tokens": map[string]any{"input": 100, "output": 10, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}},
 	}))
 
-	stats := c.takeStats("s1")
+	stats, first := c.consumeDone("s1")
+	require.True(t, first)
 	require.NotNil(t, stats)
 	_, hasModelUsage := stats["model_usage"]
 	require.False(t, hasModelUsage, "model_usage should be absent when no model tracked")
@@ -286,16 +292,26 @@ func TestConverter_SessionStatus_Idle(t *testing.T) {
 	require.Equal(t, int64(300), tokens["output"])
 	require.InDelta(t, 0.005, dd.Stats["cost"], 0.0001)
 
-	// Usage cleared after take
-	_, exists := c.states["s1"]
-	require.False(t, exists)
+	// After Done: state persists with doneShown=true (dedup guard). Usage is
+	// cleared when the next busy arrives (resetForNewTurn).
+	st, exists := c.states["s1"]
+	require.True(t, exists, "state persists for dedup guard")
+	require.True(t, st.doneShown, "doneShown marks the turn as terminated")
 }
 
 func TestConverter_SessionStatus_Idle_NoUsage(t *testing.T) {
+	// OCS 1.17+ V1 protocol: session.status(idle) arrives with no prior
+	// step.ended (no usage accumulated). Done MUST still be emitted — it is
+	// the turn terminator; stats are simply nil.
 	c := newTestConverter()
 	props := rawProps(t, map[string]any{"status": map[string]any{"type": "idle"}})
 	envs := c.Convert("s1", ocsSessionStatus, props)
-	require.Empty(t, envs, "no usage stats → skip duplicate Done (V1 nil-guard)")
+	require.Len(t, envs, 1, "idle with no usage must still emit Done (turn terminator)")
+	require.Equal(t, events.Done, envs[0].Event.Type)
+	dd, ok := envs[0].Event.Data.(events.DoneData)
+	require.True(t, ok)
+	require.True(t, dd.Success)
+	require.Nil(t, dd.Stats, "stats should be nil when no usage was recorded")
 }
 
 func TestConverter_SessionStatus_Busy(t *testing.T) {
@@ -315,10 +331,13 @@ func TestConverter_SessionStatus_Retry(t *testing.T) {
 }
 
 func TestConverter_SessionIdle(t *testing.T) {
+	// No state accumulated (OCS 1.17 V1 protocol) → session.idle STILL emits
+	// Done with nil stats. Done is the turn terminator and must fire to unlock
+	// the webchat UI (otherwise the streaming cursor spins forever).
 	c := newTestConverter()
-	// No state accumulated → session.idle does not emit Done.
 	envs := c.Convert("s1", ocsSessionIdle, nil)
-	require.Empty(t, envs, "session.idle with no prior state should not emit Done")
+	require.Len(t, envs, 1, "session.idle with no prior state must still emit Done")
+	require.Equal(t, events.Done, envs[0].Event.Type)
 }
 
 func TestConverter_SessionIdle_WithUsage(t *testing.T) {
@@ -343,8 +362,10 @@ func TestConverter_SessionError(t *testing.T) {
 	require.Equal(t, events.Error, envs[0].Event.Type)
 	require.Equal(t, "rate limited", envs[0].Event.Data.(events.ErrorData).Message)
 	require.Equal(t, events.Done, envs[1].Event.Type)
-	_, exists := c.states["s1"]
-	require.False(t, exists, "session.error should clear state")
+	// State persists with doneShown=true (dedup guard against a later idle).
+	st, exists := c.states["s1"]
+	require.True(t, exists)
+	require.True(t, st.doneShown, "session.error marks turn as done")
 }
 
 func TestConverter_SessionError_NameOnly(t *testing.T) {
@@ -485,9 +506,11 @@ func TestConverter_FullTurnLifecycle(t *testing.T) {
 	require.Equal(t, int64(5000), inner["input_tokens"])
 	require.Equal(t, int64(600), inner["output_tokens"])
 
-	// State cleared
-	_, exists := c.states[sid]
-	require.False(t, exists)
+	// State persists with doneShown=true (dedup guard); model preserved.
+	st, exists := c.states[sid]
+	require.True(t, exists)
+	require.True(t, st.doneShown)
+	require.Equal(t, "anthropic/claude-sonnet-4-6", st.model)
 }
 
 // ─── Review Fix Tests ─────────────────────────────────────────────────────────
@@ -534,16 +557,18 @@ func TestConverter_MalformedJSON(t *testing.T) {
 		require.Empty(t, envs, "malformed JSON should produce nil for %s", eventType)
 	}
 
-	// step.failed and session.error always emit Error + Done (use default message on bad JSON)
-	for _, eventType := range []string{
-		ocsStepFailed,
-		ocsSessionError,
-	} {
-		envs := c.Convert("s1", eventType, bad)
-		require.Len(t, envs, 2, "%s should emit Error+Done even on malformed JSON", eventType)
-		require.Equal(t, events.Error, envs[0].Event.Type)
-		require.Equal(t, events.Done, envs[1].Event.Type)
-	}
+	// step.failed and session.error always emit Error + Done (use default message on bad JSON).
+	// Each uses a fresh session: a second terminal event on the SAME session is
+	// deduped by consumeDone (one Done per turn).
+	envs := c.Convert("ses-failed", ocsStepFailed, bad)
+	require.Len(t, envs, 2, "step.failed should emit Error+Done even on malformed JSON")
+	require.Equal(t, events.Error, envs[0].Event.Type)
+	require.Equal(t, events.Done, envs[1].Event.Type)
+
+	envs = c.Convert("ses-error", ocsSessionError, bad)
+	require.Len(t, envs, 2, "session.error should emit Error+Done even on malformed JSON")
+	require.Equal(t, events.Error, envs[0].Event.Type)
+	require.Equal(t, events.Done, envs[1].Event.Type)
 }
 
 func TestConverter_InterleavedSessions(t *testing.T) {
@@ -562,9 +587,13 @@ func TestConverter_InterleavedSessions(t *testing.T) {
 	dd := envs[0].Event.Data.(events.DoneData)
 	require.InDelta(t, 0.01, dd.Stats["cost"], 0.0001)
 
-	_, exists := c.states[s1]
-	require.False(t, exists)
+	// s1's state persists with doneShown=true (dedup guard); s2 still has its
+	// accumulated usage waiting for its own idle.
+	st1, exists := c.states[s1]
+	require.True(t, exists)
+	require.True(t, st1.doneShown, "s1 doneShown after idle")
 	require.NotNil(t, c.states[s2])
+	require.False(t, c.states[s2].doneShown, "s2 not yet done")
 
 	envs = c.Convert(s2, ocsSessionStatus, rawProps(t, map[string]any{"status": map[string]any{"type": "idle"}}))
 	dd = envs[0].Event.Data.(events.DoneData)
@@ -782,11 +811,58 @@ func TestConverter_SessionIdle_WithStats_EmitsDone(t *testing.T) {
 	require.Equal(t, events.Done, envs[0].Event.Type)
 }
 
-func TestConverter_SessionIdle_NoStats_SkipsDone(t *testing.T) {
+func TestConverter_SessionIdle_NoStats_StillEmitsDone(t *testing.T) {
+	// Regression guard: OCS 1.17 V1 protocol — no step.ended ever arrives, so
+	// no usage is accumulated. session.idle MUST still emit Done{Success:true}
+	// (with nil Stats) to terminate the turn and unlock the webchat UI.
 	c := newTestConverter()
 	sid := "ses-idle-nostats"
 
-	// No state accumulated → session.idle produces nothing.
 	envs := c.Convert(sid, ocsSessionIdle, nil)
-	require.Empty(t, envs, "session.idle with no prior state should not emit Done")
+	require.Len(t, envs, 1, "session.idle with no prior state must emit Done (turn terminator)")
+	require.Equal(t, events.Done, envs[0].Event.Type)
+	dd, ok := envs[0].Event.Data.(events.DoneData)
+	require.True(t, ok)
+	require.True(t, dd.Success)
+	require.Nil(t, dd.Stats)
+}
+
+// TestConverter_OCS117_V1Protocol_Regression is the end-to-end regression guard
+// for the bug where webchat's streaming cursor spun forever with opencode_server.
+//
+// Root cause: OCS 1.17+ emits session.status(idle) + session.idle to mark turn
+// end but does NOT emit session.next.step.ended (the only event that
+// accumulates usage stats). The old takeStats-based Done gate returned nil
+// when no stats were recorded, silently swallowing the turn terminator.
+//
+// This test replays the REAL event sequence captured from OCS 1.17.13
+// (44-event SSE trace) and asserts:
+//  1. Done is emitted exactly once (not zero, not twice).
+//  2. The dual idle signals (session.status(idle) + session.idle) dedup correctly.
+//  3. A second turn (busy → idle) emits a fresh Done.
+func TestConverter_OCS117_V1Protocol_Regression(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-ocs117"
+
+	// Turn 1 — busy, a text delta, then BOTH idle signals (no step.ended at all).
+	_ = c.Convert(sid, ocsSessionStatus, rawProps(t, map[string]any{"status": map[string]any{"type": "busy"}}))
+	_ = c.Convert(sid, ocsPartDelta, rawProps(t, map[string]any{"partID": "p1", "field": "text", "delta": "你好"}))
+
+	// session.status(idle) arrives first → emits Done.
+	envs := c.Convert(sid, ocsSessionStatus, rawProps(t, map[string]any{"status": map[string]any{"type": "idle"}}))
+	require.Len(t, envs, 1, "session.status(idle) must emit Done even with no stats")
+	require.Equal(t, events.Done, envs[0].Event.Type)
+	dd := envs[0].Event.Data.(events.DoneData)
+	require.True(t, dd.Success)
+	require.Nil(t, dd.Stats, "no step.ended → stats are nil, but Done still fires")
+
+	// session.idle arrives second → must NOT emit a duplicate Done.
+	envs = c.Convert(sid, ocsSessionIdle, nil)
+	require.Empty(t, envs, "second idle signal must be deduped")
+
+	// Turn 2 — busy resets the turn, then a fresh idle emits a new Done.
+	_ = c.Convert(sid, ocsSessionStatus, rawProps(t, map[string]any{"status": map[string]any{"type": "busy"}}))
+	envs = c.Convert(sid, ocsSessionIdle, nil)
+	require.Len(t, envs, 1, "new turn after busy must emit a fresh Done")
+	require.Equal(t, events.Done, envs[0].Event.Type)
 }

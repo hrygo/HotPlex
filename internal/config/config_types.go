@@ -26,6 +26,7 @@ type Config struct {
 	Webhook     WebhookConfig   `mapstructure:"webhook"`
 	OAuth       OAuthConfig     `mapstructure:"oauth"`
 	Events      EventsConfig    `mapstructure:"events"`
+	Audit       AuditConfig     `mapstructure:"audit"`
 	Inherits    string          `mapstructure:"inherits"` // path to parent config file; "" = no inheritance
 
 	// ResolvedAPIKeyUsers is the runtime map of expanded API key value → userID.
@@ -353,8 +354,10 @@ type DBConfig struct {
 	Postgres PostgresConfig `mapstructure:"postgres"`
 
 	// ── Legacy flat fields (deprecated, use SQLite.* instead) ──
-	Path              string        `mapstructure:"path"`
-	EventsPath        string        `mapstructure:"events_path"` // Deprecated: events table now lives in hotplex.db (same as Path)
+	Path string `mapstructure:"path"`
+	// EventsPath is a legacy config field. Unused since events table lives in hotplex.db.
+	// Retained for backward compatibility but no longer normalized (spec #833 §11.2).
+	EventsPath        string        `mapstructure:"events_path"`
 	WALMode           bool          `mapstructure:"wal_mode"`
 	BusyTimeout       time.Duration `mapstructure:"busy_timeout"`
 	MaxOpenConns      int           `mapstructure:"max_open_conns"`
@@ -674,4 +677,27 @@ type CronConfig struct {
 // EventsConfig holds event and turn retention settings.
 type EventsConfig struct {
 	Retention time.Duration `mapstructure:"retention"` // TTL for events + turns, default 720h (30 days)
+}
+
+// AuditConfig holds user behavior audit system settings.
+type AuditConfig struct {
+	Enabled   bool                 `mapstructure:"enabled"`
+	Retention time.Duration        `mapstructure:"retention"`
+	Collector AuditCollectorConfig `mapstructure:"collector"`
+	Sinks     []AuditSinkConfig    `mapstructure:"sinks"`
+}
+
+// AuditCollectorConfig holds audit event collector tuning parameters.
+type AuditCollectorConfig struct {
+	ChannelCap    int           `mapstructure:"channel_cap"`
+	BatchInterval time.Duration `mapstructure:"batch_interval"`
+	BatchSize     int           `mapstructure:"batch_size"`
+	SpillDir      string        `mapstructure:"spill_dir"`
+}
+
+// AuditSinkConfig defines a single audit event sink.
+type AuditSinkConfig struct {
+	Name   string         `mapstructure:"name"`
+	Type   string         `mapstructure:"type"`
+	Config map[string]any `mapstructure:"config"`
 }

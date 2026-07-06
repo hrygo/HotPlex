@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -123,6 +124,14 @@ type Manager struct {
 
 	OnTerminate   func(sessionID string)
 	StateNotifier func(ctx context.Context, sessionID string, state events.SessionState, message string)
+
+	auditCollector *audit.Collector // issue #833 P1; nil = audit disabled
+}
+
+// SetAuditCollector injects the audit collector for session.create/delete instrumentation.
+// Nil disables audit emission (no-op).
+func (m *Manager) SetAuditCollector(c *audit.Collector) {
+	m.auditCollector = c
 }
 
 // terminatedSessionTTL controls how long TERMINATED sessions remain in memory.
@@ -292,6 +301,7 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	}
 
 	if err := m.store.Upsert(ctx, info); err != nil {
+		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure)
 		return nil, err
 	}
 
@@ -302,7 +312,50 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	m.log.Info("session: created", "session_id", id, "user_id", userID, "worker_type", workerType, "bot_id", botID)
 	observability.SessionCreated().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(workerType))))
 	sessionsActiveGauge(string(events.StateCreated)).Add(1)
+	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess)
 	return info, nil
+}
+
+// emitSessionCreateAudit enqueues a session.create audit event.
+// Uses context.Background() so audit never blocks the caller.
+func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string) {
+	if m.auditCollector == nil {
+		return
+	}
+	detailJSON := fmt.Sprintf(`{"bot_id":%q,"worker_type":%q}`, botID, workerType)
+	_ = m.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
+		Ts:           time.Now().UnixMilli(),
+		UserID:       userID,
+		UserIDType:   audit.UserIDTypePlatform,
+		Platform:     platform,
+		SessionID:    sessionID,
+		Action:       audit.ActionSessionCreate,
+		ResourceType: "session",
+		ResourceID:   sessionID,
+		Outcome:      outcome,
+		DetailJSON:   detailJSON,
+	})
+}
+
+// emitSessionDeleteAudit enqueues a session.delete audit event.
+// Uses context.Background() so audit never blocks the caller.
+func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string) {
+	if m.auditCollector == nil {
+		return
+	}
+	detailJSON := fmt.Sprintf(`{"bot_id":%q,"worker_type":%q}`, botID, workerType)
+	_ = m.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
+		Ts:           time.Now().UnixMilli(),
+		UserID:       userID,
+		UserIDType:   audit.UserIDTypePlatform,
+		Platform:     platform,
+		SessionID:    sessionID,
+		Action:       audit.ActionSessionDelete,
+		ResourceType: "session",
+		ResourceID:   sessionID,
+		Outcome:      outcome,
+		DetailJSON:   detailJSON,
+	})
 }
 
 // SetWorkspaceID binds a session to a workspace and persists the change (spec ①).
@@ -878,6 +931,8 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	hadWorkerBefore := ms.worker != nil
 	workerType := ms.info.WorkerType
 	uid := ms.info.UserID
+	platform := ms.info.Platform
+	botID := ms.info.BotID
 	wasRunning := ms.info.State == events.StateRunning
 	// Copy-on-write: build candidate, persist, commit on success.
 	candidate := ms.info
@@ -887,6 +942,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Unlock()
 
 	if err := m.store.Upsert(ctx, &candidate); err != nil {
+		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure)
 		return err
 	}
 
@@ -912,6 +968,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 			if rbErr := m.store.Upsert(ctx, &original); rbErr != nil {
 				m.log.Error("session: delete rollback failed", "session_id", id, "err", rbErr)
 			}
+			m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure)
 			return nil
 		}
 		// No gap worker — commit candidate and delete atomically under both locks.
@@ -933,6 +990,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.notifyStateChange(ctx, id, events.StateDeleted, "session deleted")
 
 	m.log.Info("session: deleted", "session_id", id)
+	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess)
 	return nil
 }
 
