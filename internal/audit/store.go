@@ -53,6 +53,7 @@ type Tx interface {
 	Append(ctx context.Context, ua *UserActivity) error
 	AppendBatch(ctx context.Context, uas []*UserActivity) error
 	SaveCheckpoint(ctx context.Context, c Checkpoint) error
+	TailHash(ctx context.Context) (string, error)
 	Commit() error
 	Rollback() error
 }
@@ -266,6 +267,26 @@ func (t *sqliteTx) SaveCheckpoint(ctx context.Context, c Checkpoint) error {
 	return nil
 }
 
+func (t *sqliteTx) TailHash(ctx context.Context) (string, error) {
+	if t.done {
+		return "", ErrStoreClosed
+	}
+	var h sql.NullString
+	err := t.tx.QueryRowContext(ctx,
+		"SELECT self_hash FROM user_activity ORDER BY id DESC LIMIT 1",
+	).Scan(&h)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("audit: tail hash: %w", err)
+	}
+	if !h.Valid {
+		return "", nil
+	}
+	return h.String, nil
+}
+
 func (t *sqliteTx) Commit() error {
 	if t.done {
 		return nil
@@ -450,6 +471,26 @@ func (t *pgTx) Append(ctx context.Context, ua *UserActivity) error {
 		return fmt.Errorf("audit: pg append: %w", err)
 	}
 	return nil
+}
+
+func (t *pgTx) TailHash(ctx context.Context) (string, error) {
+	if t.done {
+		return "", ErrStoreClosed
+	}
+	var h sql.NullString
+	err := t.tx.QueryRowContext(ctx,
+		"SELECT self_hash FROM user_activity ORDER BY id DESC LIMIT 1",
+	).Scan(&h)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("audit: pg tail hash: %w", err)
+	}
+	if !h.Valid {
+		return "", nil
+	}
+	return h.String, nil
 }
 
 func (t *pgTx) AppendBatch(ctx context.Context, uas []*UserActivity) error {

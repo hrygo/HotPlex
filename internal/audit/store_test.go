@@ -49,6 +49,9 @@ func newTestSQLiteStore(t *testing.T) Store {
 	db, err := sql.Open(sqlutil.DriverName, dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	require.NoError(t, err)
 
 	_, err = db.Exec(testSchemaSQL)
 	require.NoError(t, err)
