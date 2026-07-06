@@ -1,12 +1,5 @@
-// Package sinks provides AlertSink implementations for the user behavior audit
-// system. See spec section 5.6.
-//
-// This package intentionally does NOT import the parent audit package. The
-// AlertEvent type here mirrors audit.AuditEvent by value, and the bridge between
-// the two (audit.AlertSink → sinks.Sink) is performed in cmd/hotplex via a small
-// sinkAdapter. This keeps the dependency direction one-way: cmd/hotplex imports
-// both, and sinks stays a leaf package that third-party code can import without
-// pulling in the collector.
+// Package sinks AlertEvent and Sink types. The package-level documentation
+// lives in doc.go.
 package sinks
 
 import (
