@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -869,8 +870,13 @@ func (mockAuditTx) AppendBatch(_ context.Context, _ []*audit.UserActivity) error
 }
 func (mockAuditTx) SaveCheckpoint(_ context.Context, _ audit.Checkpoint) error { return nil }
 func (mockAuditTx) TailHash(_ context.Context) (string, error)                 { return "", nil }
-func (mockAuditTx) Commit() error                                              { return nil }
-func (mockAuditTx) Rollback() error                                            { return nil }
+func (mockAuditTx) LastRowBefore(_ context.Context, _ time.Time) (int64, string, error) {
+	return 0, "", nil
+}
+func (mockAuditTx) DeleteByIDLEQ(_ context.Context, _ int64) (int64, error) { return 0, nil }
+func (mockAuditTx) RowCount(_ context.Context) (int64, error)               { return 0, nil }
+func (mockAuditTx) Commit() error                                           { return nil }
+func (mockAuditTx) Rollback() error                                         { return nil }
 
 func newTestAuditCollector(t *testing.T) *audit.Collector {
 	t.Helper()
@@ -878,15 +884,90 @@ func newTestAuditCollector(t *testing.T) *audit.Collector {
 		ChannelCap: 64,
 		BatchSize:  10,
 	})
-	c.Start()
-	t.Cleanup(func() { _ = c.Close() })
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	return c
+}
+
+// capturingAuditStore (security test variant) records every appended audit row
+// so tests can assert Platform/UserIDType tagging (review I2). The collector
+// batches asynchronously, so callers poll via snapshot() + require.Eventually.
+type capturingAuditStore struct {
+	mu       sync.Mutex
+	recorded []audit.UserActivity
+}
+
+func (s *capturingAuditStore) BeginTx(context.Context) (audit.Tx, error) {
+	return &capturingAuditTx{store: s}, nil
+}
+func (s *capturingAuditStore) Query(context.Context, audit.Query) ([]audit.UserActivity, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) QueryAsc(context.Context, int64, int) ([]audit.UserActivity, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) DeleteBefore(context.Context, time.Time) (int64, error) { return 0, nil }
+func (s *capturingAuditStore) SaveCheckpoint(context.Context, audit.Checkpoint) error { return nil }
+func (s *capturingAuditStore) LatestCheckpoint(context.Context) (*audit.Checkpoint, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) Close() error            { return nil }
+func (s *capturingAuditStore) Dialect() dbutil.Dialect { return dbutil.DialectSQLite }
+func (s *capturingAuditStore) snapshot() []audit.UserActivity {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]audit.UserActivity, len(s.recorded))
+	copy(out, s.recorded)
+	return out
+}
+
+type capturingAuditTx struct {
+	store *capturingAuditStore
+}
+
+func (t *capturingAuditTx) Append(_ context.Context, ua *audit.UserActivity) error {
+	t.store.mu.Lock()
+	t.store.recorded = append(t.store.recorded, *ua)
+	t.store.mu.Unlock()
+	return nil
+}
+func (t *capturingAuditTx) AppendBatch(ctx context.Context, uas []*audit.UserActivity) error {
+	for _, ua := range uas {
+		if err := t.Append(ctx, ua); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (t *capturingAuditTx) SaveCheckpoint(context.Context, audit.Checkpoint) error { return nil }
+func (t *capturingAuditTx) TailHash(context.Context) (string, error)               { return "", nil }
+func (t *capturingAuditTx) LastRowBefore(context.Context, time.Time) (int64, string, error) {
+	return 0, "", nil
+}
+func (t *capturingAuditTx) DeleteByIDLEQ(context.Context, int64) (int64, error) { return 0, nil }
+func (t *capturingAuditTx) RowCount(context.Context) (int64, error)             { return 0, nil }
+func (t *capturingAuditTx) Commit() error                                       { return nil }
+func (t *capturingAuditTx) Rollback() error                                     { return nil }
+
+// newCapturingCollector builds a Collector backed by capturingAuditStore and
+// flushes aggressively (BatchSize=1) so the appended row lands quickly.
+func newCapturingCollector(t *testing.T, store *capturingAuditStore) *audit.Collector {
+	t.Helper()
+	c := audit.NewCollector(store, nil, nil, nil, audit.CollectorConfig{
+		ChannelCap:    64,
+		BatchSize:     1,
+		BatchInterval: 5 * time.Millisecond,
+	})
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c
 }
 
 func TestEmitAuthEvent_NilCollector(t *testing.T) {
 	t.Parallel()
 	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"k"}})
-	auth.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, "anonymous", "1.2.3.4", "test-agent", "/api/test", "GET")
+	auth.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, "anonymous",
+		audit.PlatformAPI, audit.UserIDTypeAnonymous, "1.2.3.4", "test-agent", "/api/test", "GET")
 }
 
 func TestAuthenticateRequest_AuditEvents(t *testing.T) {
@@ -959,5 +1040,107 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		uid, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "api_user", uid)
+	})
+
+	// ─── I2: webchat cookie path must tag PlatformWebChat + registered ───
+	t.Run("cookie auth tags webchat + registered (I2)", func(t *testing.T) {
+		t.Parallel()
+		store := &capturingAuditStore{}
+		ac := newCapturingCollector(t, store)
+
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"sk-test"}})
+		ca, err := NewCookieAuth("")
+		require.NoError(t, err)
+		auth.SetCookieAuth(ca)
+		auth.SetAuditCollector(ac)
+
+		// Mint a cookie for a registered user and attach it to the request.
+		w := httptest.NewRecorder()
+		require.NoError(t, ca.SetCookie(w, httptest.NewRequest("GET", "/api/test", nil), "user-uuid-123"))
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.AddCookie(w.Result().Cookies()[0])
+		req.RemoteAddr = "192.168.1.1:12345"
+
+		uid, _, err := auth.AuthenticateRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, "user-uuid-123", uid)
+
+		// The audit row MUST be tagged webchat + registered (spec §5.4),
+		// NOT api + platform (the pre-I2 behavior that mis-tagged every
+		// webchat UUID as an opaque platform handle).
+		require.Eventually(t, func() bool {
+			for _, ua := range store.snapshot() {
+				if ua.Action == audit.ActionAuthLogin && ua.Outcome == audit.OutcomeSuccess {
+					return ua.Platform == audit.PlatformWebChat &&
+						ua.UserIDType == audit.UserIDTypeRegistered &&
+						ua.UserID == "user-uuid-123"
+				}
+			}
+			return false
+		}, 2*time.Second, 5*time.Millisecond,
+			"cookie/webchat auth must be tagged PlatformWebChat + UserIDTypeRegistered (I2)")
+	})
+
+	// ─── I2: API-key path with resolver must tag registered ───
+	t.Run("api key + resolver tags registered (I2)", func(t *testing.T) {
+		t.Parallel()
+		store := &capturingAuditStore{}
+		ac := newCapturingCollector(t, store)
+
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"sk-alice"}})
+		// Resolver maps the key to a real user id → registered.
+		auth.SetKeyResolver(NewMapResolver(map[string]string{"sk-alice": "alice-uuid"}))
+		auth.SetAuditCollector(ac)
+
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-API-Key", "sk-alice")
+		req.RemoteAddr = "10.0.0.3:7070"
+		uid, _, err := auth.AuthenticateRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, "alice-uuid", uid)
+
+		// Resolved API-key auth: PlatformAPI + registered (the uid is a real
+		// users.id, not the opaque "api_user" handle).
+		require.Eventually(t, func() bool {
+			for _, ua := range store.snapshot() {
+				if ua.Action == audit.ActionAuthAPIKeyUsed && ua.Outcome == audit.OutcomeSuccess {
+					return ua.Platform == audit.PlatformAPI &&
+						ua.UserIDType == audit.UserIDTypeRegistered &&
+						ua.UserID == "alice-uuid"
+				}
+			}
+			return false
+		}, 2*time.Second, 5*time.Millisecond,
+			"resolved api-key auth must be tagged PlatformAPI + UserIDTypeRegistered (I2)")
+	})
+
+	// ─── I2: API-key path WITHOUT resolver tags platform ───
+	t.Run("api key without resolver tags platform (I2)", func(t *testing.T) {
+		t.Parallel()
+		store := &capturingAuditStore{}
+		ac := newCapturingCollector(t, store)
+
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}})
+		// No resolver → uid is the opaque "api_user" handle → platform.
+		auth.SetAuditCollector(ac)
+
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-API-Key", "secret")
+		req.RemoteAddr = "10.0.0.4:7070"
+		uid, _, err := auth.AuthenticateRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, "api_user", uid)
+
+		require.Eventually(t, func() bool {
+			for _, ua := range store.snapshot() {
+				if ua.Action == audit.ActionAuthAPIKeyUsed && ua.Outcome == audit.OutcomeSuccess {
+					return ua.Platform == audit.PlatformAPI &&
+						ua.UserIDType == audit.UserIDTypePlatform &&
+						ua.UserID == "api_user"
+				}
+			}
+			return false
+		}, 2*time.Second, 5*time.Millisecond,
+			"unresolved api-key auth must be tagged PlatformAPI + UserIDTypePlatform (I2)")
 	})
 }

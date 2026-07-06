@@ -96,14 +96,24 @@ func (a *Authenticator) SetAuditCollector(c *audit.Collector) {
 // emitAuthEvent enqueues a non-blocking audit event for an authentication
 // outcome. No-op when auditCollector is nil. Errors are silently ignored to
 // keep the auth path fast and non-blocking.
-func (a *Authenticator) emitAuthEvent(action, outcome, userID, ip, userAgent, path, method string) {
+//
+// platform and userIDType are passed by the caller because the attribution
+// depends on which auth path succeeded (review I2): cookie/webchat →
+// PlatformWebChat + UserIDTypeRegistered; API-key → PlatformAPI + (registered
+// if a resolver mapped the key, else platform); anonymous/denied → anonymous.
+// Hardcoding PlatformAPI for every path mis-tagged webchat UUIDs as opaque
+// platform handles, corrupting the by-user-type analytics the audit table
+// exists to support (spec §5.4).
+func (a *Authenticator) emitAuthEvent(action, outcome, userID, platform, userIDType, ip, userAgent, path, method string) {
 	c := a.auditCollector
 	if c == nil {
 		return
 	}
-	idType := audit.UserIDTypeAnonymous
-	if userID != "" && userID != audit.AnonymousUserID {
-		idType = audit.UserIDTypePlatform
+	if userID == "" {
+		userID = audit.AnonymousUserID
+	}
+	if userIDType == "" {
+		userIDType = audit.UserIDTypeAnonymous
 	}
 	detail, _ := json.Marshal(map[string]string{
 		"path":   path,
@@ -112,8 +122,8 @@ func (a *Authenticator) emitAuthEvent(action, outcome, userID, ip, userAgent, pa
 	ua := &audit.UserActivity{
 		Ts:         time.Now().UnixMilli(),
 		UserID:     userID,
-		UserIDType: idType,
-		Platform:   audit.PlatformAPI,
+		UserIDType: userIDType,
+		Platform:   platform,
 		Action:     action,
 		Outcome:    outcome,
 		DetailJSON: string(detail),
@@ -153,11 +163,15 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		if a.cookieAuth != nil {
 			if uid, ok := a.AuthenticateActiveCookie(r); ok {
 				botID := BotIDFromRequest(r)
-				a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, uid, ip, ua, path, method)
+				// Cookie auth is the webchat path; uid is a registered users.id
+				// UUID → spec §5.4 requires PlatformWebChat + registered.
+				a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, uid,
+					audit.PlatformWebChat, audit.UserIDTypeRegistered, ip, ua, path, method)
 				return uid, botID, nil
 			}
 		}
-		a.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, audit.AnonymousUserID, ip, ua, path, method)
+		a.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, audit.AnonymousUserID,
+			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
 
@@ -166,14 +180,16 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if a.numValidKeys == 0 && a.numDBKeys == 0 && !a.devModeLocked {
 		a.mu.RUnlock()
 		botID := BotIDFromRequest(r)
-		a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, audit.AnonymousUserID, ip, ua, path, method)
+		a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, audit.AnonymousUserID,
+			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 		return "anonymous", botID, nil
 	}
 
 	// Key lookup using constant-time comparison to prevent timing attacks.
 	if !a.authenticateKey(key) {
 		a.mu.RUnlock()
-		a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID, ip, ua, path, method)
+		a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
+			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
 
@@ -186,13 +202,22 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if idp != nil && uid != "anonymous" && uid != "api_user" {
 		u, err := idp.Lookup(r.Context(), uid)
 		if err != nil || u.Status == "disabled" {
-			a.emitAuthEvent(audit.ActionAuthTokenValidated, audit.OutcomeFailure, audit.AnonymousUserID, ip, ua, path, method)
+			a.emitAuthEvent(audit.ActionAuthTokenValidated, audit.OutcomeFailure, audit.AnonymousUserID,
+				audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 			return "", "", ErrUnauthorized
 		}
 	}
 
 	botID := BotIDFromRequest(r)
-	a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeSuccess, uid, ip, ua, path, method)
+	// API-key path: if a resolver mapped the key to a real user id, the uid is
+	// a registered users.id UUID → registered; otherwise it's the opaque
+	// "api_user" handle → platform (spec §5.4 attribution table).
+	successIDType := audit.UserIDTypePlatform
+	if uid != "api_user" && uid != "anonymous" {
+		successIDType = audit.UserIDTypeRegistered
+	}
+	a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeSuccess, uid,
+		audit.PlatformAPI, successIDType, ip, ua, path, method)
 	return uid, botID, nil
 }
 

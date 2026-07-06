@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -95,22 +96,45 @@ func (api *AdminAPI) handleActivityExport(w http.ResponseWriter, r *http.Request
 		exporter = audit.AnonymousUserID
 	}
 	data, contentType, err := api.activityService.Export(r.Context(), q, format, exporter)
+	// Meta-audit fires on BOTH success and failure paths (spec §5.8: "every
+	// export"). A failed export attempt is at least as forensically interesting
+	// as a successful one — an attacker probing the endpoint, or an insider
+	// attempting bulk exfiltration, would generate failures. Emit before the
+	// error return so the row is recorded even when Export errors.
+	if api.auditCollector != nil {
+		outcome := audit.OutcomeSuccess
+		detail := map[string]any{
+			"target_user": userID,
+			"format":      format,
+		}
+		if err != nil {
+			outcome = audit.OutcomeFailure
+			detail["error"] = err.Error()
+		} else {
+			detail["rows"] = len(data)
+		}
+		// json.Marshal produces spec-compliant detail_json and is robust
+		// against attacker-influenced userID values (review M5: %q quoting
+		// is not JSON-safe for all runes). Marshal failure is impossible
+		// for these scalar values; fall back to a static stub defensively.
+		raw, mErr := json.Marshal(detail)
+		if mErr != nil {
+			raw = []byte(`{}`)
+		}
+		_ = api.auditCollector.Enqueue(r.Context(), &audit.UserActivity{
+			Ts:         time.Now().UnixMilli(),
+			UserID:     exporter,
+			UserIDType: audit.UserIDTypeRegistered,
+			Platform:   audit.PlatformAdmin,
+			Action:     audit.ActionSystemAuditExport,
+			Outcome:    outcome,
+			DetailJSON: string(raw),
+		})
+	}
 	if err != nil {
 		api.log.Error("admin: activity export", "err", err)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "export failed")
 		return
-	}
-	// Meta-audit: emit system.audit_export row via collector (spec section 5.8)
-	if api.auditCollector != nil {
-		_ = api.auditCollector.Enqueue(r.Context(), &audit.UserActivity{
-			Ts:         time.Now().UnixMilli(),
-			UserID:     exporter,
-			UserIDType: "registered",
-			Platform:   "admin",
-			Action:     audit.ActionSystemAuditExport,
-			Outcome:    "success",
-			DetailJSON: fmt.Sprintf(`{"target_user":%q,"format":%q,"rows":%d}`, userID, format, len(data)),
-		})
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="activity-%s.%s"`, time.Now().UTC().Format("20060102-150405"), format))

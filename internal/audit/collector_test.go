@@ -57,8 +57,8 @@ func newTestCollector(t *testing.T, channelCap, batchSize int, batchInterval tim
 		BatchSize:     batchSize,
 		BatchInterval: batchInterval,
 	})
-	c.Start()
-	t.Cleanup(func() { _ = c.Close() })
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c, store, spill, ts
 }
 
@@ -125,7 +125,7 @@ func TestCollector_SpillOnFull(t *testing.T) {
 	require.Greater(t, c.Spilled(), int64(0), "expected some events to spill")
 
 	// Close the collector — this drains everything
-	require.NoError(t, c.Close())
+	require.NoError(t, c.Close(context.Background()))
 
 	// After close, spill file should be empty (all events replayed and flushed)
 	remaining, err := spill.ReadAll()
@@ -194,7 +194,7 @@ func TestCollector_CloseDrainsSpill(t *testing.T) {
 	}
 
 	// Close must drain spill and flush all events
-	require.NoError(t, c.Close())
+	require.NoError(t, c.Close(context.Background()))
 
 	// Spill should be empty
 	remaining, err := spill.ReadAll()
@@ -313,7 +313,7 @@ func TestCollector_EnqueueOnClosedReturnsError(t *testing.T) {
 
 	c, _, _, _ := newTestCollector(t, 256, 10, 1*time.Second)
 
-	require.NoError(t, c.Close())
+	require.NoError(t, c.Close(context.Background()))
 
 	err := c.Enqueue(context.Background(), &UserActivity{
 		Ts: 1000, UserID: "u1", UserIDType: UserIDTypePlatform,
@@ -356,8 +356,8 @@ func TestCollector_MultipleCloseIsSafe(t *testing.T) {
 
 	c, _, _, _ := newTestCollector(t, 256, 10, 1*time.Second)
 
-	require.NoError(t, c.Close())
-	require.NoError(t, c.Close()) // second close should be no-op
+	require.NoError(t, c.Close(context.Background()))
+	require.NoError(t, c.Close(context.Background())) // second close should be no-op
 }
 
 func TestCollector_NilLoggerFallsBack(t *testing.T) {
@@ -391,8 +391,8 @@ func TestCollector_SinksNilIsHandled(t *testing.T) {
 	c := NewCollector(store, nil, nil, slog.Default(), CollectorConfig{
 		ChannelCap: 16, BatchSize: 4, BatchInterval: 100 * time.Millisecond,
 	})
-	c.Start()
-	t.Cleanup(func() { _ = c.Close() })
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
 
 	ua := &UserActivity{
 		Ts: 1000, UserID: "u1", UserIDType: UserIDTypePlatform,
@@ -512,8 +512,8 @@ func TestCollector_SpillFlushFailure_ReSpills(t *testing.T) {
 		BatchSize:     100, // large so events accumulate without auto-flushing
 		BatchInterval: 5 * time.Second,
 	})
-	c.Start()
-	t.Cleanup(func() { _ = c.Close() })
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
 
 	ctx := context.Background()
 	const n = 6 // > channel cap → at least some will spill
@@ -580,8 +580,8 @@ func TestCollector_ConcurrentGcNoBusyLock(t *testing.T) {
 		BatchSize:     8,
 		BatchInterval: 10 * time.Millisecond, // flush frequently to maximize overlap with GC
 	})
-	c.Start()
-	t.Cleanup(func() { _ = c.Close() })
+	c.Start(context.Background())
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
 
 	// stopC signals both the enqueuers and the GC goroutines to exit, so
 	// neither path is interrupted mid-operation by context cancellation
@@ -659,3 +659,82 @@ func TestCollector_ConcurrentGcNoBusyLock(t *testing.T) {
 
 // PlatformTest is a convenience constant for tests (not in the public API).
 const PlatformTest = "test"
+
+// ─── I3: Close must drain in-flight sink fan-out ──────────────────────────────
+
+// blockingSink blocks OnAuditEvent until the released latch channel is closed.
+// Used to prove Close waits for in-flight fan-out goroutines before returning.
+type blockingSink struct {
+	release chan struct{}
+	called  chan struct{} // signals OnAuditEvent was entered
+}
+
+func (s *blockingSink) OnAuditEvent(_ context.Context, _ AuditEvent) error {
+	select {
+	case s.called <- struct{}{}:
+	default:
+	}
+	<-s.release // block until the test releases the latch
+	return nil
+}
+
+// TestCollector_CloseWaitsForSinks verifies the I3 fix: Close must not return
+// while a sink fan-out goroutine is still in flight. Before the fix, Close
+// waited only on closeWg (runWriter); the fan-out goroutines spawned by the
+// final flush were untracked, so Close could return and close the spill file
+// while a sink was still running — a goroutine leak and use-after-close risk.
+func TestCollector_CloseWaitsForSinks(t *testing.T) {
+	t.Parallel()
+
+	store := newTestSQLiteStore(t)
+	sink := &blockingSink{
+		release: make(chan struct{}),
+		called:  make(chan struct{}, 1),
+	}
+	c := NewCollector(store, nil, []AlertSink{sink}, slog.Default(), CollectorConfig{
+		ChannelCap:    8,
+		BatchSize:     1, // flush on the very first event
+		BatchInterval: 10 * time.Millisecond,
+	})
+	c.Start(context.Background())
+
+	ctx := context.Background()
+	require.NoError(t, c.Enqueue(ctx, &UserActivity{
+		Ts:         time.Now().UnixMilli(),
+		UserID:     "u1",
+		UserIDType: UserIDTypePlatform,
+		Platform:   PlatformTest,
+		Action:     ActionAuthLogin,
+		Outcome:    OutcomeSuccess,
+		DetailJSON: `{}`,
+	}))
+
+	// Wait until the sink has been entered (the fan-out goroutine is in flight
+	// and blocked on the latch). This is the channel-signal equivalent of
+	// "the sink is currently running" — no time.Sleep per AGENTS.md.
+	select {
+	case <-sink.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sink was never called before timeout")
+	}
+
+	// Close must NOT return while the sink is still blocked. Drive Close in a
+	// goroutine and assert it hasn't completed after a short window with the
+	// latch still held.
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- c.Close(context.Background()) }()
+	select {
+	case <-closeDone:
+		t.Fatal("Close returned before in-flight sink finished (I3 regression)")
+	case <-time.After(100 * time.Millisecond):
+		// expected: Close is still blocked on sinkWg
+	}
+
+	// Release the sink; Close should now complete promptly.
+	close(sink.release)
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after sink was released")
+	}
+}

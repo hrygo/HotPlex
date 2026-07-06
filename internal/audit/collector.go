@@ -60,6 +60,25 @@ type Collector struct {
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
 
+	// sinkWg tracks in-flight fan-out goroutines so Close can drain them
+	// before the spill file is closed (review I3: previously Close returned
+	// while sink goroutines were still running, leaking and risking
+	// use-after-close on sink resources).
+	sinkWg sync.WaitGroup
+	// sinkSem bounds concurrent fan-out goroutines to len(sinks) so a burst
+	// of committed events can't spawn an unbounded number of goroutines.
+	// Each sink's OnAlertEvent contract already requires "return quickly",
+	// so one in-flight call per sink is the natural concurrency ceiling.
+	sinkSem chan struct{}
+
+	// lifecycleCtx is set by Start and used for normal (ticker/batch-full/
+	// sentinel) flushes. shutdownCtx is set by Close and used for the final
+	// flush so a slow DB during shutdown can't outlive the gateway's
+	// shutdown deadline (review I5: previously flushBatch minted a fresh
+	// context.Background() with a hard 30s, ignoring the shutdown ctx).
+	lifecycleCtx context.Context
+	shutdownCtx  context.Context
+
 	mu       sync.Mutex // serializes flushBatch and drainSpill
 	enqueued atomic.Int64
 	spilled  atomic.Int64
@@ -80,6 +99,13 @@ func NewCollector(store Store, spill *SpillFile, sinks []AlertSink, log *slog.Lo
 	if sinks == nil {
 		sinks = []AlertSink{}
 	}
+	// Bound fan-out concurrency to len(sinks) (min 1). Each sink's
+	// OnAlertEvent must "return quickly" per its contract, so one in-flight
+	// call per sink is the natural ceiling; events serialize behind it.
+	semCap := len(sinks)
+	if semCap < 1 {
+		semCap = 1
+	}
 	return &Collector{
 		store:    store,
 		spill:    spill,
@@ -88,11 +114,19 @@ func NewCollector(store Store, spill *SpillFile, sinks []AlertSink, log *slog.Lo
 		cfg:      cfg,
 		captureC: make(chan *UserActivity, cfg.ChannelCap),
 		closeC:   make(chan struct{}),
+		sinkSem:  make(chan struct{}, semCap),
 	}
 }
 
 // Start launches the runWriter goroutine. Call once before Enqueue.
-func (c *Collector) Start() {
+// ctx is stored as the lifecycle context used for normal flushes (review I5);
+// pass the gateway's long-lived context so a normal flush can't outlive it.
+// A nil ctx falls back to context.Background() (test convenience).
+func (c *Collector) Start(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.lifecycleCtx = ctx
 	c.closeWg.Add(1)
 	go c.runWriter()
 }
@@ -157,14 +191,30 @@ func (c *Collector) Spilled() int64 { return c.spilled.Load() }
 // Dropped returns the count of drops (should always be 0).
 func (c *Collector) Dropped() int64 { return c.dropped.Load() }
 
-// Close signals the writer to stop, waits for it to drain and flush, then
-// closes the spill file. Safe to call multiple times.
-func (c *Collector) Close() error {
+// Close signals the writer to stop, waits for it to drain and flush, waits
+// for in-flight sink fan-out to finish, then closes the spill file. Safe to
+// call multiple times.
+//
+// ctx is stored as the shutdown context and used for the final flush (review
+// I5): pass the gateway's shutdown ctx so a slow DB during shutdown can't
+// burn the full 30s budget past the gateway's deadline. A nil ctx falls back
+// to the lifecycle context, then context.Background().
+//
+// Order: closeC → runWriter drains captureC + final flush (which may start
+// the last fan-out) → closeWg → sinkWg (drain in-flight sinks) → spill close.
+// Waiting on sinkWg before closing the spill file prevents the use-after-close
+// race where a fan-out goroutine touches sink resources after Close returns
+// (review I3).
+func (c *Collector) Close(ctx context.Context) error {
 	var spillErr error
 	c.closeOnce.Do(func() {
+		if ctx != nil {
+			c.shutdownCtx = ctx
+		}
 		close(c.closeC)
 	})
 	c.closeWg.Wait()
+	c.sinkWg.Wait()
 	if c.spill != nil {
 		spillErr = c.spill.Close()
 		c.spill = nil
@@ -182,6 +232,13 @@ func (c *Collector) runWriter() {
 	for {
 		select {
 		case <-c.closeC:
+			// Shutdown path: use the shutdown context (set by Close) for the
+			// final flush so it respects the gateway's shutdown deadline
+			// rather than a detached context.Background() (review I5).
+			ctx := c.shutdownCtx
+			if ctx == nil {
+				ctx = c.lifecycleCtx
+			}
 			c.mu.Lock()
 			for {
 				select {
@@ -195,49 +252,49 @@ func (c *Collector) runWriter() {
 				}
 			}
 		finalFlush:
-			c.flushLocked(batch)
+			c.flushLocked(ctx, batch)
 			batch = nil
-			c.drainSpillLocked()
+			c.drainSpillLocked(ctx)
 			c.mu.Unlock()
 			return
 
 		case ua := <-c.captureC:
 			if ua == spillSentinel {
 				c.mu.Lock()
-				c.flushLocked(batch)
+				c.flushLocked(c.lifecycleCtx, batch)
 				batch = batch[:0]
-				c.drainSpillLocked()
+				c.drainSpillLocked(c.lifecycleCtx)
 				c.mu.Unlock()
 				continue
 			}
 			batch = append(batch, ua)
 			if len(batch) >= c.cfg.BatchSize {
 				c.mu.Lock()
-				c.flushLocked(batch)
+				c.flushLocked(c.lifecycleCtx, batch)
 				batch = batch[:0]
 				c.mu.Unlock()
 			}
 
 		case <-ticker.C:
 			c.mu.Lock()
-			c.flushLocked(batch)
+			c.flushLocked(c.lifecycleCtx, batch)
 			batch = batch[:0]
-			c.drainSpillLocked()
+			c.drainSpillLocked(c.lifecycleCtx)
 			c.mu.Unlock()
 		}
 	}
 }
 
-func (c *Collector) flushLocked(batch []*UserActivity) {
+func (c *Collector) flushLocked(ctx context.Context, batch []*UserActivity) {
 	if len(batch) == 0 {
 		return
 	}
-	if err := c.flushBatch(batch); err != nil {
+	if err := c.flushBatch(ctx, batch); err != nil {
 		c.log.Error("audit: flush batch failed", "err", err, "size", len(batch))
 	}
 }
 
-func (c *Collector) drainSpillLocked() {
+func (c *Collector) drainSpillLocked(ctx context.Context) {
 	if c.spill == nil {
 		return
 	}
@@ -259,7 +316,7 @@ func (c *Collector) drainSpillLocked() {
 			uas = append(uas, r.UA)
 		}
 	}
-	if err := c.flushBatch(uas); err != nil {
+	if err := c.flushBatch(ctx, uas); err != nil {
 		// DB flush failed — the spill file was already truncated by Drain,
 		// so re-spill the records we just read to preserve the zero-loss
 		// guarantee (spec §5.10). Without this, a transient DB outage
@@ -290,12 +347,20 @@ func (c *Collector) reSpillLocked(records []SpillRecord) {
 	}
 }
 
-func (c *Collector) flushBatch(uas []*UserActivity) error {
+func (c *Collector) flushBatch(ctx context.Context, uas []*UserActivity) error {
 	if len(uas) == 0 {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Inherit from the caller's context (lifecycle for normal flushes,
+	// shutdown for the final flush) rather than minting a detached
+	// context.Background(). The 30s cap still bounds a single attempt, but
+	// now a slow DB during shutdown is cut off by the gateway's shutdown
+	// deadline instead of running past it (review I5).
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	tx, err := c.store.BeginTx(ctx)
@@ -356,12 +421,26 @@ func (c *Collector) flushBatch(uas []*UserActivity) error {
 	return nil
 }
 
+// fanOutSinks dispatches every committed event to every sink. Concurrency is
+// bounded by sinkSem (cap = len(sinks)) and every spawned goroutine is tracked
+// by sinkWg so Close can drain them before the spill file closes (review I3:
+// previously unbounded goroutines with no shutdown sync, leaking at Close and
+// risking use-after-close on sink resources).
 func (c *Collector) fanOutSinks(ctx context.Context, uas []*UserActivity) {
 	for _, sink := range c.sinks {
 		sink := sink
 		for _, ua := range uas {
 			ua := ua
+			// Bounded acquire: at most len(sinks) fan-out goroutines run at
+			// once. This is non-blocking in practice (sinks return quickly)
+			// but caps the worst case under a burst of large batches.
+			c.sinkSem <- struct{}{}
+			c.sinkWg.Add(1)
 			go func() {
+				defer func() {
+					<-c.sinkSem
+					c.sinkWg.Done()
+				}()
 				ev := userActivityToAuditEvent(ua)
 				sctx, cancel := context.WithTimeout(ctx, c.cfg.SinkTimeout)
 				defer cancel()

@@ -84,65 +84,80 @@ func (g *GC) Run(ctx context.Context) {
 
 // Tick performs one GC pass. Returns (deleted, err).
 //
-// Algorithm per spec section 5.5/5.7:
+// Algorithm per spec section 5.5/5.7, executed as a SINGLE transaction:
 //  1. cutoff := now - retention
-//  2. Find the last row to be pruned (highest id with ts < cutoff)
-//  3. If found: write a checkpoint with its self_hash + next_id
-//  4. DELETE rows where ts < cutoff (using last pruned row's ts + 1ms as boundary)
-//  5. First-prune edge case: if 0 rows survive, next row's prev_hash should be "" (genesis)
+//  2. Begin a write Tx (holds writeMu on SQLite / pg_advisory_xact_lock on PG
+//     until Commit — same serialization as the append path)
+//  3. Find the last row to be pruned (highest id with ts < cutoff)
+//  4. If none: rollback, return 0
+//  5. Delete every row with id <= that row's id (keyed off id, the true
+//     monotonic order, so equal-ms timestamps can't cause off-by-one)
+//  6. If the table is now empty, set LastSelfHash="" so the next append is genesis
+//  7. Write the checkpoint inside the same Tx, then Commit
+//
+// Running the whole prune under one Tx closes the C1/C2 race: previously the
+// find → checkpoint → delete → checkpoint ran as separate store calls, each
+// acquiring and releasing the writer lock independently. A concurrent
+// flushBatch could insert a row between the checkpoint and the delete whose
+// self_hash became part of the chain but whose row was then pruned, breaking
+// the chain and producing a false-positive tamper alert. Now no other writer
+// can interleave between the anchor read and the prune commit.
 func (g *GC) Tick(ctx context.Context) (int64, error) {
 	g.mu.Lock()
 	retention := g.cfg.Retention
 	g.mu.Unlock()
 	cutoff := time.Now().Add(-retention)
 
-	// 1. Find the last row to be pruned (highest id with ts <= cutoff).
-	// Query returns rows in DESC order, so Limit=1 gives us the highest-id row.
-	rows, err := g.store.Query(ctx, Query{
-		To:    cutoff,
-		Limit: 1,
-	})
+	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("audit gc: query last-to-prune: %w", err)
+		return 0, fmt.Errorf("audit gc: begin tx: %w", err)
 	}
-	if len(rows) == 0 {
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// 1. Find the highest-id row with ts < cutoff. Returns (0,"",nil) if none.
+	lastID, lastHash, err := tx.LastRowBefore(ctx, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("audit gc: last row before: %w", err)
+	}
+	if lastID == 0 {
 		return 0, nil // nothing to prune
 	}
 
-	lastPruned := rows[0] // DESC order: first row is the highest-id match
-
-	// 2. Write checkpoint BEFORE deleting (so verifier can always rebase).
-	cp := Checkpoint{
-		PrunedAt:     time.Now(),
-		LastSelfHash: lastPruned.SelfHash,
-		NextID:       lastPruned.ID + 1, // first surviving row's id
-	}
-	if err := g.store.SaveCheckpoint(ctx, cp); err != nil {
-		return 0, fmt.Errorf("audit gc: save checkpoint: %w", err)
-	}
-
-	// 3. Delete old rows. Use lastPruned.Ts + 1ms as the delete boundary
-	// to ensure exactly the same set of rows is deleted as was used for
-	// the checkpoint (avoids off-by-one between Query's <= and DeleteBefore's <).
-	deleteBoundary := time.UnixMilli(lastPruned.Ts + 1)
-	deleted, err := g.store.DeleteBefore(ctx, deleteBoundary)
+	// 2. Delete every row up to and including lastID. The id boundary is the
+	// exact set the checkpoint will anchor — no ts-based off-by-one.
+	deleted, err := tx.DeleteByIDLEQ(ctx, lastID)
 	if err != nil {
 		return 0, fmt.Errorf("audit gc: delete: %w", err)
 	}
 
-	// 4. If all rows were pruned (DB is now empty), update the checkpoint
-	// to set LastSelfHash="" so the next row is treated as genesis.
-	remaining, err := g.store.Query(ctx, Query{Limit: 1})
+	// 3. Build the checkpoint. If the table is now empty, clear LastSelfHash
+	// so the verifier treats the next appended row as genesis (prev_hash="").
+	cp := Checkpoint{
+		PrunedAt:     time.Now(),
+		LastSelfHash: lastHash,
+		NextID:       lastID + 1, // first surviving row's id
+	}
+	remaining, err := tx.RowCount(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("audit gc: query remaining: %w", err)
+		return 0, fmt.Errorf("audit gc: row count: %w", err)
 	}
-	if len(remaining) == 0 {
-		// DB is empty — update checkpoint to indicate genesis.
+	if remaining == 0 {
 		cp.LastSelfHash = ""
-		if err := g.store.SaveCheckpoint(ctx, cp); err != nil {
-			return 0, fmt.Errorf("audit gc: update checkpoint for genesis: %w", err)
-		}
 	}
+
+	if err := tx.SaveCheckpoint(ctx, cp); err != nil {
+		return 0, fmt.Errorf("audit gc: save checkpoint: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("audit gc: commit: %w", err)
+	}
+	committed = true
 
 	g.log.Info("audit gc: pruned",
 		"deleted", deleted,
