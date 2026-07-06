@@ -58,10 +58,17 @@ const maxSpillRecordSize = 64 * 1024 * 1024
 
 // ReadAll reads all complete records from the spill file. Truncated trailing
 // records (from a crash mid-write) are silently skipped — never returned.
+//
+// Prefer Drain for the read-and-clear path: it atomically reads + truncates
+// under a single lock acquisition, preventing concurrent Write from
+// interleaving between ReadAll and Truncate (which would lose the new records).
 func (s *SpillFile) ReadAll() ([]SpillRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.readAllLocked()
+}
 
+func (s *SpillFile) readAllLocked() ([]SpillRecord, error) {
 	// Open a separate read handle to avoid interfering with the write handle.
 	rf, err := os.Open(s.path)
 	if err != nil {
@@ -92,6 +99,27 @@ func (s *SpillFile) ReadAll() ([]SpillRecord, error) {
 			break
 		}
 		records = append(records, rec)
+	}
+	return records, nil
+}
+
+// Drain atomically reads all complete records and clears the spill file
+// under a single s.mu acquisition. This prevents the race where a concurrent
+// Write appends new records between ReadAll and Truncate (which would lose
+// those records). The collector MUST use this instead of separate
+// ReadAll+Truncate calls.
+func (s *SpillFile) Drain() ([]SpillRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records, err := s.readAllLocked()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.f.Truncate(0); err != nil {
+		return nil, fmt.Errorf("audit: spill truncate: %w", err)
+	}
+	if _, err := s.f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("audit: spill seek after truncate: %w", err)
 	}
 	return records, nil
 }

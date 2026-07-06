@@ -129,19 +129,10 @@ func TestCollector_SpillOnFull(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, remaining, "spill file should be empty after drain")
 
-	// All events should be in the database.
-	// Use require.Eventually because the test may interleave with other parallel tests
-	// that share the same WriteMu (e.g., session tests), causing flush latency.
-	require.Eventually(t, func() bool {
-		rows, err := store.Query(context.Background(), Query{})
-		if err != nil {
-			return false
-		}
-		return len(rows) == n
-	}, 5*time.Second, 50*time.Millisecond, "all %d events should be in DB", n)
-
+	// All events should be in the database
 	rows, err := store.Query(context.Background(), Query{})
 	require.NoError(t, err)
+	require.Len(t, rows, n, "all %d events should be in DB", n)
 
 	// Verify hash chain
 	brokenID, reason := VerifyChain(reverseRows(rows), "")

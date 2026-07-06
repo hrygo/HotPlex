@@ -238,9 +238,13 @@ func (c *Collector) drainSpillLocked() {
 	if c.spill == nil {
 		return
 	}
-	records, err := c.spill.ReadAll()
+	// Drain atomically reads + truncates the spill file under a single
+	// s.mu lock acquisition. This prevents the race where a concurrent
+	// Write appends new records between ReadAll and Truncate (which would
+	// lose those records). Spec section 5.10 zero-loss guarantee.
+	records, err := c.spill.Drain()
 	if err != nil {
-		c.log.Error("audit: spill read", "err", err)
+		c.log.Error("audit: spill drain", "err", err)
 		return
 	}
 	if len(records) == 0 {
@@ -253,11 +257,8 @@ func (c *Collector) drainSpillLocked() {
 		}
 	}
 	if err := c.flushBatch(uas); err != nil {
-		c.log.Error("audit: spill drain failed", "err", err)
+		c.log.Error("audit: spill flush failed", "err", err)
 		return
-	}
-	if err := c.spill.Truncate(); err != nil {
-		c.log.Error("audit: spill truncate", "err", err)
 	}
 }
 
