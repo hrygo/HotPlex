@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
 
 	"github.com/stretchr/testify/require"
 )
@@ -835,4 +838,123 @@ func TestAuthenticateActiveCookie(t *testing.T) {
 	uid, ok = authDev.AuthenticateActiveCookie(reqWithCookie(cookieFor("anyone")))
 	require.True(t, ok)
 	require.Equal(t, "anyone", uid)
+}
+
+// ─── Audit event emission ──────────────────────────────────────────────────────
+
+// mockAuditStore is a minimal audit.Store implementation for testing.
+// It discards all writes — we only need the collector's channel to accept events.
+type mockAuditStore struct{}
+
+func (mockAuditStore) BeginTx(_ context.Context) (audit.Tx, error) { return mockAuditTx{}, nil }
+func (mockAuditStore) Query(_ context.Context, _ audit.Query) ([]audit.UserActivity, error) {
+	return nil, nil
+}
+func (mockAuditStore) DeleteBefore(_ context.Context, _ time.Time) (int64, error) { return 0, nil }
+func (mockAuditStore) SaveCheckpoint(_ context.Context, _ audit.Checkpoint) error { return nil }
+func (mockAuditStore) LatestCheckpoint(_ context.Context) (*audit.Checkpoint, error) {
+	return nil, nil
+}
+func (mockAuditStore) Close() error            { return nil }
+func (mockAuditStore) Dialect() dbutil.Dialect { return dbutil.DialectSQLite }
+
+type mockAuditTx struct{}
+
+func (mockAuditTx) Append(_ context.Context, _ *audit.UserActivity) error { return nil }
+func (mockAuditTx) AppendBatch(_ context.Context, _ []*audit.UserActivity) error {
+	return nil
+}
+func (mockAuditTx) SaveCheckpoint(_ context.Context, _ audit.Checkpoint) error { return nil }
+func (mockAuditTx) TailHash(_ context.Context) (string, error)                 { return "", nil }
+func (mockAuditTx) Commit() error                                              { return nil }
+func (mockAuditTx) Rollback() error                                            { return nil }
+
+func newTestAuditCollector(t *testing.T) *audit.Collector {
+	t.Helper()
+	c := audit.NewCollector(mockAuditStore{}, nil, nil, nil, audit.CollectorConfig{
+		ChannelCap: 64,
+		BatchSize:  10,
+	})
+	c.Start()
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+func TestEmitAuthEvent_NilCollector(t *testing.T) {
+	t.Parallel()
+	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"k"}})
+	auth.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, "anonymous", "1.2.3.4", "test-agent", "/api/test", "GET")
+}
+
+func TestAuthenticateRequest_AuditEvents(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dev mode emits auth.login success", func(t *testing.T) {
+		t.Parallel()
+		ac := newTestAuditCollector(t)
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{}})
+		auth.SetAuditCollector(ac)
+
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-API-Key", "any-key")
+		req.RemoteAddr = "192.168.1.1:12345"
+		req.Header.Set("User-Agent", "test-ua/1.0")
+		uid, _, err := auth.AuthenticateRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, "anonymous", uid)
+		require.Equal(t, int64(1), ac.Enqueued())
+	})
+
+	t.Run("denied emits auth.denied", func(t *testing.T) {
+		t.Parallel()
+		ac := newTestAuditCollector(t)
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}})
+		auth.SetAuditCollector(ac)
+
+		req := httptest.NewRequest("GET", "/admin/keys", nil)
+		req.RemoteAddr = "10.0.0.1:9999"
+		_, _, err := auth.AuthenticateRequest(req)
+		require.ErrorIs(t, err, ErrUnauthorized)
+		require.Equal(t, int64(1), ac.Enqueued())
+	})
+
+	t.Run("invalid key emits auth.apikey_used failure", func(t *testing.T) {
+		t.Parallel()
+		ac := newTestAuditCollector(t)
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}})
+		auth.SetAuditCollector(ac)
+
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-API-Key", "wrong-key")
+		req.RemoteAddr = "10.0.0.2:8080"
+		_, _, err := auth.AuthenticateRequest(req)
+		require.ErrorIs(t, err, ErrUnauthorized)
+		require.Equal(t, int64(1), ac.Enqueued())
+	})
+
+	t.Run("valid key emits auth.apikey_used success", func(t *testing.T) {
+		t.Parallel()
+		ac := newTestAuditCollector(t)
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}})
+		auth.SetAuditCollector(ac)
+
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-API-Key", "secret")
+		req.RemoteAddr = "10.0.0.3:7070"
+		uid, _, err := auth.AuthenticateRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, "api_user", uid)
+		require.Equal(t, int64(1), ac.Enqueued())
+	})
+
+	t.Run("nil collector does not panic", func(t *testing.T) {
+		t.Parallel()
+		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"secret"}})
+
+		req := httptest.NewRequest("GET", "/api/test", nil)
+		req.Header.Set("X-API-Key", "secret")
+		uid, _, err := auth.AuthenticateRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, "api_user", uid)
+	})
 }
