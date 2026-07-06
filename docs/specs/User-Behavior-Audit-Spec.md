@@ -292,6 +292,75 @@ audit:
 - **Phase 2(覆盖 + 告警 + UI)**:工具调用审计 + admin 操作迁移 + **`LogSink` + `RegisterSink` 注册机制 + 告警配置** + admin UI 时间线 + 导出
 
 > 具体告警能力(规则引擎 / 多通道投递 / 去噪 / 告警状态机)**另立 spec**,不在本 spec 范围。本 spec 仅提供 `AlertSink` 扩展点与数据契约,保证审计核心稳定、告警子系统可独立演进。
+
+---
+
+## 11. 实施状态(Implementation Status)
+
+> **当前状态**:Phase 1 已完成,PR [#844](https://github.com/hrygo/hotplex/pull/844) 待 review & merge。
+
+### P1 已完成 ✅
+
+| 组件 | 状态 | 落地位置 |
+|------|------|----------|
+| Migration 023 (SQLite + PG) | ✅ | `internal/session/sql/migrations/023_user_activity.{sql,pg.sql}` |
+| `user_activity` + `audit_chain_checkpoints` 表 | ✅ | spec §5.1 |
+| `BEFORE UPDATE` 触发器 (SQLite + PG) | ✅ | spec §5.5 |
+| `DROP VIEW IF EXISTS v_turns*` | ✅ | spec §11.2 |
+| `AuditConfig` + hot-reload + env binding | ✅ | spec §8 |
+| `EventsPath` 配置清理(归 deprecated) | ✅ | spec §11.2 |
+| 5 个 Prometheus 指标 | ✅ | `internal/observability/instruments.go` |
+| 公开类型:`UserActivity` / `Checkpoint` / `AuditEvent` / `AlertSink` | ✅ | `internal/audit/types.go` |
+| sha256 hash chain + checkpoint 锚定 | ✅ | `internal/audit/hash.go` |
+| `CollectorConfig` 默认值 | ✅ | `internal/audit/collector.go` |
+| 双重 DB store (SQLite `WriteMu` + PG `pg_advisory_xact_lock(819207)`) | ✅ | `internal/audit/store.go` |
+| WAL spill + O_SYNC | ✅ | `internal/audit/spill.go` |
+| 零丢失 collector (3 级 Enqueue: 通道→spill→阻塞) | ✅ | `internal/audit/collector.go` |
+| 原子 `SpillFile.Drain()` (修竞态) | ✅ | `internal/audit/spill.go:Drain` |
+| Sink fan-out(per-sink goroutine,5s 超时) | ✅ | `internal/audit/collector.go:fanOutSinks` |
+| `AlertSink` + `NoopSink` + `LogSink` + 内部 registry | ✅ | `internal/audit/sinks/` |
+| 6 个写入点:`auth.*` (6 paths) + `message.inbound` (7 paths) + `session.create/delete` (5 paths) | ✅ | spec §5.2 |
+| Retention GC (3y) + checkpoint 锚定 + 全裁剪 genesis 边缘 | ✅ | `internal/audit/gc.go` |
+| 链路验证 (后台 ticker + `chain_breaks` 指标) | ✅ | `internal/audit/verify.go` |
+| `GET /admin/users/{id}/activity` + 导出 (JSON/CSV) | ✅ | `internal/admin/activity_handlers.go` |
+| `GET /admin/activity` + 导出 (JSON/CSV) | ✅ | 同上 |
+| `?include_pii=true` 需要 `admin:write` | ✅ | spec §5.9 |
+| PII 掩码:IPv4 末段→0、IPv6 末 4 段→0、UA 截断 50 字 | ✅ | `internal/admin/audit_service.go:maskPII` |
+| `system.audit_export` meta-audit (每次导出) | ✅ | spec §5.8 |
+| `GatewayDeps.AuditCollector` 集成 + 关闭顺序 (在 EventCollector 之后、SessionMgr 之前) | ✅ | `cmd/hotplex/gateway_run.go` |
+| Hot-reload 接线 (retention 立即生效,`batch_interval` 需重启) | ✅ | spec §8 |
+
+### P2 仍未开始 ⏳
+
+- `tool.call` 工具调用审计(spec §5.2)
+- 现有 `internal/admin/audit.go` AdminAudit slog 路径迁移为双写 user_activity
+- 外部 `RegisterSink` 机制 (P1 仅内嵌 noop/log)
+- admin UI 用户活动时间线(issue #807 集成)
+- `full_content_retention` 延长 events/turns TTL(目前 30 天)
+- `requested-code-review` skill 用于 P2 PR review
+
+### P3 仍未开始 ⏳
+
+- 跨通道归一 v2 (`user_identities` 扩展 vs 新建 `platform_user_map`)
+- SIEM / OTLP 导出
+- 冷归档到外部存储
+- PG 按月分区(性能)
+
+### 已发现 + 已修复的 Bug (P1 review 期间)
+
+| Bug | 根因 | 修复 | 提交 |
+|-----|------|------|------|
+| `TestCollector_SpillOnFull` 偶发 1/5 失败 | `SpillFile.ReadAll` 与 `Truncate` 分两次获取 `s.mu`,并发 Enqueue 在两者之间写入新记录会被 Truncate 抹掉,违反 §5.10 零丢失保证 | 新增 `SpillFile.Drain()` 原子读+截断,collector 改用 Drain | `dc7b269f` |
+| `DeleteSession` 鉴权后丢弃 `*SessionInfo` | 旧代码 `id, _, ok := g.authorizeSession(...)` 把用户 ID 丢了,无法审计操作者 | 改为 `id, si, ok` 并 emit `session.delete` | `fa01af5a` |
+| `auth` 不上报匿名失败 | spec §5.4 要求 `user_id="anonymous"` + IP/UA 必填;原代码仅返回 error 不上报 | 加 `OnAuthEvent` 回调 + 6 path instrumentation | `1ae66e69` |
+| `internal/config` hot-reload 不支持 `audit.*` | 新增字段未登记到 `hotReloadableFields`/`BindEnv` | 加入 watcher + loader + 默认值 | `9cdb76c7` |
+| `events_path` 配置仍被 `normalizePaths` 处理 | spec §11.2 要求废弃但保留字段 | 从 normalizePaths 移除 + 加 deprecation 注释 | `9cdb76c7` + `690d49ad` |
+
+### 评审反馈 / 待办(给 reviewer)
+
+- [ ] PG migration 在 PR 环境未跑(syntax 匹配 022+009);建议 reviewer 在 staging PG 实例验证 `023_user_activity.pg.sql`
+- [ ] `p2 spec` (告警规则引擎 + 多通道) 尚未立项,见 issue 评论区跟进
+- [ ] admin UI 用户活动时间线(issue #807)后续 issue
 - **Phase 3(归一 + 合规)**:跨通道归一 v2 + SIEM/OTLP 导出 + 冷归档
 
 ---
