@@ -354,8 +354,10 @@ type DBConfig struct {
 	Postgres PostgresConfig `mapstructure:"postgres"`
 
 	// ── Legacy flat fields (deprecated, use SQLite.* instead) ──
-	Path              string        `mapstructure:"path"`
-	EventsPath        string        `mapstructure:"events_path"` // Deprecated: events table now lives in hotplex.db (same as Path)
+	Path string `mapstructure:"path"`
+	// EventsPath is a legacy config field. Unused since events table lives in hotplex.db.
+	// Retained for backward compatibility but no longer normalized (spec #833 §11.2).
+	EventsPath        string        `mapstructure:"events_path"`
 	WALMode           bool          `mapstructure:"wal_mode"`
 	BusyTimeout       time.Duration `mapstructure:"busy_timeout"`
 	MaxOpenConns      int           `mapstructure:"max_open_conns"`
