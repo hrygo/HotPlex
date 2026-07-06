@@ -1,9 +1,14 @@
 package admin
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/hrygo/hotplex/internal/audit"
 )
 
 // Audit action enumeration (issue #788 A5). Persisted as the "action" field of
@@ -173,4 +178,78 @@ func sessionAction(method string) string {
 		return AuditSessionPut
 	}
 	return "session." + strings.ToLower(method)
+}
+
+// resourceTypeFromAction maps a slog-style audit action (e.g. "bot.create") to
+// the user_activity.resource_type value ("bot"). Falls back to "admin" for
+// unmapped actions so the column is never empty for admin writes.
+func resourceTypeFromAction(slogAction string) string {
+	// slog actions are "<resource>.<verb>" (see AuditBotCreate = "bot.create").
+	if i := strings.IndexByte(slogAction, '.'); i > 0 {
+		return slogAction[:i]
+	}
+	return "admin"
+}
+
+// mapOutcome converts the legacy slog AuditResult* string to the user_activity
+// outcome enum. The two namespaces differ deliberately: slog uses "ok"/"failed"
+// (issue #788 dashboard contract), user_activity uses "success"/"failure"
+// (spec §5.1). "denied" passes through unchanged.
+func mapOutcome(slogResult string) string {
+	switch slogResult {
+	case AuditResultOk:
+		return audit.OutcomeSuccess
+	case AuditResultFailed:
+		return audit.OutcomeFailure
+	case AuditResultDenied:
+		return audit.OutcomeDenied
+	default:
+		return audit.OutcomeFailure
+	}
+}
+
+// enqueueAdminActivity records an admin write into the tamper-evident
+// user_activity table (issue #833 P2 dual-write, spec §7). Non-blocking;
+// no-op when no audit collector is wired (a.auditCollector == nil). Called
+// from the Middleware audit defer alongside the legacy slog AdminAudit path.
+//
+// The user_activity.action is prefixed with "admin." per spec §5.2 (e.g.
+// "bot.create" → "admin.bot.create") so admin writes are distinguishable from
+// other action namespaces (auth.* / session.* / message.* / tool.*) in the
+// unified table. detail_json carries the method, path, and status — enough to
+// reconstruct the request without re-reading slog.
+func (a *AdminAPI) enqueueAdminActivity(r *http.Request, status int, actor, slogAction string) {
+	c := a.auditCollector
+	if c == nil {
+		return
+	}
+	userID := actor
+	userIDType := audit.UserIDTypeRegistered // admin cookie → users.id
+	if actor == "" || actor == "anonymous" || actor == "admin-token" {
+		userID = audit.AnonymousUserID
+		userIDType = audit.UserIDTypeAnonymous
+	}
+	outcome := audit.OutcomeSuccess
+	if status >= 400 {
+		outcome = audit.OutcomeFailure
+	}
+	detail, _ := json.Marshal(map[string]any{
+		"method":      r.Method,
+		"path":        r.URL.Path,
+		"status":      status,
+		"slog_action": slogAction, // preserve the legacy label for dashboard migration
+	})
+	ua := &audit.UserActivity{
+		Ts:           time.Now().UnixMilli(),
+		UserID:       userID,
+		UserIDType:   userIDType,
+		Platform:     audit.PlatformAdmin,
+		Action:       "admin." + slogAction,
+		ResourceType: resourceTypeFromAction(slogAction),
+		Outcome:      outcome,
+		DetailJSON:   string(detail),
+		IP:           clientIP(r),
+		UserAgent:    r.UserAgent(),
+	}
+	_ = c.Enqueue(context.Background(), ua)
 }
