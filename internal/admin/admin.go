@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
@@ -125,6 +126,8 @@ type AdminAPI struct {
 	cookieAuth       *security.CookieAuth           // Optional: enables cookie-session fallback (issue #788 A2)
 	idp              *security.LocalAccountProvider // Optional: paired with cookieAuth
 	startedAt        time.Time
+	activityService  *ActivityService // Optional: enables /admin/activity + /admin/users/{id}/activity (issue #833)
+	auditCollector   *audit.Collector // Optional: emits system.audit_export meta-audit rows (issue #833)
 }
 
 type Deps struct {
@@ -362,6 +365,12 @@ func (a *AdminAPI) SetCookieFallback(cookieAuth *security.CookieAuth, idp *secur
 	a.cookieAuth = cookieAuth
 	a.idp = idp
 }
+
+// SetActivityService injects the ActivityService for /admin/activity endpoints (issue #833).
+func (a *AdminAPI) SetActivityService(s *ActivityService) { a.activityService = s }
+
+// SetAuditCollector injects the audit.Collector for emitting system.audit_export meta-audit rows (issue #833).
+func (a *AdminAPI) SetAuditCollector(c *audit.Collector) { a.auditCollector = c }
 
 // sameOriginRequest reports whether the request originated from the gateway's
 // own origin (Sec-Fetch-Site) or an explicitly allowed origin (Origin header).
