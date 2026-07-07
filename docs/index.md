@@ -69,7 +69,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [安全加固](guides/enterprise/security-hardening.md)   | 7 层安全体系详解                      |
 | [可观测性](guides/enterprise/observability.md)        | 日志、Prometheus、OpenTelemetry、告警 |
 | [多租户隔离](guides/enterprise/multi-tenant.md)       | Bot 级隔离、Bot ID 路由、会话配额        |
-| [合规与审计](guides/enterprise/compliance.md)         | 配置审计、凭据管理、回滚能力          |
+| [合规与审计](guides/enterprise/audit.md)             | 用户行为审计、不可变存储、跨渠道追踪、凭证管理 |
 | [灾备恢复](guides/enterprise/disaster-recovery.md)    | RTO/RPO、自动重启、备份策略           |
 | [配置管理](guides/enterprise/config-management.md)    | 5 层优先级、热重载、多环境策略        |
 | [集成模式](guides/enterprise/integration-patterns.md) | 反向代理、CI/CD、SDK 集成             |
