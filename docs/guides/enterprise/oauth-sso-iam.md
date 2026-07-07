@@ -1,3 +1,9 @@
+---
+title: "企业 OAuth/SSO IAM 对接指南"
+weight: 40
+description: "面向企业管理员和 IAM 管理员的 HotPlex WebChat OIDC 单点登录零门槛对接指南。"
+---
+
 # 企业 OAuth/SSO IAM 对接指南
 
 本文面向企业管理员、IAM 管理员和 HotPlex 运维人员，目标是让没有 HotPlex

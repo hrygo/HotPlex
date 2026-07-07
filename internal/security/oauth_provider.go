@@ -214,7 +214,7 @@ func (p *OAuthProvider) VerifyAndExtractClaimsWithUserInfo(ctx context.Context, 
 	if err != nil {
 		return claims, nil
 	}
-	if userInfo.Subject != "" && userInfo.Subject != claims.Subject {
+	if userInfo.Subject != claims.Subject {
 		return nil, fmt.Errorf("oauth provider %q: userinfo subject mismatch", p.config.Name)
 	}
 

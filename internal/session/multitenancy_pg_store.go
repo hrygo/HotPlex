@@ -292,6 +292,23 @@ func (s *pgStore) GetUserIdentityByProviderSubject(ctx context.Context, provider
 	return id, err
 }
 
+func (s *pgStore) GetOrCreateUserByIdentity(ctx context.Context, provider, subject, username, displayName, email, userID, identityID string, now int64) (*IdentityUserResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := getOrCreateUserByIdentityTx(ctx, tx, provider, subject, username, displayName, email, userID, identityID, now, pgIdentitySQL{})
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *pgStore) CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error {
 	_, err := s.db.ExecContext(ctx, s.queries["identities.create"],
 		id.ID, id.UserID, id.Provider, id.Subject, id.DisplayName, id.Email, now, now)
@@ -301,4 +318,25 @@ func (s *pgStore) CreateUserIdentity(ctx context.Context, id *UserIdentity, now 
 func (s *pgStore) UpdateUserIdentityProfile(ctx context.Context, id, displayName, email string, now int64) error {
 	_, err := s.db.ExecContext(ctx, s.queries["identities.update_profile"], displayName, email, now, id)
 	return err
+}
+
+type pgIdentitySQL struct{}
+
+func (pgIdentitySQL) selectIdentity() string {
+	return "SELECT id, user_id, provider, subject, display_name, email, created_at, updated_at FROM user_identities WHERE provider = $1 AND subject = $2"
+}
+func (pgIdentitySQL) insertUserIgnoreConflict() string {
+	return "INSERT INTO users (id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL) ON CONFLICT(username) DO NOTHING"
+}
+func (pgIdentitySQL) selectUserByID() string {
+	return "SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users WHERE id = $1"
+}
+func (pgIdentitySQL) selectUserByUsername() string {
+	return "SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users WHERE username = $1"
+}
+func (pgIdentitySQL) insertIdentityIgnoreConflict() string {
+	return "INSERT INTO user_identities (id, user_id, provider, subject, display_name, email, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT(provider, subject) DO NOTHING"
+}
+func (pgIdentitySQL) updateIdentityProfile() string {
+	return "UPDATE user_identities SET display_name = $1, email = $2, updated_at = $3 WHERE id = $4"
 }

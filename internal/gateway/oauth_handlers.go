@@ -186,81 +186,21 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
-// getOrCreateUser implements the spec ④ §8.1 account association:
-// - Look up by (provider, subject) → found: update profile, return user_id.
-// - Not found: create users row + user_identities row, return user_id.
+// getOrCreateUser implements the spec ④ §8.1 account association in one store
+// transaction: resolve by (provider, subject), otherwise create/reuse the
+// deterministic SSO user and bind the identity.
 func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string, claims *security.OIDCClaims) (userID string, firstLogin bool, err error) {
 	now := h.now().Unix()
-
-	// Check if identity already exists.
-	identity, err := h.store.GetUserIdentityByProviderSubject(ctx, providerName, claims.Subject)
-	if err == nil {
-		// Identity exists — update display_name/email from IdP (IdP is authoritative).
-		if identity.DisplayName != claims.DisplayName || identity.Email != claims.Email {
-			_ = h.store.UpdateUserIdentityProfile(ctx, identity.ID, claims.DisplayName, claims.Email, now)
-		}
-		// Verify user is not disabled.
-		user, err := h.store.GetUserByID(ctx, identity.UserID)
-		if err != nil {
-			return "", false, err
-		}
-		if user.Status == "disabled" {
-			return "", false, &security.IdentityError{Code: security.ErrCodeUserDisabled}
-		}
-		// Returning user: first login iff they have never logged in before.
-		return identity.UserID, user.LastLoginAt == 0, nil
-	}
-	if !errors.Is(err, session.ErrIdentityNotFound) {
-		return "", false, err
-	}
-
-	// First login: create user + identity.
-	userID = uuid.NewString()
 	username := providerName + ":" + claims.Subject
-	firstLogin = true // new SSO identity; never logged in (recovered orphan may reset below)
 
-	// Idempotent create path (P1): a prior first-login attempt may have left an
-	// orphaned users row (CreateUser succeeded, CreateUserIdentity failed on a
-	// transient DB error). On retry GetUserIdentityByProviderSubject still misses,
-	// so we re-check by username before insert. If found, we reuse that user row
-	// and only (re)create the identity, avoiding a UNIQUE(username) violation that
-	// would permanently lock out the SSO identity.
-	existing, err := h.store.GetUserByUsername(ctx, username)
-	if err != nil && !errors.Is(err, security.ErrUserNotFound) {
-		return "", false, err
-	}
-	if existing != nil {
-		// Recover orphaned user row from a crashed prior first-login.
-		userID = existing.ID
-		firstLogin = existing.LastLoginAt == 0
-	} else {
-		err = h.store.CreateUser(ctx, &security.User{
-			ID:           userID,
-			Username:     username,
-			PasswordHash: "", // SSO-only account; empty hash = no password login
-			Role:         "user",
-			DisplayName:  claims.DisplayName,
-			Status:       "active",
-		}, now)
-		if err != nil {
-			return "", false, err
-		}
-	}
-
-	identityID := uuid.NewString()
-	err = h.store.CreateUserIdentity(ctx, &session.UserIdentity{
-		ID:          identityID,
-		UserID:      userID,
-		Provider:    providerName,
-		Subject:     claims.Subject,
-		DisplayName: claims.DisplayName,
-		Email:       claims.Email,
-	}, now)
+	result, err := h.store.GetOrCreateUserByIdentity(ctx, providerName, claims.Subject, username, claims.DisplayName, claims.Email, uuid.NewString(), uuid.NewString(), now)
 	if err != nil {
 		return "", false, err
 	}
-
-	return userID, firstLogin, nil
+	if result.User.Status == "disabled" {
+		return "", false, &security.IdentityError{Code: security.ErrCodeUserDisabled}
+	}
+	return result.User.ID, result.User.LastLoginAt == 0, nil
 }
 
 func (h *OAuthHandlers) callbackURL(r *http.Request, providerName string) string {

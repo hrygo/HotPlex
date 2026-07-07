@@ -704,6 +704,8 @@ HotPlex 通过 `fsnotify` 监听配置文件变更，支持运行时热更新。
 | `admin.burst` | Admin API 突发量 |
 | `admin.tokens` | Admin Token 列表 |
 | `admin.allowed_cidrs` | IP 白名单 CIDR 列表 |
+| `oauth.external_url` | OAuth/OIDC callback 公网基础地址 |
+| `oauth.providers` | OAuth/OIDC provider 列表、client 配置和 claim 映射 |
 
 ### 4.2 静态字段（需重启）
 
