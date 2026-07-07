@@ -387,7 +387,7 @@ export default function AdminActivityPage() {
                   key={row.id}
                   type="button"
                   onClick={() => setDrawerRow(row)}
-                  className={`w-full text-left grid grid-cols-[140px_1.4fr_100px_1.5fr_100px_2.5fr] items-center gap-3 px-4 py-3.5 border-t border-[var(--border-subtle)] transition-all duration-200 hover:translate-x-0.5 odd:bg-[var(--bg-surface)]/10 even:bg-[var(--bg-surface)]/40 hover:bg-[var(--bg-hover)]/30 ${
+                  className={`w-full text-left grid grid-cols-[140px_1.4fr_100px_1.5fr_100px_2.5fr] items-center gap-3 px-4 py-2 border-t border-[var(--border-subtle)] transition-all duration-200 hover:translate-x-0.5 odd:bg-[var(--bg-surface)]/10 even:bg-[var(--bg-surface)]/40 hover:bg-[var(--bg-hover)]/30 ${
                     selected ? 'bg-[var(--bg-active)] border-l-2 border-l-[var(--accent-gold)]' : ''
                   }`}
                 >
