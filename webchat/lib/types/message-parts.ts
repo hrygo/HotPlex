@@ -23,6 +23,7 @@ export interface ToolCallPart {
   toolCallId: string;
   result?: any;
   isError?: boolean;
+  status?: { type: 'running' } | { type: 'complete' } | { type: 'error' };
 }
 
 export interface ToolSummaryPart {
