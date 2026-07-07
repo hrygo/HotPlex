@@ -104,3 +104,30 @@ func TestOAuthConfig_CallbackURL(t *testing.T) {
 	url2 := cfg.CallbackURL("https://hotplex.example.com/", "kc")
 	require.Equal(t, "https://hotplex.example.com/api/auth/oauth/kc/callback", url2)
 }
+
+func TestOAuthConfig_ExpandEnv(t *testing.T) {
+	// NOT parallel — mutates process environment.
+	t.Setenv("OAUTH_KEYCLOAK_SECRET", "expanded-secret")
+	t.Setenv("OAUTH_KEYCLOAK_ISSUER", "https://sso.example.com/realms/main")
+
+	cfg := Config{
+		OAuth: OAuthConfig{
+			ExternalURL: "${HOTPLEX_PUBLIC_URL:-https://hotplex.example.com}",
+			Providers: []OAuthProviderConfig{{
+				Name:         "keycloak",
+				DisplayName:  "${OAUTH_KEYCLOAK_DISPLAY_NAME:-Enterprise SSO}",
+				Issuer:       "${OAUTH_KEYCLOAK_ISSUER}",
+				ClientID:     "${OAUTH_KEYCLOAK_CLIENT_ID:-hotplex-webchat}",
+				ClientSecret: "${OAUTH_KEYCLOAK_SECRET}",
+			}},
+		},
+	}
+
+	cfg.normalizePaths()
+
+	require.Equal(t, "https://hotplex.example.com", cfg.OAuth.ExternalURL)
+	require.Equal(t, "Enterprise SSO", cfg.OAuth.Providers[0].DisplayName)
+	require.Equal(t, "https://sso.example.com/realms/main", cfg.OAuth.Providers[0].Issuer)
+	require.Equal(t, "hotplex-webchat", cfg.OAuth.Providers[0].ClientID)
+	require.Equal(t, "expanded-secret", cfg.OAuth.Providers[0].ClientSecret)
+}

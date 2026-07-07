@@ -366,6 +366,16 @@ WebChat 多租户登录与工作区管理端点，同样监听在网关主端口
 | GET | `/api/auth/oauth/{provider}/login` | 无 | 发起 OIDC 登录，重定向到 IdP（name 须匹配 `[a-z0-9-]+`） |
 | GET | `/api/auth/oauth/{provider}/callback` | state cookie | OIDC 回调，完成 token exchange + ID Token 验证后签发 Cookie |
 
+`GET /api/auth/oauth/providers` 始终返回稳定 envelope：
+
+```json
+{
+  "providers": [
+    { "name": "keycloak", "display_name": "企业 SSO" }
+  ]
+}
+```
+
 **Workspace 管理（spec ⑥ A1 / ⑦ 跨通道租户）**：
 
 Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API Key**（header `X-API-Key` 或 query `api_key`，面向第三方集成）还是 **Cookie**（WebChat UI）进入，都能拥有并管理自己的 workspace。鉴权链为 API Key 优先、Cookie 兜底（`AuthenticateRequest`），与 session REST、WS upgrade 对齐。`work_dir` workspace 级可改：PATCH 携带 `work_dir` 时校验 owner 沙箱（`403 WORK_DIR_OUTSIDE_SANDBOX`）且 workspace 必须无活跃会话（`409 WORKSPACE_NOT_EMPTY`，因 work_dir 进 session key 派生）。session 级 `switch-workdir` 对 workspace-bound session 返回 `400 WORK_DIR_IMMUTABLE`（worker 须跟随 workspace）。详见 WebChat-Workspace-Create-WorkDir-Prefix-Spec §5.1.4。

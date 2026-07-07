@@ -124,5 +124,8 @@ func (p OAuthProviderConfig) EmailClaimName() string {
 // CallbackURL constructs the OAuth callback URL for this provider.
 func (c *OAuthConfig) CallbackURL(externalURL, providerName string) string {
 	base := strings.TrimRight(externalURL, "/")
+	if base == "" {
+		return ""
+	}
 	return fmt.Sprintf("%s/api/auth/oauth/%s/callback", base, providerName)
 }

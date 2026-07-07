@@ -624,7 +624,7 @@ WebChat 多租户的企业单点登录（SSO）配置（spec ④）。基于标�
 | `display_name` | string | — | 登录页展示的人类可读标签（spec ⑥） |
 | `issuer` | string | — | OIDC issuer URL。discovery 端点自动解析为 `{issuer}/.well-known/openid-configuration` |
 | `client_id` | string | — | 在 IdP 注册的 OAuth2 client id |
-| `client_secret` | string | — | OAuth2 client secret（明文写入，暂不支持 `${ENV_VAR}` 展开） |
+| `client_secret` | string | — | OAuth2 client secret。支持 `${ENV_VAR}` / `${ENV_VAR:-default}` 展开，生产环境建议通过环境变量或 secret manager 注入 |
 | `scopes` | []string | `["openid","profile"]` | 请求的 OIDC scopes |
 | `username_claim` | string | `""` | 可选 claim 名覆盖；为空时用 OIDC 标准 claim |
 | `display_name_claim` | string | `""` | 同上，显示名 claim |
@@ -641,9 +641,13 @@ oauth:
     - name: "keycloak"
       display_name: "企业 SSO"
       issuer: "https://sso.example.com/realms/main"
-      client_id: "hotplex"
-      client_secret: "your-keycloak-client-secret"  # 明文（${ENV} 展开暂未实现）
+      client_id: "${OAUTH_KEYCLOAK_CLIENT_ID}"
+      client_secret: "${OAUTH_KEYCLOAK_CLIENT_SECRET}"
+      scopes: ["openid", "profile", "email"]
 ```
+
+企业 IAM 对接步骤、Keycloak / Okta / Microsoft Entra ID / Google Workspace
+示例与错误排查见 [Enterprise OAuth/SSO IAM Integration](../guides/enterprise/oauth-sso-iam.md)。
 
 ---
 

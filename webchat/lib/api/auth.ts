@@ -30,6 +30,10 @@ export interface OAuthProvider {
   display_name: string;
 }
 
+interface OAuthProvidersResponse {
+  providers?: OAuthProvider[];
+}
+
 export interface LoginResult {
   user_id: string;
   first_login: boolean;
@@ -122,7 +126,11 @@ export async function getOAuthProviders(signal?: AbortSignal): Promise<OAuthProv
     // If not configured or failed, degrade gracefully to empty list
     return [];
   }
-  return res.json();
+  const data: OAuthProvidersResponse | OAuthProvider[] = await res.json();
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return Array.isArray(data?.providers) ? data.providers : [];
 }
 
 // ---------------------------------------------------------------------------

@@ -79,9 +79,11 @@ func (h *OAuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		IssuedAt:     h.now(),
 	})
 
+	callbackURL := h.callbackURL(r, providerName)
 	authURL := provider.BuildAuthURL(security.AuthURLOption{
 		State:         state,
 		CodeChallenge: codeChallenge,
+		RedirectURL:   callbackURL,
 	})
 
 	h.log.Debug("oauth login redirect", "provider", providerName, "state", state[:8]+"...")
@@ -128,7 +130,8 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange authorization code for tokens (with PKCE verifier).
-	exchangeResult, err := provider.ExchangeCode(r.Context(), code, payload.CodeVerifier)
+	callbackURL := h.callbackURL(r, providerName)
+	exchangeResult, err := provider.ExchangeCodeWithRedirectURL(r.Context(), code, payload.CodeVerifier, callbackURL)
 	if err != nil {
 		h.log.Error("oauth callback: token exchange failed", "provider", providerName, "err", err)
 		redirectAuthError(w, r, "CODE_EXCHANGE_FAILED")
@@ -136,7 +139,7 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify ID Token signature and extract claims.
-	claims, err := provider.VerifyAndExtractClaims(r.Context(), exchangeResult.IDToken)
+	claims, err := provider.VerifyAndExtractClaimsWithUserInfo(r.Context(), exchangeResult.IDToken, exchangeResult.AccessToken)
 	if err != nil {
 		h.log.Error("oauth callback: id_token verification failed", "provider", providerName, "err", err)
 		redirectAuthError(w, r, "ID_TOKEN_INVALID")
@@ -258,6 +261,76 @@ func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string
 	}
 
 	return userID, firstLogin, nil
+}
+
+func (h *OAuthHandlers) callbackURL(r *http.Request, providerName string) string {
+	if base := strings.TrimRight(h.oauthManager.ExternalURL(), "/"); base != "" {
+		return base + "/api/auth/oauth/" + providerName + "/callback"
+	}
+	return requestPublicBaseURL(r) + "/api/auth/oauth/" + providerName + "/callback"
+}
+
+func requestPublicBaseURL(r *http.Request) string {
+	scheme, host := forwardedProtoHost(r)
+	if scheme == "" {
+		if r.TLS != nil || strings.EqualFold(firstHeaderValue(r.Header.Get("X-Forwarded-Proto")), "https") {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	if host == "" {
+		host = firstHeaderValue(r.Header.Get("X-Forwarded-Host"))
+	}
+	if host == "" {
+		host = r.Host
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return scheme + "://" + host
+}
+
+func forwardedProtoHost(r *http.Request) (scheme, host string) {
+	for _, part := range strings.Split(r.Header.Get("Forwarded"), ",") {
+		for _, item := range strings.Split(part, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(item), "=")
+			if !ok {
+				continue
+			}
+			v = strings.Trim(v, `"`)
+			switch strings.ToLower(k) {
+			case "proto":
+				if scheme == "" {
+					scheme = v
+				}
+			case "host":
+				if host == "" {
+					host = v
+				}
+			}
+		}
+		if scheme != "" || host != "" {
+			break
+		}
+	}
+	if scheme == "" {
+		scheme = firstHeaderValue(r.Header.Get("X-Forwarded-Proto"))
+	}
+	if host == "" {
+		host = firstHeaderValue(r.Header.Get("X-Forwarded-Host"))
+	}
+	if scheme != "" && !strings.EqualFold(scheme, "http") && !strings.EqualFold(scheme, "https") {
+		scheme = ""
+	}
+	return scheme, host
+}
+
+func firstHeaderValue(v string) string {
+	if i := strings.IndexByte(v, ','); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
 }
 
 // redirectAuthError redirects to webchat home with an auth_error query param.

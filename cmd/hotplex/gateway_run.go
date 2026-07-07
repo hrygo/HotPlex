@@ -667,6 +667,21 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			}
 			log.Info("gateway: oauth SSO providers loaded", "count", count)
 		}
+		cfgStore.RegisterFunc(func(prev, next *config.Config) {
+			if reflect.DeepEqual(prev.OAuth, next.OAuth) {
+				return
+			}
+			if err := next.OAuth.Validate(); err != nil {
+				log.Warn("oauth config reload skipped: validation failed", "error", err)
+				return
+			}
+			count, err := oauthManager.Reload(ctx, next.OAuth)
+			if err != nil {
+				log.Error("oauth config reload completed with provider errors", "count", count, "error", err)
+				return
+			}
+			log.Info("oauth config reloaded", "count", count)
+		})
 	}
 
 	mux := http.NewServeMux()
