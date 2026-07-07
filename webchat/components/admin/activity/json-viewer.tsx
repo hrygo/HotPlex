@@ -71,13 +71,13 @@ export function JsonViewer({ json, emptyLabel }: { json: string; emptyLabel?: st
   }
   if (invalid) {
     return (
-      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-[var(--text-muted)] rounded-[var(--radius-sm)] bg-[var(--bg-hover)]/40 p-3">
+      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--text-muted)] rounded-md bg-[var(--bg-hover)]/40 p-2.5 max-h-48 overflow-y-auto border border-[var(--border-subtle)]/40">
         {trimmed}
       </pre>
     );
   }
   return (
-    <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-[var(--text-secondary)] rounded-[var(--radius-sm)] bg-[var(--bg-hover)]/40 p-3 overflow-x-auto">
+    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-normal text-[var(--text-secondary)] rounded-md bg-[var(--bg-hover)]/40 p-2.5 overflow-x-auto max-h-48 overflow-y-auto border border-[var(--border-subtle)]/40">
       {html ? <code dangerouslySetInnerHTML={{ __html: html }} /> : <code>{pretty}</code>}
     </pre>
   );
