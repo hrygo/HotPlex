@@ -447,6 +447,14 @@
       "failure": "Failure",
       "denied": "Denied"
     },
+    "pagination": {
+      "showing": "Showing",
+      "to": "to",
+      "of": "of",
+      "entries": "entries",
+      "prev": "Prev",
+      "next": "Next"
+    },
     "action_groups": {
       "auth": "Authentication",
       "session": "Session",

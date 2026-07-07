@@ -116,6 +116,14 @@ export default function AdminActivityPage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // Reset page when filter search params change (avoid out-of-bounds offset queries)
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [userId, principalUserId, actionPrefix, outcome, platform, from, to]);
+
   const filters = useMemo<ActivityFilters>(
     () => ({
       userId: userId.trim(),
@@ -125,9 +133,10 @@ export default function AdminActivityPage() {
       platform,
       from,
       to,
-      limit: 100,
+      limit: pageSize,
+      offset: (currentPage - 1) * pageSize,
     }),
-    [actionPrefix, from, outcome, platform, principalUserId, to, userId],
+    [actionPrefix, from, outcome, platform, principalUserId, to, userId, pageSize, currentPage],
   );
 
   const load = useCallback(async () => {
@@ -196,6 +205,63 @@ export default function AdminActivityPage() {
   const failureCount = stats?.by_outcome?.failure ?? 0;
   const deniedCount = stats?.by_outcome?.denied ?? 0;
   const totalCount = stats?.total ?? 0;
+
+  const totalPages = Math.ceil(totalCount / pageSize);
+
+  const renderPageNumbers = () => {
+    if (totalPages <= 1) return null;
+
+    const pages: (number | string)[] = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      pages.push(1);
+      if (currentPage > 3) {
+        pages.push('...');
+      }
+
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) {
+        pages.push('...');
+      }
+      pages.push(totalPages);
+    }
+
+    return pages.map((p, idx) => {
+      if (p === '...') {
+        return (
+          <span key={`dots-${idx}`} className="px-1 text-[var(--text-faint)] select-none">
+            ...
+          </span>
+        );
+      }
+      const active = p === currentPage;
+      return (
+        <button
+          key={`page-${p}`}
+          type="button"
+          onClick={() => setCurrentPage(Number(p))}
+          className={`w-6 h-6 rounded text-[11px] font-mono font-bold flex items-center justify-center transition-all ${
+            active
+              ? 'bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] border border-[var(--accent-gold)]/20 shadow-sm'
+              : 'bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+          }`}
+        >
+          {p}
+        </button>
+      );
+    });
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] p-6">
@@ -457,6 +523,49 @@ export default function AdminActivityPage() {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && !error && rows.length > 0 && totalPages > 1 && (
+          <div className="mt-4 px-4 py-2 flex items-center justify-between border border-[var(--border-subtle)] rounded-[var(--radius-md)] bg-[var(--bg-surface)]/40 backdrop-blur-sm text-[11px] text-[var(--text-secondary)] shadow-sm">
+            <div className="flex items-center gap-1 text-[var(--text-muted)]">
+              <span>{t('activity.pagination.showing')}</span>
+              <span className="font-mono font-bold text-[var(--text-primary)]">
+                {Math.min(totalCount, (currentPage - 1) * pageSize + 1)}
+              </span>
+              <span>{t('activity.pagination.to')}</span>
+              <span className="font-mono font-bold text-[var(--text-primary)]">
+                {Math.min(totalCount, currentPage * pageSize)}
+              </span>
+              <span>{t('activity.pagination.of')}</span>
+              <span className="font-mono font-bold text-[var(--text-primary)]">{totalCount}</span>
+              <span>{t('activity.pagination.entries')}</span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                className="px-2.5 py-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-hover)] transition-all duration-200"
+              >
+                {t('activity.pagination.prev')}
+              </button>
+
+              <div className="flex items-center gap-1">
+                {renderPageNumbers()}
+              </div>
+
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                className="px-2.5 py-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--bg-hover)] transition-all duration-200"
+              >
+                {t('activity.pagination.next')}
+              </button>
+            </div>
           </div>
         )}
 
