@@ -61,6 +61,7 @@ func TestAuthenticateRequest(t *testing.T) {
 		apiKeys    []string
 		headerName string
 		requestKey string
+		authHeader string
 		wantUserID string
 		wantErr    bool
 	}{
@@ -81,6 +82,13 @@ func TestAuthenticateRequest(t *testing.T) {
 			name:       "valid api key",
 			apiKeys:    []string{"secret1", "secret2"},
 			requestKey: "secret1",
+			wantUserID: "api_user",
+			wantErr:    false,
+		},
+		{
+			name:       "valid bearer api key",
+			apiKeys:    []string{"secret1"},
+			authHeader: "Bearer secret1",
 			wantUserID: "api_user",
 			wantErr:    false,
 		},
@@ -125,6 +133,9 @@ func TestAuthenticateRequest(t *testing.T) {
 					header = "X-API-Key"
 				}
 				req.Header.Set(header, tt.requestKey)
+			}
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
 			}
 
 			userID, _, err := auth.AuthenticateRequest(req)
@@ -386,6 +397,15 @@ func TestExtractAPIKey(t *testing.T) {
 		key, ok := auth.ExtractAPIKey(req)
 		require.True(t, ok)
 		require.Equal(t, "query-key", key)
+	})
+
+	t.Run("from bearer authorization", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Authorization", "Bearer bearer-key")
+		key, ok := auth.ExtractAPIKey(req)
+		require.True(t, ok)
+		require.Equal(t, "bearer-key", key)
 	})
 
 	t.Run("header takes precedence", func(t *testing.T) {

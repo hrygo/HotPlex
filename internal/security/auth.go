@@ -350,12 +350,22 @@ func (a *Authenticator) extractAPIKey(r *http.Request) (string, bool) {
 	}
 	key := r.Header.Get(header)
 	if key == "" {
+		key = bearerToken(r.Header.Get("Authorization"))
+	}
+	if key == "" {
 		key = r.URL.Query().Get(apiKeyQueryParam)
 	}
 	if key == "" {
 		return "", false
 	}
 	return key, true
+}
+
+func bearerToken(header string) string {
+	if !strings.HasPrefix(header, "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 }
 
 // AuthenticateKey validates an API key string directly.

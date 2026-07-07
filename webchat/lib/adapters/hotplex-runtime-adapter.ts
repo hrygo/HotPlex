@@ -19,10 +19,13 @@ import type {
     QuestionRequestData,
     ElicitationRequestData,
 } from "@/lib/ai-sdk-transport/client/types";
-import { WorkerStdioCommand } from "@/lib/ai-sdk-transport/client/constants";
+import {
+    WorkerStdioCommand,
+    type WorkerType,
+} from "@/lib/ai-sdk-transport/client/constants";
 import {
     wsUrl,
-    workerType,
+    workerType as defaultWorkerType,
     apiKey,
     isSameOrigin,
     allowedTools,
@@ -82,6 +85,8 @@ type ThreadSuggestion = { title: string; label: string; prompt: string };
 export interface UseHotPlexRuntimeConfig {
     /** Initial session ID to resume (calls resume() instead of connect()). */
     sessionId?: string;
+    /** Worker type of the selected session. Defaults to HOTPLEX_WEBCHAT_WORKER_TYPE. */
+    workerType?: WorkerType;
     /** Active workspace ID (spec ⑥) */
     workspaceId?: string;
     /** Called when the server rejects the workspace during handshake
@@ -231,6 +236,7 @@ function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
  */
 export function useHotPlexRuntime({
     sessionId,
+    workerType: sessionWorkerType,
     workspaceId,
     onWorkspaceError,
     onMetricsChange,
@@ -413,7 +419,7 @@ export function useHotPlexRuntime({
 
         const client = new BrowserHotPlexClient({
             url: wsUrl,
-            workerType,
+            workerType: sessionWorkerType ?? defaultWorkerType,
             apiKey: isSameOrigin() ? undefined : apiKey,
             authToken: isSameOrigin() ? undefined : apiKey,
             workspaceId,
@@ -570,6 +576,7 @@ export function useHotPlexRuntime({
                         toolName: data.name,
                         args: data.input,
                         toolCallId: data.id,
+                        status: { type: "running" as const },
                     };
                     // Replace previous todo tool-call instead of stacking duplicates
                     if (TODO_TOOLS.has(data.name?.toLowerCase())) {
@@ -601,7 +608,16 @@ export function useHotPlexRuntime({
                 if (lastMessage?.role === "assistant") {
                     const parts = lastMessage.parts.map((p) =>
                         p.type === "tool-call" && p.toolCallId === data.id
-                            ? { ...p, result: data.output }
+                            ? {
+                                  ...p,
+                                  result: data.error ?? data.output,
+                                  isError: !!data.error,
+                                  status: {
+                                      type: data.error
+                                          ? ("error" as const)
+                                          : ("complete" as const),
+                                  },
+                              }
                             : p,
                     );
                     return [...prev.slice(0, -1), { ...lastMessage, parts }];
@@ -623,6 +639,18 @@ export function useHotPlexRuntime({
                 const lastMessage = prev[prev.length - 1];
                 if (lastMessage?.role === "assistant") {
                     const parts = [...lastMessage.parts];
+                    for (let i = 0; i < parts.length; i += 1) {
+                        const part = parts[i];
+                        if (
+                            part.type === "tool-call" &&
+                            (!part.status || part.status.type === "running")
+                        ) {
+                            parts[i] = {
+                                ...part,
+                                status: { type: "complete" as const },
+                            };
+                        }
+                    }
                     // Inject turn-summary part from _session data
                     if (data?.stats?._session) {
                         parts.push({
@@ -761,7 +789,21 @@ export function useHotPlexRuntime({
                     ) {
                         return [
                             ...prev.slice(0, -1),
-                            { ...lastMessage, status: "complete" },
+                            {
+                                ...lastMessage,
+                                status: "complete",
+                                parts: lastMessage.parts.map((p) =>
+                                    p.type === "tool-call" &&
+                                    p.status?.type === "running"
+                                        ? {
+                                              ...p,
+                                              status: {
+                                                  type: "complete" as const,
+                                              },
+                                          }
+                                        : p,
+                                ),
+                            },
                         ];
                     }
                     return prev;
@@ -836,7 +878,21 @@ export function useHotPlexRuntime({
                     ) {
                         return [
                             ...prev.slice(0, -1),
-                            { ...lastMessage, status: "complete" },
+                            {
+                                ...lastMessage,
+                                status: "complete",
+                                parts: lastMessage.parts.map((p) =>
+                                    p.type === "tool-call" &&
+                                    p.status?.type === "running"
+                                        ? {
+                                              ...p,
+                                              status: {
+                                                  type: "error" as const,
+                                              },
+                                          }
+                                        : p,
+                                ),
+                            },
                         ];
                     }
                     return prev;
@@ -1164,7 +1220,7 @@ export function useHotPlexRuntime({
             clientRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- connection lifecycle effect; refs/recordTurn intentionally excluded to avoid reconnect churn
-    }, [sessionId, workspaceId]);
+    }, [sessionId, workspaceId, sessionWorkerType]);
 
     // Track pending connection-wait state so useEffect cleanup can tear it down
     const connectionWaitRef = useRef<{

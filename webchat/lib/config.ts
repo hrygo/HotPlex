@@ -12,9 +12,23 @@ import type { WorkerType } from "@/lib/ai-sdk-transport/client/constants";
 
 // -- Gateway -----------------------------------------------------------
 
+function browserReachableUrl(rawUrl: string): string {
+  if (typeof window === "undefined") return rawUrl;
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname === "0.0.0.0" || url.hostname === "::") {
+      url.hostname = window.location.hostname || "localhost";
+      return url.toString();
+    }
+  } catch {
+    // Keep malformed values unchanged so connection errors expose the bad config.
+  }
+  return rawUrl;
+}
+
 function resolveWsUrl(): string {
   const envUrl = process.env.HOTPLEX_WEBCHAT_WS_URL;
-  if (envUrl) return envUrl;
+  if (envUrl) return browserReachableUrl(envUrl);
   // Auto-detect when served from the same Go binary (zero-config).
   if (typeof window !== "undefined") {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -66,4 +80,4 @@ export function httpBase(): string {
 // -- Admin -----------------------------------------------------------------
 
 export const adminUrl: string =
-  process.env.HOTPLEX_WEBCHAT_ADMIN_URL ?? 'http://localhost:9999';
+  browserReachableUrl(process.env.HOTPLEX_WEBCHAT_ADMIN_URL ?? 'http://localhost:9999');

@@ -33,6 +33,7 @@ import { logout, getMe, type User } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/errors";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import type { WorkerType } from "@/lib/ai-sdk-transport/client/constants";
 
 // Clear all hotplex workspace/session selection state from localStorage.
 // Called on logout so a different account logging into the same browser does
@@ -53,12 +54,14 @@ function clearHotplexSessionStorage(): void {
 
 function ChatInterface({
     sessionId,
+    workerType,
     onMetricsChange,
     onSessionStateChange,
     workspaceId,
     onWorkspaceError,
 }: {
     sessionId: string | null;
+    workerType?: WorkerType;
     onMetricsChange?: (metrics: SessionMetrics) => void;
     onSessionStateChange?: (state: string) => void;
     workspaceId?: string;
@@ -67,6 +70,7 @@ function ChatInterface({
     const { skills, mergeSkills } = useSkillsCache(sessionId);
     const adapter = useHotPlexRuntime({
         sessionId: sessionId ?? undefined,
+        workerType,
         onMetricsChange,
         onSkillsChange: mergeSkills,
         onSessionStateChange,
@@ -672,6 +676,11 @@ export default function ChatContainer() {
                             <ChatInterface
                                 key={activeSessionId}
                                 sessionId={activeSessionId}
+                                workerType={
+                                    activeSession?.worker_type as
+                                        | WorkerType
+                                        | undefined
+                                }
                                 onMetricsChange={setSessionMetrics}
                                 onSessionStateChange={(state) =>
                                     activeSessionId &&
