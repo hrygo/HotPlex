@@ -67,6 +67,7 @@
     "dashboard": "Dashboard",
     "bots": "Bots",
     "sessions": "Sessions",
+    "activity": "Activity",
     "workspaces": "Workspaces",
     "cron": "Cron",
     "api_keys": "API Keys",
@@ -419,6 +420,48 @@
       "description": "Optional description"
     }
   },
+  "activity": {
+    "title": "Activity",
+    "loading": "Loading activity...",
+    "resolved_ids": "Resolved IDs",
+    "filters": {
+      "user_id": "User ID",
+      "principal_user_id": "Principal User ID",
+      "action": "Action",
+      "any_outcome": "Any outcome",
+      "from": "From",
+      "to": "To"
+    },
+    "table": {
+      "time": "Time",
+      "user": "User",
+      "platform": "Platform",
+      "action": "Action",
+      "outcome": "Outcome",
+      "detail": "Detail"
+    },
+    "outcomes": {
+      "success": "Success",
+      "failure": "Failure",
+      "denied": "Denied"
+    },
+    "action": {
+      "export_json": "Export JSON",
+      "export_csv": "Export CSV",
+      "exporting": "Exporting..."
+    },
+    "toast": {
+      "exported": "Export started."
+    },
+    "error": {
+      "load_failed": "Failed to load activity",
+      "export_failed": "Export failed"
+    },
+    "empty": {
+      "title": "No activity",
+      "description": "Audit rows appear here after users authenticate, create sessions, send messages, call tools, or perform admin actions."
+    }
+  },
   "cron": {
     "title": "Cron Jobs",
     "loading": "Loading cron jobs...",
@@ -498,4 +541,3 @@
     }
   }
 }
-

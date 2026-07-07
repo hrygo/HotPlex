@@ -18,7 +18,8 @@ import (
 
 // mockAuditStore implements audit.Store for ActivityService tests.
 type mockAuditStore struct {
-	queryFn func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	queryFn       func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	identityLinks []audit.IdentityLink
 }
 
 func (m *mockAuditStore) BeginTx(ctx context.Context) (audit.Tx, error) {
@@ -42,7 +43,24 @@ func (m *mockAuditStore) SaveCheckpoint(ctx context.Context, c audit.Checkpoint)
 func (m *mockAuditStore) LatestCheckpoint(ctx context.Context) (*audit.Checkpoint, error) {
 	return nil, nil
 }
-func (m *mockAuditStore) Close() error { return nil }
+func (m *mockAuditStore) ListIdentityLinks(ctx context.Context, principalUserID string) ([]audit.IdentityLink, error) {
+	if principalUserID == "" {
+		return m.identityLinks, nil
+	}
+	var out []audit.IdentityLink
+	for _, link := range m.identityLinks {
+		if link.PrincipalUserID == principalUserID {
+			out = append(out, link)
+		}
+	}
+	return out, nil
+}
+func (m *mockAuditStore) UpsertIdentityLink(ctx context.Context, link audit.IdentityLink) error {
+	m.identityLinks = append(m.identityLinks, link)
+	return nil
+}
+func (m *mockAuditStore) DeleteIdentityLink(ctx context.Context, id string) error { return nil }
+func (m *mockAuditStore) Close() error                                            { return nil }
 func (m *mockAuditStore) Dialect() dbutil.Dialect {
 	return dbutil.DialectSQLite
 }
@@ -121,6 +139,31 @@ func TestActivityService_QueryByUser(t *testing.T) {
 	require.Equal(t, "auth.login", capturedQuery.Action)
 }
 
+func TestActivityService_QueryPrincipal_ExpandsLinkedSubjects(t *testing.T) {
+	t.Parallel()
+	var gotQuery audit.Query
+	store := &mockAuditStore{
+		identityLinks: []audit.IdentityLink{
+			{PrincipalUserID: "u-local", Subject: "ou_feishu"},
+			{PrincipalUserID: "u-local", Subject: "U_slack"},
+			{PrincipalUserID: "other", Subject: "ignored"},
+		},
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			gotQuery = q
+			return []audit.UserActivity{{ID: 1, UserID: "ou_feishu"}}, nil
+		},
+	}
+	svc := NewActivityService(store, slog.Default())
+
+	rows, resolved, err := svc.QueryPrincipal(context.Background(), "u-local", audit.Query{Action: audit.ActionMessageInbound})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, []string{"u-local", "ou_feishu", "U_slack"}, resolved)
+	require.Empty(t, gotQuery.UserID)
+	require.Equal(t, []string{"u-local", "ou_feishu", "U_slack"}, gotQuery.UserIDs)
+	require.Equal(t, audit.ActionMessageInbound, gotQuery.Action)
+}
+
 func TestActivityService_Query_StoreError(t *testing.T) {
 	t.Parallel()
 	store := &mockAuditStore{
@@ -150,7 +193,7 @@ func TestActivityService_Export_JSON(t *testing.T) {
 	data, contentType, err := svc.Export(context.Background(), audit.Query{}, "json", "admin-user")
 	require.NoError(t, err)
 	require.Equal(t, "application/json; charset=utf-8", contentType)
-	require.Contains(t, string(data), `"UserID": "u1"`)
+	require.Contains(t, string(data), `"user_id": "u1"`)
 }
 
 func TestActivityService_Export_CSV(t *testing.T) {

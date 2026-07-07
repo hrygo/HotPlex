@@ -67,6 +67,7 @@
     "dashboard": "控制台",
     "bots": "机器人管理",
     "sessions": "会话管理",
+    "activity": "行为审计",
     "workspaces": "工作区管理",
     "cron": "定时任务",
     "api_keys": "API 密钥",
@@ -419,6 +420,48 @@
       "description": "可选描述"
     }
   },
+  "activity": {
+    "title": "行为审计",
+    "loading": "正在加载审计活动...",
+    "resolved_ids": "已解析 ID",
+    "filters": {
+      "user_id": "用户 ID",
+      "principal_user_id": "主体用户 ID",
+      "action": "动作",
+      "any_outcome": "任意结果",
+      "from": "开始时间",
+      "to": "结束时间"
+    },
+    "table": {
+      "time": "时间",
+      "user": "用户",
+      "platform": "平台",
+      "action": "动作",
+      "outcome": "结果",
+      "detail": "详情"
+    },
+    "outcomes": {
+      "success": "成功",
+      "failure": "失败",
+      "denied": "拒绝"
+    },
+    "action": {
+      "export_json": "导出 JSON",
+      "export_csv": "导出 CSV",
+      "exporting": "导出中..."
+    },
+    "toast": {
+      "exported": "已开始导出。"
+    },
+    "error": {
+      "load_failed": "加载审计活动失败",
+      "export_failed": "导出失败"
+    },
+    "empty": {
+      "title": "暂无审计活动",
+      "description": "用户认证、创建会话、发送消息、调用工具或执行管理操作后，审计记录会显示在这里。"
+    }
+  },
   "cron": {
     "title": "定时任务",
     "loading": "正在加载定时任务...",
@@ -498,4 +541,3 @@
     }
   }
 }
-

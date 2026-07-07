@@ -73,7 +73,7 @@ Rate Limit 和 IP Whitelist 支持配置热重载，无需重启生效。
 
 ## 操作审计
 
-所有 admin 写操作（`POST`/`PUT`/`PATCH`/`DELETE`）均通过 `slog` 记录结构化审计事件（`admin_audit`，issue #788 A5），用于合规追溯与事故取证。审计复用网关现有 JSON 日志管道，无独立存储——直接流向标准日志输出，可由日志聚合系统按字段过滤检索，无需额外配置。
+所有 admin 写操作（`POST`/`PUT`/`PATCH`/`DELETE`）均进入 `user_activity` 防篡改审计表（issue #833），并在兼容期继续输出结构化 `slog` 事件（`admin_audit`，issue #788 A5）。`user_activity` 是权威审计载体；`admin_audit` 仅保留给既有日志看板迁移使用。
 
 **覆盖范围**：
 
@@ -98,6 +98,7 @@ Rate Limit 和 IP Whitelist 支持配置热重载，无需重启生效。
 | API Key | `apikey.create` / `apikey.update` / `apikey.delete` |
 | Cron | `cron.create` / `cron.update` / `cron.delete` / `cron.trigger` |
 | Session | `session.delete` / `session.terminate` / `session.patch` / `session.put` |
+| Audit | `audit.identity_link.create` / `audit.identity_link.delete` |
 | Config | `config.rollback` / `config.validate` |
 | 多租户成员/邀请 | `member.status.update` / `invitation.create` / `invitation.delete` |
 | 认证拒绝 | `auth.denied` |
@@ -243,6 +244,47 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 | POST | `/admin/restart` | `admin:write` | 触发网关重启 |
 
 **POST /admin/restart** — 异步触发网关重启。Gateway 在 500ms 延迟后执行重启，立即返回 `{ "status": "restarting" }`。使用 `restart helper`（独立 PGID）确保安全隔离。未配置 restart handler 时返回 `503`。
+
+### 用户行为审计
+
+`/admin/activity` 系列端点查询 issue #833 的 `user_activity` 表。所有读端点需要 `admin:read`；导出默认脱敏，`include_pii=true` 需要 `admin:write`。每次导出都会写入 `system.audit_export` meta-audit。
+
+| 方法 | 路径 | Scope | 说明 |
+|------|------|-------|------|
+| GET | `/admin/activity` | `admin:read` | 查询全局活动时间线 |
+| GET | `/admin/activity/export` | `admin:read` | 导出全局活动时间线（`format=json|csv`） |
+| GET | `/admin/users/{id}/activity` | `admin:read` | 查询单个原生 user_id 的活动 |
+| GET | `/admin/users/{id}/activity/export` | `admin:read` | 导出单个原生 user_id 的活动 |
+| GET | `/admin/audit/identity-links` | `admin:read` | 列出跨通道身份链接 |
+| POST | `/admin/audit/identity-links` | `admin:write` | 创建或更新身份链接 |
+| DELETE | `/admin/audit/identity-links/{id}` | `admin:write` | 删除身份链接 |
+
+查询参数：
+
+| 参数 | 说明 |
+|------|------|
+| `user_id` | 按审计行原始 `user_id` 查询 |
+| `principal_user_id` | 按本地 canonical 用户查询；会展开 `audit_identity_links` 中的所有平台原生 subject |
+| `action` | 精确匹配 action，如 `tool.call` / `admin.bot.create` |
+| `outcome` | `success` / `failure` / `denied` |
+| `from` / `to` | RFC3339 时间范围 |
+| `limit` / `offset` | 分页 |
+| `format` | 导出格式：`json` 或 `csv` |
+
+**POST /admin/audit/identity-links** — JSON body：
+
+```json
+{
+  "principal_user_id": "local-user-uuid",
+  "provider": "feishu",
+  "subject": "ou_xxx",
+  "subject_type": "platform",
+  "display_name": "Alice",
+  "email": "alice@example.com"
+}
+```
+
+`principal_user_id`、`provider`、`subject` 必填；`subject_type` 默认为 `platform`，允许 `registered` / `platform` / `system` / `anonymous`。`UNIQUE(provider, subject)` 保证一个平台原生 ID 只归属一个 principal。写操作通过 middleware 审计为 `admin.audit.identity_link.create` / `admin.audit.identity_link.delete`。
 
 ### API Key 用户管理
 

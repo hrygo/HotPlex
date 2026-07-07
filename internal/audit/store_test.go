@@ -40,6 +40,20 @@ CREATE TABLE IF NOT EXISTS audit_chain_checkpoints (
     last_self_hash  TEXT    NOT NULL,
     next_id         INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_identity_links (
+    id                TEXT PRIMARY KEY,
+    principal_user_id TEXT NOT NULL,
+    provider          TEXT NOT NULL,
+    subject           TEXT NOT NULL,
+    subject_type      TEXT NOT NULL DEFAULT 'platform',
+    display_name      TEXT NOT NULL DEFAULT '',
+    email             TEXT NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    UNIQUE(provider, subject)
+);
+CREATE INDEX idx_audit_identity_links_principal ON audit_identity_links(principal_user_id);
+CREATE INDEX idx_audit_identity_links_lookup ON audit_identity_links(provider, subject);
 `
 
 // newTestSQLiteStore creates a fresh SQLite-backed Store in t.TempDir().
@@ -387,4 +401,82 @@ func TestSQLiteStore_AppendAfterCommitErrors(t *testing.T) {
 	}
 	err = tx.Append(ctx, ua)
 	require.Error(t, err)
+}
+
+func TestSQLiteStore_Query_UserIDs(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+	for i, userID := range []string{"u-local", "ou_feishu", "U_slack", "other"} {
+		require.NoError(t, tx.Append(ctx, &UserActivity{
+			Ts:         int64(1000 + i),
+			UserID:     userID,
+			UserIDType: UserIDTypePlatform,
+			Platform:   PlatformFeishu,
+			Action:     ActionMessageInbound,
+			Outcome:    OutcomeSuccess,
+			DetailJSON: `{}`,
+			PrevHash:   "",
+			SelfHash:   "h",
+		}))
+	}
+	require.NoError(t, tx.Commit())
+
+	rows, err := store.Query(ctx, Query{UserIDs: []string{"u-local", "ou_feishu", "U_slack"}})
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	got := map[string]bool{}
+	for _, row := range rows {
+		got[row.UserID] = true
+	}
+	require.True(t, got["u-local"])
+	require.True(t, got["ou_feishu"])
+	require.True(t, got["U_slack"])
+	require.False(t, got["other"])
+}
+
+func TestSQLiteStore_IdentityLinks_CRUD(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	link := IdentityLink{
+		ID:              "link-1",
+		PrincipalUserID: "u-local",
+		Provider:        "feishu",
+		Subject:         "ou_feishu",
+		SubjectType:     UserIDTypePlatform,
+		DisplayName:     "Feishu User",
+		Email:           "user@example.com",
+		CreatedAt:       1000,
+		UpdatedAt:       1000,
+	}
+	require.NoError(t, store.UpsertIdentityLink(ctx, link))
+
+	links, err := store.ListIdentityLinks(ctx, "u-local")
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, "ou_feishu", links[0].Subject)
+
+	link.ID = "ignored-on-conflict"
+	link.PrincipalUserID = "u-other"
+	link.DisplayName = "Moved"
+	link.UpdatedAt = 2000
+	require.NoError(t, store.UpsertIdentityLink(ctx, link))
+
+	links, err = store.ListIdentityLinks(ctx, "u-local")
+	require.NoError(t, err)
+	require.Empty(t, links)
+	links, err = store.ListIdentityLinks(ctx, "u-other")
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, "Moved", links[0].DisplayName)
+
+	require.NoError(t, store.DeleteIdentityLink(ctx, links[0].ID))
+	links, err = store.ListIdentityLinks(ctx, "u-other")
+	require.NoError(t, err)
+	require.Empty(t, links)
 }

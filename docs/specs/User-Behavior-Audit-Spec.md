@@ -2,7 +2,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | Draft — 待 review |
+| 状态 | Implemented — P1/P2 complete; final follow-ups in `User-Behavior-Audit-Final-Followups-Spec.md` |
 | 日期 | 2026-07-03 |
 | 适用版本 | hotplex ≥ v1.31 |
 | 关联调研 | events/sessions/turns 数据模型 · admin_audit · observability · 用户身份模型 |

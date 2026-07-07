@@ -55,22 +55,37 @@ const AnonymousUserID = "anonymous"
 // UserActivity is the row stored in the user_activity table.
 // Mirrors the 16-column schema in spec §5.1.
 type UserActivity struct {
-	ID           int64  // assigned by DB
-	Ts           int64  // Unix ms
-	UserID       string // NOT NULL
-	UserIDType   string // NOT NULL
-	Platform     string // NOT NULL
-	SessionID    string // empty for admin/api
-	Action       string // NOT NULL
-	ResourceType string // optional
-	ResourceID   string // optional
-	Outcome      string // NOT NULL: success/failure/denied
-	DetailJSON   string // NOT NULL: whitelisted fields per §5.9
-	EventRef     string // optional: events.id or turns.id
-	IP           string // optional
-	UserAgent    string // optional
-	PrevHash     string // NOT NULL: "" for genesis
-	SelfHash     string // NOT NULL: sha256(PrevHash || canonical(rest))
+	ID           int64  `json:"id"`            // assigned by DB
+	Ts           int64  `json:"ts"`            // Unix ms
+	UserID       string `json:"user_id"`       // NOT NULL
+	UserIDType   string `json:"user_id_type"`  // NOT NULL
+	Platform     string `json:"platform"`      // NOT NULL
+	SessionID    string `json:"session_id"`    // empty for admin/api
+	Action       string `json:"action"`        // NOT NULL
+	ResourceType string `json:"resource_type"` // optional
+	ResourceID   string `json:"resource_id"`   // optional
+	Outcome      string `json:"outcome"`       // NOT NULL: success/failure/denied
+	DetailJSON   string `json:"detail_json"`   // NOT NULL: whitelisted fields per §5.9
+	EventRef     string `json:"event_ref"`     // optional: events.id or turns.id
+	IP           string `json:"ip"`            // optional
+	UserAgent    string `json:"user_agent"`    // optional
+	PrevHash     string `json:"prev_hash"`     // NOT NULL: "" for genesis
+	SelfHash     string `json:"self_hash"`     // NOT NULL: sha256(PrevHash || canonical(rest))
+}
+
+// IdentityLink maps one immutable audit subject (provider + subject) to a
+// canonical principal user. Audit rows are never rewritten; queries expand a
+// principal into these linked native IDs.
+type IdentityLink struct {
+	ID              string `json:"id"`
+	PrincipalUserID string `json:"principal_user_id"`
+	Provider        string `json:"provider"`
+	Subject         string `json:"subject"`
+	SubjectType     string `json:"subject_type"`
+	DisplayName     string `json:"display_name"`
+	Email           string `json:"email"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
 }
 
 // Checkpoint is the rebase anchor written before pruning.

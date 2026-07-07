@@ -50,6 +50,58 @@ func (s *ActivityService) QueryByUser(ctx context.Context, userID string, q audi
 	return s.Query(ctx, q)
 }
 
+// QueryPrincipal expands a canonical principal user ID into all explicitly
+// linked platform-native audit subjects, then queries the unified timeline.
+func (s *ActivityService) QueryPrincipal(ctx context.Context, principalUserID string, q audit.Query) ([]audit.UserActivity, []string, error) {
+	userIDs, err := s.ResolvePrincipalUserIDs(ctx, principalUserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	q.UserID = ""
+	q.UserIDs = userIDs
+	rows, err := s.Query(ctx, q)
+	return rows, userIDs, err
+}
+
+// ResolvePrincipalUserIDs returns the principal itself plus linked subjects.
+// This is intentionally explicit: no email/name fuzzy matching is performed.
+func (s *ActivityService) ResolvePrincipalUserIDs(ctx context.Context, principalUserID string) ([]string, error) {
+	principalUserID = strings.TrimSpace(principalUserID)
+	if principalUserID == "" {
+		return nil, fmt.Errorf("principal_user_id is required")
+	}
+	links, err := s.store.ListIdentityLinks(ctx, principalUserID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{principalUserID: {}}
+	out := []string{principalUserID}
+	for _, link := range links {
+		subject := strings.TrimSpace(link.Subject)
+		if subject == "" {
+			continue
+		}
+		if _, ok := seen[subject]; ok {
+			continue
+		}
+		seen[subject] = struct{}{}
+		out = append(out, subject)
+	}
+	return out, nil
+}
+
+func (s *ActivityService) ListIdentityLinks(ctx context.Context, principalUserID string) ([]audit.IdentityLink, error) {
+	return s.store.ListIdentityLinks(ctx, principalUserID)
+}
+
+func (s *ActivityService) UpsertIdentityLink(ctx context.Context, link audit.IdentityLink) error {
+	return s.store.UpsertIdentityLink(ctx, link)
+}
+
+func (s *ActivityService) DeleteIdentityLink(ctx context.Context, id string) error {
+	return s.store.DeleteIdentityLink(ctx, id)
+}
+
 // Export returns the audit rows in the requested format ("json" or "csv").
 // An empty format defaults to JSON. Always includes PII — the HTTP layer
 // gates ?include_pii=true on admin:write scope. The caller (HTTP handler)

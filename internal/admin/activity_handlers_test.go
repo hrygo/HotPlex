@@ -20,7 +20,8 @@ import (
 
 // mockAuditStoreForHandler implements audit.Store for handler tests.
 type mockAuditStoreForHandler struct {
-	queryFn func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	queryFn       func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	identityLinks []audit.IdentityLink
 }
 
 func (m *mockAuditStoreForHandler) BeginTx(ctx context.Context) (audit.Tx, error) {
@@ -43,6 +44,25 @@ func (m *mockAuditStoreForHandler) SaveCheckpoint(ctx context.Context, c audit.C
 }
 func (m *mockAuditStoreForHandler) LatestCheckpoint(ctx context.Context) (*audit.Checkpoint, error) {
 	return nil, nil
+}
+func (m *mockAuditStoreForHandler) ListIdentityLinks(ctx context.Context, principalUserID string) ([]audit.IdentityLink, error) {
+	if principalUserID == "" {
+		return m.identityLinks, nil
+	}
+	var out []audit.IdentityLink
+	for _, link := range m.identityLinks {
+		if link.PrincipalUserID == principalUserID {
+			out = append(out, link)
+		}
+	}
+	return out, nil
+}
+func (m *mockAuditStoreForHandler) UpsertIdentityLink(ctx context.Context, link audit.IdentityLink) error {
+	m.identityLinks = append(m.identityLinks, link)
+	return nil
+}
+func (m *mockAuditStoreForHandler) DeleteIdentityLink(ctx context.Context, id string) error {
+	return nil
 }
 func (m *mockAuditStoreForHandler) Close() error { return nil }
 func (m *mockAuditStoreForHandler) Dialect() dbutil.Dialect {
@@ -541,8 +561,15 @@ func (s *capturingAuditStore) SaveCheckpoint(context.Context, audit.Checkpoint) 
 func (s *capturingAuditStore) LatestCheckpoint(context.Context) (*audit.Checkpoint, error) {
 	return nil, nil
 }
-func (s *capturingAuditStore) Close() error            { return nil }
-func (s *capturingAuditStore) Dialect() dbutil.Dialect { return dbutil.DialectSQLite }
+func (s *capturingAuditStore) ListIdentityLinks(context.Context, string) ([]audit.IdentityLink, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) UpsertIdentityLink(context.Context, audit.IdentityLink) error {
+	return nil
+}
+func (s *capturingAuditStore) DeleteIdentityLink(context.Context, string) error { return nil }
+func (s *capturingAuditStore) Close() error                                     { return nil }
+func (s *capturingAuditStore) Dialect() dbutil.Dialect                          { return dbutil.DialectSQLite }
 func (s *capturingAuditStore) snapshot() []audit.UserActivity {
 	s.mu.Lock()
 	defer s.mu.Unlock()

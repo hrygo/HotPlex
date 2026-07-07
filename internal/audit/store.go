@@ -28,6 +28,7 @@ const AuditAdvisoryLockKey int64 = 819207
 // Query holds the by-user activity search parameters.
 type Query struct {
 	UserID     string
+	UserIDs    []string
 	Action     string
 	Outcome    string
 	From       time.Time
@@ -49,6 +50,9 @@ type Store interface {
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 	SaveCheckpoint(ctx context.Context, c Checkpoint) error
 	LatestCheckpoint(ctx context.Context) (*Checkpoint, error)
+	ListIdentityLinks(ctx context.Context, principalUserID string) ([]IdentityLink, error)
+	UpsertIdentityLink(ctx context.Context, link IdentityLink) error
+	DeleteIdentityLink(ctx context.Context, id string) error
 	Close() error
 	Dialect() dbutil.Dialect
 }
@@ -126,7 +130,7 @@ func queryAsc(db *sql.DB, d dbutil.Dialect, ctx context.Context, fromID int64, l
 		if err := rows.Scan(
 			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
 			&sessionID, &ua.Action, &resourceType, &resourceID,
-			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &userAgent,
 			&ua.PrevHash, &ua.SelfHash,
 		); err != nil {
 			return nil, fmt.Errorf("audit: query_asc scan: %w", err)
@@ -182,9 +186,15 @@ func (s *sqliteStore) BeginTx(ctx context.Context) (Tx, error) {
 func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
 	var conditions []string
 	var args []any
-	if q.UserID != "" {
+	userIDs := normalizedUserIDs(q)
+	if len(userIDs) == 1 {
 		conditions = append(conditions, "user_id = ?")
-		args = append(args, q.UserID)
+		args = append(args, userIDs[0])
+	} else if len(userIDs) > 1 {
+		conditions = append(conditions, "user_id IN ("+strings.TrimRight(strings.Repeat("?,", len(userIDs)), ",")+")")
+		for _, id := range userIDs {
+			args = append(args, id)
+		}
 	}
 	if q.Action != "" {
 		conditions = append(conditions, "action = ?")
@@ -240,7 +250,7 @@ func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error
 		if err := rows.Scan(
 			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
 			&sessionID, &ua.Action, &resourceType, &resourceID,
-			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &userAgent,
 			&ua.PrevHash, &ua.SelfHash,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan: %w", err)
@@ -254,6 +264,91 @@ func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error
 		results = append(results, ua)
 	}
 	return results, rows.Err()
+}
+
+func normalizedUserIDs(q Query) []string {
+	seen := make(map[string]struct{}, len(q.UserIDs)+1)
+	var out []string
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	add(q.UserID)
+	for _, v := range q.UserIDs {
+		add(v)
+	}
+	return out
+}
+
+func listIdentityLinks(db *sql.DB, d dbutil.Dialect, ctx context.Context, principalUserID string) ([]IdentityLink, error) {
+	var conditions []string
+	var args []any
+	if strings.TrimSpace(principalUserID) != "" {
+		conditions = append(conditions, "principal_user_id = ?")
+		args = append(args, strings.TrimSpace(principalUserID))
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	rows, err := db.QueryContext(ctx, d.Rebind(
+		"SELECT id, principal_user_id, provider, subject, subject_type, display_name, email, created_at, updated_at "+
+			"FROM audit_identity_links"+where+" ORDER BY provider, subject"), args...)
+	if err != nil {
+		return nil, fmt.Errorf("audit: list identity links: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	links := make([]IdentityLink, 0)
+	for rows.Next() {
+		var l IdentityLink
+		if err := rows.Scan(&l.ID, &l.PrincipalUserID, &l.Provider, &l.Subject, &l.SubjectType, &l.DisplayName, &l.Email, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("audit: scan identity link: %w", err)
+		}
+		links = append(links, l)
+	}
+	return links, rows.Err()
+}
+
+func (s *sqliteStore) ListIdentityLinks(ctx context.Context, principalUserID string) ([]IdentityLink, error) {
+	return listIdentityLinks(s.db, s.d, ctx, principalUserID)
+}
+
+func (s *sqliteStore) UpsertIdentityLink(ctx context.Context, link IdentityLink) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, s.d.Rebind(`
+INSERT INTO audit_identity_links
+    (id, principal_user_id, provider, subject, subject_type, display_name, email, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(provider, subject) DO UPDATE SET
+    principal_user_id = excluded.principal_user_id,
+    subject_type = excluded.subject_type,
+    display_name = excluded.display_name,
+    email = excluded.email,
+    updated_at = excluded.updated_at`),
+			link.ID, link.PrincipalUserID, link.Provider, link.Subject, link.SubjectType,
+			link.DisplayName, link.Email, link.CreatedAt, link.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("audit: upsert identity link: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *sqliteStore) DeleteIdentityLink(ctx context.Context, id string) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, s.d.Rebind("DELETE FROM audit_identity_links WHERE id = ?"), id)
+		if err != nil {
+			return fmt.Errorf("audit: delete identity link: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *sqliteStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]UserActivity, error) {
@@ -479,9 +574,15 @@ func (s *pgStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
 	// Same logic as SQLite — Rebind handles placeholder conversion.
 	var conditions []string
 	var args []any
-	if q.UserID != "" {
+	userIDs := normalizedUserIDs(q)
+	if len(userIDs) == 1 {
 		conditions = append(conditions, "user_id = ?")
-		args = append(args, q.UserID)
+		args = append(args, userIDs[0])
+	} else if len(userIDs) > 1 {
+		conditions = append(conditions, "user_id IN ("+strings.TrimRight(strings.Repeat("?,", len(userIDs)), ",")+")")
+		for _, id := range userIDs {
+			args = append(args, id)
+		}
 	}
 	if q.Action != "" {
 		conditions = append(conditions, "action = ?")
@@ -537,7 +638,7 @@ func (s *pgStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
 		if err := rows.Scan(
 			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
 			&sessionID, &ua.Action, &resourceType, &resourceID,
-			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &userAgent,
 			&ua.PrevHash, &ua.SelfHash,
 		); err != nil {
 			return nil, fmt.Errorf("audit: pg scan: %w", err)
@@ -590,6 +691,37 @@ func (s *pgStore) LatestCheckpoint(ctx context.Context) (*Checkpoint, error) {
 	}
 	c.PrunedAt = time.UnixMilli(prunedAtMs)
 	return &c, nil
+}
+
+func (s *pgStore) ListIdentityLinks(ctx context.Context, principalUserID string) ([]IdentityLink, error) {
+	return listIdentityLinks(s.db, s.d, ctx, principalUserID)
+}
+
+func (s *pgStore) UpsertIdentityLink(ctx context.Context, link IdentityLink) error {
+	_, err := s.db.ExecContext(ctx, s.d.Rebind(`
+INSERT INTO audit_identity_links
+    (id, principal_user_id, provider, subject, subject_type, display_name, email, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(provider, subject) DO UPDATE SET
+    principal_user_id = excluded.principal_user_id,
+    subject_type = excluded.subject_type,
+    display_name = excluded.display_name,
+    email = excluded.email,
+    updated_at = excluded.updated_at`),
+		link.ID, link.PrincipalUserID, link.Provider, link.Subject, link.SubjectType,
+		link.DisplayName, link.Email, link.CreatedAt, link.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("audit: pg upsert identity link: %w", err)
+	}
+	return nil
+}
+
+func (s *pgStore) DeleteIdentityLink(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.d.Rebind("DELETE FROM audit_identity_links WHERE id = ?"), id)
+	if err != nil {
+		return fmt.Errorf("audit: pg delete identity link: %w", err)
+	}
+	return nil
 }
 
 func (s *pgStore) Close() error { return s.db.Close() }

@@ -859,8 +859,13 @@ func (mockAuditStore) SaveCheckpoint(_ context.Context, _ audit.Checkpoint) erro
 func (mockAuditStore) LatestCheckpoint(_ context.Context) (*audit.Checkpoint, error) {
 	return nil, nil
 }
-func (mockAuditStore) Close() error            { return nil }
-func (mockAuditStore) Dialect() dbutil.Dialect { return dbutil.DialectSQLite }
+func (mockAuditStore) ListIdentityLinks(_ context.Context, _ string) ([]audit.IdentityLink, error) {
+	return nil, nil
+}
+func (mockAuditStore) UpsertIdentityLink(_ context.Context, _ audit.IdentityLink) error { return nil }
+func (mockAuditStore) DeleteIdentityLink(_ context.Context, _ string) error             { return nil }
+func (mockAuditStore) Close() error                                                     { return nil }
+func (mockAuditStore) Dialect() dbutil.Dialect                                          { return dbutil.DialectSQLite }
 
 type mockAuditTx struct{}
 
@@ -911,8 +916,15 @@ func (s *capturingAuditStore) SaveCheckpoint(context.Context, audit.Checkpoint) 
 func (s *capturingAuditStore) LatestCheckpoint(context.Context) (*audit.Checkpoint, error) {
 	return nil, nil
 }
-func (s *capturingAuditStore) Close() error            { return nil }
-func (s *capturingAuditStore) Dialect() dbutil.Dialect { return dbutil.DialectSQLite }
+func (s *capturingAuditStore) ListIdentityLinks(context.Context, string) ([]audit.IdentityLink, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) UpsertIdentityLink(context.Context, audit.IdentityLink) error {
+	return nil
+}
+func (s *capturingAuditStore) DeleteIdentityLink(context.Context, string) error { return nil }
+func (s *capturingAuditStore) Close() error                                     { return nil }
+func (s *capturingAuditStore) Dialect() dbutil.Dialect                          { return dbutil.DialectSQLite }
 func (s *capturingAuditStore) snapshot() []audit.UserActivity {
 	s.mu.Lock()
 	defer s.mu.Unlock()

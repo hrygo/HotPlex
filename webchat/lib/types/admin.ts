@@ -70,6 +70,57 @@ export interface AdminSessionInfo {
   turn_count?: number;
 }
 
+// --- Audit Activity ---
+
+export interface AuditActivity {
+  id: number;
+  ts: number;
+  user_id: string;
+  user_id_type: string;
+  platform: string;
+  session_id?: string;
+  action: string;
+  resource_type?: string;
+  resource_id?: string;
+  outcome: string;
+  detail_json: string;
+  event_ref?: string;
+  ip?: string;
+  user_agent?: string;
+  prev_hash: string;
+  self_hash: string;
+}
+
+export interface AuditActivityResponse {
+  rows: AuditActivity[];
+  limit: number;
+  offset: number;
+  user_id?: string;
+  principal_user_id?: string;
+  resolved_user_ids?: string[];
+}
+
+export interface AuditIdentityLink {
+  ID?: string;
+  id?: string;
+  PrincipalUserID?: string;
+  principal_user_id?: string;
+  Provider?: string;
+  provider?: string;
+  Subject?: string;
+  subject?: string;
+  SubjectType?: string;
+  subject_type?: string;
+  DisplayName?: string;
+  display_name?: string;
+  Email?: string;
+  email?: string;
+  CreatedAt?: number;
+  created_at?: number;
+  UpdatedAt?: number;
+  updated_at?: number;
+}
+
 // --- Cron ---
 
 export interface CronSchedule {

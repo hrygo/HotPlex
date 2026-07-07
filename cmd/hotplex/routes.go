@@ -166,6 +166,9 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/users/{id}/activity/export", adminAPI.HandleUserActivityExport)
 	adminMux.HandleFunc("GET /admin/activity", adminAPI.HandleAdminActivity)
 	adminMux.HandleFunc("GET /admin/activity/export", adminAPI.HandleAdminActivityExport)
+	adminMux.HandleFunc("GET /admin/audit/identity-links", adminAPI.HandleAuditIdentityLinks)
+	adminMux.HandleFunc("POST /admin/audit/identity-links", adminAPI.HandleCreateAuditIdentityLink)
+	adminMux.HandleFunc("DELETE /admin/audit/identity-links/{id}", adminAPI.HandleDeleteAuditIdentityLink)
 
 	// Cron API
 	adminMux.HandleFunc("GET /admin/cron/jobs", adminAPI.HandleCronList)
