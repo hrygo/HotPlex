@@ -605,7 +605,7 @@ agent_config.inject_exclude  ──→  messaging.slack.inject_exclude  ──�
 
 ### 3.14 oauth — WebChat 企业 SSO（OIDC）
 
-WebChat 多租户的企业单点登录（SSO）配置（spec ④）。基于标准 OIDC Authorization Code flow + PKCE，一套实现覆盖全部主流 IdP（Keycloak / Okta / Azure AD / Google Workspace，以及国内的派拉 / 玉符 / 阿里云 IDaaS / 腾讯云 IDaaS / 宁盾 / Authing / 竹云 / 华为 OneAccess / TOPIAM）。
+WebChat 多租户的企业单点登录（SSO）配置（spec ④）。基于标准 OIDC Authorization Code flow + PKCE，一套实现覆盖全部主流 IdP（Keycloak / Okta / Microsoft Entra ID / Google Workspace，以及国内的派拉 / 玉符 / 阿里云 IDaaS / 腾讯云 IDaaS / 宁盾 / Authing / 竹云 / 华为 OneAccess / TOPIAM）。
 
 > 该配置块为 **WebChat 专用**，独立于 Slack/Feishu 的 bot 配置（后者属于 Message Channel 轨道）。仅在启用 WebChat 多租户登录时生效。与内建账号登录（spec ①）并存，均为一等公民。
 
