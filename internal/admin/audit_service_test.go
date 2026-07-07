@@ -18,7 +18,9 @@ import (
 
 // mockAuditStore implements audit.Store for ActivityService tests.
 type mockAuditStore struct {
-	queryFn func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	queryFn       func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	statsFn       func(ctx context.Context, q audit.Query) (audit.ActivityStats, error)
+	identityLinks []audit.IdentityLink
 }
 
 func (m *mockAuditStore) BeginTx(ctx context.Context) (audit.Tx, error) {
@@ -29,6 +31,12 @@ func (m *mockAuditStore) Query(ctx context.Context, q audit.Query) ([]audit.User
 		return m.queryFn(ctx, q)
 	}
 	return nil, nil
+}
+func (m *mockAuditStore) Stats(ctx context.Context, q audit.Query) (audit.ActivityStats, error) {
+	if m.statsFn != nil {
+		return m.statsFn(ctx, q)
+	}
+	return audit.ActivityStats{ByOutcome: map[string]int64{}, ByPlatform: map[string]int64{}}, nil
 }
 func (m *mockAuditStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]audit.UserActivity, error) {
 	return nil, nil // service tests don't exercise the verifier path
@@ -42,7 +50,24 @@ func (m *mockAuditStore) SaveCheckpoint(ctx context.Context, c audit.Checkpoint)
 func (m *mockAuditStore) LatestCheckpoint(ctx context.Context) (*audit.Checkpoint, error) {
 	return nil, nil
 }
-func (m *mockAuditStore) Close() error { return nil }
+func (m *mockAuditStore) ListIdentityLinks(ctx context.Context, principalUserID string) ([]audit.IdentityLink, error) {
+	if principalUserID == "" {
+		return m.identityLinks, nil
+	}
+	var out []audit.IdentityLink
+	for _, link := range m.identityLinks {
+		if link.PrincipalUserID == principalUserID {
+			out = append(out, link)
+		}
+	}
+	return out, nil
+}
+func (m *mockAuditStore) UpsertIdentityLink(ctx context.Context, link audit.IdentityLink) error {
+	m.identityLinks = append(m.identityLinks, link)
+	return nil
+}
+func (m *mockAuditStore) DeleteIdentityLink(ctx context.Context, id string) error { return nil }
+func (m *mockAuditStore) Close() error                                            { return nil }
 func (m *mockAuditStore) Dialect() dbutil.Dialect {
 	return dbutil.DialectSQLite
 }
@@ -121,6 +146,31 @@ func TestActivityService_QueryByUser(t *testing.T) {
 	require.Equal(t, "auth.login", capturedQuery.Action)
 }
 
+func TestActivityService_QueryPrincipal_ExpandsLinkedSubjects(t *testing.T) {
+	t.Parallel()
+	var gotQuery audit.Query
+	store := &mockAuditStore{
+		identityLinks: []audit.IdentityLink{
+			{PrincipalUserID: "u-local", Subject: "ou_feishu"},
+			{PrincipalUserID: "u-local", Subject: "U_slack"},
+			{PrincipalUserID: "other", Subject: "ignored"},
+		},
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			gotQuery = q
+			return []audit.UserActivity{{ID: 1, UserID: "ou_feishu"}}, nil
+		},
+	}
+	svc := NewActivityService(store, slog.Default())
+
+	rows, resolved, err := svc.QueryPrincipal(context.Background(), "u-local", audit.Query{Action: audit.ActionMessageInbound})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, []string{"u-local", "ou_feishu", "U_slack"}, resolved)
+	require.Empty(t, gotQuery.UserID)
+	require.Equal(t, []string{"u-local", "ou_feishu", "U_slack"}, gotQuery.UserIDs)
+	require.Equal(t, audit.ActionMessageInbound, gotQuery.Action)
+}
+
 func TestActivityService_Query_StoreError(t *testing.T) {
 	t.Parallel()
 	store := &mockAuditStore{
@@ -150,7 +200,59 @@ func TestActivityService_Export_JSON(t *testing.T) {
 	data, contentType, err := svc.Export(context.Background(), audit.Query{}, "json", "admin-user")
 	require.NoError(t, err)
 	require.Equal(t, "application/json; charset=utf-8", contentType)
-	require.Contains(t, string(data), `"UserID": "u1"`)
+	require.Contains(t, string(data), `"user_id": "u1"`)
+}
+
+func TestActivityService_Export_DefaultMasksPII(t *testing.T) {
+	t.Parallel()
+	store := &mockAuditStore{
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			require.False(t, q.IncludePII)
+			return []audit.UserActivity{
+				{
+					ID:        1,
+					UserID:    "u1",
+					IP:        "192.168.1.100",
+					UserAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				},
+			}, nil
+		},
+	}
+	svc := NewActivityService(store, slog.Default())
+
+	data, _, err := svc.Export(context.Background(), audit.Query{}, "json", "admin-user")
+	require.NoError(t, err)
+	var rows []audit.UserActivity
+	require.NoError(t, json.Unmarshal(data, &rows))
+	require.Len(t, rows, 1)
+	require.Equal(t, "192.168.1.0", rows[0].IP)
+	require.True(t, strings.HasSuffix(rows[0].UserAgent, "..."))
+}
+
+func TestActivityService_Export_IncludePII(t *testing.T) {
+	t.Parallel()
+	store := &mockAuditStore{
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			require.True(t, q.IncludePII)
+			return []audit.UserActivity{
+				{
+					ID:        1,
+					UserID:    "u1",
+					IP:        "192.168.1.100",
+					UserAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				},
+			}, nil
+		},
+	}
+	svc := NewActivityService(store, slog.Default())
+
+	data, _, err := svc.Export(context.Background(), audit.Query{IncludePII: true}, "json", "admin-user")
+	require.NoError(t, err)
+	var rows []audit.UserActivity
+	require.NoError(t, json.Unmarshal(data, &rows))
+	require.Len(t, rows, 1)
+	require.Equal(t, "192.168.1.100", rows[0].IP)
+	require.Contains(t, rows[0].UserAgent, "Chrome/120.0.0.0")
 }
 
 func TestActivityService_Export_CSV(t *testing.T) {

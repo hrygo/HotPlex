@@ -55,6 +55,15 @@ worker:
 log:
   level: "debug"
   format: "text"
+  # File logging is disabled in dev (logs go to stderr for live debugging).
+  # file:
+  #   enabled: false
+  #   path: ""
+  #   max_size: 10
+  #   max_age: 30
+  #   max_backups: 100
+  #   compress: true
+  #   local_time: true
 
 messaging:
   turn_summary_enabled: true

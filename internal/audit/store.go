@@ -27,20 +27,35 @@ const AuditAdvisoryLockKey int64 = 819207
 
 // Query holds the by-user activity search parameters.
 type Query struct {
-	UserID     string
-	Action     string
-	Outcome    string
-	From       time.Time
-	To         time.Time
-	Limit      int
-	Offset     int
-	IncludePII bool
+	UserID       string
+	UserIDs      []string
+	Action       string
+	ActionPrefix string // match action by prefix (e.g. "tool." → all tool.*)
+	Outcome      string
+	Platform     string // exact platform match (webchat/feishu/slack/admin/api/cron)
+	SessionID    string // exact session_id match
+	ResourceType string // exact resource_type match (session/tool/bot/...)
+	From         time.Time
+	To           time.Time
+	Limit        int
+	Offset       int
+	IncludePII   bool
+}
+
+// ActivityStats holds aggregate counts for the activity timeline overview.
+// All counts are scoped by the same Query filters used by Query(); they reflect
+// the full filtered set (not just the current page).
+type ActivityStats struct {
+	Total      int64            `json:"total"`
+	ByOutcome  map[string]int64 `json:"by_outcome"`
+	ByPlatform map[string]int64 `json:"by_platform"`
 }
 
 // Store is the abstract audit storage layer.
 type Store interface {
 	BeginTx(ctx context.Context) (Tx, error)
 	Query(ctx context.Context, q Query) ([]UserActivity, error)
+	Stats(ctx context.Context, q Query) (ActivityStats, error)
 	// QueryAsc returns rows in ascending id order starting at FromID
 	// (inclusive). Used by the verifier to stream the chain without
 	// loading the whole table into memory (spec §5.5 chain verification).
@@ -49,6 +64,9 @@ type Store interface {
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 	SaveCheckpoint(ctx context.Context, c Checkpoint) error
 	LatestCheckpoint(ctx context.Context) (*Checkpoint, error)
+	ListIdentityLinks(ctx context.Context, principalUserID string) ([]IdentityLink, error)
+	UpsertIdentityLink(ctx context.Context, link IdentityLink) error
+	DeleteIdentityLink(ctx context.Context, id string) error
 	Close() error
 	Dialect() dbutil.Dialect
 }
@@ -126,7 +144,7 @@ func queryAsc(db *sql.DB, d dbutil.Dialect, ctx context.Context, fromID int64, l
 		if err := rows.Scan(
 			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
 			&sessionID, &ua.Action, &resourceType, &resourceID,
-			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &userAgent,
 			&ua.PrevHash, &ua.SelfHash,
 		); err != nil {
 			return nil, fmt.Errorf("audit: query_asc scan: %w", err)
@@ -180,33 +198,7 @@ func (s *sqliteStore) BeginTx(ctx context.Context) (Tx, error) {
 }
 
 func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
-	var conditions []string
-	var args []any
-	if q.UserID != "" {
-		conditions = append(conditions, "user_id = ?")
-		args = append(args, q.UserID)
-	}
-	if q.Action != "" {
-		conditions = append(conditions, "action = ?")
-		args = append(args, q.Action)
-	}
-	if q.Outcome != "" {
-		conditions = append(conditions, "outcome = ?")
-		args = append(args, q.Outcome)
-	}
-	if !q.From.IsZero() {
-		conditions = append(conditions, "ts >= ?")
-		args = append(args, q.From.UnixMilli())
-	}
-	if !q.To.IsZero() {
-		conditions = append(conditions, "ts <= ?")
-		args = append(args, q.To.UnixMilli())
-	}
-
-	where := ""
-	if len(conditions) > 0 {
-		where = " WHERE " + strings.Join(conditions, " AND ")
-	}
+	where, args := buildActivityWhere(q)
 
 	limit := q.Limit
 	if limit <= 0 {
@@ -240,7 +232,7 @@ func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error
 		if err := rows.Scan(
 			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
 			&sessionID, &ua.Action, &resourceType, &resourceID,
-			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &userAgent,
 			&ua.PrevHash, &ua.SelfHash,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan: %w", err)
@@ -254,6 +246,156 @@ func (s *sqliteStore) Query(ctx context.Context, q Query) ([]UserActivity, error
 		results = append(results, ua)
 	}
 	return results, rows.Err()
+}
+
+func normalizedUserIDs(q Query) []string {
+	seen := make(map[string]struct{}, len(q.UserIDs)+1)
+	var out []string
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	add(q.UserID)
+	for _, v := range q.UserIDs {
+		add(v)
+	}
+	return out
+}
+
+// buildActivityWhere constructs the WHERE clause and parameter args shared by
+// Query and Stats. Placeholders are dialect-agnostic (?) — callers pass the
+// resulting SQL through Rebind for $N conversion on PostgreSQL. Returns ("", nil)
+// when q has no effective filters (matches all rows).
+//
+// ActionPrefix uses LIKE with ESCAPE so that literal %/_ in the prefix (rare —
+// action tokens use only [a-z.]) are matched verbatim instead of as wildcards.
+func buildActivityWhere(q Query) (string, []any) {
+	var conditions []string
+	var args []any
+	userIDs := normalizedUserIDs(q)
+	if len(userIDs) == 1 {
+		conditions = append(conditions, "user_id = ?")
+		args = append(args, userIDs[0])
+	} else if len(userIDs) > 1 {
+		conditions = append(conditions, "user_id IN ("+strings.TrimRight(strings.Repeat("?,", len(userIDs)), ",")+")")
+		for _, id := range userIDs {
+			args = append(args, id)
+		}
+	}
+	if q.Action != "" {
+		conditions = append(conditions, "action = ?")
+		args = append(args, q.Action)
+	}
+	if q.ActionPrefix != "" {
+		// Escape LIKE metacharacters so the prefix matches literally before
+		// appending the trailing wildcard. Backslash is the ESCAPE char.
+		esc := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(q.ActionPrefix)
+		conditions = append(conditions, "action LIKE ? ESCAPE '\\'")
+		args = append(args, esc+"%")
+	}
+	if q.Outcome != "" {
+		conditions = append(conditions, "outcome = ?")
+		args = append(args, q.Outcome)
+	}
+	if q.Platform != "" {
+		conditions = append(conditions, "platform = ?")
+		args = append(args, q.Platform)
+	}
+	if q.SessionID != "" {
+		conditions = append(conditions, "session_id = ?")
+		args = append(args, q.SessionID)
+	}
+	if q.ResourceType != "" {
+		conditions = append(conditions, "resource_type = ?")
+		args = append(args, q.ResourceType)
+	}
+	if !q.From.IsZero() {
+		conditions = append(conditions, "ts >= ?")
+		args = append(args, q.From.UnixMilli())
+	}
+	if !q.To.IsZero() {
+		conditions = append(conditions, "ts <= ?")
+		args = append(args, q.To.UnixMilli())
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	return where, args
+}
+
+func listIdentityLinks(db *sql.DB, d dbutil.Dialect, ctx context.Context, principalUserID string) ([]IdentityLink, error) {
+	var conditions []string
+	var args []any
+	if strings.TrimSpace(principalUserID) != "" {
+		conditions = append(conditions, "principal_user_id = ?")
+		args = append(args, strings.TrimSpace(principalUserID))
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	rows, err := db.QueryContext(ctx, d.Rebind(
+		"SELECT id, principal_user_id, provider, subject, subject_type, display_name, email, created_at, updated_at "+
+			"FROM audit_identity_links"+where+" ORDER BY provider, subject"), args...)
+	if err != nil {
+		return nil, fmt.Errorf("audit: list identity links: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	links := make([]IdentityLink, 0)
+	for rows.Next() {
+		var l IdentityLink
+		if err := rows.Scan(&l.ID, &l.PrincipalUserID, &l.Provider, &l.Subject, &l.SubjectType, &l.DisplayName, &l.Email, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("audit: scan identity link: %w", err)
+		}
+		links = append(links, l)
+	}
+	return links, rows.Err()
+}
+
+func (s *sqliteStore) ListIdentityLinks(ctx context.Context, principalUserID string) ([]IdentityLink, error) {
+	return listIdentityLinks(s.db, s.d, ctx, principalUserID)
+}
+
+func (s *sqliteStore) UpsertIdentityLink(ctx context.Context, link IdentityLink) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, s.d.Rebind(`
+INSERT INTO audit_identity_links
+    (id, principal_user_id, provider, subject, subject_type, display_name, email, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(provider, subject) DO UPDATE SET
+    id = excluded.id,
+    principal_user_id = excluded.principal_user_id,
+    subject_type = excluded.subject_type,
+    display_name = excluded.display_name,
+    email = excluded.email,
+    created_at = excluded.created_at,
+    updated_at = excluded.updated_at`),
+			link.ID, link.PrincipalUserID, link.Provider, link.Subject, link.SubjectType,
+			link.DisplayName, link.Email, link.CreatedAt, link.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("audit: upsert identity link: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *sqliteStore) DeleteIdentityLink(ctx context.Context, id string) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, s.d.Rebind("DELETE FROM audit_identity_links WHERE id = ?"), id)
+		if err != nil {
+			return fmt.Errorf("audit: delete identity link: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *sqliteStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]UserActivity, error) {
@@ -303,6 +445,77 @@ func (s *sqliteStore) LatestCheckpoint(ctx context.Context) (*Checkpoint, error)
 }
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
+
+func (s *sqliteStore) Stats(ctx context.Context, q Query) (ActivityStats, error) {
+	return activityStats(s.db, s.d, ctx, q)
+}
+
+// activityStats computes the ActivityStats aggregates (total + per-outcome +
+// per-platform) over the row set matched by q. Shared by sqliteStore and
+// pgStore — the WHERE clause and placeholder binding are identical to Query,
+// only the GROUP BY dimension differs. Two SQL round-trips (outcome, platform)
+// keep each query simple and index-friendly; a third COUNT(*) provides total.
+// The filters in q are applied to every sub-query so the stats reflect the
+// exact same scoped set the timeline displays.
+func activityStats(db queryExecContext, d dbutil.Dialect, ctx context.Context, q Query) (ActivityStats, error) {
+	where, args := buildActivityWhere(q)
+	stats := ActivityStats{
+		ByOutcome:  make(map[string]int64),
+		ByPlatform: make(map[string]int64),
+	}
+
+	// Total count (scoped).
+	countSQL := d.Rebind("SELECT COUNT(*) FROM user_activity" + where)
+	var total int64
+	if err := db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return stats, fmt.Errorf("audit: stats total: %w", err)
+	}
+	stats.Total = total
+
+	// Per-outcome breakdown.
+	outcomeSQL := d.Rebind("SELECT outcome, COUNT(*) FROM user_activity" + where + " GROUP BY outcome")
+	orows, err := db.QueryContext(ctx, outcomeSQL, args...)
+	if err != nil {
+		return stats, fmt.Errorf("audit: stats by outcome: %w", err)
+	}
+	for k, v := range scanGroupCounts(orows) {
+		stats.ByOutcome[k] = v
+	}
+
+	// Per-platform breakdown.
+	platformSQL := d.Rebind("SELECT platform, COUNT(*) FROM user_activity" + where + " GROUP BY platform")
+	prows, err := db.QueryContext(ctx, platformSQL, args...)
+	if err != nil {
+		return stats, fmt.Errorf("audit: stats by platform: %w", err)
+	}
+	for k, v := range scanGroupCounts(prows) {
+		stats.ByPlatform[k] = v
+	}
+	return stats, nil
+}
+
+// queryExecContext is the subset of *sql.DB used by activityStats, extracted so
+// the function works against any sqlbinder (currently *sql.DB on both stores).
+type queryExecContext interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// scanGroupCounts drains a two-column (key TEXT, count INTEGER) result set into
+// a map and closes the rows. Returns an empty map for an empty result set.
+func scanGroupCounts(rows *sql.Rows) map[string]int64 {
+	out := make(map[string]int64)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key string
+		var n int64
+		if err := rows.Scan(&key, &n); err != nil {
+			continue
+		}
+		out[key] = n
+	}
+	return out
+}
 
 // sqliteTx implements Tx for SQLite. The store's writeMu is acquired in
 // BeginTx and held until Commit or Rollback releases it (exactly once, via
@@ -477,33 +690,7 @@ func (s *pgStore) BeginTx(ctx context.Context) (Tx, error) {
 
 func (s *pgStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
 	// Same logic as SQLite — Rebind handles placeholder conversion.
-	var conditions []string
-	var args []any
-	if q.UserID != "" {
-		conditions = append(conditions, "user_id = ?")
-		args = append(args, q.UserID)
-	}
-	if q.Action != "" {
-		conditions = append(conditions, "action = ?")
-		args = append(args, q.Action)
-	}
-	if q.Outcome != "" {
-		conditions = append(conditions, "outcome = ?")
-		args = append(args, q.Outcome)
-	}
-	if !q.From.IsZero() {
-		conditions = append(conditions, "ts >= ?")
-		args = append(args, q.From.UnixMilli())
-	}
-	if !q.To.IsZero() {
-		conditions = append(conditions, "ts <= ?")
-		args = append(args, q.To.UnixMilli())
-	}
-
-	where := ""
-	if len(conditions) > 0 {
-		where = " WHERE " + strings.Join(conditions, " AND ")
-	}
+	where, args := buildActivityWhere(q)
 
 	limit := q.Limit
 	if limit <= 0 {
@@ -537,7 +724,7 @@ func (s *pgStore) Query(ctx context.Context, q Query) ([]UserActivity, error) {
 		if err := rows.Scan(
 			&ua.ID, &ua.Ts, &ua.UserID, &ua.UserIDType, &ua.Platform,
 			&sessionID, &ua.Action, &resourceType, &resourceID,
-			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &ua.UserAgent,
+			&ua.Outcome, &ua.DetailJSON, &eventRef, &ip, &userAgent,
 			&ua.PrevHash, &ua.SelfHash,
 		); err != nil {
 			return nil, fmt.Errorf("audit: pg scan: %w", err)
@@ -592,7 +779,44 @@ func (s *pgStore) LatestCheckpoint(ctx context.Context) (*Checkpoint, error) {
 	return &c, nil
 }
 
+func (s *pgStore) ListIdentityLinks(ctx context.Context, principalUserID string) ([]IdentityLink, error) {
+	return listIdentityLinks(s.db, s.d, ctx, principalUserID)
+}
+
+func (s *pgStore) UpsertIdentityLink(ctx context.Context, link IdentityLink) error {
+	_, err := s.db.ExecContext(ctx, s.d.Rebind(`
+INSERT INTO audit_identity_links
+    (id, principal_user_id, provider, subject, subject_type, display_name, email, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(provider, subject) DO UPDATE SET
+    id = excluded.id,
+    principal_user_id = excluded.principal_user_id,
+    subject_type = excluded.subject_type,
+    display_name = excluded.display_name,
+    email = excluded.email,
+    created_at = excluded.created_at,
+    updated_at = excluded.updated_at`),
+		link.ID, link.PrincipalUserID, link.Provider, link.Subject, link.SubjectType,
+		link.DisplayName, link.Email, link.CreatedAt, link.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("audit: pg upsert identity link: %w", err)
+	}
+	return nil
+}
+
+func (s *pgStore) DeleteIdentityLink(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.d.Rebind("DELETE FROM audit_identity_links WHERE id = ?"), id)
+	if err != nil {
+		return fmt.Errorf("audit: pg delete identity link: %w", err)
+	}
+	return nil
+}
+
 func (s *pgStore) Close() error { return s.db.Close() }
+
+func (s *pgStore) Stats(ctx context.Context, q Query) (ActivityStats, error) {
+	return activityStats(s.db, s.d, ctx, q)
+}
 
 // pgTx implements Tx for PostgreSQL with advisory lock serialization.
 type pgTx struct {

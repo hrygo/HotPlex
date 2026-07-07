@@ -98,6 +98,17 @@ func (c *Config) Validate() []string {
 	if c.Log.Format != "" && c.Log.Format != "json" && c.Log.Format != "text" {
 		errs = append(errs, "log.format must be either 'json' or 'text'")
 	}
+	if c.Log.File.Enabled {
+		if c.Log.File.MaxSize < 0 {
+			errs = append(errs, "log.file.max_size must be non-negative")
+		}
+		if c.Log.File.MaxAge < 0 {
+			errs = append(errs, "log.file.max_age must be non-negative")
+		}
+		if c.Log.File.MaxBackups < 0 {
+			errs = append(errs, "log.file.max_backups must be non-negative")
+		}
+	}
 	// Exec mode was removed; force app-server mode.
 	if !c.Worker.CodexCLI.UseAppServer {
 		slog.Warn("config: codex_cli.use_app_server is deprecated, forcing app-server mode")
@@ -143,6 +154,11 @@ const DefaultConfigPath = "~/.hotplex/config.yaml"
 // It does not create the directory — callers should use ensureDir or rely on
 // the components that need the directory to create it on first use.
 func HotplexHome() string {
+	// HOTPLEX_HOME overrides the default location (primarily for tests and
+	// non-standard installs). Falls back to ~/.hotplex otherwise.
+	if h := os.Getenv("HOTPLEX_HOME"); h != "" {
+		return h
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return TempBaseDir()

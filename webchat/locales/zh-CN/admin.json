@@ -67,6 +67,7 @@
     "dashboard": "控制台",
     "bots": "机器人管理",
     "sessions": "会话管理",
+    "activity": "行为审计",
     "workspaces": "工作区管理",
     "cron": "定时任务",
     "api_keys": "API 密钥",
@@ -419,6 +420,97 @@
       "description": "可选描述"
     }
   },
+  "activity": {
+    "title": "行为审计",
+    "loading": "正在加载审计活动...",
+    "resolved_ids": "已解析 ID",
+    "filters": {
+      "user_id": "平台原生账号 ID (如飞书 ou_ / Slack U...)",
+      "principal_user_id": "统一主账号 ID (Principal ID)",
+      "action": "动作",
+      "any_action": "任意动作",
+      "any_outcome": "任意结果",
+      "any_platform": "任意平台",
+      "platform": "平台",
+      "from": "开始时间",
+      "to": "结束时间",
+      "from_short": "从",
+      "to_short": "至"
+    },
+    "hints": {
+      "user_id_tooltip": "通信平台分配给该用户的原始账号 ID，例如飞书里的 ou_xxxx，Slack 里的 Uxxxx 等。",
+      "principal_tooltip": "员工在系统中的统一主账号 ID。输入后系统会自动检索其绑定的所有通信平台账号（飞书/Slack/WebChat）的全部活动审计。"
+    },
+    "stats": {
+      "total": "总计",
+      "success": "成功",
+      "failure": "失败",
+      "denied": "拒绝"
+    },
+    "pagination": {
+      "showing": "显示第",
+      "to": "至",
+      "of": "条，共",
+      "entries": "条记录",
+      "prev": "上一页",
+      "next": "下一页"
+    },
+    "action_groups": {
+      "auth": "认证",
+      "session": "会话",
+      "message": "消息",
+      "tool": "工具调用",
+      "admin": "管理",
+      "system": "系统"
+    },
+    "table": {
+      "time": "时间",
+      "user": "用户",
+      "platform": "平台",
+      "action": "动作",
+      "outcome": "结果",
+      "detail": "详情",
+      "session": "会话"
+    },
+    "outcomes": {
+      "success": "成功",
+      "failure": "失败",
+      "denied": "拒绝"
+    },
+    "drawer": {
+      "title": "行为详情",
+      "identity": "身份",
+      "context": "上下文",
+      "network": "网络",
+      "detail_json": "详情 JSON",
+      "hash_chain": "哈希链",
+      "prev_hash": "前驱",
+      "self_hash": "当前",
+      "hash_hint": "防篡改链",
+      "no_detail": "无详情数据",
+      "copy_json": "复制 JSON",
+      "copied": "已复制",
+      "open_session": "打开会话",
+      "ip_masked": "未开启 include_pii 时已脱敏",
+      "message_content": "消息内容"
+    },
+    "action": {
+      "export_json": "导出 JSON",
+      "export_csv": "导出 CSV",
+      "exporting": "导出中..."
+    },
+    "toast": {
+      "exported": "已开始导出。"
+    },
+    "error": {
+      "load_failed": "加载审计活动失败",
+      "export_failed": "导出失败"
+    },
+    "empty": {
+      "title": "暂无审计活动",
+      "description": "用户认证、创建会话、发送消息、调用工具或执行管理操作后，审计记录会显示在这里。"
+    }
+  },
   "cron": {
     "title": "定时任务",
     "loading": "正在加载定时任务...",
@@ -498,4 +590,3 @@
     }
   }
 }
-

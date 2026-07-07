@@ -47,6 +47,13 @@ var staticFields = map[string]bool{
 	"gateway.read_buffer_size":     true,
 	"gateway.write_buffer_size":    true,
 	"log.format":                   true,
+	"log.file.enabled":             true, // lumberjack writer cannot be safely rebuilt at runtime
+	"log.file.path":                true,
+	"log.file.max_size":            true,
+	"log.file.max_age":             true,
+	"log.file.max_backups":         true,
+	"log.file.compress":            true,
+	"log.file.local_time":          true,
 	"security.tls_enabled":         true,
 	"security.tls_cert_file":       true,
 	"security.tls_key_file":        true,

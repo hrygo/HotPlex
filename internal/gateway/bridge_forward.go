@@ -313,14 +313,15 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 
 // extractTurnContent extracts message/reasoning content for turn tracking.
 func (b *Bridge) extractTurnContent(env *events.Envelope, fc *forwardContext) (deltaContent, reasoningContent string) {
-	if env.Event.Type == events.MessageDelta || env.Event.Type == events.Message {
+	switch env.Event.Type {
+	case events.MessageDelta, events.Message:
 		if content := extractMessageContent(env); content != "" {
 			fc.turnText.WriteString(content)
 			if env.Event.Type == events.MessageDelta {
 				deltaContent = content
 			}
 		}
-	} else if env.Event.Type == events.Reasoning {
+	case events.Reasoning:
 		reasoningContent = extractReasoningContent(env)
 	}
 	return

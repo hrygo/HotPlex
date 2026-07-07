@@ -2,7 +2,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | Draft — 待 review |
+| 状态 | Implemented — P1/P2 complete; final follow-ups in `User-Behavior-Audit-Final-Followups-Spec.md` |
 | 日期 | 2026-07-03 |
 | 适用版本 | hotplex ≥ v1.31 |
 | 关联调研 | events/sessions/turns 数据模型 · admin_audit · observability · 用户身份模型 |
@@ -290,6 +290,7 @@ audit:
 
 - **Phase 1(核心)**:表 + migration + hash chain(checkpoint)+ 独立 collector(spill)+ 写入点(认证/会话/消息)+ retention(3 年)+ by-user 端点 + chain verify + **`AlertSink` 接口 + `NoopSink`(collector 预留 sink fan-out 钩子)**
 - **Phase 2(覆盖 + 告警 + UI)**:工具调用审计 + admin 操作迁移 + **`LogSink` + `RegisterSink` 注册机制 + 告警配置** + admin UI 时间线 + 导出
+- **Final follow-ups(PR #854)**:admin 活动时间线 UI + `audit_identity_links` 显式跨通道身份链接 + `principal_user_id` 查询展开 + identity-link admin API + 文档化 SIEM/冷归档边界
 
 > 具体告警能力(规则引擎 / 多通道投递 / 去噪 / 告警状态机)**另立 spec**,不在本 spec 范围。本 spec 仅提供 `AlertSink` 扩展点与数据契约,保证审计核心稳定、告警子系统可独立演进。
 
@@ -297,7 +298,7 @@ audit:
 
 ## 11. 实施状态(Implementation Status)
 
-> **当前状态**:Phase 1 已完成,PR [#844](https://github.com/hrygo/hotplex/pull/844) 待 review & merge。
+> **当前状态**:Phase 1 PR [#844](https://github.com/hrygo/hotplex/pull/844) 已合并,Phase 2 PR [#845](https://github.com/hrygo/hotplex/pull/845) 已合并,final follow-ups PR [#854](https://github.com/hrygo/hotplex/pull/854) 已创建并通过质量门禁。
 
 ### P1 已完成 ✅
 
@@ -330,21 +331,31 @@ audit:
 | `GatewayDeps.AuditCollector` 集成 + 关闭顺序 (在 EventCollector 之后、SessionMgr 之前) | ✅ | `cmd/hotplex/gateway_run.go` |
 | Hot-reload 接线 (retention 立即生效,`batch_interval` 需重启) | ✅ | spec §8 |
 
-### P2 仍未开始 ⏳
+### P2 已完成 ✅
 
 - `tool.call` 工具调用审计(spec §5.2)
-- 现有 `internal/admin/audit.go` AdminAudit slog 路径迁移为双写 user_activity
-- 外部 `RegisterSink` 机制 (P1 仅内嵌 noop/log)
-- admin UI 用户活动时间线(issue #807 集成)
-- `full_content_retention` 延长 events/turns TTL(目前 30 天)
-- `requested-code-review` skill 用于 P2 PR review
+- 现有 `internal/admin/audit.go` AdminAudit slog 路径迁移为双写 `user_activity`
+- 外部 `RegisterSink` 机制 + `WebhookSink`
+- `full_content_retention` 延长 events/turns TTL(默认 90 天)
+- `system.audit_config_changed` meta-audit
+- sinks↔audit 单向导入清理
 
-### P3 仍未开始 ⏳
+### Final follow-ups 已完成 / PR #854 ✅
 
-- 跨通道归一 v2 (`user_identities` 扩展 vs 新建 `platform_user_map`)
-- SIEM / OTLP 导出
-- 冷归档到外部存储
-- PG 按月分区(性能)
+- `docs/specs/User-Behavior-Audit-Final-Followups-Spec.md` 收尾 spec
+- `audit_identity_links` 显式身份链接表(SQLite + PostgreSQL migration 024)
+- `GET /admin/activity?principal_user_id=...` 展开 principal + linked subjects
+- `GET/POST/DELETE /admin/audit/identity-links`
+- `/admin/activity` webchat admin 时间线(过滤 + JSON/CSV 导出)
+- `docs/reference/admin-api.md` 更新活动查询、身份链接、`admin_audit` 兼容期说明
+
+### P3 / 独立子系统仍未开始 ⏳
+
+- 自动身份匹配 / 跨通道归一 v2(当前只做 admin 显式链接,不做 email/name fuzzy matching)
+- 告警规则引擎 / 多通道投递 / 去噪 / 告警状态机
+- 冷归档到外部存储(当前通过 JSON/CSV 导出作为人工归档面)
+- PG 按月分区(需要 staged table replacement + staging smoke,不做未知生产表的 unsafe in-place conversion)
+- `admin_audit` slog 完全退役(当前是兼容流,权威审计载体为 `user_activity`)
 
 ### 已发现 + 已修复的 Bug (P1 review 期间)
 

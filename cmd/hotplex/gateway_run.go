@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/agentconfig"
@@ -871,10 +873,11 @@ func initLogging(cfg *config.Config) (*slog.Logger, *config.ConfigStore, *slog.L
 	}
 
 	var logHandler slog.Handler
+	writer := buildLogWriter(cfg)
 	if cfg.Log.Format == "text" {
-		logHandler = slog.NewTextHandler(os.Stderr, opts)
+		logHandler = slog.NewTextHandler(writer, opts)
 	} else {
-		logHandler = slog.NewJSONHandler(os.Stderr, opts)
+		logHandler = slog.NewJSONHandler(writer, opts)
 	}
 
 	log := slog.New(logHandler).With(
@@ -884,6 +887,64 @@ func initLogging(cfg *config.Config) (*slog.Logger, *config.ConfigStore, *slog.L
 	slog.SetDefault(log)
 
 	return log, cfgStore, levelVar
+}
+
+// stderrIsTTY reports whether stderr is connected to a terminal.
+// Used to decide whether to tee logs to stderr when file logging is enabled:
+// in daemon mode stderr is redirected to a file (not a TTY), so tee-ing would
+// duplicate every line into the same file lumberjack manages.
+func stderrIsTTY() bool {
+	fi, err := os.Stderr.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// buildLogWriter constructs the slog writer based on LogConfig.
+//
+// When log.file is disabled (default), it returns os.Stderr unchanged,
+// preserving historical behavior in both foreground and daemon modes.
+//
+// When log.file is enabled, logs are written to the file (rotated via
+// lumberjack). In a foreground TTY, logs are also teed to stderr for live
+// debugging; in daemon/service mode (stderr already redirected to a file),
+// stderr is suppressed to avoid duplicating lines into the same file.
+func buildLogWriter(cfg *config.Config) io.Writer {
+	fc := cfg.Log.File
+	if !fc.Enabled {
+		return os.Stderr
+	}
+
+	path := fc.Path
+	if path == "" {
+		// Default path mirrors daemon mode: ~/.hotplex/logs/gateway.log.
+		logDir := filepath.Join(config.HotplexHome(), "logs")
+		path = filepath.Join(logDir, "gateway.log")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		// Cannot create log dir — fall back to stderr rather than aborting startup.
+		fmt.Fprintf(os.Stderr, "log: failed to create log dir %q: %v; falling back to stderr\n", filepath.Dir(path), err)
+		return os.Stderr
+	}
+
+	lw := &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    fc.MaxSize,
+		MaxAge:     fc.MaxAge,
+		MaxBackups: fc.MaxBackups,
+		Compress:   fc.Compress,
+		LocalTime:  fc.LocalTime,
+	}
+
+	// Tee to stderr only in foreground (TTY) mode. In daemon/service mode
+	// stderr is already redirected to a log file; writing there too would
+	// duplicate every line when path coincides with the daemon's redirect target.
+	if stderrIsTTY() {
+		return io.MultiWriter(os.Stderr, lw)
+	}
+	return lw
 }
 
 // cleanupStaleTempFiles removes orphaned temp files from previous gateway runs.

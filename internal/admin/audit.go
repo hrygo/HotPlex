@@ -36,6 +36,8 @@ const (
 	AuditInvitationCreate              = "invitation.create"
 	AuditInvitationDelete              = "invitation.delete"
 	AuditWorkspacePermissionModeUpdate = "workspace.permission_mode.update" // issue #807 admin console
+	AuditIdentityLinkCreate            = "audit.identity_link.create"
+	AuditIdentityLinkDelete            = "audit.identity_link.delete"
 	AuditAuthDenied                    = "auth.denied"
 
 	// AuditResult* — stable "result" field values. Reuse instead of literals so
@@ -95,6 +97,8 @@ func adminActionFor(method, path string) string {
 		return AuditConfigRollback
 	case strings.Contains(path, "/config/validate"):
 		return AuditConfigValidate
+	case strings.Contains(path, "/audit/identity-links"):
+		return auditIdentityLinkAction(method)
 	case strings.Contains(path, "/api-keys"):
 		return apiKeyAction(method)
 	case strings.Contains(path, "/cron/jobs"):
@@ -107,6 +111,16 @@ func adminActionFor(method, path string) string {
 		return workspaceAction(method)
 	}
 	return method + " " + path
+}
+
+func auditIdentityLinkAction(method string) string {
+	switch method {
+	case http.MethodPost:
+		return AuditIdentityLinkCreate
+	case http.MethodDelete:
+		return AuditIdentityLinkDelete
+	}
+	return "audit.identity_link." + strings.ToLower(method)
 }
 
 // workspaceAction covers PATCH /admin/workspaces/{id} (issue #807) — the only

@@ -165,7 +165,11 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/users/{id}/activity", adminAPI.HandleUserActivity)
 	adminMux.HandleFunc("GET /admin/users/{id}/activity/export", adminAPI.HandleUserActivityExport)
 	adminMux.HandleFunc("GET /admin/activity", adminAPI.HandleAdminActivity)
+	adminMux.HandleFunc("GET /admin/activity/stats", adminAPI.HandleActivityStats)
 	adminMux.HandleFunc("GET /admin/activity/export", adminAPI.HandleAdminActivityExport)
+	adminMux.HandleFunc("GET /admin/audit/identity-links", adminAPI.HandleAuditIdentityLinks)
+	adminMux.HandleFunc("POST /admin/audit/identity-links", adminAPI.HandleCreateAuditIdentityLink)
+	adminMux.HandleFunc("DELETE /admin/audit/identity-links/{id}", adminAPI.HandleDeleteAuditIdentityLink)
 
 	// Cron API
 	adminMux.HandleFunc("GET /admin/cron/jobs", adminAPI.HandleCronList)
@@ -280,6 +284,17 @@ func setupRoutes(
 		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(userAdmin.ListUsers)))
 		mux.Handle("PATCH /api/admin/users/{id}", corsMw(userAdmin.AuditWrite(admin.AuditMemberStatusUpdate, csrfMw(http.HandlerFunc(userAdmin.UpdateUserStatus)))))
 
+		// Embedded admin activity console. The standalone admin server exposes
+		// the same handlers at /admin/* for Bearer-token clients; the webchat UI
+		// needs same-origin cookie-authenticated routes that do not collide with
+		// the SPA /admin/activity page.
+		mux.Handle("GET /api/admin/activity", corsMw(adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleAdminActivity))))
+		mux.Handle("GET /api/admin/activity/stats", corsMw(adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleActivityStats))))
+		mux.Handle("GET /api/admin/activity/export", corsMw(adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleAdminActivityExport))))
+		mux.Handle("GET /api/admin/audit/identity-links", corsMw(adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleAuditIdentityLinks))))
+		mux.Handle("POST /api/admin/audit/identity-links", corsMw(adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleCreateAuditIdentityLink))))
+		mux.Handle("DELETE /api/admin/audit/identity-links/{id}", corsMw(adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleDeleteAuditIdentityLink))))
+
 		// OPTIONS preflight handlers for Auth & Admin APIs
 		mux.Handle("OPTIONS /api/auth/login", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/auth/logout", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
@@ -291,6 +306,11 @@ func setupRoutes(
 		mux.Handle("OPTIONS /api/admin/users", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/users/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/users/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/activity", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/activity/stats", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/activity/export", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/audit/identity-links", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/audit/identity-links/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 
 		// Workspaces CRUD endpoints. Write routes (POST/PATCH/DELETE) mount
 		// csrfMw for the same reason /api/admin/* does (issue #794 P2-1):

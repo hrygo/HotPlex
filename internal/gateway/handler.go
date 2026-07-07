@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -60,12 +61,19 @@ func (h *Handler) SetAuditCollector(ac *audit.Collector) {
 }
 
 // emitAudit enqueues a non-blocking message.inbound audit event. No-op when collector is nil.
-func (h *Handler) emitAudit(outcome, userID, platform, sessionID string) {
+func (h *Handler) emitAudit(outcome, userID, platform, sessionID, content string) {
 	if h.auditCollector == nil {
 		return
 	}
 	if userID == "" {
 		userID = audit.AnonymousUserID
+	}
+	detailJSON := "{}"
+	if content != "" {
+		detail := map[string]any{"content": content}
+		if bytes, err := json.Marshal(detail); err == nil {
+			detailJSON = string(bytes)
+		}
 	}
 	_ = h.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:         time.Now().UnixMilli(),
@@ -75,7 +83,7 @@ func (h *Handler) emitAudit(outcome, userID, platform, sessionID string) {
 		SessionID:  sessionID,
 		Action:     audit.ActionMessageInbound,
 		Outcome:    outcome,
-		DetailJSON: `{}`,
+		DetailJSON: detailJSON,
 	})
 }
 
@@ -242,7 +250,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	si, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
-		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID)
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
@@ -256,21 +264,21 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 			resumeCancel()
 			if resumeErr != nil {
 				h.log.Warn("gateway: auto-resume failed", "session_id", env.SessionID, "err", resumeErr)
-				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "session resume failed: %v", resumeErr)
 			}
 			prevPlatform := si.Platform
 			si, err = h.sm.Get(ctx, env.SessionID)
 			if err != nil {
-				h.emitAudit(audit.OutcomeFailure, env.OwnerID, prevPlatform, env.SessionID)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, prevPlatform, env.SessionID, content)
 				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after resume")
 			}
 			if !si.State.IsActive() {
-				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 				return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active after resume: %s", si.State)
 			}
 		} else {
-			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID)
+			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active: %s", si.State)
 		}
 	}
@@ -278,7 +286,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	if si.State == events.StateIdle {
 		if err := h.sm.TransitionWithInput(ctx, env.SessionID, events.StateRunning, content, nil); err != nil {
 			h.log.Warn("gateway: handleInput transition failed", "session_id", env.SessionID, "err", err)
-			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID)
+			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session busy: %v", err)
 		}
 	}
@@ -286,7 +294,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	w := h.sm.GetWorker(env.SessionID)
 	if w == nil {
 		h.log.Warn("gateway: handleInput no worker found", "session_id", env.SessionID)
-		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID)
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "no worker attached to session")
 	}
 
@@ -298,6 +306,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 		h.log.Debug("gateway: delivering input to worker", "session_id", env.SessionID, "content_len", len(content), "preview", preview)
 	}
+
 	if err := w.Input(ctx, content, nil); err != nil {
 		var we *worker.WorkerError
 		if errors.As(err, &we) && we.Kind == worker.ErrKindTimeout {
@@ -313,11 +322,11 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		if code == events.ErrCodeSessionTerminated && h.bridge != nil {
 			h.bridge.cleanupCrashedWorker(env.SessionID, w)
 		}
-		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID)
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 		return h.sendErrorf(ctx, env, code, "worker input failed: %v", err)
 	}
 	h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
-	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID)
+	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, content)
 	if h.bridge != nil {
 		h.bridge.CaptureInbound(ctx, env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
 	}
