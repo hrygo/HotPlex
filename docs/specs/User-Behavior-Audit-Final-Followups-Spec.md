@@ -2,10 +2,11 @@
 
 | Item | Value |
 |---|---|
-| Status | Implementing |
+| Status | Implemented in PR #854 |
 | Date | 2026-07-07 |
 | Issue | #833 |
 | Base | main after PR #845 |
+| PR | https://github.com/hrygo/hotplex/pull/854 |
 
 ## 1. Goal
 
@@ -33,7 +34,7 @@ Already complete on main:
 - `audit.full_content_retention`
 - `system.audit_config_changed` meta-audit
 
-Remaining work is mostly operational access and identity resolution.
+This spec covers the final operational access and identity resolution layer.
 
 ## 3. Design
 
@@ -93,16 +94,45 @@ The old slog path remains as a compatibility stream until dashboards migrate to 
 
 ## 4. Acceptance Criteria
 
-- Admin can open `/admin/activity` and inspect audit rows.
-- Filters include user ID, principal user ID, action, outcome, and time range.
-- Export buttons preserve the active filters.
-- Admin can create, list, and delete identity links via API.
-- `principal_user_id` queries return activity for the principal plus linked subjects.
-- SQLite and PostgreSQL migrations both create/drop `audit_identity_links`.
-- Existing activity endpoints keep backward-compatible responses.
-- Tests cover identity link persistence and principal expansion.
+- ✅ Admin can open `/admin/activity` and inspect audit rows.
+- ✅ Filters include user ID, principal user ID, action, outcome, and time range.
+- ✅ Export buttons preserve the active filters.
+- ✅ Admin can create, list, and delete identity links via API.
+- ✅ `principal_user_id` queries return activity for the principal plus linked subjects.
+- ✅ SQLite and PostgreSQL migrations both create/drop `audit_identity_links`.
+- ✅ Existing activity endpoints keep backward-compatible responses.
+- ✅ Tests cover identity link persistence and principal expansion.
 
-## 5. Non-goals
+## 5. Implementation Status
+
+| Area | Status | Landing |
+|---|---|---|
+| Spec update | ✅ | `docs/specs/User-Behavior-Audit-Final-Followups-Spec.md`, `docs/specs/User-Behavior-Audit-Spec.md` |
+| Identity link schema | ✅ | `internal/session/sql/migrations/024_audit_identity_links.sql`, `internal/session/sql/migrations-postgres/024_audit_identity_links.pg.sql` |
+| Store/API support | ✅ | `internal/audit/store.go`, `internal/admin/activity_handlers.go`, `internal/admin/audit_service.go` |
+| Principal expansion | ✅ | `/admin/activity?principal_user_id=...` |
+| Admin write audit labels | ✅ | `audit.identity_link.create`, `audit.identity_link.delete` in `internal/admin/audit.go` |
+| Admin activity UI | ✅ | `webchat/app/admin/activity/page.tsx` |
+| i18n | ✅ | `webchat/locales/en/admin.json`, `webchat/locales/zh-CN/admin.json` |
+| API docs | ✅ | `docs/reference/admin-api.md` |
+
+## 6. Validation
+
+- ✅ `go test -count=1 ./...`
+- ✅ `go test -race -count=1 ./internal/audit ./internal/admin ./internal/security ./cmd/hotplex`
+- ✅ `cd webchat && npx tsc --noEmit`
+- ✅ `cd webchat && npx eslint app/admin/activity/page.tsx lib/api/admin-activity.ts lib/types/admin.ts components/admin/admin-nav.tsx`
+- ✅ `make check`
+- ✅ pre-push hook: formatting, vet, `go mod verify`, lint, build, tests
+- ✅ GitHub PR checks on #854: Branch Naming, Issue Link, Large File Guard, Build, Test
+
+## 7. Deferred Boundaries
+
+- Full alert rule engine remains out of #833 and should be specified separately.
+- PostgreSQL monthly partition conversion remains deferred because safe conversion of an existing `user_activity` table requires a staged table replacement plan and staging smoke test.
+- Full removal of legacy `admin_audit` slog remains deferred as a versioned observability compatibility change.
+
+## 8. Non-goals
 
 - Automatic identity matching.
 - Full alert rule engine.
