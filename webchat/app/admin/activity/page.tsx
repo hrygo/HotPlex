@@ -766,7 +766,7 @@ function KV({
   hint?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-1.5 border-b border-[var(--border-subtle)]/30 last:border-b-0 transition-all hover:bg-[var(--bg-hover)]/[0.04] -mx-2 px-2 rounded-[var(--radius-sm)]">
+    <div className="flex items-center justify-between gap-4 py-1 border-b border-[var(--border-subtle)]/30 last:border-b-0 transition-all hover:bg-[var(--bg-hover)]/[0.04] -mx-2 px-2 rounded-[var(--radius-sm)]">
       <span className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-wider shrink-0 min-w-[95px] text-left">{label}</span>
       <div className="min-w-0 flex-1 text-right">
         <div className="inline-flex items-center justify-end gap-1.5 flex-nowrap w-full">
