@@ -647,7 +647,7 @@ oauth:
 ```
 
 企业 IAM 对接步骤、Keycloak / Okta / Microsoft Entra ID / Google Workspace
-示例与错误排查见 [Enterprise OAuth/SSO IAM Integration](../guides/enterprise/oauth-sso-iam.md)。
+示例与错误排查见 [企业 OAuth/SSO IAM 对接指南](../guides/enterprise/oauth-sso-iam.md)。
 
 ---
 

@@ -64,7 +64,7 @@ WebChat 多租户化后（spec ⑥）**强制登录**，废除匿名 `webchat_us
 
 **企业 SSO**（spec ④）：标准 OIDC Authorization Code flow + PKCE，一套实现覆盖全部主流 IdP（Keycloak / Okta / Azure AD / Google Workspace 等）。配置 `oauth.providers[]` 后，登录页通过 `GET /api/auth/oauth/providers` 渲染 SSO 按钮，点击跳转 `GET /api/auth/oauth/{provider}/login` → IdP 认证 → `GET /api/auth/oauth/{provider}/callback` 回调。回调链路依次执行 **state 校验（防 CSRF）→ token exchange → id_token 签名验证 → 用户创建/查找 → 签发 HMAC Cookie**。
 
-> 配置详见 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc) 与 [Enterprise OAuth/SSO IAM Integration](oauth-sso-iam.md)。`client_secret` 支持 `${ENV_VAR}` 展开，生产环境建议通过环境变量或 secret manager 注入，并妥善保护运行环境。
+> 配置详见 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc) 与 [企业 OAuth/SSO IAM 对接指南](oauth-sso-iam.md)。`client_secret` 支持 `${ENV_VAR}` 展开，生产环境建议通过环境变量或 secret manager 注入，并妥善保护运行环境。
 
 ### 2.5 HMAC Cookie 认证（登录态）
 

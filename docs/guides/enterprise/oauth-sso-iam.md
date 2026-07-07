@@ -1,85 +1,85 @@
-# Enterprise OAuth/SSO IAM Integration
+# 企业 OAuth/SSO IAM 对接指南
 
-HotPlex WebChat supports enterprise SSO through standard OpenID Connect (OIDC).
-The flow is OAuth2 Authorization Code with PKCE plus OIDC ID Token validation,
-which is the common integration mode for Keycloak, Okta, Microsoft Entra ID,
-Google Workspace, Authing, TOPIAM, and most enterprise IAM/IDaaS systems.
+HotPlex WebChat 通过标准 OpenID Connect（OIDC）接入企业单点登录（SSO）。
+认证流程采用 OAuth2 Authorization Code flow + PKCE，并验证 OIDC ID Token。
+该模式是 Keycloak、Okta、Microsoft Entra ID、Google Workspace、Authing、
+TOPIAM 以及多数企业 IAM/IDaaS 系统的通用对接方式。
 
-HotPlex does not implement SAML or CAS directly. If your IAM is SAML-only or
-CAS-only, use the IAM product's OIDC bridge/client feature, or deploy an identity
-broker such as Keycloak in front of it.
+HotPlex 当前不直接实现 SAML 或 CAS。如果企业 IAM 只提供 SAML/CAS，请使用
+IAM 产品自带的 OIDC 桥接能力，或在前面部署 Keycloak 等身份代理，将 SAML/CAS
+转换为标准 OIDC 后再接入 HotPlex。
 
-## Requirements
+## 对接要求
 
-Your IAM provider must expose:
+企业 IAM provider 必须具备以下能力：
 
-| Capability | Requirement |
-|------------|-------------|
-| Discovery | `/.well-known/openid-configuration` under the configured issuer |
-| Flow | Authorization Code flow |
-| Client type | Confidential web application with `client_id` and `client_secret` |
-| PKCE | S256 code challenge support |
-| Token | `id_token` returned from the token endpoint |
-| Keys | JWKS endpoint for ID Token signature verification |
-| Claims | Stable `sub`; optional `preferred_username`, `name`, `email` in ID Token or UserInfo |
+| 能力 | 要求 |
+|------|------|
+| Discovery | 在配置的 issuer 下提供 `/.well-known/openid-configuration` |
+| 授权流程 | Authorization Code flow |
+| 客户端类型 | Web / confidential client，提供 `client_id` 和 `client_secret` |
+| PKCE | 支持 S256 code challenge |
+| Token | token endpoint 返回 `id_token` |
+| 签名密钥 | 提供 JWKS endpoint，用于验证 ID Token 签名 |
+| Claims | 稳定的 `sub`；可选 `preferred_username`、`name`、`email`，可位于 ID Token 或 UserInfo |
 
-## Register HotPlex in the IAM
+## 在 IAM 中注册 HotPlex
 
-Create a confidential OIDC client in your IAM console.
+在企业 IAM 管理控制台中创建一个 confidential OIDC client。
 
-Use this redirect URI when `oauth.external_url` is set:
+当配置了 `oauth.external_url` 时，回调地址格式为：
 
 ```text
 https://hotplex.example.com/api/auth/oauth/<provider-name>/callback
 ```
 
-If HotPlex is behind a reverse proxy, prefer setting `oauth.external_url` to the
-public HTTPS origin. If it is omitted, HotPlex derives the callback origin from
-`Forwarded`, `X-Forwarded-Proto`, `X-Forwarded-Host`, and `Host` headers.
+如果 HotPlex 部署在反向代理之后，建议显式配置 `oauth.external_url` 为公网
+HTTPS 访问源。若未配置，HotPlex 会根据请求头 `Forwarded`、
+`X-Forwarded-Proto`、`X-Forwarded-Host` 和 `Host` 推导回调地址源。
 
-Recommended client settings:
+推荐 IAM client 配置：
 
-| Setting | Value |
-|---------|-------|
-| Application type | Web / confidential client |
+| 设置项 | 建议值 |
+|--------|--------|
+| 应用类型 | Web / confidential client |
 | Grant type | Authorization Code |
-| PKCE | Required or allowed, method `S256` |
-| Redirect URI | HotPlex callback URI above |
+| PKCE | Required 或 Allowed，method 为 `S256` |
+| Redirect URI | 上文 HotPlex callback URI |
 | Scopes | `openid profile email` |
-| Front-channel logout | Not required |
-| Refresh tokens | Not required |
+| Front-channel logout | 不需要 |
+| Refresh tokens | 不需要 |
 
-## Configure HotPlex
+## 配置 HotPlex
 
-Keep secrets out of YAML by referencing environment variables:
+生产环境建议通过环境变量引用密钥，避免把 `client_secret` 明文写入 YAML：
 
 ```yaml
 oauth:
   external_url: "https://hotplex.example.com"
   providers:
     - name: "keycloak"
-      display_name: "Company SSO"
+      display_name: "企业 SSO"
       issuer: "https://sso.example.com/realms/main"
       client_id: "${OAUTH_KEYCLOAK_CLIENT_ID}"
       client_secret: "${OAUTH_KEYCLOAK_CLIENT_SECRET}"
       scopes: ["openid", "profile", "email"]
 ```
 
-Provider names must match `[a-z0-9-]+`. The name appears in URLs and in the
-`user_identities.provider` database column, so choose a stable identifier such as
-`keycloak`, `okta`, `entra`, or `google`.
+Provider `name` 必须匹配 `[a-z0-9-]+`。该名称会出现在 URL 和
+`user_identities.provider` 数据库列中，因此应选择稳定标识，例如 `keycloak`、
+`okta`、`entra` 或 `google`。
 
-## Claim Mapping
+## Claim 映射
 
-By default HotPlex reads these OIDC claims:
+默认情况下，HotPlex 读取以下 OIDC claims：
 
-| HotPlex field | Default claim |
-|---------------|---------------|
-| Username | `preferred_username`, falling back to `sub` |
-| Display name | `name` |
-| Email | `email` |
+| HotPlex 字段 | 默认 claim |
+|--------------|------------|
+| 用户名 | `preferred_username`，缺失时回退到 `sub` |
+| 显示名 | `name` |
+| 邮箱 | `email` |
 
-If your IAM uses custom claims, configure them explicitly:
+如果企业 IAM 使用自定义 claim 名称，可以显式配置映射：
 
 ```yaml
 oauth:
@@ -93,17 +93,17 @@ oauth:
       email_claim: "mail"
 ```
 
-HotPlex maps accounts by `(provider, sub)`. It does not automatically merge SSO
-users with password users that share the same email address.
+HotPlex 使用 `(provider, sub)` 映射本地用户，不会因为 SSO 用户与密码用户
+邮箱相同而自动合并账号。
 
-HotPlex verifies the ID Token first. If username, display name, or email are not
-present in the ID Token, it calls the OIDC UserInfo endpoint with the access token
-and only accepts the response when its `sub` matches the verified ID Token.
+HotPlex 会先验证 ID Token。如果用户名、显示名或邮箱没有出现在 ID Token
+中，HotPlex 会使用 access token 调用 OIDC UserInfo endpoint 补齐资料，并且
+只有当 UserInfo 返回的 `sub` 与已验证 ID Token 的 `sub` 一致时才接受该结果。
 
-## Multiple Providers
+## 多 Provider
 
-You can configure multiple IAM providers. The WebChat login page renders one SSO
-button per provider:
+可以同时配置多个企业 IAM provider。WebChat 登录页会为每个 provider 渲染一个
+SSO 登录按钮：
 
 ```yaml
 oauth:
@@ -123,40 +123,39 @@ oauth:
       scopes: ["openid", "profile", "email"]
 ```
 
-Configuration reloads at runtime. Adding, removing, or rotating providers does
-not require a gateway restart, but existing browser login attempts may need to be
-started again if their provider was changed during the flow.
+OAuth 配置支持运行时热重载。新增、移除或轮换 provider 不需要重启 Gateway。
+如果用户正在进行 SSO 登录，而该 provider 在过程中被修改，建议重新发起登录。
 
-## Verification
+## 验证方式
 
-After changing the configuration, open:
+修改配置后，打开：
 
 ```text
 https://hotplex.example.com/api/auth/oauth/providers
 ```
 
-Expected response:
+期望响应：
 
 ```json
 {
   "providers": [
-    { "name": "keycloak", "display_name": "Company SSO" }
+    { "name": "keycloak", "display_name": "企业 SSO" }
   ]
 }
 ```
 
-Then open `/login` and confirm the SSO button appears. Clicking it should
-redirect to the IAM authorization endpoint with a `redirect_uri` matching the
-registered callback URI.
+然后打开 `/login`，确认页面出现对应 SSO 按钮。点击按钮后，应跳转到企业 IAM
+authorization endpoint，并且请求中的 `redirect_uri` 与 IAM 中注册的 callback
+URI 完全一致。
 
-## Troubleshooting
+## 故障排查
 
-| Symptom | Check |
-|---------|-------|
-| No SSO button | `GET /api/auth/oauth/providers` returns a provider; WebChat can reach Gateway with CORS enabled |
-| IAM rejects redirect URI | `oauth.external_url` matches the public HTTPS origin and provider name |
-| `STATE_EXPIRED` | Complete the IAM login within 5 minutes and ensure browser cookies are enabled |
-| `CSRF_DETECTED` | Browser must preserve the `oauth_state` cookie during the IAM round trip |
-| `CODE_EXCHANGE_FAILED` | Client secret, redirect URI, PKCE policy, or grant type mismatch |
-| `ID_TOKEN_INVALID` | Issuer, audience/client ID, JWKS, or clock skew mismatch |
-| User has wrong display name/email | Configure `display_name_claim` / `email_claim` for your IAM |
+| 现象 | 检查项 |
+|------|--------|
+| 登录页没有 SSO 按钮 | `GET /api/auth/oauth/providers` 是否返回 provider；WebChat 是否能通过 CORS 访问 Gateway |
+| IAM 拒绝 redirect URI | `oauth.external_url` 是否匹配公网 HTTPS 访问源；provider name 是否与注册回调一致 |
+| `STATE_EXPIRED` | 是否在 5 分钟内完成 IAM 登录；浏览器是否启用 Cookie |
+| `CSRF_DETECTED` | IAM 跳转回 HotPlex 时浏览器是否保留 `oauth_state` cookie |
+| `CODE_EXCHANGE_FAILED` | client secret、redirect URI、PKCE 策略或 grant type 是否与 IAM 配置一致 |
+| `ID_TOKEN_INVALID` | issuer、audience/client ID、JWKS 或服务器时间是否正确 |
+| 显示名或邮箱不正确 | 根据企业 IAM 的实际 claim 名配置 `display_name_claim` / `email_claim` |
