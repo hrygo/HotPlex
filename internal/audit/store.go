@@ -55,11 +55,32 @@ type Store interface {
 
 // Tx is a single audit-write transaction. All hash-chain rows in one batch
 // must use the same Tx; the previous row's self_hash feeds the next row's prev_hash.
+//
+// GC also runs its whole prune inside one Tx (LastRowBefore → DeleteByIDLEQ →
+// SaveCheckpoint → Commit). Doing the prune under the Tx guarantees the same
+// single-writer serialization that protects the append path: on SQLite the
+// process-wide writeMu is held for the entire Tx; on PostgreSQL the
+// pg_advisory_xact_lock acquired in BeginTx is held until Commit. This closes
+// the C1/C2 race where GC previously ran each step as a separate store call
+// and could interleave with a concurrent flushBatch, breaking the hash chain.
 type Tx interface {
 	Append(ctx context.Context, ua *UserActivity) error
 	AppendBatch(ctx context.Context, uas []*UserActivity) error
 	SaveCheckpoint(ctx context.Context, c Checkpoint) error
 	TailHash(ctx context.Context) (string, error)
+	// LastRowBefore returns the highest-id row with ts < cutoff, as
+	// (id, self_hash). Returns (0, "", nil) when no row matches — GC treats
+	// that as "nothing to prune". Keyed off id (the true monotonic order)
+	// rather than ts to avoid equal-ms collisions (review C1).
+	LastRowBefore(ctx context.Context, cutoff time.Time) (int64, string, error)
+	// DeleteByIDLEQ deletes every row with id <= maxID and returns the count.
+	// Used by GC; the id boundary is derived from LastRowBefore's id so the
+	// deleted set is exactly the set the checkpoint anchored.
+	DeleteByIDLEQ(ctx context.Context, maxID int64) (int64, error)
+	// RowCount returns the total row count. GC uses it after the prune to
+	// detect the full-prune / empty-table case and rewrite the checkpoint
+	// with LastSelfHash="" so the next append is treated as genesis.
+	RowCount(ctx context.Context) (int64, error)
 	Commit() error
 	Rollback() error
 }
@@ -364,6 +385,49 @@ func (t *sqliteTx) TailHash(ctx context.Context) (string, error) {
 	return h.String, nil
 }
 
+func (t *sqliteTx) LastRowBefore(ctx context.Context, cutoff time.Time) (int64, string, error) {
+	if t.done {
+		return 0, "", ErrStoreClosed
+	}
+	var id int64
+	var h sql.NullString
+	err := t.tx.QueryRowContext(ctx,
+		"SELECT id, self_hash FROM user_activity WHERE ts < ? ORDER BY id DESC LIMIT 1",
+		cutoff.UnixMilli(),
+	).Scan(&id, &h)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", nil
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("audit: last row before: %w", err)
+	}
+	return id, h.String, nil
+}
+
+func (t *sqliteTx) DeleteByIDLEQ(ctx context.Context, maxID int64) (int64, error) {
+	if t.done {
+		return 0, ErrStoreClosed
+	}
+	res, err := t.tx.ExecContext(ctx, "DELETE FROM user_activity WHERE id <= ?", maxID)
+	if err != nil {
+		return 0, fmt.Errorf("audit: delete by id: %w", err)
+	}
+	d, _ := res.RowsAffected()
+	return d, nil
+}
+
+func (t *sqliteTx) RowCount(ctx context.Context) (int64, error) {
+	if t.done {
+		return 0, ErrStoreClosed
+	}
+	var n int64
+	err := t.tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_activity").Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("audit: row count: %w", err)
+	}
+	return n, nil
+}
+
 func (t *sqliteTx) Commit() error {
 	if t.done {
 		return nil
@@ -599,6 +663,49 @@ func (t *pgTx) SaveCheckpoint(ctx context.Context, c Checkpoint) error {
 		return fmt.Errorf("audit: pg tx save checkpoint: %w", err)
 	}
 	return nil
+}
+
+func (t *pgTx) LastRowBefore(ctx context.Context, cutoff time.Time) (int64, string, error) {
+	if t.done {
+		return 0, "", ErrStoreClosed
+	}
+	var id int64
+	var h sql.NullString
+	err := t.tx.QueryRowContext(ctx,
+		"SELECT id, self_hash FROM user_activity WHERE ts < $1 ORDER BY id DESC LIMIT 1",
+		cutoff.UnixMilli(),
+	).Scan(&id, &h)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", nil
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("audit: pg last row before: %w", err)
+	}
+	return id, h.String, nil
+}
+
+func (t *pgTx) DeleteByIDLEQ(ctx context.Context, maxID int64) (int64, error) {
+	if t.done {
+		return 0, ErrStoreClosed
+	}
+	res, err := t.tx.ExecContext(ctx, "DELETE FROM user_activity WHERE id <= $1", maxID)
+	if err != nil {
+		return 0, fmt.Errorf("audit: pg delete by id: %w", err)
+	}
+	d, _ := res.RowsAffected()
+	return d, nil
+}
+
+func (t *pgTx) RowCount(ctx context.Context) (int64, error) {
+	if t.done {
+		return 0, ErrStoreClosed
+	}
+	var n int64
+	err := t.tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_activity").Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("audit: pg row count: %w", err)
+	}
+	return n, nil
 }
 
 func (t *pgTx) Commit() error {

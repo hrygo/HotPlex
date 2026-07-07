@@ -114,6 +114,18 @@ func TestDiffConfigs_Precision(t *testing.T) {
 	require.True(t, foundAddr, "should have found gateway.addr change")
 }
 
+func TestDiffConfigs_FullContentRetentionRequiresRestart(t *testing.T) {
+	t.Parallel()
+	prev := Default()
+	next := Default()
+	next.Audit.FullContentRetention += 24 * time.Hour
+
+	changes := diffConfigs(prev, next)
+	require.Len(t, changes, 1)
+	require.Equal(t, "audit.full_content_retention", changes[0].Field)
+	require.False(t, changes[0].Hot)
+}
+
 func TestWatcher_Rollback_Triggers_Store(t *testing.T) {
 	t.Parallel()
 

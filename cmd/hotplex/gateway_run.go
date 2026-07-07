@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -80,6 +81,89 @@ func (a *sinkAdapter) OnAuditEvent(ctx context.Context, e audit.AuditEvent) erro
 		IP:           e.IP,
 		UserAgent:    e.UserAgent,
 	})
+}
+
+func (a *sinkAdapter) Close(ctx context.Context) error {
+	if closer, ok := a.sink.(sinks.Closer); ok {
+		return closer.Close(ctx)
+	}
+	return nil
+}
+
+// emitAuditConfigChange returns a ConfigStore observer callback that emits a
+// system.audit_config_changed meta-audit row whenever any audit config field
+// changes at runtime (spec §5.2). The callback is non-blocking and silently
+// ignores enqueue errors to keep the config-reload path fast. Fields requiring
+// restart are still recorded so the audit trail is durable.
+func emitAuditConfigChange(c *audit.Collector) func(prev, next *config.Config) {
+	return func(prev, next *config.Config) {
+		changes := auditConfigDiff(prev.Audit, next.Audit)
+		if len(changes) == 0 {
+			return
+		}
+		detail, _ := json.Marshal(map[string]any{
+			"changes": changes,
+		})
+		ua := &audit.UserActivity{
+			Ts:         time.Now().UnixMilli(),
+			UserID:     "system",
+			UserIDType: audit.UserIDTypeSystem,
+			Platform:   audit.PlatformAdmin,
+			Action:     audit.ActionSystemAuditConfigChanged,
+			Outcome:    audit.OutcomeSuccess,
+			DetailJSON: string(detail),
+		}
+		_ = c.Enqueue(context.Background(), ua)
+	}
+}
+
+// auditConfigDiff returns a list of field-level changes between two AuditConfig
+// values. Each entry is {field, old, new}. Only top-level + collector + sinks
+// fields are tracked — these are the fields a security reviewer needs to see.
+func auditConfigDiff(prev, next config.AuditConfig) []map[string]string {
+	var changes []map[string]string
+	add := func(field, oldV, newV string) {
+		if oldV != newV {
+			changes = append(changes, map[string]string{
+				"field": field, "old": oldV, "new": newV,
+			})
+		}
+	}
+	add("audit.enabled", strconv.FormatBool(prev.Enabled), strconv.FormatBool(next.Enabled))
+	add("audit.retention", prev.Retention.String(), next.Retention.String())
+	add("audit.full_content_retention", prev.FullContentRetention.String(), next.FullContentRetention.String())
+	add("audit.collector.channel_cap", strconv.Itoa(prev.Collector.ChannelCap), strconv.Itoa(next.Collector.ChannelCap))
+	add("audit.collector.batch_interval", prev.Collector.BatchInterval.String(), next.Collector.BatchInterval.String())
+	add("audit.collector.batch_size", strconv.Itoa(prev.Collector.BatchSize), strconv.Itoa(next.Collector.BatchSize))
+	add("audit.collector.spill_dir", prev.Collector.SpillDir, next.Collector.SpillDir)
+	// Compare raw values so secret-only changes remain observable, but serialize
+	// only sanitized copies into the tamper-evident audit trail.
+	prevSinksRaw, _ := json.Marshal(prev.Sinks)
+	nextSinksRaw, _ := json.Marshal(next.Sinks)
+	if string(prevSinksRaw) != string(nextSinksRaw) {
+		changes = append(changes, map[string]string{
+			"field": "audit.sinks",
+			"old":   sanitizedJSONString(prev.Sinks),
+			"new":   sanitizedJSONString(next.Sinks),
+		})
+	}
+	return changes
+}
+
+func sanitizedJSONString(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "null"
+	}
+	sanitized, err := json.Marshal(audit.SanitizeValue(decoded))
+	if err != nil {
+		return "null"
+	}
+	return string(sanitized)
 }
 
 // GatewayDeps holds all dependencies constructed during gateway initialization.
@@ -214,7 +298,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			SinkTimeout:       5 * time.Second,
 			SpillBlockTimeout: 5 * time.Second,
 		})
-		auditCollector.Start()
+		auditCollector.Start(ctx)
 
 		auditGC = audit.NewGC(auditStore, audit.GCConfig{
 			Retention: cfg.Audit.Retention,
@@ -303,6 +387,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			sm.ResetGCInterval(next.Session.GCScanInterval)
 		}
 	})
+	// Audit config-change meta-audit (spec §5.2): changes to audit config are
+	// themselves audited. Non-blocking; no-op when audit is disabled. Each reload
+	// emits a single system.audit_config_changed row with the full field-level
+	// diff in detail_json. Fields requiring restart (enabled / spill_dir /
+	// channel_cap) are also recorded here so there is a durable trail even though
+	// they are not actually applied until restart.
+	if auditCollector != nil {
+		cfgStore.RegisterFunc(emitAuditConfigChange(auditCollector))
+	}
 
 	sm.StateNotifier = func(ctx context.Context, sessionID string, state events.SessionState, message string) {
 		env := events.NewEnvelope(aep.NewID(), sessionID, hub.NextSeq(sessionID), events.State, events.StateData{
@@ -393,6 +486,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	})
 	handler.SetAuditCollector(auditCollector)
 	hub.SetAuditCollector(auditCollector)
+	bridge.SetAuditCollector(auditCollector) // tool.call audit (issue #833 P2)
 
 	if cfg.Worker.AutoRetry.Enabled {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
@@ -607,7 +701,17 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Warn("Brain initialization failed (fail-open)", "error", err)
 	}
 
-	go runEventsGC(ctx, stores, log, cfg.Events.Retention)
+	// Effective events/turns retention: when audit is enabled, extend the TTL
+	// to max(events.retention, audit.full_content_retention) so audit event_ref
+	// drill-down stays valid for the full-content window (spec §5.3). Hot-reload
+	// of this effective value requires a gateway restart (the GC goroutine
+	// captures the value at startup), consistent with audit.collector.batch_interval.
+	eventsRetention := config.EffectiveEventsRetention(cfg)
+	if eventsRetention != cfg.Events.Retention {
+		log.Info("audit: extending events/turns retention for full-content drill-down",
+			"original", cfg.Events.Retention, "effective", eventsRetention)
+	}
+	go runEventsGC(ctx, stores, log, eventsRetention)
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 
@@ -1137,7 +1241,7 @@ func shutdownGateway(
 	// processed) but BEFORE SessionMgr (so audit rows persist before session
 	// metadata closes). Per AGENTS.md shutdown order.
 	if deps.AuditCollector != nil {
-		if err := deps.AuditCollector.Close(); err != nil {
+		if err := deps.AuditCollector.Close(shutdownCtx); err != nil {
 			log.Warn("audit: collector close", "err", err)
 		}
 	}

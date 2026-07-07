@@ -54,9 +54,10 @@ var staticFields = map[string]bool{
 	"db.wal_mode":                  true,
 	"db.events_path":               true, // Deprecated: kept for restart-warning
 	// Audit fields (spec §8): enabled and collector path/capacity are NOT hot-reloadable.
-	"audit.enabled":               true,
-	"audit.collector.spill_dir":   true,
-	"audit.collector.channel_cap": true,
+	"audit.enabled":                true,
+	"audit.collector.spill_dir":    true,
+	"audit.collector.channel_cap":  true,
+	"audit.full_content_retention": true,
 }
 
 // ConfigChange represents a single configuration change for audit logging.

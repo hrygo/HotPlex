@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,7 +461,7 @@ func TestHandleActivityExport_WithCollector(t *testing.T) {
 	api.HandleAdminActivityExport(w, r)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	_ = collector.Close()
+	_ = collector.Close(context.Background())
 }
 
 func TestParseActivityQuery_LimitClamp(t *testing.T) {
@@ -512,4 +513,139 @@ func TestHandleActivityExport_CSVFormat(t *testing.T) {
 	require.Contains(t, w.Header().Get("Content-Type"), "text/csv")
 	body := w.Body.String()
 	require.True(t, strings.Contains(body, "id,ts,user_id"))
+}
+
+// ─── I1: meta-audit must fire on export failure (spec §5.8) ───────────────────
+
+// capturingAuditStore is an audit.Store whose BeginTx returns a capturing Tx
+// that records every appended row. Used to assert the export handler emits a
+// system.audit_export row on BOTH success and failure paths.
+type capturingAuditStore struct {
+	mu       sync.Mutex
+	recorded []audit.UserActivity
+}
+
+func (s *capturingAuditStore) BeginTx(context.Context) (audit.Tx, error) {
+	return &capturingAuditTx{store: s}, nil
+}
+func (s *capturingAuditStore) Query(context.Context, audit.Query) ([]audit.UserActivity, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) QueryAsc(context.Context, int64, int) ([]audit.UserActivity, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) DeleteBefore(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+func (s *capturingAuditStore) SaveCheckpoint(context.Context, audit.Checkpoint) error { return nil }
+func (s *capturingAuditStore) LatestCheckpoint(context.Context) (*audit.Checkpoint, error) {
+	return nil, nil
+}
+func (s *capturingAuditStore) Close() error            { return nil }
+func (s *capturingAuditStore) Dialect() dbutil.Dialect { return dbutil.DialectSQLite }
+func (s *capturingAuditStore) snapshot() []audit.UserActivity {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]audit.UserActivity, len(s.recorded))
+	copy(out, s.recorded)
+	return out
+}
+
+type capturingAuditTx struct {
+	store *capturingAuditStore
+}
+
+func (t *capturingAuditTx) Append(_ context.Context, ua *audit.UserActivity) error {
+	t.store.mu.Lock()
+	t.store.recorded = append(t.store.recorded, *ua)
+	t.store.mu.Unlock()
+	return nil
+}
+func (t *capturingAuditTx) AppendBatch(ctx context.Context, uas []*audit.UserActivity) error {
+	for _, ua := range uas {
+		if err := t.Append(ctx, ua); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (t *capturingAuditTx) SaveCheckpoint(context.Context, audit.Checkpoint) error { return nil }
+func (t *capturingAuditTx) TailHash(context.Context) (string, error)               { return "", nil }
+func (t *capturingAuditTx) LastRowBefore(context.Context, time.Time) (int64, string, error) {
+	return 0, "", nil
+}
+func (t *capturingAuditTx) DeleteByIDLEQ(context.Context, int64) (int64, error) { return 0, nil }
+func (t *capturingAuditTx) RowCount(context.Context) (int64, error)             { return 0, nil }
+func (t *capturingAuditTx) Commit() error                                       { return nil }
+func (t *capturingAuditTx) Rollback() error                                     { return nil }
+
+// TestExport_FailureStillEmitsMetaAudit verifies the I1 fix: a failed export
+// must still emit a system.audit_export row with outcome=failure. Before the
+// fix the meta-audit only ran on the success path, leaving failed export
+// attempts (attacker probing, failed bulk exfil) invisible in the audit log —
+// a forensic gap for a system whose purpose is forensic visibility.
+func TestExport_FailureStillEmitsMetaAudit(t *testing.T) {
+	t.Parallel()
+	api := newTestAPIWithActivity()
+	capStore := &capturingAuditStore{}
+	collector := audit.NewCollector(capStore, nil, nil, slog.Default(), audit.CollectorConfig{
+		BatchSize:     1,
+		BatchInterval: 5 * time.Millisecond,
+	})
+	collector.Start(context.Background())
+	t.Cleanup(func() { _ = collector.Close(context.Background()) })
+	api.SetAuditCollector(collector)
+
+	w := httptest.NewRecorder()
+	// Unknown format forces Export to error (audit_service.go:83).
+	r := httptest.NewRequest(http.MethodGet, "/admin/activity?format=does-not-exist", nil)
+	r = withScope(r, ScopeAdminRead)
+
+	api.HandleAdminActivityExport(w, r)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+
+	// The meta-audit row must be present with outcome=failure. The collector
+	// batches asynchronously, so poll until the row lands (no time.Sleep —
+	// require.Eventually per AGENTS.md).
+	require.Eventually(t, func() bool {
+		for _, ua := range capStore.snapshot() {
+			if ua.Action == audit.ActionSystemAuditExport && ua.Outcome == audit.OutcomeFailure {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 5*time.Millisecond, "failed export must emit system.audit_export with outcome=failure")
+}
+
+// TestExport_SuccessEmitsMetaAudit confirms the success path still emits the
+// meta-audit row (regression guard for the I1 refactor that moved Enqueue
+// before the error return).
+func TestExport_SuccessEmitsMetaAudit(t *testing.T) {
+	t.Parallel()
+	api := newTestAPIWithActivity()
+	capStore := &capturingAuditStore{}
+	collector := audit.NewCollector(capStore, nil, nil, slog.Default(), audit.CollectorConfig{
+		BatchSize:     1,
+		BatchInterval: 5 * time.Millisecond,
+	})
+	collector.Start(context.Background())
+	t.Cleanup(func() { _ = collector.Close(context.Background()) })
+	api.SetAuditCollector(collector)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/admin/activity?format=json", nil)
+	r = withScope(r, ScopeAdminRead)
+
+	api.HandleAdminActivityExport(w, r)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	require.Eventually(t, func() bool {
+		for _, ua := range capStore.snapshot() {
+			if ua.Action == audit.ActionSystemAuditExport && ua.Outcome == audit.OutcomeSuccess {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 5*time.Millisecond, "successful export must emit system.audit_export with outcome=success")
 }

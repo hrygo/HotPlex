@@ -262,6 +262,7 @@ func setupRoutes(
 		// (P2.6) but mount on the gateway mux with cookie auth — WebChat admin UI
 		// uses cookie sessions, not the Bearer+scope tokens of the admin port.
 		userAdmin := admin.NewUserAdminHandlers(deps.WorkspaceStore, auth, deps.CookieAuth, lap)
+		userAdmin.SetAuditCollector(deps.AuditCollector)
 		mux.Handle("POST /api/auth/login", corsMw(http.HandlerFunc(authHandlers.Login)))
 		mux.Handle("POST /api/auth/logout", corsMw(http.HandlerFunc(authHandlers.Logout)))
 		mux.Handle("GET /api/auth/me", corsMw(http.HandlerFunc(authHandlers.Me)))
@@ -273,11 +274,11 @@ func setupRoutes(
 		// write methods (POST/DELETE/PATCH); GETs pass through (issue #788
 		// review P0). Inside corsMw so OPTIONS preflight is handled first.
 		csrfMw := adminAPI.CSRFMiddleware
-		mux.Handle("POST /api/admin/invitations", corsMw(csrfMw(http.HandlerFunc(userAdmin.CreateInvitation))))
+		mux.Handle("POST /api/admin/invitations", corsMw(userAdmin.AuditWrite(admin.AuditInvitationCreate, csrfMw(http.HandlerFunc(userAdmin.CreateInvitation)))))
 		mux.Handle("GET /api/admin/invitations", corsMw(http.HandlerFunc(userAdmin.ListInvitations)))
-		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(csrfMw(http.HandlerFunc(userAdmin.DeleteInvitation))))
+		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(userAdmin.AuditWrite(admin.AuditInvitationDelete, csrfMw(http.HandlerFunc(userAdmin.DeleteInvitation)))))
 		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(userAdmin.ListUsers)))
-		mux.Handle("PATCH /api/admin/users/{id}", corsMw(csrfMw(http.HandlerFunc(userAdmin.UpdateUserStatus))))
+		mux.Handle("PATCH /api/admin/users/{id}", corsMw(userAdmin.AuditWrite(admin.AuditMemberStatusUpdate, csrfMw(http.HandlerFunc(userAdmin.UpdateUserStatus)))))
 
 		// OPTIONS preflight handlers for Auth & Admin APIs
 		mux.Handle("OPTIONS /api/auth/login", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))

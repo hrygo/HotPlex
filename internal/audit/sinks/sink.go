@@ -1,5 +1,5 @@
-// Package sinks provides AlertSink implementations for the user behavior audit
-// system. See spec section 5.6.
+// Package sinks AlertEvent and Sink types. The package-level documentation
+// lives in doc.go.
 package sinks
 
 import (
@@ -8,8 +8,8 @@ import (
 )
 
 // AlertEvent is the read-only snapshot passed to a sink. Mirrors audit.AuditEvent
-// but lives in this package to avoid a circular import (W2.A defines the same type
-// in the parent audit package; the collector fans out to sinks.Sink instances).
+// field-for-field. The two types are kept separate to preserve the one-way import
+// direction documented above.
 type AlertEvent struct {
 	EventID      string
 	Ts           time.Time
@@ -36,9 +36,8 @@ type Sink interface {
 	OnAlertEvent(ctx context.Context, e AlertEvent) error
 }
 
-// FromAuditEvent converts an audit.AuditEvent to an AlertEvent.
-// Use this in the collector when calling sink.OnAlertEvent.
-// TODO: populate fields from audit.AuditEvent once W2.A defines it.
-func FromAuditEvent() AlertEvent {
-	return AlertEvent{}
+// Closer is an optional lifecycle contract. Collectors call it after all
+// queued events have been handed to the sink.
+type Closer interface {
+	Close(ctx context.Context) error
 }

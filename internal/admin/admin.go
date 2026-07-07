@@ -203,6 +203,12 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 		// P1-2). Failed/denied writes are the most forensically valuable; the
 		// prior status<300 guard dropped them. actor falls back to "anonymous"
 		// when auth never resolved (401/403 before actor assignment).
+		//
+		// Dual-write (issue #833 P2, spec §7): the legacy slog AdminAudit path
+		// is retained during the compat period; the same write is also enqueued
+		// into the tamper-evident user_activity table when an audit collector is
+		// wired. slog retirement is deferred to P3 so existing log dashboards
+		// keep working while consumers migrate.
 		defer func() {
 			if isWriteMethod(r.Method) {
 				actorVal := actor
@@ -213,7 +219,11 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 				if sw.status >= 400 {
 					result = AuditResultFailed
 				}
-				AdminAudit(actorVal, adminActionFor(r.Method, r.URL.Path), r.URL.Path, result)
+				slogAction := adminActionFor(r.Method, r.URL.Path)
+				AdminAudit(actorVal, slogAction, r.URL.Path, result)
+				// Best-effort tamper-evident dual-write. Never blocks the
+				// response (Enqueue is non-blocking with spill fallback).
+				a.enqueueAdminActivity(r, sw.status, actorVal, slogAction)
 			}
 		}()
 
