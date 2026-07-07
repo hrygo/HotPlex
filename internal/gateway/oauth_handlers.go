@@ -79,9 +79,11 @@ func (h *OAuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		IssuedAt:     h.now(),
 	})
 
+	callbackURL := h.callbackURL(r, providerName)
 	authURL := provider.BuildAuthURL(security.AuthURLOption{
 		State:         state,
 		CodeChallenge: codeChallenge,
+		RedirectURL:   callbackURL,
 	})
 
 	h.log.Debug("oauth login redirect", "provider", providerName, "state", state[:8]+"...")
@@ -128,7 +130,8 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange authorization code for tokens (with PKCE verifier).
-	exchangeResult, err := provider.ExchangeCode(r.Context(), code, payload.CodeVerifier)
+	callbackURL := h.callbackURL(r, providerName)
+	exchangeResult, err := provider.ExchangeCodeWithRedirectURL(r.Context(), code, payload.CodeVerifier, callbackURL)
 	if err != nil {
 		h.log.Error("oauth callback: token exchange failed", "provider", providerName, "err", err)
 		redirectAuthError(w, r, "CODE_EXCHANGE_FAILED")
@@ -136,7 +139,7 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify ID Token signature and extract claims.
-	claims, err := provider.VerifyAndExtractClaims(r.Context(), exchangeResult.IDToken)
+	claims, err := provider.VerifyAndExtractClaimsWithUserInfo(r.Context(), exchangeResult.IDToken, exchangeResult.AccessToken)
 	if err != nil {
 		h.log.Error("oauth callback: id_token verification failed", "provider", providerName, "err", err)
 		redirectAuthError(w, r, "ID_TOKEN_INVALID")
@@ -183,81 +186,91 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusFound)
 }
 
-// getOrCreateUser implements the spec ④ §8.1 account association:
-// - Look up by (provider, subject) → found: update profile, return user_id.
-// - Not found: create users row + user_identities row, return user_id.
+// getOrCreateUser implements the spec ④ §8.1 account association in one store
+// transaction: resolve by (provider, subject), otherwise create/reuse the
+// deterministic SSO user and bind the identity.
 func (h *OAuthHandlers) getOrCreateUser(ctx context.Context, providerName string, claims *security.OIDCClaims) (userID string, firstLogin bool, err error) {
 	now := h.now().Unix()
-
-	// Check if identity already exists.
-	identity, err := h.store.GetUserIdentityByProviderSubject(ctx, providerName, claims.Subject)
-	if err == nil {
-		// Identity exists — update display_name/email from IdP (IdP is authoritative).
-		if identity.DisplayName != claims.DisplayName || identity.Email != claims.Email {
-			_ = h.store.UpdateUserIdentityProfile(ctx, identity.ID, claims.DisplayName, claims.Email, now)
-		}
-		// Verify user is not disabled.
-		user, err := h.store.GetUserByID(ctx, identity.UserID)
-		if err != nil {
-			return "", false, err
-		}
-		if user.Status == "disabled" {
-			return "", false, &security.IdentityError{Code: security.ErrCodeUserDisabled}
-		}
-		// Returning user: first login iff they have never logged in before.
-		return identity.UserID, user.LastLoginAt == 0, nil
-	}
-	if !errors.Is(err, session.ErrIdentityNotFound) {
-		return "", false, err
-	}
-
-	// First login: create user + identity.
-	userID = uuid.NewString()
 	username := providerName + ":" + claims.Subject
-	firstLogin = true // new SSO identity; never logged in (recovered orphan may reset below)
 
-	// Idempotent create path (P1): a prior first-login attempt may have left an
-	// orphaned users row (CreateUser succeeded, CreateUserIdentity failed on a
-	// transient DB error). On retry GetUserIdentityByProviderSubject still misses,
-	// so we re-check by username before insert. If found, we reuse that user row
-	// and only (re)create the identity, avoiding a UNIQUE(username) violation that
-	// would permanently lock out the SSO identity.
-	existing, err := h.store.GetUserByUsername(ctx, username)
-	if err != nil && !errors.Is(err, security.ErrUserNotFound) {
-		return "", false, err
-	}
-	if existing != nil {
-		// Recover orphaned user row from a crashed prior first-login.
-		userID = existing.ID
-		firstLogin = existing.LastLoginAt == 0
-	} else {
-		err = h.store.CreateUser(ctx, &security.User{
-			ID:           userID,
-			Username:     username,
-			PasswordHash: "", // SSO-only account; empty hash = no password login
-			Role:         "user",
-			DisplayName:  claims.DisplayName,
-			Status:       "active",
-		}, now)
-		if err != nil {
-			return "", false, err
-		}
-	}
-
-	identityID := uuid.NewString()
-	err = h.store.CreateUserIdentity(ctx, &session.UserIdentity{
-		ID:          identityID,
-		UserID:      userID,
-		Provider:    providerName,
-		Subject:     claims.Subject,
-		DisplayName: claims.DisplayName,
-		Email:       claims.Email,
-	}, now)
+	result, err := h.store.GetOrCreateUserByIdentity(ctx, providerName, claims.Subject, username, claims.DisplayName, claims.Email, uuid.NewString(), uuid.NewString(), now)
 	if err != nil {
 		return "", false, err
 	}
+	if result.User.Status == "disabled" {
+		return "", false, &security.IdentityError{Code: security.ErrCodeUserDisabled}
+	}
+	return result.User.ID, result.User.LastLoginAt == 0, nil
+}
 
-	return userID, firstLogin, nil
+func (h *OAuthHandlers) callbackURL(r *http.Request, providerName string) string {
+	if base := strings.TrimRight(h.oauthManager.ExternalURL(), "/"); base != "" {
+		return base + "/api/auth/oauth/" + providerName + "/callback"
+	}
+	return requestPublicBaseURL(r) + "/api/auth/oauth/" + providerName + "/callback"
+}
+
+func requestPublicBaseURL(r *http.Request) string {
+	scheme, host := forwardedProtoHost(r)
+	if scheme == "" {
+		if r.TLS != nil || strings.EqualFold(firstHeaderValue(r.Header.Get("X-Forwarded-Proto")), "https") {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	if host == "" {
+		host = firstHeaderValue(r.Header.Get("X-Forwarded-Host"))
+	}
+	if host == "" {
+		host = r.Host
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return scheme + "://" + host
+}
+
+func forwardedProtoHost(r *http.Request) (scheme, host string) {
+	for _, part := range strings.Split(r.Header.Get("Forwarded"), ",") {
+		for _, item := range strings.Split(part, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(item), "=")
+			if !ok {
+				continue
+			}
+			v = strings.Trim(v, `"`)
+			switch strings.ToLower(k) {
+			case "proto":
+				if scheme == "" {
+					scheme = v
+				}
+			case "host":
+				if host == "" {
+					host = v
+				}
+			}
+		}
+		if scheme != "" || host != "" {
+			break
+		}
+	}
+	if scheme == "" {
+		scheme = firstHeaderValue(r.Header.Get("X-Forwarded-Proto"))
+	}
+	if host == "" {
+		host = firstHeaderValue(r.Header.Get("X-Forwarded-Host"))
+	}
+	if scheme != "" && !strings.EqualFold(scheme, "http") && !strings.EqualFold(scheme, "https") {
+		scheme = ""
+	}
+	return scheme, host
+}
+
+func firstHeaderValue(v string) string {
+	if i := strings.IndexByte(v, ','); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
 }
 
 // redirectAuthError redirects to webchat home with an auth_error query param.

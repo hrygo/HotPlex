@@ -294,6 +294,20 @@ func (c *Config) normalizePaths() {
 	}
 	expandStringFields(botFields...)
 
+	oauthFields := []*string{&c.OAuth.ExternalURL}
+	for i := range c.OAuth.Providers {
+		oauthFields = append(oauthFields,
+			&c.OAuth.Providers[i].DisplayName,
+			&c.OAuth.Providers[i].Issuer,
+			&c.OAuth.Providers[i].ClientID,
+			&c.OAuth.Providers[i].ClientSecret,
+			&c.OAuth.Providers[i].UsernameClaim,
+			&c.OAuth.Providers[i].DisplayNameClaim,
+			&c.OAuth.Providers[i].EmailClaim,
+		)
+	}
+	expandStringFields(oauthFields...)
+
 	// 2. Expand ~ and normalize paths.
 	for _, pf := range []*string{
 		&c.DB.SQLite.Path,

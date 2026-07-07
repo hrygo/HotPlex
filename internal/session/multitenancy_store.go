@@ -68,6 +68,14 @@ type UserIdentity struct {
 	UpdatedAt   int64
 }
 
+// IdentityUserResult is the atomic result of resolving an OAuth/OIDC identity
+// to a local user during SSO login.
+type IdentityUserResult struct {
+	User     *security.User
+	Identity *UserIdentity
+	Created  bool // true when this call created the identity binding
+}
+
 // Multitenancy store sentinels.
 var (
 	ErrWorkspaceNotFound     = errors.New("session: workspace not found")
@@ -113,6 +121,7 @@ type UserWorkspaceStore interface {
 	DeleteInvitation(ctx context.Context, id string) error
 	// user identities (spec ④ SSO)
 	GetUserIdentityByProviderSubject(ctx context.Context, provider, subject string) (*UserIdentity, error)
+	GetOrCreateUserByIdentity(ctx context.Context, provider, subject, username, displayName, email, userID, identityID string, now int64) (*IdentityUserResult, error)
 	CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error
 	UpdateUserIdentityProfile(ctx context.Context, id, displayName, email string, now int64) error
 }
@@ -522,6 +531,24 @@ func (s *SQLiteStore) GetUserIdentityByProviderSubject(ctx context.Context, prov
 	return id, err
 }
 
+func (s *SQLiteStore) GetOrCreateUserByIdentity(ctx context.Context, provider, subject, username, displayName, email, userID, identityID string, now int64) (*IdentityUserResult, error) {
+	var result *IdentityUserResult
+	err := s.writeMu.WithLock(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		result, err = getOrCreateUserByIdentityTx(ctx, tx, provider, subject, username, displayName, email, userID, identityID, now, sqliteIdentitySQL{})
+		if err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+	return result, err
+}
+
 func (s *SQLiteStore) CreateUserIdentity(ctx context.Context, id *UserIdentity, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["identities.create"],
@@ -535,4 +562,104 @@ func (s *SQLiteStore) UpdateUserIdentityProfile(ctx context.Context, id, display
 		_, err := s.db.ExecContext(ctx, queries["identities.update_profile"], displayName, email, now, id)
 		return err
 	})
+}
+
+type identityTx interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type identitySQL interface {
+	selectIdentity() string
+	insertUserIgnoreConflict() string
+	selectUserByID() string
+	selectUserByUsername() string
+	insertIdentityIgnoreConflict() string
+	updateIdentityProfile() string
+}
+
+type sqliteIdentitySQL struct{}
+
+func (sqliteIdentitySQL) selectIdentity() string {
+	return "SELECT id, user_id, provider, subject, display_name, email, created_at, updated_at FROM user_identities WHERE provider = ? AND subject = ?"
+}
+func (sqliteIdentitySQL) insertUserIgnoreConflict() string {
+	return "INSERT INTO users (id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(username) DO NOTHING"
+}
+func (sqliteIdentitySQL) selectUserByID() string {
+	return "SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users WHERE id = ?"
+}
+func (sqliteIdentitySQL) selectUserByUsername() string {
+	return "SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users WHERE username = ?"
+}
+func (sqliteIdentitySQL) insertIdentityIgnoreConflict() string {
+	return "INSERT INTO user_identities (id, user_id, provider, subject, display_name, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(provider, subject) DO NOTHING"
+}
+func (sqliteIdentitySQL) updateIdentityProfile() string {
+	return "UPDATE user_identities SET display_name = ?, email = ?, updated_at = ? WHERE id = ?"
+}
+
+func getOrCreateUserByIdentityTx(ctx context.Context, tx identityTx, provider, subject, username, displayName, email, userID, identityID string, now int64, sqls identitySQL) (*IdentityUserResult, error) {
+	identity, err := scanIdentity(tx.QueryRowContext(ctx, sqls.selectIdentity(), provider, subject))
+	if err == nil {
+		if identity.DisplayName != displayName || identity.Email != email {
+			if _, err := tx.ExecContext(ctx, sqls.updateIdentityProfile(), displayName, email, now, identity.ID); err != nil {
+				return nil, err
+			}
+			identity.DisplayName = displayName
+			identity.Email = email
+			identity.UpdatedAt = now
+		}
+		user, err := scanUser(tx.QueryRowContext(ctx, sqls.selectUserByID(), identity.UserID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, security.ErrUserNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &IdentityUserResult{User: user, Identity: identity}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, sqls.insertUserIgnoreConflict(),
+		userID, username, "", "user", displayName, "active", now, now); err != nil {
+		return nil, err
+	}
+	user, err := scanUser(tx.QueryRowContext(ctx, sqls.selectUserByUsername(), username))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, security.ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	insertResult, err := tx.ExecContext(ctx, sqls.insertIdentityIgnoreConflict(),
+		identityID, user.ID, provider, subject, displayName, email, now, now)
+	if err != nil {
+		return nil, err
+	}
+	created := true
+	if rows, err := insertResult.RowsAffected(); err == nil && rows == 0 {
+		created = false
+		conflicted, err := scanIdentity(tx.QueryRowContext(ctx, sqls.selectIdentity(), provider, subject))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrIdentityNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, sqls.updateIdentityProfile(), displayName, email, now, conflicted.ID); err != nil {
+			return nil, err
+		}
+	}
+	identity, err = scanIdentity(tx.QueryRowContext(ctx, sqls.selectIdentity(), provider, subject))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrIdentityNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &IdentityUserResult{User: user, Identity: identity, Created: created}, nil
 }

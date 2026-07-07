@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -52,21 +53,6 @@ func (m *OAuthManager) Reload(ctx context.Context, cfg config.OAuthConfig) (int,
 	var errs []error
 
 	for _, pcfg := range cfg.Providers {
-		// Check if we already have this provider with same issuer+clientID.
-		m.mu.RLock()
-		existing, ok := m.providers[pcfg.Name]
-		m.mu.RUnlock()
-
-		if ok && existing.Config().Issuer == pcfg.Issuer && existing.Config().ClientID == pcfg.ClientID {
-			// Preserve existing (no re-discovery needed); only update non-discovery fields.
-			newProviders[pcfg.Name] = existing
-			continue
-		}
-
-		// Build callback URL.
-		callbackURL := cfg.CallbackURL(externalURL, pcfg.Name)
-
-		// Construct OAuthProviderConfig from config.
 		opCfg := OAuthProviderConfig{
 			Name:             pcfg.Name,
 			DisplayName:      pcfg.DisplayName,
@@ -78,6 +64,22 @@ func (m *OAuthManager) Reload(ctx context.Context, cfg config.OAuthConfig) (int,
 			DisplayNameClaim: pcfg.DisplayNameClaimName(),
 			EmailClaim:       pcfg.EmailClaimName(),
 		}
+
+		// Check if we already have this exact provider config.
+		m.mu.RLock()
+		existing, ok := m.providers[pcfg.Name]
+		m.mu.RUnlock()
+
+		if ok && reflect.DeepEqual(existing.Config(), opCfg) {
+			// Preserve existing (no re-discovery needed) when all runtime
+			// relevant fields are unchanged, including rotated client_secret,
+			// scopes, claim mappings, and display name.
+			newProviders[pcfg.Name] = existing
+			continue
+		}
+
+		// Build callback URL.
+		callbackURL := cfg.CallbackURL(externalURL, pcfg.Name)
 
 		provider, err := NewOAuthProvider(ctx, opCfg, callbackURL)
 		if err != nil {

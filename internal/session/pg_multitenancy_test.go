@@ -64,6 +64,10 @@ func invitationColumns() []string {
 	return []string{"id", "code", "created_by", "role", "used_by", "expires_at", "created_at", "used_at"}
 }
 
+func identityColumns() []string {
+	return []string{"id", "user_id", "provider", "subject", "display_name", "email", "created_at", "updated_at"}
+}
+
 // --- PG users ---
 
 func TestPGMultitenancy_CreateUser(t *testing.T) {
@@ -424,4 +428,39 @@ func TestPGMultitenancy_DeleteInvitation(t *testing.T) {
 	q := store.queries["invitations.delete"]
 	mock.ExpectExec(regexp.QuoteMeta(q)).WithArgs("inv-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, store.DeleteInvitation(context.Background(), "inv-1"))
+}
+
+func TestPGMultitenancy_GetOrCreateUserByIdentity_CreatesInTransaction(t *testing.T) {
+	t.Parallel()
+	store, mock, cleanup := newPGMultitenancyMock(t)
+	defer cleanup()
+	sqls := pgIdentitySQL{}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(sqls.selectIdentity())).
+		WithArgs("keycloak", "sub123").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta(sqls.insertUserIgnoreConflict())).
+		WithArgs("u-sso-1", "keycloak:sub123", "", "user", "Alice", "active", int64(1700000000), int64(1700000000)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(sqls.selectUserByUsername())).
+		WithArgs("keycloak:sub123").
+		WillReturnRows(sqlmock.NewRows(userColumns()).
+			AddRow("u-sso-1", "keycloak:sub123", "", "user", "Alice", "active", int64(1700000000), int64(1700000000), nil))
+	mock.ExpectExec(regexp.QuoteMeta(sqls.insertIdentityIgnoreConflict())).
+		WithArgs("ident-1", "u-sso-1", "keycloak", "sub123", "Alice", "alice@example.com", int64(1700000000), int64(1700000000)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(sqls.selectIdentity())).
+		WithArgs("keycloak", "sub123").
+		WillReturnRows(sqlmock.NewRows(identityColumns()).
+			AddRow("ident-1", "u-sso-1", "keycloak", "sub123", "Alice", "alice@example.com", int64(1700000000), int64(1700000000)))
+	mock.ExpectCommit()
+
+	result, err := store.GetOrCreateUserByIdentity(context.Background(),
+		"keycloak", "sub123", "keycloak:sub123", "Alice", "alice@example.com",
+		"u-sso-1", "ident-1", 1700000000)
+	require.NoError(t, err)
+	require.True(t, result.Created)
+	require.Equal(t, "u-sso-1", result.User.ID)
+	require.Equal(t, "ident-1", result.Identity.ID)
 }

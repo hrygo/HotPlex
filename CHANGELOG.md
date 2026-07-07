@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.32.1] - 2026-07-07
+
+### Summary
+
+v1.32.1 是一次 patch 版本更新，完成用户行为审计子系统（#833）的 P2 阶段交付。核心变更包括：admin activity 时间线 UI（分页、跨通道身份关联、平台标识）、tool-call 审计埋点（敏感工具全量记录 + PII 脱敏）、admin 写操作双写审计、WebhookSink 外部告警扩展、GC 并发安全修复（原子 prune 事务消除 hash chain 断裂风险）、以及 CI release workflow 健壮性修复。
+
+### Added
+
+- **WebChat UI**: Admin activity 时间线页面 — 分页表格、跨通道身份关联（principal_user_id）、平台标识（Feishu/Slack/WebChat/Cron）、结构化详情抽屉（KV 对齐 + JSON 查看器 + PlatformBadge）、i18n 完整支持（中/英）。(#854)
+- **Audit**: Tool-call 审计埋点（spec §5.2）— 自动记录所有 worker tool 调用，敏感工具（Bash/Write/Edit/WebFetch 等）存储全量 detail_json，非敏感工具记录 input_sha256 + 200 rune 预览；PII/凭证自动脱敏（API key / Bearer / password 等前缀替换）。
+- **Audit**: Admin 写操作双写审计（spec §7）— 所有 admin 写操作同步写入 slog admin_audit + tamper-evident user_activity 表，action 命名空间 `admin.*`（如 `admin.bot.create`）。
+- **Audit**: 外部 RegisterSink 扩展点 + WebhookSink 参考（spec §5.6）— 公开 `sinks.Register()` 扩展契约，内置 HMAC-SHA256 签名 WebhookSink（bounded queue 1024、3 次指数退避、drop-on-overflow）。
+- **Audit**: `audit.full_content_retention` 配置（spec §5.3）— 控制事件 drill-down 引用的有效窗口（默认 90d），延长 event_ref 在事件过期后仍可回溯的时长。
+- **Audit**: 审计配置变更 meta-audit（spec §5.2）— 运行时 audit config 变更（enabled/retention/collector/sinks 等 7 字段）自动写入审计表，支持变更前后 diff 追溯。
+- **Audit**: 跨通道身份关联 — SQLite/PostgreSQL 迁移 `024_audit_identity_links`，支持同一用户跨平台的身份链接查询。
+
+### Changed
+
+- **Audit**: GC prune 重写为单事务原子操作 — 消除 GC tick 与 flushBatch 之间的 hash chain 断裂风险（原先 find→checkpoint→delete→checkpoint 为 5 次独立 store 调用，并发 flush 可在中间插入行导致链断裂）。PG 通过 advisory lock 保障多 pod 安全。(#845)
+- **Audit**: Collector sink 生命周期加固 — `Close()` 等待所有 in-flight sink goroutine 完成后再关闭 spill file，消除 goroutine 泄漏风险；最终 flush 使用 gateway shutdown ctx 而非 `context.Background()`。
+- **Audit**: 导出失败同样记录审计事件 — 导出成功/失败均写入 `system.audit_export` 审计行，失败以 Outcome=failure 记录；detail 改用 `json.Marshal` 替代 `fmt.Sprintf('%q')`（JSON 安全）。
+- **Security**: WebChat 用户身份标签修正 — cookie 认证用户正确标记为 `PlatformWebChat` + `UserIDTypeRegistered`，不再被错误归类为 opaque platform handle。(#845)
+
+### Fixed
+
+- **CI**: OpenCode 版本解析健壮性 — release workflow 中 sed JSON 解析在 GitHub API 限流时静默返回空串，导致 Pack 离线 bundle 失败。改用 jq + `curl -sf` + 空值检查。(#854)
+
 ## [1.32.0] - 2026-07-06
 
 ### Summary

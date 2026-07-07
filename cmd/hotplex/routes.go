@@ -334,9 +334,10 @@ func setupRoutes(
 
 		log.Info("auth, admin, and workspaces endpoints registered", "channels", "login,logout,me,accept-invite,workspaces,admin")
 
-		// OAuth SSO handlers (spec ④): when OAuthManager has providers,
-		// register the full SSO flow (providers list + login + callback).
-		if deps.OAuthManager != nil && deps.OAuthManager.HasProviders() {
+		// OAuth SSO handlers (spec ④). Register the full route set whenever
+		// OAuthManager exists so runtime config reload can add or remove
+		// providers without requiring a gateway restart.
+		if deps.OAuthManager != nil {
 			oauthHandlers := gateway.NewOAuthHandlers(deps.OAuthManager, deps.CookieAuth, deps.WorkspaceStore, log)
 			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(oauthHandlers.Providers)))
 			mux.Handle("GET /api/auth/oauth/{provider}/login", http.HandlerFunc(oauthHandlers.Login))
@@ -349,7 +350,7 @@ func setupRoutes(
 			// console when SSO is unconfigured. Returns an empty list.
 			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte("[]"))
+				_, _ = w.Write([]byte(`{"providers":[]}`))
 			})))
 		}
 

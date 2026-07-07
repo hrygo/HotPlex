@@ -110,11 +110,16 @@ func (p *OAuthProvider) Config() OAuthProviderConfig { return p.config }
 type AuthURLOption struct {
 	State         string
 	CodeChallenge string
+	RedirectURL   string
 }
 
 // BuildAuthURL constructs the OIDC authorization redirect URL with PKCE.
 func (p *OAuthProvider) BuildAuthURL(opts AuthURLOption) string {
-	return p.oauth2.AuthCodeURL(opts.State,
+	cfg := *p.oauth2
+	if opts.RedirectURL != "" {
+		cfg.RedirectURL = opts.RedirectURL
+	}
+	return cfg.AuthCodeURL(opts.State,
 		oauth2.SetAuthURLParam("code_challenge", opts.CodeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
@@ -130,7 +135,18 @@ type ExchangeResult struct {
 // ExchangeCode exchanges the authorization code for tokens. The codeVerifier
 // must match the code_challenge sent in BuildAuthURL.
 func (p *OAuthProvider) ExchangeCode(ctx context.Context, code, codeVerifier string) (*ExchangeResult, error) {
-	token, err := p.oauth2.Exchange(ctx, code,
+	return p.ExchangeCodeWithRedirectURL(ctx, code, codeVerifier, "")
+}
+
+// ExchangeCodeWithRedirectURL exchanges an authorization code using a request-
+// scoped redirect URI. This is required when oauth.external_url is omitted and
+// the public callback URL must be derived from Host / reverse-proxy headers.
+func (p *OAuthProvider) ExchangeCodeWithRedirectURL(ctx context.Context, code, codeVerifier, redirectURL string) (*ExchangeResult, error) {
+	cfg := *p.oauth2
+	if redirectURL != "" {
+		cfg.RedirectURL = redirectURL
+	}
+	token, err := cfg.Exchange(ctx, code,
 		oauth2.SetAuthURLParam("code_verifier", codeVerifier),
 	)
 	if err != nil {
@@ -178,6 +194,47 @@ func (p *OAuthProvider) VerifyAndExtractClaims(ctx context.Context, rawIDToken s
 		claims.Username = idToken.Subject
 	}
 
+	return claims, nil
+}
+
+// VerifyAndExtractClaimsWithUserInfo verifies the ID Token, then optionally
+// reads the OIDC UserInfo endpoint to fill profile claims that some enterprise
+// IAM systems omit from ID Tokens. The ID Token remains the source of identity;
+// UserInfo is only accepted when its subject matches the verified token subject.
+func (p *OAuthProvider) VerifyAndExtractClaimsWithUserInfo(ctx context.Context, rawIDToken, accessToken string) (*OIDCClaims, error) {
+	claims, err := p.VerifyAndExtractClaims(ctx, rawIDToken)
+	if err != nil {
+		return nil, err
+	}
+	if accessToken == "" || (claims.Username != claims.Subject && claims.DisplayName != "" && claims.Email != "") {
+		return claims, nil
+	}
+
+	userInfo, err := p.provider.UserInfo(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
+	if err != nil {
+		return claims, nil
+	}
+	if userInfo.Subject != claims.Subject {
+		return nil, fmt.Errorf("oauth provider %q: userinfo subject mismatch", p.config.Name)
+	}
+
+	var raw map[string]any
+	if err := userInfo.Claims(&raw); err != nil {
+		return claims, nil
+	}
+	username := claimString(raw, p.config.UsernameClaim, "preferred_username")
+	displayName := claimString(raw, p.config.DisplayNameClaim, "name")
+	email := claimString(raw, p.config.EmailClaim, "email")
+
+	if username != "" && claims.Username == claims.Subject {
+		claims.Username = username
+	}
+	if displayName != "" && claims.DisplayName == "" {
+		claims.DisplayName = displayName
+	}
+	if email != "" && claims.Email == "" {
+		claims.Email = email
+	}
 	return claims, nil
 }
 

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -401,4 +402,96 @@ func TestIdentities_UniqueProviderSubject(t *testing.T) {
 	}
 	err := store.CreateUserIdentity(ctx, ident2, 1700000002)
 	require.Error(t, err, "duplicate provider+subject must fail")
+}
+
+func TestIdentities_GetOrCreateUserByIdentity_CreatesUserAndIdentityAtomically(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	result, err := store.GetOrCreateUserByIdentity(ctx,
+		"keycloak", "sub123", "keycloak:sub123", "Alice", "alice@example.com",
+		"u-sso-1", "ident-1", 1700000000)
+	require.NoError(t, err)
+	require.True(t, result.Created)
+	require.Equal(t, "u-sso-1", result.User.ID)
+	require.Equal(t, "keycloak:sub123", result.User.Username)
+	require.Equal(t, "active", result.User.Status)
+	require.Equal(t, "ident-1", result.Identity.ID)
+	require.Equal(t, "u-sso-1", result.Identity.UserID)
+
+	user, err := store.GetUserByUsername(ctx, "keycloak:sub123")
+	require.NoError(t, err)
+	require.Equal(t, "u-sso-1", user.ID)
+	identity, err := store.GetUserIdentityByProviderSubject(ctx, "keycloak", "sub123")
+	require.NoError(t, err)
+	require.Equal(t, "u-sso-1", identity.UserID)
+}
+
+func TestIdentities_GetOrCreateUserByIdentity_ReusesAndSyncsProfile(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	first, err := store.GetOrCreateUserByIdentity(ctx,
+		"authing", "sub456", "authing:sub456", "Bob", "bob@old.example.com",
+		"u-sso-2", "ident-2", 1700000000)
+	require.NoError(t, err)
+	require.True(t, first.Created)
+
+	second, err := store.GetOrCreateUserByIdentity(ctx,
+		"authing", "sub456", "authing:sub456", "Bob Smith", "bob@new.example.com",
+		"ignored-user", "ignored-ident", 1700000001)
+	require.NoError(t, err)
+	require.False(t, second.Created)
+	require.Equal(t, first.User.ID, second.User.ID)
+	require.Equal(t, first.Identity.ID, second.Identity.ID)
+	require.Equal(t, "Bob Smith", second.Identity.DisplayName)
+	require.Equal(t, "bob@new.example.com", second.Identity.Email)
+}
+
+func TestIdentities_GetOrCreateUserByIdentity_ConcurrentFirstLogin(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	const workers = 8
+	var wg sync.WaitGroup
+	results := make(chan *IdentityUserResult, workers)
+	errs := make(chan error, workers)
+	for i := range workers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := store.GetOrCreateUserByIdentity(ctx,
+				"oidc", "sub789", "oidc:sub789", "Dana", "dana@example.com",
+				"user-concurrent-"+string(rune('a'+i)), "ident-concurrent-"+string(rune('a'+i)), 1700000000+int64(i))
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- result
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	var userID string
+	var created int
+	for result := range results {
+		if result.Created {
+			created++
+		}
+		if userID == "" {
+			userID = result.User.ID
+		}
+		require.Equal(t, userID, result.User.ID)
+		require.Equal(t, userID, result.Identity.UserID)
+	}
+	require.Equal(t, 1, created)
 }

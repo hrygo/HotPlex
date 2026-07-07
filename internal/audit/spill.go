@@ -25,7 +25,7 @@ type SpillFile struct {
 
 // OpenSpill opens (or creates) a spill file at path with O_APPEND|O_WRONLY|O_SYNC.
 func OpenSpill(path string) (*SpillFile, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE|os.O_SYNC, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE|os.O_SYNC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("audit: open spill: %w", err)
 	}

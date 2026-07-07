@@ -182,7 +182,7 @@ var StaticFS embed.FS
 **用户登录方式**（登录成功后签发 HMAC Cookie）：
 
 - **内建账号**（spec ①）：username/password 本地账号，由 admin 通过邀请码（`/api/admin/invitations`）创建。首次部署尚无任何账号时，登录页根据 `GET /api/auth/bootstrap-status` 引导创建首个管理员。
-- **企业 SSO**（spec ④）：标准 OIDC Authorization Code flow + PKCE。在 `oauth.providers[]` 配置 IdP（Keycloak / Okta / Azure AD 等）后，登录页渲染对应 SSO 按钮，点击跳转 IdP 完成认证。详见 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc)。
+- **企业 SSO**（spec ④）：标准 OIDC Authorization Code flow + PKCE。在 `oauth.providers[]` 配置 IdP（Keycloak / Okta / Microsoft Entra ID / Google Workspace 等）后，登录页渲染对应 SSO 按钮，点击跳转 IdP 完成认证。详见 [配置参考 — oauth](../../reference/configuration.md#314-oauth--webchat--ssooidc) 与 [企业 IAM 对接指南](../enterprise/oauth-sso-iam.md)。
 
 **HMAC Cookie 认证**：登录成功后 Gateway 签发 HttpOnly、SameSite=None; Secure 的签名 cookie（7 天有效），后续 WebSocket 连接自动携带，无需配置 API Key。SameSite=None 支持跨域 WebChat 部署——但 SameSite=None cookie 会被跨站请求自动携带，故状态变更方法（`POST`/`PATCH`/`DELETE`）由同源校验中间件防护 CSRF（依据 `Sec-Fetch-Site`/`Origin`，不通过返回 `403 FORBIDDEN`）；HMAC 签名仅保证 cookie 完整性，本身不防 CSRF。跨域时网关须 HTTPS（浏览器拒绝非 Secure 的 SameSite=None cookie）。Cookie HMAC secret 持久化到 `~/.hotplex/data/cookie_secret.key`（权限 0600），重启后仍有效。
 

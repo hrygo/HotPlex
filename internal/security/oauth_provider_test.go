@@ -16,14 +16,17 @@ import (
 
 // mockOIDCServer simulates a full OIDC IdP for integration testing.
 type mockOIDCServer struct {
-	t              *testing.T
-	server         *httptest.Server
-	signingKey     *rsa.PrivateKey
-	jwksPublicKey  jose.JSONWebKeySet
-	clientID       string
-	expectedSub    string
-	expectedClaims map[string]any
-	codeVerifier   string // captured during token exchange
+	t               *testing.T
+	server          *httptest.Server
+	signingKey      *rsa.PrivateKey
+	jwksPublicKey   jose.JSONWebKeySet
+	clientID        string
+	expectedSub     string
+	expectedClaims  map[string]any
+	userInfoClaims  map[string]any
+	userInfoSubject string
+	omitUserInfoSub bool
+	codeVerifier    string // captured during token exchange
 }
 
 func newMockOIDCServer(t *testing.T) *mockOIDCServer {
@@ -60,6 +63,7 @@ func newMockOIDCServer(t *testing.T) *mockOIDCServer {
 	mux.HandleFunc("/.well-known/openid-configuration", m.handleDiscovery)
 	mux.HandleFunc("/oauth/token", m.handleToken)
 	mux.HandleFunc("/oauth/jwks", m.handleJWKS)
+	mux.HandleFunc("/oauth/userinfo", m.handleUserInfo)
 
 	m.server = httptest.NewServer(mux)
 	return m
@@ -123,6 +127,25 @@ func (m *mockOIDCServer) handleToken(w http.ResponseWriter, r *http.Request) {
 func (m *mockOIDCServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(m.jwksPublicKey)
+}
+
+func (m *mockOIDCServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
+	claims := map[string]any{}
+	if !m.omitUserInfoSub {
+		subject := m.expectedSub
+		if m.userInfoSubject != "" {
+			subject = m.userInfoSubject
+		}
+		claims["sub"] = subject
+	}
+	for k, v := range m.expectedClaims {
+		claims[k] = v
+	}
+	for k, v := range m.userInfoClaims {
+		claims[k] = v
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(claims)
 }
 
 func TestOAuthProvider_DiscoveryAndClaims(t *testing.T) {
@@ -191,4 +214,100 @@ func TestOAuthProvider_ClaimFallback(t *testing.T) {
 	require.Equal(t, "bob", claimString(claims, "", "preferred_username"))
 	require.Equal(t, "bob", claimString(claims, "custom", "preferred_username"))
 	require.Equal(t, "", claimString(claims, "custom", "default"))
+}
+
+func TestOAuthProvider_UserInfoFillsMissingProfileClaims(t *testing.T) {
+	t.Parallel()
+
+	mock := newMockOIDCServer(t)
+	defer mock.close()
+	mock.expectedClaims = map[string]any{}
+	mock.userInfoClaims = map[string]any{
+		"preferred_username": "carol",
+		"name":               "Carol Chen",
+		"email":              "carol@example.com",
+	}
+
+	op, err := NewOAuthProvider(context.Background(), OAuthProviderConfig{
+		Name:         "keycloak",
+		Issuer:       mock.issuer(),
+		ClientID:     mock.clientID,
+		ClientSecret: "test-secret",
+		Scopes:       []string{"openid", "profile", "email"},
+	}, "https://hotplex.example.com/api/auth/oauth/keycloak/callback")
+	require.NoError(t, err)
+
+	_, verifier, _, err := GenerateStateAndVerifier()
+	require.NoError(t, err)
+	exchange, err := op.ExchangeCode(context.Background(), "fake-auth-code", verifier)
+	require.NoError(t, err)
+
+	claims, err := op.VerifyAndExtractClaimsWithUserInfo(context.Background(), exchange.IDToken, exchange.AccessToken)
+	require.NoError(t, err)
+	require.Equal(t, "user-sub-123", claims.Subject)
+	require.Equal(t, "carol", claims.Username)
+	require.Equal(t, "Carol Chen", claims.DisplayName)
+	require.Equal(t, "carol@example.com", claims.Email)
+}
+
+func TestOAuthProvider_UserInfoRejectsMissingSubject(t *testing.T) {
+	t.Parallel()
+
+	mock := newMockOIDCServer(t)
+	defer mock.close()
+	mock.expectedClaims = map[string]any{}
+	mock.omitUserInfoSub = true
+	mock.userInfoClaims = map[string]any{
+		"preferred_username": "carol",
+		"name":               "Carol Chen",
+		"email":              "carol@example.com",
+	}
+
+	op, err := NewOAuthProvider(context.Background(), OAuthProviderConfig{
+		Name:         "keycloak",
+		Issuer:       mock.issuer(),
+		ClientID:     mock.clientID,
+		ClientSecret: "test-secret",
+		Scopes:       []string{"openid", "profile", "email"},
+	}, "https://hotplex.example.com/api/auth/oauth/keycloak/callback")
+	require.NoError(t, err)
+
+	_, verifier, _, err := GenerateStateAndVerifier()
+	require.NoError(t, err)
+	exchange, err := op.ExchangeCode(context.Background(), "fake-auth-code", verifier)
+	require.NoError(t, err)
+
+	_, err = op.VerifyAndExtractClaimsWithUserInfo(context.Background(), exchange.IDToken, exchange.AccessToken)
+	require.ErrorContains(t, err, "userinfo subject mismatch")
+}
+
+func TestOAuthProvider_UserInfoRejectsMismatchedSubject(t *testing.T) {
+	t.Parallel()
+
+	mock := newMockOIDCServer(t)
+	defer mock.close()
+	mock.expectedClaims = map[string]any{}
+	mock.userInfoSubject = "attacker-sub"
+	mock.userInfoClaims = map[string]any{
+		"preferred_username": "mallory",
+		"name":               "Mallory",
+		"email":              "mallory@example.com",
+	}
+
+	op, err := NewOAuthProvider(context.Background(), OAuthProviderConfig{
+		Name:         "keycloak",
+		Issuer:       mock.issuer(),
+		ClientID:     mock.clientID,
+		ClientSecret: "test-secret",
+		Scopes:       []string{"openid", "profile", "email"},
+	}, "https://hotplex.example.com/api/auth/oauth/keycloak/callback")
+	require.NoError(t, err)
+
+	_, verifier, _, err := GenerateStateAndVerifier()
+	require.NoError(t, err)
+	exchange, err := op.ExchangeCode(context.Background(), "fake-auth-code", verifier)
+	require.NoError(t, err)
+
+	_, err = op.VerifyAndExtractClaimsWithUserInfo(context.Background(), exchange.IDToken, exchange.AccessToken)
+	require.ErrorContains(t, err, "userinfo subject mismatch")
 }
