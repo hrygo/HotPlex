@@ -50,6 +50,16 @@ func (s *ActivityService) QueryByUser(ctx context.Context, userID string, q audi
 	return s.Query(ctx, q)
 }
 
+// Stats returns aggregate counts (total / by-outcome / by-platform) scoped by
+// the query filters. Aggregates contain no PII, so no masking is applied.
+func (s *ActivityService) Stats(ctx context.Context, q audit.Query) (audit.ActivityStats, error) {
+	stats, err := s.store.Stats(ctx, q)
+	if err != nil {
+		return stats, fmt.Errorf("audit stats: %w", err)
+	}
+	return stats, nil
+}
+
 // QueryPrincipal expands a canonical principal user ID into all explicitly
 // linked platform-native audit subjects, then queries the unified timeline.
 func (s *ActivityService) QueryPrincipal(ctx context.Context, principalUserID string, q audit.Query) ([]audit.UserActivity, []string, error) {
@@ -94,6 +104,10 @@ func (s *ActivityService) ListIdentityLinks(ctx context.Context, principalUserID
 	return s.store.ListIdentityLinks(ctx, principalUserID)
 }
 
+func (s *ActivityService) ListAllIdentityLinks(ctx context.Context) ([]audit.IdentityLink, error) {
+	return s.store.ListIdentityLinks(ctx, "")
+}
+
 func (s *ActivityService) UpsertIdentityLink(ctx context.Context, link audit.IdentityLink) error {
 	return s.store.UpsertIdentityLink(ctx, link)
 }
@@ -103,16 +117,14 @@ func (s *ActivityService) DeleteIdentityLink(ctx context.Context, id string) err
 }
 
 // Export returns the audit rows in the requested format ("json" or "csv").
-// An empty format defaults to JSON. Always includes PII — the HTTP layer
-// gates ?include_pii=true on admin:write scope. The caller (HTTP handler)
-// is responsible for emitting the system.audit_export meta-audit row.
+// An empty format defaults to JSON. PII is included only when q.IncludePII is
+// true; the HTTP layer gates that flag on admin:write scope. The caller (HTTP
+// handler) is responsible for emitting the system.audit_export meta-audit row.
 func (s *ActivityService) Export(ctx context.Context, q audit.Query, format, exporterUserID string) ([]byte, string, error) {
 	if exporterUserID == "" {
 		exporterUserID = audit.AnonymousUserID
 	}
-	// Export always includes PII; the gate is at the HTTP layer.
-	q.IncludePII = true
-	rows, err := s.store.Query(ctx, q)
+	rows, err := s.Query(ctx, q)
 	if err != nil {
 		return nil, "", fmt.Errorf("audit export query: %w", err)
 	}

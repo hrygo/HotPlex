@@ -32,11 +32,19 @@ func (api *AdminAPI) HandleUserActivity(w http.ResponseWriter, r *http.Request) 
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to query activity")
 		return
 	}
+	links, _ := api.activityService.ListAllIdentityLinks(r.Context())
+	linksMap := make(map[string]audit.IdentityLink)
+	for _, link := range links {
+		if link.Subject != "" {
+			linksMap[link.Subject] = link
+		}
+	}
 	respondJSON(w, map[string]any{
-		"user_id": userID,
-		"rows":    rows,
-		"limit":   q.Limit,
-		"offset":  q.Offset,
+		"user_id":        userID,
+		"rows":           rows,
+		"identity_links": linksMap,
+		"limit":          q.Limit,
+		"offset":         q.Offset,
 	})
 }
 
@@ -51,7 +59,19 @@ func (api *AdminAPI) HandleAdminActivity(w http.ResponseWriter, r *http.Request)
 	if !api.ensureActivityService(w) {
 		return
 	}
+	if hasConflictingActivityUserFilters(r, r.URL.Query().Get("user_id")) {
+		writeActivityFilterConflict(w)
+		return
+	}
 	q := parseActivityQuery(r)
+	links, _ := api.activityService.ListAllIdentityLinks(r.Context())
+	linksMap := make(map[string]audit.IdentityLink)
+	for _, link := range links {
+		if link.Subject != "" {
+			linksMap[link.Subject] = link
+		}
+	}
+
 	if principalUserID := r.URL.Query().Get("principal_user_id"); principalUserID != "" {
 		rows, resolved, err := api.activityService.QueryPrincipal(r.Context(), principalUserID, q)
 		if err != nil {
@@ -63,6 +83,7 @@ func (api *AdminAPI) HandleAdminActivity(w http.ResponseWriter, r *http.Request)
 			"principal_user_id": principalUserID,
 			"resolved_user_ids": resolved,
 			"rows":              rows,
+			"identity_links":    linksMap,
 			"limit":             q.Limit,
 			"offset":            q.Offset,
 		})
@@ -78,10 +99,45 @@ func (api *AdminAPI) HandleAdminActivity(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	respondJSON(w, map[string]any{
-		"rows":   rows,
-		"limit":  q.Limit,
-		"offset": q.Offset,
+		"rows":           rows,
+		"identity_links": linksMap,
+		"limit":          q.Limit,
+		"offset":         q.Offset,
 	})
+}
+
+// HandleActivityStats is GET /admin/activity/stats and GET /api/admin/activity/stats.
+// Returns aggregate counts (total / per-outcome / per-platform) scoped by the
+// same query filters as the list endpoint. Powers the timeline overview cards.
+// Requires admin:read scope.
+func (api *AdminAPI) HandleActivityStats(w http.ResponseWriter, r *http.Request) {
+	if !hasScope(r, ScopeAdminRead) {
+		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:read")
+		return
+	}
+	if !api.ensureActivityService(w) {
+		return
+	}
+	q := parseActivityQuery(r)
+	if principalUserID := r.URL.Query().Get("principal_user_id"); principalUserID != "" {
+		resolved, err := api.activityService.ResolvePrincipalUserIDs(r.Context(), principalUserID)
+		if err != nil {
+			api.log.Error("admin: activity stats principal resolve", "err", err, "principal_user_id", principalUserID)
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to compute stats")
+			return
+		}
+		q.UserID = ""
+		q.UserIDs = resolved
+	} else if uid := r.URL.Query().Get("user_id"); uid != "" {
+		q.UserID = uid
+	}
+	stats, err := api.activityService.Stats(r.Context(), q)
+	if err != nil {
+		api.log.Error("admin: activity stats", "err", err)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to compute stats")
+		return
+	}
+	respondJSON(w, stats)
 }
 
 // HandleUserActivityExport is GET /admin/users/{id}/activity?format=json|csv
@@ -104,6 +160,10 @@ func (api *AdminAPI) handleActivityExport(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !api.ensureActivityService(w) {
+		return
+	}
+	if hasConflictingActivityUserFilters(r, userID) {
+		writeActivityFilterConflict(w)
 		return
 	}
 	// include_pii=true requires admin:write (spec section 5.9)
@@ -266,6 +326,14 @@ func (api *AdminAPI) ensureActivityService(w http.ResponseWriter) bool {
 	return false
 }
 
+func hasConflictingActivityUserFilters(r *http.Request, userID string) bool {
+	return strings.TrimSpace(userID) != "" && strings.TrimSpace(r.URL.Query().Get("principal_user_id")) != ""
+}
+
+func writeActivityFilterConflict(w http.ResponseWriter) {
+	web.WriteAppError(w, http.StatusBadRequest, "INVALID_REQUEST", "user_id and principal_user_id are mutually exclusive")
+}
+
 func identityLinkFromRequest(req identityLinkRequest) (audit.IdentityLink, error) {
 	principal := strings.TrimSpace(req.PrincipalUserID)
 	provider := strings.TrimSpace(req.Provider)
@@ -309,7 +377,11 @@ func parseActivityQuery(r *http.Request) audit.Query {
 		}
 	}
 	q.Action = r.URL.Query().Get("action")
+	q.ActionPrefix = r.URL.Query().Get("action_prefix")
 	q.Outcome = r.URL.Query().Get("outcome")
+	q.Platform = r.URL.Query().Get("platform")
+	q.SessionID = r.URL.Query().Get("session_id")
+	q.ResourceType = r.URL.Query().Get("resource_type")
 	if v := r.URL.Query().Get("include_pii"); v == "true" {
 		q.IncludePII = true
 	}

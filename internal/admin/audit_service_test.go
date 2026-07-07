@@ -19,6 +19,7 @@ import (
 // mockAuditStore implements audit.Store for ActivityService tests.
 type mockAuditStore struct {
 	queryFn       func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	statsFn       func(ctx context.Context, q audit.Query) (audit.ActivityStats, error)
 	identityLinks []audit.IdentityLink
 }
 
@@ -30,6 +31,12 @@ func (m *mockAuditStore) Query(ctx context.Context, q audit.Query) ([]audit.User
 		return m.queryFn(ctx, q)
 	}
 	return nil, nil
+}
+func (m *mockAuditStore) Stats(ctx context.Context, q audit.Query) (audit.ActivityStats, error) {
+	if m.statsFn != nil {
+		return m.statsFn(ctx, q)
+	}
+	return audit.ActivityStats{ByOutcome: map[string]int64{}, ByPlatform: map[string]int64{}}, nil
 }
 func (m *mockAuditStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]audit.UserActivity, error) {
 	return nil, nil // service tests don't exercise the verifier path
@@ -194,6 +201,58 @@ func TestActivityService_Export_JSON(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "application/json; charset=utf-8", contentType)
 	require.Contains(t, string(data), `"user_id": "u1"`)
+}
+
+func TestActivityService_Export_DefaultMasksPII(t *testing.T) {
+	t.Parallel()
+	store := &mockAuditStore{
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			require.False(t, q.IncludePII)
+			return []audit.UserActivity{
+				{
+					ID:        1,
+					UserID:    "u1",
+					IP:        "192.168.1.100",
+					UserAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				},
+			}, nil
+		},
+	}
+	svc := NewActivityService(store, slog.Default())
+
+	data, _, err := svc.Export(context.Background(), audit.Query{}, "json", "admin-user")
+	require.NoError(t, err)
+	var rows []audit.UserActivity
+	require.NoError(t, json.Unmarshal(data, &rows))
+	require.Len(t, rows, 1)
+	require.Equal(t, "192.168.1.0", rows[0].IP)
+	require.True(t, strings.HasSuffix(rows[0].UserAgent, "..."))
+}
+
+func TestActivityService_Export_IncludePII(t *testing.T) {
+	t.Parallel()
+	store := &mockAuditStore{
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			require.True(t, q.IncludePII)
+			return []audit.UserActivity{
+				{
+					ID:        1,
+					UserID:    "u1",
+					IP:        "192.168.1.100",
+					UserAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				},
+			}, nil
+		},
+	}
+	svc := NewActivityService(store, slog.Default())
+
+	data, _, err := svc.Export(context.Background(), audit.Query{IncludePII: true}, "json", "admin-user")
+	require.NoError(t, err)
+	var rows []audit.UserActivity
+	require.NoError(t, json.Unmarshal(data, &rows))
+	require.Len(t, rows, 1)
+	require.Equal(t, "192.168.1.100", rows[0].IP)
+	require.Contains(t, rows[0].UserAgent, "Chrome/120.0.0.0")
 }
 
 func TestActivityService_Export_CSV(t *testing.T) {

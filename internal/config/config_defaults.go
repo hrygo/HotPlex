@@ -121,6 +121,14 @@ func Default() *Config {
 		Log: LogConfig{
 			Level:  "info",
 			Format: "json",
+			File: LogFileConfig{
+				Enabled:    false, // default off: stderr-only (historical behavior)
+				MaxSize:    10,
+				MaxAge:     30,
+				MaxBackups: 100,
+				Compress:   true,
+				LocalTime:  true,
+			},
 		},
 		WebChat: WebChatConfig{
 			Addr:    "",

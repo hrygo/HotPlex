@@ -294,8 +294,23 @@ type AdminConfig struct {
 
 // LogConfig holds logging settings.
 type LogConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"` // "json" or "text"
+	Level  string        `mapstructure:"level"`
+	Format string        `mapstructure:"format"` // "json" or "text"
+	File   LogFileConfig `mapstructure:"file"`
+}
+
+// LogFileConfig holds file logging + rotation settings.
+// Enabled=false (default) keeps historical behavior: logs go to stderr only.
+// When Enabled=true, logs are teed to both the file (rotated via lumberjack)
+// and stderr, so daemon-mode stderr redirection and foreground debugging still work.
+type LogFileConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	Path       string `mapstructure:"path"`        // empty → default ~/.hotplex/logs/gateway.log
+	MaxSize    int    `mapstructure:"max_size"`    // MB per file before rotation; 0 → lumberjack default
+	MaxAge     int    `mapstructure:"max_age"`     // days to retain rotated logs
+	MaxBackups int    `mapstructure:"max_backups"` // number of rotated backups to keep
+	Compress   bool   `mapstructure:"compress"`    // gzip rotated backups
+	LocalTime  bool   `mapstructure:"local_time"`  // use local time for rotation filenames
 }
 
 // WebChatConfig holds webchat UI serving settings.

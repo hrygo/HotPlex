@@ -98,6 +98,15 @@ export interface AuditActivityResponse {
   user_id?: string;
   principal_user_id?: string;
   resolved_user_ids?: string[];
+  identity_links?: Record<string, AuditIdentityLink>;
+}
+
+// Audit activity aggregate counts returned by GET /admin/activity/stats.
+// total reflects the full filtered set (not just the current page).
+export interface ActivityStats {
+  total: number;
+  by_outcome: Record<string, number>;
+  by_platform: Record<string, number>;
 }
 
 export interface AuditIdentityLink {

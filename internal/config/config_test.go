@@ -44,6 +44,18 @@ func TestDefault(t *testing.T) {
 	require.Equal(t, "allowlist", cfg.Messaging.Feishu.GroupPolicy)
 	require.False(t, cfg.Messaging.Slack.Enabled)
 	require.False(t, cfg.Messaging.Feishu.Enabled)
+
+	// log.file defaults: disabled (preserves stderr-only behavior), with sane
+	// rotation params ready for opt-in.
+	require.Equal(t, "info", cfg.Log.Level)
+	require.Equal(t, "json", cfg.Log.Format)
+	require.False(t, cfg.Log.File.Enabled)
+	require.Empty(t, cfg.Log.File.Path) // empty → initLogging resolves default path
+	require.Equal(t, 10, cfg.Log.File.MaxSize)
+	require.Equal(t, 30, cfg.Log.File.MaxAge)
+	require.Equal(t, 100, cfg.Log.File.MaxBackups)
+	require.True(t, cfg.Log.File.Compress)
+	require.True(t, cfg.Log.File.LocalTime)
 }
 
 // TestDefaultPermissionMode: r3 (#804) — config.worker.default_permission_mode
@@ -174,6 +186,38 @@ func TestConfig_Validate(t *testing.T) {
 				return c
 			}(),
 			errCnt: 1,
+		},
+		{
+			name: "log.file disabled accepts negative rotation params (no-op)",
+			cfg: func() Config {
+				c := *Default()
+				c.Log.File.Enabled = false
+				c.Log.File.MaxSize = -1
+				return c
+			}(),
+			errCnt: 0,
+		},
+		{
+			name: "log.file enabled with negative max_size",
+			cfg: func() Config {
+				c := *Default()
+				c.Log.File.Enabled = true
+				c.Log.File.MaxSize = -1
+				return c
+			}(),
+			errCnt: 1,
+		},
+		{
+			name: "log.file enabled with multiple negative params",
+			cfg: func() Config {
+				c := *Default()
+				c.Log.File.Enabled = true
+				c.Log.File.MaxSize = -1
+				c.Log.File.MaxAge = -1
+				c.Log.File.MaxBackups = -1
+				return c
+			}(),
+			errCnt: 3,
 		},
 		{
 			name: "multiple errors",

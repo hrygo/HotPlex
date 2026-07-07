@@ -425,12 +425,35 @@
     "loading": "Loading activity...",
     "resolved_ids": "Resolved IDs",
     "filters": {
-      "user_id": "User ID",
-      "principal_user_id": "Principal User ID",
+      "user_id": "Platform Native ID (e.g. Feishu ou_ / Slack U...)",
+      "principal_user_id": "Unified Principal ID (e.g. zhangsan)",
       "action": "Action",
+      "any_action": "Any action",
       "any_outcome": "Any outcome",
+      "any_platform": "Any platform",
+      "platform": "Platform",
       "from": "From",
-      "to": "To"
+      "to": "To",
+      "from_short": "From",
+      "to_short": "To"
+    },
+    "hints": {
+      "user_id_tooltip": "The raw account ID assigned by the communication platform, e.g. ou_xxxx on Feishu or Uxxxx on Slack.",
+      "principal_tooltip": "The employee's unified primary identity ID. Searching this automatically resolves all linked accounts (Feishu/Slack/WebChat)."
+    },
+    "stats": {
+      "total": "Total",
+      "success": "Success",
+      "failure": "Failure",
+      "denied": "Denied"
+    },
+    "action_groups": {
+      "auth": "Authentication",
+      "session": "Session",
+      "message": "Message",
+      "tool": "Tool Call",
+      "admin": "Admin",
+      "system": "System"
     },
     "table": {
       "time": "Time",
@@ -438,12 +461,30 @@
       "platform": "Platform",
       "action": "Action",
       "outcome": "Outcome",
-      "detail": "Detail"
+      "detail": "Detail",
+      "session": "Session"
     },
     "outcomes": {
       "success": "Success",
       "failure": "Failure",
       "denied": "Denied"
+    },
+    "drawer": {
+      "title": "Activity Detail",
+      "identity": "Identity",
+      "context": "Context",
+      "network": "Network",
+      "detail_json": "Detail JSON",
+      "hash_chain": "Hash Chain",
+      "prev_hash": "Previous",
+      "self_hash": "Current",
+      "hash_hint": "Tamper-evident chain",
+      "no_detail": "No detail payload",
+      "copy_json": "Copy JSON",
+      "copied": "Copied",
+      "open_session": "Open session",
+      "ip_masked": "masked unless include_pii",
+      "message_content": "Message Content"
     },
     "action": {
       "export_json": "Export JSON",

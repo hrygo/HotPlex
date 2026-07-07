@@ -21,6 +21,7 @@ import (
 // mockAuditStoreForHandler implements audit.Store for handler tests.
 type mockAuditStoreForHandler struct {
 	queryFn       func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error)
+	statsFn       func(ctx context.Context, q audit.Query) (audit.ActivityStats, error)
 	identityLinks []audit.IdentityLink
 }
 
@@ -32,6 +33,12 @@ func (m *mockAuditStoreForHandler) Query(ctx context.Context, q audit.Query) ([]
 		return m.queryFn(ctx, q)
 	}
 	return nil, nil
+}
+func (m *mockAuditStoreForHandler) Stats(ctx context.Context, q audit.Query) (audit.ActivityStats, error) {
+	if m.statsFn != nil {
+		return m.statsFn(ctx, q)
+	}
+	return audit.ActivityStats{ByOutcome: map[string]int64{}, ByPlatform: map[string]int64{}}, nil
 }
 func (m *mockAuditStoreForHandler) QueryAsc(ctx context.Context, fromID int64, limit int) ([]audit.UserActivity, error) {
 	return nil, nil // handler tests don't exercise the verifier path
@@ -535,6 +542,127 @@ func TestHandleActivityExport_CSVFormat(t *testing.T) {
 	require.True(t, strings.Contains(body, "id,ts,user_id"))
 }
 
+func TestHandleActivityExport_DefaultMasksPII(t *testing.T) {
+	t.Parallel()
+	api := newTestAPI()
+	store := &mockAuditStoreForHandler{
+		queryFn: func(ctx context.Context, q audit.Query) ([]audit.UserActivity, error) {
+			require.False(t, q.IncludePII)
+			return []audit.UserActivity{
+				{
+					ID:        1,
+					UserID:    "u1",
+					IP:        "192.168.1.100",
+					UserAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				},
+			}, nil
+		},
+	}
+	api.SetActivityService(NewActivityService(store, slog.Default()))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/admin/activity/export?format=json", nil)
+	r = withScope(r, ScopeAdminRead)
+
+	api.HandleAdminActivityExport(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var rows []audit.UserActivity
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&rows))
+	require.Len(t, rows, 1)
+	require.Equal(t, "192.168.1.0", rows[0].IP)
+	require.True(t, strings.HasSuffix(rows[0].UserAgent, "..."))
+}
+
+func TestHandleAdminActivity_RejectsUserAndPrincipalFilters(t *testing.T) {
+	t.Parallel()
+	api := newTestAPIWithActivity()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/admin/activity?user_id=u1&principal_user_id=u-local", nil)
+	r = withScope(r, ScopeAdminRead)
+
+	api.HandleAdminActivity(w, r)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "mutually exclusive")
+}
+
+func TestHandleAdminActivityExport_RejectsUserAndPrincipalFilters(t *testing.T) {
+	t.Parallel()
+	api := newTestAPIWithActivity()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/admin/activity/export?user_id=u1&principal_user_id=u-local", nil)
+	r = withScope(r, ScopeAdminRead)
+
+	api.HandleAdminActivityExport(w, r)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "mutually exclusive")
+}
+
+func TestHandleCreateAuditIdentityLink_Success(t *testing.T) {
+	t.Parallel()
+	api := newTestAPI()
+	store := &mockAuditStoreForHandler{}
+	api.SetActivityService(NewActivityService(store, slog.Default()))
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"principal_user_id":"u-local","provider":"feishu","subject":"ou_feishu","subject_type":"platform","display_name":"Feishu User"}`)
+	r := httptest.NewRequest(http.MethodPost, "/admin/audit/identity-links", body)
+	r = withScope(r, ScopeAdminWrite)
+
+	api.HandleCreateAuditIdentityLink(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		Link audit.IdentityLink `json:"link"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.NotEmpty(t, resp.Link.ID)
+	require.Equal(t, "u-local", resp.Link.PrincipalUserID)
+	require.Equal(t, "ou_feishu", resp.Link.Subject)
+	require.Len(t, store.identityLinks, 1)
+}
+
+func TestHandleAuditIdentityLinks_Success(t *testing.T) {
+	t.Parallel()
+	api := newTestAPI()
+	store := &mockAuditStoreForHandler{
+		identityLinks: []audit.IdentityLink{
+			{ID: "link-1", PrincipalUserID: "u-local", Provider: "feishu", Subject: "ou_feishu"},
+			{ID: "link-2", PrincipalUserID: "other", Provider: "slack", Subject: "U_other"},
+		},
+	}
+	api.SetActivityService(NewActivityService(store, slog.Default()))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/admin/audit/identity-links?principal_user_id=u-local", nil)
+	r = withScope(r, ScopeAdminRead)
+
+	api.HandleAuditIdentityLinks(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		Links []audit.IdentityLink `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp.Links, 1)
+	require.Equal(t, "link-1", resp.Links[0].ID)
+}
+
+func TestHandleDeleteAuditIdentityLink_Success(t *testing.T) {
+	t.Parallel()
+	api := newTestAPIWithActivity()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/admin/audit/identity-links/link-1", nil)
+	r = withScope(r, ScopeAdminWrite)
+	r.SetPathValue("id", "link-1")
+
+	api.HandleDeleteAuditIdentityLink(w, r)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
 // ─── I1: meta-audit must fire on export failure (spec §5.8) ───────────────────
 
 // capturingAuditStore is an audit.Store whose BeginTx returns a capturing Tx
@@ -550,6 +678,9 @@ func (s *capturingAuditStore) BeginTx(context.Context) (audit.Tx, error) {
 }
 func (s *capturingAuditStore) Query(context.Context, audit.Query) ([]audit.UserActivity, error) {
 	return nil, nil
+}
+func (s *capturingAuditStore) Stats(context.Context, audit.Query) (audit.ActivityStats, error) {
+	return audit.ActivityStats{ByOutcome: map[string]int64{}, ByPlatform: map[string]int64{}}, nil
 }
 func (s *capturingAuditStore) QueryAsc(context.Context, int64, int) ([]audit.UserActivity, error) {
 	return nil, nil

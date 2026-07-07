@@ -300,6 +300,17 @@ skills:
 log:
   level: "info"
   format: "json" # "json" or "text"
+  # File logging + rotation. Disabled by default (logs go to stderr only,
+  # matching daemon-mode stderr redirection). Enable to tee logs to a rotated
+  # file; in foreground/TTY mode logs still appear on stderr too.
+  file:
+    enabled: false
+    path: "" # empty → ~/.hotplex/logs/gateway.log
+    max_size: 10 # MB per file before rotation
+    max_age: 30 # days to retain rotated logs
+    max_backups: 100 # number of rotated backups to keep
+    compress: true # gzip rotated backups
+    local_time: true # use local time in rotation filenames
 
 webchat:
   addr: ""      # informational: banner display only

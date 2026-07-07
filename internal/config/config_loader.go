@@ -43,6 +43,13 @@ func Load(filePath string) (*Config, error) {
 	// Viper's AutomaticEnv only works during Unmarshal if keys are known.
 	_ = v.BindEnv("log.level")
 	_ = v.BindEnv("log.format")
+	_ = v.BindEnv("log.file.enabled")
+	_ = v.BindEnv("log.file.path")
+	_ = v.BindEnv("log.file.max_size")
+	_ = v.BindEnv("log.file.max_age")
+	_ = v.BindEnv("log.file.max_backups")
+	_ = v.BindEnv("log.file.compress")
+	_ = v.BindEnv("log.file.local_time")
 	_ = v.BindEnv("db.path")
 	_ = v.BindEnv("db.wal_mode")
 	_ = v.BindEnv("db.driver")

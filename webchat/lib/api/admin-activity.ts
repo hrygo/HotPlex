@@ -1,4 +1,4 @@
-import type { AuditActivityResponse } from '@/lib/types/admin';
+import type { ActivityStats, AuditActivityResponse } from '@/lib/types/admin';
 
 import { adminFetch, getStoredAdminConnection } from './admin-client';
 import { BASE, authOpts } from './client';
@@ -8,7 +8,11 @@ export interface ActivityFilters {
   userId?: string;
   principalUserId?: string;
   action?: string;
+  actionPrefix?: string;
   outcome?: string;
+  platform?: string;
+  sessionId?: string;
+  resourceType?: string;
   from?: string;
   to?: string;
   limit?: number;
@@ -20,7 +24,11 @@ function activityParams(filters: ActivityFilters, format?: 'json' | 'csv'): stri
   if (filters.userId) params.set('user_id', filters.userId);
   if (filters.principalUserId) params.set('principal_user_id', filters.principalUserId);
   if (filters.action) params.set('action', filters.action);
+  if (filters.actionPrefix) params.set('action_prefix', filters.actionPrefix);
   if (filters.outcome) params.set('outcome', filters.outcome);
+  if (filters.platform) params.set('platform', filters.platform);
+  if (filters.sessionId) params.set('session_id', filters.sessionId);
+  if (filters.resourceType) params.set('resource_type', filters.resourceType);
   if (filters.from) params.set('from', new Date(filters.from).toISOString());
   if (filters.to) params.set('to', new Date(filters.to).toISOString());
   if (filters.limit) params.set('limit', String(filters.limit));
@@ -30,13 +38,21 @@ function activityParams(filters: ActivityFilters, format?: 'json' | 'csv'): stri
   return query ? `?${query}` : '';
 }
 
+function activityBasePath(): string {
+  return getStoredAdminConnection() ? '/admin/activity' : '/api/admin/activity';
+}
+
 export async function listActivity(filters: ActivityFilters): Promise<AuditActivityResponse> {
-  return adminFetch<AuditActivityResponse>(`/admin/activity${activityParams(filters)}`);
+  return adminFetch<AuditActivityResponse>(`${activityBasePath()}${activityParams(filters)}`);
+}
+
+export async function listActivityStats(filters: ActivityFilters): Promise<ActivityStats> {
+  return adminFetch<ActivityStats>(`${activityBasePath()}/stats${activityParams(filters)}`);
 }
 
 export async function downloadActivity(filters: ActivityFilters, format: 'json' | 'csv'): Promise<void> {
   const conn = getStoredAdminConnection();
-  const path = `/admin/activity/export${activityParams(filters, format)}`;
+  const path = `${conn ? '/admin/activity' : '/api/admin/activity'}/export${activityParams(filters, format)}`;
   const res = conn
     ? await fetch(`${conn.url}${path}`, {
         headers: { Authorization: `Bearer ${conn.token}` },

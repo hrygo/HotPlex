@@ -126,6 +126,25 @@ func TestDiffConfigs_FullContentRetentionRequiresRestart(t *testing.T) {
 	require.False(t, changes[0].Hot)
 }
 
+// TestDiffConfigs_LogFileRequiresRestart locks in that log.file.* fields are
+// static: changing the rotation sink at runtime cannot rebuild the lumberjack
+// writer safely, so a restart is required.
+func TestDiffConfigs_LogFileRequiresRestart(t *testing.T) {
+	t.Parallel()
+	prev := Default()
+	next := Default()
+	next.Log.File.Enabled = true
+	next.Log.File.Path = "/var/log/hotplex/gateway.log"
+	next.Log.File.MaxSize = 50
+
+	changes := diffConfigs(prev, next)
+	// All three changed fields must be reported as static (Hot=false).
+	require.Len(t, changes, 3)
+	for _, c := range changes {
+		require.False(t, c.Hot, "field %s should require restart", c.Field)
+	}
+}
+
 func TestWatcher_Rollback_Triggers_Store(t *testing.T) {
 	t.Parallel()
 

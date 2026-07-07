@@ -252,6 +252,98 @@ func TestSQLiteStore_Query_Filters(t *testing.T) {
 	require.Len(t, res, 5)
 }
 
+func TestSQLiteStore_Query_ExtendedFilters(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	// Seed rows that exercise the new filter dimensions. tool.call carries a
+	// session_id + resource_type so it is matchable by both; auth.login has
+	// no session/resource and serves as the negative-match control.
+	rows := []*UserActivity{
+		{Ts: 1000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionToolCall, Outcome: OutcomeSuccess, SessionID: "sess-a", ResourceType: "tool", ResourceID: "call-1", DetailJSON: `{}`, PrevHash: "", SelfHash: "h1"},
+		{Ts: 2000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionToolCall, Outcome: OutcomeSuccess, SessionID: "sess-a", ResourceType: "tool", ResourceID: "call-2", DetailJSON: `{}`, PrevHash: "h1", SelfHash: "h2"},
+		{Ts: 3000, UserID: "u2", UserIDType: UserIDTypeRegistered, Platform: PlatformWebChat, Action: ActionToolCall, Outcome: OutcomeFailure, SessionID: "sess-b", ResourceType: "tool", ResourceID: "call-3", DetailJSON: `{}`, PrevHash: "h2", SelfHash: "h3"},
+		{Ts: 4000, UserID: "u2", UserIDType: UserIDTypeRegistered, Platform: PlatformWebChat, Action: ActionSessionCreate, Outcome: OutcomeSuccess, SessionID: "sess-b", ResourceType: "session", ResourceID: "sess-b", DetailJSON: `{}`, PrevHash: "h3", SelfHash: "h4"},
+		{Ts: 5000, UserID: "u3", UserIDType: UserIDTypeAnonymous, Platform: PlatformAPI, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "h4", SelfHash: "h5"},
+		{Ts: 6000, UserID: "u3", UserIDType: UserIDTypeAnonymous, Platform: PlatformAPI, Action: ActionAuthTokenValidated, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "h5", SelfHash: "h6"},
+	}
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, tx.AppendBatch(ctx, rows))
+	require.NoError(t, tx.Commit())
+
+	cases := []struct {
+		name    string
+		q       Query
+		wantIDs []int64 // by SelfHash suffix for readability
+		wantCnt int
+	}{
+		{name: "platform feishu", q: Query{Platform: PlatformFeishu}, wantCnt: 2},
+		{name: "platform webchat", q: Query{Platform: PlatformWebChat}, wantCnt: 2},
+		{name: "session_id exact", q: Query{SessionID: "sess-a"}, wantCnt: 2},
+		{name: "resource_type tool", q: Query{ResourceType: "tool"}, wantCnt: 3},
+		{name: "resource_type session", q: Query{ResourceType: "session"}, wantCnt: 1},
+		{name: "action_prefix tool.", q: Query{ActionPrefix: "tool."}, wantCnt: 3},
+		{name: "action_prefix auth.", q: Query{ActionPrefix: "auth."}, wantCnt: 2},
+		// Prefix literal safety: "auth.login" must not match via wildcard "_" .
+		{name: "action_prefix literal underscore", q: Query{ActionPrefix: "auth_login"}, wantCnt: 0},
+		// Composed filters.
+		{name: "platform+action_prefix", q: Query{Platform: PlatformWebChat, ActionPrefix: "tool."}, wantCnt: 1},
+		{name: "session+resource_type", q: Query{SessionID: "sess-b", ResourceType: "tool"}, wantCnt: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := store.Query(ctx, tc.q)
+			require.NoError(t, err)
+			require.Len(t, res, tc.wantCnt, "query=%+v", tc.q)
+		})
+	}
+}
+
+func TestSQLiteStore_Stats(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	rows := []*UserActivity{
+		{Ts: 1000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "", SelfHash: "h1"},
+		{Ts: 2000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionToolCall, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "h1", SelfHash: "h2"},
+		{Ts: 3000, UserID: "u2", UserIDType: UserIDTypeRegistered, Platform: PlatformWebChat, Action: ActionToolCall, Outcome: OutcomeFailure, DetailJSON: `{}`, PrevHash: "h2", SelfHash: "h3"},
+		{Ts: 4000, UserID: "u2", UserIDType: UserIDTypeRegistered, Platform: PlatformWebChat, Action: ActionAuthLogin, Outcome: OutcomeDenied, DetailJSON: `{}`, PrevHash: "h3", SelfHash: "h4"},
+	}
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, tx.AppendBatch(ctx, rows))
+	require.NoError(t, tx.Commit())
+
+	// Unscoped stats: total=4, outcome {success:2, failure:1, denied:1}, platform {feishu:2, webchat:2}.
+	stats, err := store.Stats(ctx, Query{})
+	require.NoError(t, err)
+	require.Equal(t, int64(4), stats.Total)
+	require.Equal(t, int64(2), stats.ByOutcome[OutcomeSuccess])
+	require.Equal(t, int64(1), stats.ByOutcome[OutcomeFailure])
+	require.Equal(t, int64(1), stats.ByOutcome[OutcomeDenied])
+	require.Equal(t, int64(2), stats.ByPlatform[PlatformFeishu])
+	require.Equal(t, int64(2), stats.ByPlatform[PlatformWebChat])
+
+	// Scoped stats: only tool.call → total=2, failure=1.
+	stats, err = store.Stats(ctx, Query{ActionPrefix: "tool."})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.Total)
+	require.Equal(t, int64(1), stats.ByOutcome[OutcomeSuccess])
+	require.Equal(t, int64(1), stats.ByOutcome[OutcomeFailure])
+	require.Equal(t, int64(2), stats.ByPlatform[PlatformFeishu]+stats.ByPlatform[PlatformWebChat])
+
+	// Empty table scoped to impossible filter returns zero counts, not nil maps.
+	stats, err = store.Stats(ctx, Query{Platform: "nope"})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), stats.Total)
+	require.NotNil(t, stats.ByOutcome)
+	require.NotNil(t, stats.ByPlatform)
+}
+
 func TestSQLiteStore_DeleteBefore(t *testing.T) {
 	t.Parallel()
 	store := newTestSQLiteStore(t)
@@ -461,9 +553,10 @@ func TestSQLiteStore_IdentityLinks_CRUD(t *testing.T) {
 	require.Len(t, links, 1)
 	require.Equal(t, "ou_feishu", links[0].Subject)
 
-	link.ID = "ignored-on-conflict"
+	link.ID = "link-2"
 	link.PrincipalUserID = "u-other"
 	link.DisplayName = "Moved"
+	link.CreatedAt = 2000
 	link.UpdatedAt = 2000
 	require.NoError(t, store.UpsertIdentityLink(ctx, link))
 
@@ -473,7 +566,9 @@ func TestSQLiteStore_IdentityLinks_CRUD(t *testing.T) {
 	links, err = store.ListIdentityLinks(ctx, "u-other")
 	require.NoError(t, err)
 	require.Len(t, links, 1)
+	require.Equal(t, "link-2", links[0].ID)
 	require.Equal(t, "Moved", links[0].DisplayName)
+	require.Equal(t, int64(2000), links[0].CreatedAt)
 
 	require.NoError(t, store.DeleteIdentityLink(ctx, links[0].ID))
 	links, err = store.ListIdentityLinks(ctx, "u-other")

@@ -851,6 +851,9 @@ func (mockAuditStore) BeginTx(_ context.Context) (audit.Tx, error) { return mock
 func (mockAuditStore) Query(_ context.Context, _ audit.Query) ([]audit.UserActivity, error) {
 	return nil, nil
 }
+func (mockAuditStore) Stats(_ context.Context, _ audit.Query) (audit.ActivityStats, error) {
+	return audit.ActivityStats{ByOutcome: map[string]int64{}, ByPlatform: map[string]int64{}}, nil
+}
 func (mockAuditStore) QueryAsc(_ context.Context, _ int64, _ int) ([]audit.UserActivity, error) {
 	return nil, nil // security tests don't exercise the verifier path
 }
@@ -907,6 +910,9 @@ func (s *capturingAuditStore) BeginTx(context.Context) (audit.Tx, error) {
 }
 func (s *capturingAuditStore) Query(context.Context, audit.Query) ([]audit.UserActivity, error) {
 	return nil, nil
+}
+func (s *capturingAuditStore) Stats(context.Context, audit.Query) (audit.ActivityStats, error) {
+	return audit.ActivityStats{ByOutcome: map[string]int64{}, ByPlatform: map[string]int64{}}, nil
 }
 func (s *capturingAuditStore) QueryAsc(context.Context, int64, int) ([]audit.UserActivity, error) {
 	return nil, nil
