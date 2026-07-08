@@ -319,6 +319,30 @@ type Question struct {
 	MultiSelect bool             `json:"multi_select"`
 }
 
+// UnmarshalJSON implements custom JSON unmarshaling to support aliases for MultiSelect.
+func (q *Question) UnmarshalJSON(data []byte) error {
+	type Alias Question
+	aux := &struct {
+		IsMultiSelect *bool `json:"is_multi_select,omitempty"`
+		MultiSelect   *bool `json:"multi_select,omitempty"`
+		Multiple      *bool `json:"multiple,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(q),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.IsMultiSelect != nil {
+		q.MultiSelect = *aux.IsMultiSelect
+	} else if aux.MultiSelect != nil {
+		q.MultiSelect = *aux.MultiSelect
+	} else if aux.Multiple != nil {
+		q.MultiSelect = *aux.Multiple
+	}
+	return nil
+}
+
 // QuestionRequestData is the payload for QuestionRequest events (S→C — ask user a question).
 type QuestionRequestData struct {
 	ID        string     `json:"id"`
