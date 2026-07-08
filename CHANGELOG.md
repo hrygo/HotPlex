@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.32.3] - 2026-07-08
+
+### Summary
+
+v1.32.3 是一次 patch 版本更新，修复了 API Key 持有者（owner）规范化问题，确保鉴权、审计和跨模块用户标识的准确性与一致性。
+
+### Fixed
+
+- **Security**: Fix API key owner normalization — ensure consistent owner identification across auth, audit, and spill append paths, fixing edge cases where partial key owner metadata was incorrectly appended. (#868)
+
 ## [1.32.2] - 2026-07-08
 
 ### Summary
