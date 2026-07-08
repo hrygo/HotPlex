@@ -17,6 +17,7 @@ import type { AdminConnection } from '@/lib/types/admin';
 
 import { BASE, authOpts } from './client';
 import { parseApiError } from './errors';
+import { adminUrl } from '@/lib/config';
 
 const STORAGE_URL_KEY = 'hotplex_admin_url';
 const STORAGE_TOKEN_KEY = 'hotplex_admin_token';
@@ -118,7 +119,7 @@ async function adminFetchCookie<T>(
   path: string,
   options?: AdminFetchOptions,
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${adminUrl}${path}`, {
     ...options,
     ...authOpts(),
     headers: {
