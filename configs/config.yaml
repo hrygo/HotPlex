@@ -127,7 +127,8 @@ security:
   # (comma-separated list, e.g. "https://app.example.com,https://admin.example.com").
   # A startup WARN log fires when wildcard "*" is in effect.
   allowed_origins:
-    - "*"
+    - "http://127.0.0.1:3000"
+    - "http://localhost:3000"
   # Content-Security-Policy header served with the embedded webchat SPA and
   # docs portal. Leave empty to use the package-level default, which is
   # INTENTIONALLY permissive: connect-src uses the CSP scheme keywords
