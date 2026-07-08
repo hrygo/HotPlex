@@ -233,7 +233,47 @@
     "search": { "loading": "Searching..." },
     "list": { "loading": "Listing directory..." },
     "todo": { "loading": "Retrieving latest tasks..." },
-    "filediff": { "loading": "Synthesizing file patch..." }
+    "filediff": { "loading": "Synthesizing file patch..." },
+    "interaction": {
+      "timeout": "Expires in {{seconds}}s",
+      "permission": {
+        "title": "Tool Execution Approval",
+        "description": "Agent requests permission to execute the following tool",
+        "approved": "Execution Approved",
+        "rejected": "Execution Rejected",
+        "expired": "Approval Expired",
+        "submitting": "Submitting approval...",
+        "failed": "Submission failed: {{error}}",
+        "approve": "Approve",
+        "reject": "Reject"
+      },
+      "question": {
+        "title": "Input Request",
+        "description": "Agent requires your input on the following questions",
+        "answered": "Answered",
+        "expired": "Question Expired",
+        "submitting": "Submitting answers...",
+        "failed": "Submission failed: {{error}}",
+        "submit": "Submit Answer",
+        "custom_placeholder": "Type custom answer...",
+        "custom_answer": "Custom Answer",
+        "multi_select_hint": " (Multiple choice)"
+      },
+      "elicitation": {
+        "title": "Interactive Request",
+        "description": "Input request from MCP server",
+        "accepted": "Request Accepted",
+        "declined": "Request Declined",
+        "cancelled": "Request Cancelled",
+        "expired": "Request Expired",
+        "submitting": "Submitting response...",
+        "failed": "Submission failed: {{error}}",
+        "accept": "Accept",
+        "decline": "Decline",
+        "cancel": "Cancel",
+        "open_url": "Open Form URL"
+      }
+    }
   },
   "aria": {
     "send": "Send message",

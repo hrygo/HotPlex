@@ -552,3 +552,48 @@ func TestClone_EmptyEnvelope(t *testing.T) {
 	require.Equal(t, emptyEnv, clone)
 	require.NotSame(t, emptyEnv, clone) // Should be different pointer
 }
+
+func TestQuestion_UnmarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		jsonStr  string
+		expected bool
+	}{
+		{
+			name:     "unmarshal standard multi_select key",
+			jsonStr:  `{"question": "test?", "header": "test", "multi_select": true}`,
+			expected: true,
+		},
+		{
+			name:     "unmarshal standard multi_select false",
+			jsonStr:  `{"question": "test?", "header": "test", "multi_select": false}`,
+			expected: false,
+		},
+		{
+			name:     "unmarshal alias is_multi_select key",
+			jsonStr:  `{"question": "test?", "header": "test", "is_multi_select": true}`,
+			expected: true,
+		},
+		{
+			name:     "unmarshal alias multiple key",
+			jsonStr:  `{"question": "test?", "header": "test", "multiple": true}`,
+			expected: true,
+		},
+		{
+			name:     "unmarshal default false when none provided",
+			jsonStr:  `{"question": "test?", "header": "test"}`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var q Question
+			err := json.Unmarshal([]byte(tt.jsonStr), &q)
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, q.MultiSelect)
+		})
+	}
+}

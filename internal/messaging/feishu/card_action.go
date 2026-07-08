@@ -37,6 +37,7 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 	// "request_id" key — reading "id" here would silently miss every click.
 	requestID, _ := val["request_id"].(string)
 	actionType, _ := val["action"].(string)
+	summary, _ := val["summary"].(string)
 
 	openID := ""
 	if event.Event.Operator != nil {
@@ -81,7 +82,7 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 
 	default:
 		a.Log.Warn("feishu: unknown card action type", "action", actionType, "request_id", requestID)
-		return wrapResolvedCard(buildResolvedCard("deny", "未知操作", headerGrey)), nil
+		return wrapResolvedCard(buildResolvedCard("deny", "未知操作", headerGrey, summary, "")), nil
 	}
 
 	// Owner check BEFORE Complete — preserves the interaction for non-owner
@@ -92,7 +93,7 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 	// their own timeout.
 	pending, exists := a.Interactions.Get(requestID)
 	if !exists {
-		resp = wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", ""))
+		resp = wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "", summary, ""))
 		return
 	}
 	if pending.OwnerID != "" && pending.OwnerID != openID {
@@ -103,7 +104,7 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 
 	pi, ok := a.Interactions.Complete(requestID)
 	if !ok {
-		resp = wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", ""))
+		resp = wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "", summary, ""))
 		return
 	}
 
@@ -116,7 +117,7 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 		"action", actionType,
 		"operator", openID)
 
-	return wrapResolvedCard(buildResolvedCard(actionType, resolvedLabel, resolvedColor)), nil
+	return wrapResolvedCard(buildResolvedCard(actionType, resolvedLabel, resolvedColor, summary, openID)), nil
 }
 
 func wrapResolvedCard(card map[string]any) *callback.CardActionTriggerResponse {

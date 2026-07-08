@@ -1,6 +1,6 @@
 import type { ActivityStats, AuditActivityResponse } from '@/lib/types/admin';
 
-import { adminFetch, getStoredAdminConnection } from './admin-client';
+import { getStoredAdminConnection } from './admin-client';
 import { BASE, authOpts } from './client';
 import { parseApiError } from './errors';
 
@@ -42,12 +42,40 @@ function activityBasePath(): string {
   return getStoredAdminConnection() ? '/admin/activity' : '/api/admin/activity';
 }
 
+// Cannot reuse adminFetch: its cookie channel targets adminUrl (port 9999
+// adminMux), but /api/admin/activity is registered on the gateway mux (BASE,
+// port 8888) to avoid collisions with the SPA /admin/activity HTML fallback.
+async function adminActivityFetch<T>(path: string): Promise<T> {
+  const conn = getStoredAdminConnection();
+  const res = conn
+    ? await fetch(`${conn.url}${path}`, { headers: { Authorization: `Bearer ${conn.token}` } })
+    : await fetch(`${BASE}${path}`, authOpts());
+
+  if (!res.ok) {
+    const info = await parseApiError(res);
+    const message = info.message || info.raw || `Admin request failed: ${res.status}`;
+    const err = new Error(message);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (err as any).status = info.status;
+    if (info.code) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (err as any).code = info.code;
+    }
+    throw err;
+  }
+
+  if (res.status === 204 || res.status === 202) {
+    return undefined as unknown as T;
+  }
+  return res.json();
+}
+
 export async function listActivity(filters: ActivityFilters): Promise<AuditActivityResponse> {
-  return adminFetch<AuditActivityResponse>(`${activityBasePath()}${activityParams(filters)}`);
+  return adminActivityFetch<AuditActivityResponse>(`${activityBasePath()}${activityParams(filters)}`);
 }
 
 export async function listActivityStats(filters: ActivityFilters): Promise<ActivityStats> {
-  return adminFetch<ActivityStats>(`${activityBasePath()}/stats${activityParams(filters)}`);
+  return adminActivityFetch<ActivityStats>(`${activityBasePath()}/stats${activityParams(filters)}`);
 }
 
 export async function downloadActivity(filters: ActivityFilters, format: 'json' | 'csv'): Promise<void> {

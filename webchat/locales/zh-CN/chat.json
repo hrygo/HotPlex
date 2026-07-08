@@ -233,7 +233,47 @@
     "search": { "loading": "搜索中..." },
     "list": { "loading": "列出目录中..." },
     "todo": { "loading": "获取最新任务中..." },
-    "filediff": { "loading": "合成文件补丁中..." }
+    "filediff": { "loading": "合成文件补丁中..." },
+    "interaction": {
+      "timeout": "剩余时间 {{seconds}}秒",
+      "permission": {
+        "title": "工具执行授权",
+        "description": "智能体请求执行以下工具",
+        "approved": "已允许执行",
+        "rejected": "已拒绝执行",
+        "expired": "授权已过期",
+        "submitting": "正在提交授权...",
+        "failed": "提交失败：{{error}}",
+        "approve": "允许",
+        "reject": "拒绝"
+      },
+      "question": {
+        "title": "输入请求",
+        "description": "智能体需要您回答以下问题",
+        "answered": "已回答",
+        "expired": "问题已过期",
+        "submitting": "正在提交回答...",
+        "failed": "回答失败：{{error}}",
+        "submit": "提交回答",
+        "custom_placeholder": "输入自定义回答...",
+        "custom_answer": "自定义回答",
+        "multi_select_hint": "（可多选）"
+      },
+      "elicitation": {
+        "title": "交互输入请求",
+        "description": "来自 MCP 服务器的输入请求",
+        "accepted": "已接受请求",
+        "declined": "已拒绝请求",
+        "cancelled": "已取消请求",
+        "expired": "请求已过期",
+        "submitting": "正在提交响应...",
+        "failed": "提交失败：{{error}}",
+        "accept": "接受",
+        "decline": "拒绝",
+        "cancel": "取消",
+        "open_url": "打开表单链接"
+      }
+    }
   },
   "aria": {
     "send": "发送消息",

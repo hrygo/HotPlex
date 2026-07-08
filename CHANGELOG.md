@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.33.0] - 2026-07-08
+
+### Summary
+
+v1.33.0 是一次 minor 版本更新，聚焦于 **跨平台交互式体验（Cross-Platform Interactive UX Loops, #859）** 的完整支持，以及 OpenCodeServer (OCS) 1.17+ 的增强。引入了多平台（Feishu/Slack）交互卡片模板与事件处理机制，WebChat UI 新增表单收集与动态权限审批卡片，并在 Gateway 层面实现了完善的交互超时控制。此外，允许 localhost 开发环境跨域，支持更灵活的 worker 默认权限模式。
+
+### Added
+
+- **Gateway Core**: Support cross-platform interactive UX loops by handling elicitation forms, permission approvals, and question-response flows. (#859)
+- **WebChat UI**: Add interactive UX components including `ElicitationFormCard`, `PermissionApprovalCard`, and `QuestionResponseCard` with full i18n support.
+- **WebChat UI**: Implement countdown and timeout control with `useInteractionTimeout` hook for action deadlines.
+- **Messaging**: Support interactive cards in Feishu and Slack, updating templates and action routing to handle user responses.
+- **Worker**: Support OCS 1.17 part metadata parsing to route streaming part deltas.
+- **Configuration**: Add `default_permission_mode` under `worker` section in `config.yaml` to configure agent execution permissions.
+
+### Changed
+
+- **Configuration**: Update default `allowed_origins` to allow localhost next dev (port 3000) and embedded webchat (port 8888) by default.
+
+### Fixed
+
+- **WebChat UI**: Support `multi_select` and multiple fields in `QuestionResponseCard`, and fallback to question text if `q.id` is undefined.
+- **WebChat UI**: Route admin cookie fetch requests to correct `adminUrl` instead of gateway BASE URL.
+- **Gateway Core**: Support multi-select aliases in Question JSON unmarshaling.
+
 ## [1.32.3] - 2026-07-08
 
 ### Summary

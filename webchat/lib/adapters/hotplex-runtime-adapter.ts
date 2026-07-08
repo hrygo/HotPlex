@@ -78,6 +78,25 @@ export type {
 // ThreadSuggestion shape — matches @assistant-ui/core ThreadSuggestion
 type ThreadSuggestion = { title: string; label: string; prompt: string };
 
+export type InteractionKind = "permission" | "question" | "elicitation";
+export type InteractionStatus =
+  | "pending"
+  | "submitting"
+  | "resolved"
+  | "rejected"
+  | "expired"
+  | "failed";
+
+export interface InteractionState {
+  kind: InteractionKind;
+  requestId: string;
+  status: InteractionStatus;
+  createdAt: number;
+  expiresAt?: number;
+  response?: any;
+  error?: string;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -765,6 +784,41 @@ export function useHotPlexRuntime({
 
         const handleError = (data: ErrorData, env: Envelope) => {
             const isBusy = (data?.code as string) === "SESSION_BUSY";
+
+            // Mark any submitting interaction as failed if this is an interaction error
+            const isInteractionError = (data?.message || "").includes("worker response failed") || 
+                                       (data?.message || "").includes("invalid response data");
+            if (isInteractionError) {
+                const reqId = env?.metadata?.interaction_error?.request_id;
+                setMessages((prev) => {
+                    return prev.map((msg) => {
+                        if (msg.role !== "assistant") return msg;
+                        let found = false;
+                        const parts = msg.parts.map((p) => {
+                            if (p.type === "tool-call" && p.args?.interaction) {
+                                const inter = p.args.interaction;
+                                if ((reqId && p.toolCallId === reqId) || (!reqId && inter.status === "submitting")) {
+                                    found = true;
+                                    return {
+                                        ...p,
+                                        args: {
+                                            ...p.args,
+                                            interaction: {
+                                                ...inter,
+                                                status: "failed" as const,
+                                                error: data?.message || "Failed to deliver response to worker",
+                                            },
+                                        },
+                                    };
+                                }
+                            }
+                            return p;
+                        });
+                        return found ? { ...msg, parts } : msg;
+                    });
+                });
+            }
+
             const isResumeRetry = (data?.code as string) === "RESUME_RETRY";
             const isShutdown = (data?.message || "").includes(
                 "during shutdown",
@@ -1084,6 +1138,13 @@ export function useHotPlexRuntime({
                                         description: data.description,
                                         tool_name: data.tool_name,
                                         args: data.args,
+                                        interaction: {
+                                            kind: "permission",
+                                            requestId: data.id,
+                                            status: "pending",
+                                            createdAt: Date.now(),
+                                            expiresAt: Date.now() + 5 * 60 * 1000,
+                                        },
                                     },
                                     toolCallId: data.id,
                                 },
@@ -1119,6 +1180,13 @@ export function useHotPlexRuntime({
                                     args: {
                                         description: questionText,
                                         questions: data.questions,
+                                        interaction: {
+                                            kind: "question",
+                                            requestId: data.id,
+                                            status: "pending",
+                                            createdAt: Date.now(),
+                                            expiresAt: Date.now() + 5 * 60 * 1000,
+                                        },
                                     },
                                     toolCallId: data.id,
                                 },
@@ -1153,6 +1221,13 @@ export function useHotPlexRuntime({
                                         message: data.message,
                                         mcp_server_name: data.mcp_server_name,
                                         url: data.url,
+                                        interaction: {
+                                            kind: "elicitation",
+                                            requestId: data.id,
+                                            status: "pending",
+                                            createdAt: Date.now(),
+                                            expiresAt: Date.now() + 5 * 60 * 1000,
+                                        },
                                     },
                                     toolCallId: data.id,
                                 },
@@ -1429,28 +1504,127 @@ export function useHotPlexRuntime({
 
     // Interaction response callback — routes to the correct send method
     const handleInteractionRespond = useCallback(
-        (toolCallId: string, allowed: boolean) => {
+        async (
+            toolCallId: string,
+            response: {
+                type: "permission" | "question" | "elicitation";
+                allowed?: boolean;
+                reason?: string;
+                answers?: Record<string, string>;
+                action?: "accept" | "decline" | "cancel";
+                content?: Record<string, unknown>;
+            },
+        ) => {
             const client = clientRef.current;
             if (!client) return;
-            const entry = interactionMapRef.current.get(toolCallId);
-            if (!entry) return;
-            interactionMapRef.current.delete(toolCallId);
 
-            switch (entry.type) {
-                case "permission":
-                    client.sendPermissionResponse(toolCallId, allowed);
-                    break;
-                case "question":
-                    client.sendQuestionResponse(toolCallId, {
-                        default: allowed ? "yes" : "no",
+            // Transition status to submitting
+            setMessages((prev) => {
+                return prev.map((msg) => {
+                    if (msg.role !== "assistant") return msg;
+                    let found = false;
+                    const parts = msg.parts.map((p) => {
+                        if (p.type === "tool-call" && p.toolCallId === toolCallId) {
+                            found = true;
+                            const inter = p.args?.interaction;
+                            return {
+                                ...p,
+                                args: {
+                                    ...p.args,
+                                    interaction: {
+                                        ...inter,
+                                        status: "submitting" as const,
+                                    },
+                                },
+                            };
+                        }
+                        return p;
                     });
-                    break;
-                case "elicitation":
-                    client.sendElicitationResponse(
-                        toolCallId,
-                        allowed ? "accept" : "decline",
-                    );
-                    break;
+                    return found ? { ...msg, parts } : msg;
+                });
+            });
+
+            try {
+                switch (response.type) {
+                    case "permission":
+                        await client.sendPermissionResponse(
+                            toolCallId,
+                            response.allowed ?? false,
+                            response.reason,
+                        );
+                        break;
+                    case "question":
+                        await client.sendQuestionResponse(toolCallId, response.answers ?? {});
+                        break;
+                    case "elicitation":
+                        await client.sendElicitationResponse(
+                            toolCallId,
+                            response.action ?? "cancel",
+                            response.content,
+                        );
+                        break;
+                }
+
+                // Transition status to resolved/rejected
+                setMessages((prev) => {
+                    return prev.map((msg) => {
+                        if (msg.role !== "assistant") return msg;
+                        let found = false;
+                        const parts = msg.parts.map((p) => {
+                            if (p.type === "tool-call" && p.toolCallId === toolCallId) {
+                                found = true;
+                                const inter = p.args?.interaction;
+                                let nextStatus: InteractionStatus = "resolved";
+                                if (response.type === "permission" && !response.allowed) {
+                                    nextStatus = "rejected";
+                                } else if (response.type === "elicitation" && response.action !== "accept") {
+                                    nextStatus = "rejected";
+                                }
+                                return {
+                                    ...p,
+                                    args: {
+                                        ...p.args,
+                                        interaction: {
+                                            ...inter,
+                                            status: nextStatus,
+                                            response: response,
+                                        },
+                                    },
+                                };
+                            }
+                            return p;
+                        });
+                        return found ? { ...msg, parts } : msg;
+                    });
+                });
+                interactionMapRef.current.delete(toolCallId);
+            } catch (err) {
+                // Transition status to failed
+                setMessages((prev) => {
+                    return prev.map((msg) => {
+                        if (msg.role !== "assistant") return msg;
+                        let found = false;
+                        const parts = msg.parts.map((p) => {
+                            if (p.type === "tool-call" && p.toolCallId === toolCallId) {
+                                found = true;
+                                const inter = p.args?.interaction;
+                                return {
+                                    ...p,
+                                    args: {
+                                        ...p.args,
+                                        interaction: {
+                                            ...inter,
+                                            status: "failed" as const,
+                                            error: String(err),
+                                        },
+                                    },
+                                };
+                            }
+                            return p;
+                        });
+                        return found ? { ...msg, parts } : msg;
+                    });
+                });
             }
         },
         [],

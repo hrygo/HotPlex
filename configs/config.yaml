@@ -127,7 +127,8 @@ security:
   # (comma-separated list, e.g. "https://app.example.com,https://admin.example.com").
   # A startup WARN log fires when wildcard "*" is in effect.
   allowed_origins:
-    - "*"
+    - "http://127.0.0.1:8888"
+    - "http://localhost:8888"
   # Content-Security-Policy header served with the embedded webchat SPA and
   # docs portal. Leave empty to use the package-level default, which is
   # INTENTIONALLY permissive: connect-src uses the CSP scheme keywords
@@ -184,6 +185,10 @@ worker:
   turn_timeout: 0  # per-turn kill timer; 0=disabled (execution_timeout catches zombies)
   default_work_dir: ~/.hotplex/workspace
   pid_dir: ~/.hotplex/.pids
+  # Default permission mode tier (read-only, workspace, auto-edit, bypass)
+  # applied to workspaces with no explicit override (seeded "workspace").
+  # Empty/unset in workspaces allows each worker to run under its own default/config.
+  default_permission_mode: "workspace"
 
   # Environment variables to block from workers (prefix match with trailing "_").
   env_blocklist: []

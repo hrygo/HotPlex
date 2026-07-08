@@ -20,9 +20,12 @@ import { MessageActions } from "./MessageActions";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { getExt, messageVariants, extractCommand, extractFilePath, extractFileContent } from "./thread-helpers";
 import { useTranslation } from "react-i18next";
+import { PermissionApprovalCard } from "@/components/assistant-ui/tools/PermissionApprovalCard";
+import { QuestionResponseCard } from "@/components/assistant-ui/tools/QuestionResponseCard";
+import { ElicitationFormCard } from "@/components/assistant-ui/tools/ElicitationFormCard";
 
  
-const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, allowed: boolean) => void }) {
+const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, response: any) => void }) {
   const { t } = useTranslation('chat');
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const isError = message?.status === "error";
@@ -88,7 +91,57 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                         case "list": return <ListTool toolName={p.toolName} path={extractFilePath(args)} items={p.result} status={status} onToggle={!isLastPart ? toggle : undefined} />;
                         case "todo": return <TodoTool todo={args.todo} todos={args.todos} status={status === "running" ? "running" : "complete"} onToggle={!isLastPart ? toggle : undefined} />;
                         case "ai": return <AgentTool description={args.description} prompt={args.prompt} subagent_type={args.subagent_type} run_in_background={args.run_in_background} status={status === "running" ? "running" : "complete"} onToggle={!isLastPart ? toggle : undefined} />;
-                        case "permission": return <PermissionCard toolName={p.toolName} args={args} status={status === "error" ? "complete" : status as "running" | "complete"} onRespond={p.toolCallId && onInteractionRespond ? (allowed: boolean) => onInteractionRespond(p.toolCallId, allowed) : undefined} onToggle={!isLastPart ? toggle : undefined} />;
+                        case "permission": {
+                          const interaction = p.args?.interaction;
+                          const resolvedStatus = interaction?.status || (status === "error" ? "failed" : status === "complete" ? "resolved" : "pending");
+
+                          if (p.toolName === "question_request") {
+                            const onRespondQuestion = p.toolCallId && onInteractionRespond
+                              ? (answers: Record<string, string>) => onInteractionRespond(p.toolCallId, { type: "question", answers })
+                              : undefined;
+                            return (
+                              <QuestionResponseCard
+                                toolName={p.toolName}
+                                questions={args.questions}
+                                status={resolvedStatus}
+                                interactionState={interaction}
+                                onRespond={onRespondQuestion}
+                                onToggle={!isLastPart ? toggle : undefined}
+                              />
+                            );
+                          } else if (p.toolName === "elicitation") {
+                            const onRespondElicitation = p.toolCallId && onInteractionRespond
+                              ? (action: "accept" | "decline" | "cancel", content?: Record<string, any>) => onInteractionRespond(p.toolCallId, { type: "elicitation", action, content })
+                              : undefined;
+                            return (
+                              <ElicitationFormCard
+                                toolName={p.toolName}
+                                message={args.message}
+                                mcpServerName={args.mcp_server_name}
+                                url={args.url}
+                                status={resolvedStatus}
+                                interactionState={interaction}
+                                onRespond={onRespondElicitation}
+                                onToggle={!isLastPart ? toggle : undefined}
+                              />
+                            );
+                          } else {
+                            const onRespondPerm = p.toolCallId && onInteractionRespond
+                              ? (allowed: boolean, reason?: string) => onInteractionRespond(p.toolCallId, { type: "permission", allowed, reason })
+                              : undefined;
+                            return (
+                              <PermissionApprovalCard
+                                toolName={p.toolName}
+                                args={args.args}
+                                description={args.description}
+                                status={resolvedStatus}
+                                interactionState={interaction}
+                                onRespond={onRespondPerm}
+                                onToggle={!isLastPart ? toggle : undefined}
+                              />
+                            );
+                          }
+                        }
                         default: {
                           const content = p.result || args;
                           const summary = typeof content === 'string' ? content : JSON.stringify(content, null, 2);

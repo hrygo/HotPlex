@@ -243,6 +243,7 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 	for _, tool := range allowedTools {
 		rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
 	}
+	slog.Info("opencode: applying permission rules to session", "session_id", c.getSessionID(), "mode", mode, "rules", rules)
 	if err := c.doPatch(ctx, "/session/"+url.PathEscape(c.getSessionID()), map[string]any{"permission": rules}); err != nil {
 		return nil, fmt.Errorf("opencode set permission: %w", err)
 	}

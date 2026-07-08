@@ -12,6 +12,7 @@ export interface Envelope<T = unknown> {
   session_id: string;
   timestamp: number;
   event: Event<T>;
+  metadata?: Record<string, any>;
 }
 
 export interface Event<T = unknown> {
