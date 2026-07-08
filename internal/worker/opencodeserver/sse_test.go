@@ -82,17 +82,17 @@ func patchBackoff() (restore func()) {
 
 // ─── Global SSE → EventBus Dispatch Tests ─────────────────────────────────────
 
-func TestReadGlobalSSE_PartUpdatedText_Skipped(t *testing.T) {
+func TestReadGlobalSSE_PartUpdatedText_MetadataOnly(t *testing.T) {
 	t.Parallel()
 
 	s, _ := newSingletonWithSSE(t, func(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-Type", "text/event-stream")
 		flusher := rw.(http.Flusher)
 
-		// V1 message.part.updated is now ignored by V2 Converter.
+		// message.part.updated records metadata but does not emit user-visible text.
 		evt := ocsEvent(t, "message.part.updated", map[string]any{
 			"sessionID": "ses_1",
-			"part":      map[string]any{"type": "text", "text": "hello"},
+			"part":      map[string]any{"id": "p1", "messageID": "msg1", "sessionID": "ses_1", "type": "text", "text": "hello"},
 		})
 		fmt.Fprint(rw, evt)
 		flusher.Flush()
@@ -100,6 +100,7 @@ func TestReadGlobalSSE_PartUpdatedText_Skipped(t *testing.T) {
 		// Followed by a V2 part delta to confirm reader is still alive.
 		deltaEvt := ocsEvent(t, "message.part.delta", map[string]any{
 			"sessionID": "ses_1",
+			"messageID": "msg1",
 			"partID":    "p1",
 			"field":     "text",
 			"delta":     "world",
@@ -115,7 +116,7 @@ func TestReadGlobalSSE_PartUpdatedText_Skipped(t *testing.T) {
 	defer cancel()
 	go s.readGlobalSSE(ctx)
 
-	// Only one event — the part.updated text was skipped.
+	// Only one event — the part.updated snapshot is metadata-only.
 	got := collectN(t, ch, 1)
 	require.Equal(t, events.MessageDelta, got[0].Event.Type)
 	require.Equal(t, "world", got[0].Event.Data.(events.MessageDeltaData).Content)
@@ -129,10 +130,18 @@ func TestReadGlobalSSE_PartUpdatedReasoning(t *testing.T) {
 		rw.Header().Set("Content-Type", "text/event-stream")
 		flusher := rw.(http.Flusher)
 
+		updated := ocsEvent(t, "message.part.updated", map[string]any{
+			"sessionID": "ses_1",
+			"part":      map[string]any{"id": "r_1", "messageID": "msg1", "sessionID": "ses_1", "type": "reasoning", "text": ""},
+		})
+		fmt.Fprint(rw, updated)
+		flusher.Flush()
+
 		evt := ocsEvent(t, "message.part.delta", map[string]any{
 			"sessionID": "ses_1",
+			"messageID": "msg1",
 			"partID":    "r_1",
-			"field":     "reasoning",
+			"field":     "text",
 			"delta":     "thinking...",
 		})
 		fmt.Fprint(rw, evt)

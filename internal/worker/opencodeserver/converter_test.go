@@ -211,6 +211,93 @@ func TestConverter_PartDelta_Reasoning_Empty(t *testing.T) {
 	require.Empty(t, envs)
 }
 
+func TestConverter_PartUpdatedReasoning_TextDelta(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-part-metadata"
+
+	envs := c.Convert(sid, ocsPartUpdated, rawProps(t, map[string]any{
+		"sessionID": sid,
+		"part": map[string]any{
+			"id":        "r1",
+			"messageID": "msg1",
+			"sessionID": sid,
+			"type":      "reasoning",
+			"text":      "",
+		},
+	}))
+	require.Empty(t, envs)
+
+	envs = c.Convert(sid, ocsPartDelta, rawProps(t, map[string]any{
+		"sessionID": sid,
+		"messageID": "msg1",
+		"partID":    "r1",
+		"field":     "text",
+		"delta":     "thinking",
+	}))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.Reasoning, envs[0].Event.Type)
+	data := envs[0].Event.Data.(events.ReasoningData)
+	require.Equal(t, "r1", data.ID)
+	require.Equal(t, "thinking", data.Content)
+}
+
+func TestConverter_PartUpdatedText_DeltaUsesMessageID(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-text-metadata"
+
+	envs := c.Convert(sid, ocsPartUpdated, rawProps(t, map[string]any{
+		"sessionID": sid,
+		"part": map[string]any{
+			"id":        "p1",
+			"messageID": "msg1",
+			"sessionID": sid,
+			"type":      "text",
+			"text":      "",
+		},
+	}))
+	require.Empty(t, envs)
+
+	envs = c.Convert(sid, ocsPartDelta, rawProps(t, map[string]any{
+		"sessionID": sid,
+		"messageID": "msg1",
+		"partID":    "p1",
+		"field":     "text",
+		"delta":     "answer",
+	}))
+	require.Len(t, envs, 1)
+	require.Equal(t, events.MessageDelta, envs[0].Event.Type)
+	data := envs[0].Event.Data.(events.MessageDeltaData)
+	require.Equal(t, "msg1", data.MessageID)
+	require.Equal(t, "answer", data.Content)
+}
+
+func TestConverter_PartUpdatedIgnoredText_SkipsDelta(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-ignored-text"
+
+	envs := c.Convert(sid, ocsPartUpdated, rawProps(t, map[string]any{
+		"sessionID": sid,
+		"part": map[string]any{
+			"id":        "p1",
+			"messageID": "msg1",
+			"sessionID": sid,
+			"type":      "text",
+			"ignored":   true,
+			"text":      "",
+		},
+	}))
+	require.Empty(t, envs)
+
+	envs = c.Convert(sid, ocsPartDelta, rawProps(t, map[string]any{
+		"sessionID": sid,
+		"messageID": "msg1",
+		"partID":    "p1",
+		"field":     "text",
+		"delta":     "hidden",
+	}))
+	require.Empty(t, envs)
+}
+
 // ─── V2 Tool Events ───────────────────────────────────────────────────────────
 
 func TestConverter_ToolCalled(t *testing.T) {

@@ -14,7 +14,8 @@ const (
 	ocsStepStarted      = "session.next.step.started"
 	ocsStepEnded        = "session.next.step.ended"
 	ocsStepFailed       = "session.next.step.failed"
-	ocsPartDelta        = "message.part.delta" // OCS 1.15+: unified text/reasoning delta
+	ocsPartUpdated      = "message.part.updated" // OCS 1.17+: part metadata for text/reasoning deltas
+	ocsPartDelta        = "message.part.delta"   // OCS 1.15+: unified text/reasoning delta
 	ocsToolCalled       = "session.next.tool.called"
 	ocsToolSuccess      = "session.next.tool.success"
 	ocsToolFailed       = "session.next.tool.failed"
@@ -47,6 +48,13 @@ type turnState struct {
 	reasoningActive bool   // true between reasoning.started and reasoning.ended
 	model           string // "providerID/modelID" from step.started
 	doneShown       bool   // true once Done has been emitted for this turn (dedup)
+	parts           map[string]partState
+}
+
+type partState struct {
+	typ       string
+	messageID string
+	ignored   bool
 }
 
 type tokenAccum struct {
@@ -64,6 +72,8 @@ func NewConverter() *Converter {
 // eventType is payload.type, props is payload.properties (raw JSON).
 func (c *Converter) Convert(sessionID, eventType string, props json.RawMessage) []*events.Envelope {
 	switch {
+	case eventType == ocsPartUpdated:
+		return c.handlePartUpdated(sessionID, props)
 	case eventType == ocsPartDelta:
 		return c.handlePartDelta(sessionID, props)
 	case strings.HasPrefix(eventType, "session.next."):
@@ -176,15 +186,46 @@ func (c *Converter) handleStepFailed(sessionID string, props json.RawMessage) []
 	}
 }
 
+// handlePartUpdated records part metadata from OCS 1.17+. The event carries the
+// authoritative part type; the actual streamed text still arrives later via
+// message.part.delta.
+func (c *Converter) handlePartUpdated(sessionID string, props json.RawMessage) []*events.Envelope {
+	var evt struct {
+		Part struct {
+			ID        string `json:"id"`
+			MessageID string `json:"messageID"`
+			Type      string `json:"type"`
+			Ignored   bool   `json:"ignored"`
+		} `json:"part"`
+	}
+	if err := json.Unmarshal(props, &evt); err != nil {
+		return nil
+	}
+	if evt.Part.ID == "" || evt.Part.Type == "" {
+		return nil
+	}
+
+	st := c.getOrCreateState(sessionID)
+	if st.parts == nil {
+		st.parts = make(map[string]partState)
+	}
+	st.parts[evt.Part.ID] = partState{
+		typ:       evt.Part.Type,
+		messageID: evt.Part.MessageID,
+		ignored:   evt.Part.Ignored,
+	}
+	return nil
+}
+
 // handlePartDelta handles message.part.delta from OCS 1.15+.
-// Routes by field: "reasoning" → Reasoning, "text" → Reasoning (if in reasoning
-// phase) or MessageDelta. The reasoning phase is bracketed by
-// session.next.reasoning.started/ended events stored in turnState.
+// Routes by explicit field or by part metadata from message.part.updated:
+// reasoning parts → Reasoning, non-ignored text parts → MessageDelta.
 func (c *Converter) handlePartDelta(sessionID string, props json.RawMessage) []*events.Envelope {
 	var evt struct {
-		PartID string `json:"partID"`
-		Field  string `json:"field"`
-		Delta  string `json:"delta"`
+		MessageID string `json:"messageID"`
+		PartID    string `json:"partID"`
+		Field     string `json:"field"`
+		Delta     string `json:"delta"`
 	}
 	if err := json.Unmarshal(props, &evt); err != nil {
 		return nil
@@ -195,24 +236,52 @@ func (c *Converter) handlePartDelta(sessionID string, props json.RawMessage) []*
 
 	switch evt.Field {
 	case "reasoning":
-		return []*events.Envelope{
-			events.NewEnvelope(aep.NewID(), sessionID, 0, events.Reasoning, events.ReasoningData{
-				ID:      evt.PartID,
-				Content: evt.Delta,
-			}),
-		}
+		return reasoningEnvelope(sessionID, evt.PartID, evt.Delta)
 	default: // "text" or unspecified
-		if st, ok := c.states[sessionID]; ok && st.reasoningActive {
-			return []*events.Envelope{
-				events.NewEnvelope(aep.NewID(), sessionID, 0, events.Reasoning, events.ReasoningData{
-					ID:      evt.PartID,
-					Content: evt.Delta,
-				}),
+		if st, ok := c.states[sessionID]; ok {
+			if part, found := st.parts[evt.PartID]; found {
+				return c.handleKnownPartDelta(sessionID, evt.MessageID, evt.PartID, evt.Delta, part)
+			}
+			if st.reasoningActive {
+				return reasoningEnvelope(sessionID, evt.PartID, evt.Delta)
 			}
 		}
-		return []*events.Envelope{
-			events.NewEnvelope(aep.NewID(), sessionID, 0, events.MessageDelta, events.MessageDeltaData{Content: evt.Delta}),
+		return messageDeltaEnvelope(sessionID, evt.MessageID, evt.Delta)
+	}
+}
+
+func (c *Converter) handleKnownPartDelta(sessionID, messageID, partID, delta string, part partState) []*events.Envelope {
+	switch part.typ {
+	case "reasoning":
+		return reasoningEnvelope(sessionID, partID, delta)
+	case "text":
+		if part.ignored {
+			return nil
 		}
+		if messageID == "" {
+			messageID = part.messageID
+		}
+		return messageDeltaEnvelope(sessionID, messageID, delta)
+	default:
+		return nil
+	}
+}
+
+func reasoningEnvelope(sessionID, partID, delta string) []*events.Envelope {
+	return []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Reasoning, events.ReasoningData{
+			ID:      partID,
+			Content: delta,
+		}),
+	}
+}
+
+func messageDeltaEnvelope(sessionID, messageID, delta string) []*events.Envelope {
+	return []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.MessageDelta, events.MessageDeltaData{
+			MessageID: messageID,
+			Content:   delta,
+		}),
 	}
 }
 
