@@ -185,6 +185,10 @@ worker:
   turn_timeout: 0  # per-turn kill timer; 0=disabled (execution_timeout catches zombies)
   default_work_dir: ~/.hotplex/workspace
   pid_dir: ~/.hotplex/.pids
+  # Default permission mode tier (read-only, workspace, auto-edit, bypass)
+  # applied to workspaces with no explicit override (seeded "workspace").
+  # Empty/unset in workspaces allows each worker to run under its own default/config.
+  default_permission_mode: "workspace"
 
   # Environment variables to block from workers (prefix match with trailing "_").
   env_blocklist: []
