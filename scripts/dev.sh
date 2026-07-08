@@ -134,7 +134,7 @@ start_gateway() {
         fi
     fi
 
-    "$binary" gateway start -c "$CONFIG" 2>> "$GATEWAY_LOG" &
+    nohup "$binary" gateway start -c "$CONFIG" >> "$GATEWAY_LOG" 2>&1 < /dev/null &
     local bg_pid=$!
     echo $bg_pid > "$GATEWAY_PID"
 
@@ -230,7 +230,7 @@ start_webchat() {
     fi
 
     echo -e "  ${DIM}› Starting webchat (port $WEBCHAT_PORT)...${NC}"
-    (cd "$WEBCHAT_DIR" && exec pnpm dev --port "$WEBCHAT_PORT" --hostname 127.0.0.1 >> "$WEBCHAT_LOG" 2>&1) &
+    (cd "$WEBCHAT_DIR" && exec nohup pnpm dev --port "$WEBCHAT_PORT" --hostname 127.0.0.1 >> "$WEBCHAT_LOG" 2>&1 < /dev/null) &
     echo $! > "$WEBCHAT_PID"
     sleep 3
 
