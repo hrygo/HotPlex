@@ -20,9 +20,9 @@ import { MessageActions } from "./MessageActions";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { getExt, messageVariants, extractCommand, extractFilePath, extractFileContent } from "./thread-helpers";
 import { useTranslation } from "react-i18next";
-import { PermissionApprovalCard } from "./tools/PermissionApprovalCard";
-import { QuestionResponseCard } from "./tools/QuestionResponseCard";
-import { ElicitationFormCard } from "./tools/ElicitationFormCard";
+import { PermissionApprovalCard } from "@/components/assistant-ui/tools/PermissionApprovalCard";
+import { QuestionResponseCard } from "@/components/assistant-ui/tools/QuestionResponseCard";
+import { ElicitationFormCard } from "@/components/assistant-ui/tools/ElicitationFormCard";
 
  
 const AssistantMessage = memo(function AssistantMessage({ message, onInteractionRespond }: { message: any; onInteractionRespond?: (toolCallId: string, response: any) => void }) {
