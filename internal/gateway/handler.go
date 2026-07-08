@@ -100,6 +100,9 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) 
 			err = fmt.Errorf("handler panic: %v", r)
 		}
 	}()
+	if env.Event.Type != events.Ping {
+		h.log.Info("gateway: Handle received event", "type", env.Event.Type, "session_id", env.SessionID, "seq", env.Seq, "data", env.Event.Data)
+	}
 	switch env.Event.Type {
 	case events.Input:
 		return h.handleInput(ctx, env)

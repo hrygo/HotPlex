@@ -74,8 +74,9 @@ export function QuestionResponseCard({
     // Validate that all questions have some answer
     const finalAnswers: Record<string, string> = {};
     for (const q of questions) {
-      const ans = answers[q.id] || textAnswers[q.id] || "";
-      finalAnswers[q.id] = ans;
+      const qKey = q.id || q.question;
+      const ans = answers[qKey] || textAnswers[qKey] || "";
+      finalAnswers[qKey] = ans;
     }
 
     onRespond?.(finalAnswers);
@@ -136,12 +137,13 @@ export function QuestionResponseCard({
           )}
 
           {questions.map((q, idx) => {
+            const qKey = q.id || q.question;
             const isMulti = !!(q.is_multi_select || q.multiSelect);
             const hasOptions = q.options && q.options.length > 0;
-            const currentAnswer = answers[q.id] || "";
+            const currentAnswer = answers[qKey] || "";
 
             return (
-              <div key={q.id || idx} className="space-y-2.5 p-3 rounded-[var(--radius-sm)] bg-[var(--bg-base)] border border-[var(--border-subtle)]">
+              <div key={qKey || idx} className="space-y-2.5 p-3 rounded-[var(--radius-sm)] bg-[var(--bg-base)] border border-[var(--border-subtle)]">
                 <div className="flex items-start gap-2">
                   <span className="font-mono text-xs text-[var(--text-faint)] mt-0.5">{idx + 1}.</span>
                   <div>
@@ -164,7 +166,7 @@ export function QuestionResponseCard({
                     {q.options!.map((opt, oIdx) => {
                       const optVal = opt.value !== undefined ? opt.value : opt.label;
                       const isSelected = isMulti
-                        ? !!(selectedMulti[q.id]?.has(optVal))
+                        ? !!(selectedMulti[qKey]?.has(optVal))
                         : currentAnswer === optVal;
 
                       return (
@@ -178,11 +180,11 @@ export function QuestionResponseCard({
                         >
                           <input
                             type={isMulti ? "checkbox" : "radio"}
-                            name={q.id}
+                            name={qKey}
                             value={optVal}
                             checked={isSelected}
                             disabled={!isInteractive}
-                            onChange={() => handleOptionSelect(q.id, optVal, isMulti)}
+                            onChange={() => handleOptionSelect(qKey, optVal, isMulti)}
                             className="hidden"
                           />
                           <div className={`w-3.5 h-3.5 flex items-center justify-center border transition-all ${
@@ -207,9 +209,9 @@ export function QuestionResponseCard({
                   <div className="pl-5">
                     <textarea
                       rows={3}
-                      value={textAnswers[q.id] || ""}
+                      value={textAnswers[qKey] || ""}
                       disabled={!isInteractive}
-                      onChange={(e) => handleTextChange(q.id, e.target.value)}
+                      onChange={(e) => handleTextChange(qKey, e.target.value)}
                       placeholder={t("tool.interaction.question.custom_placeholder", { defaultValue: "Type custom answer..." })}
                       className="w-full text-xs font-mono p-2.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors disabled:opacity-75 disabled:cursor-not-allowed resize-none"
                     />
@@ -258,7 +260,7 @@ export function QuestionResponseCard({
             {interactionState?.response?.answers && (
               <div className="px-4 pb-3 space-y-1 text-xs text-[var(--text-secondary)] font-mono pl-10 border-t border-[rgba(16,185,129,0.08)] pt-2 leading-relaxed">
                 {Object.entries(interactionState.response.answers).map(([qId, val]) => {
-                  const q = questions.find((qi) => qi.id === qId);
+                  const q = questions.find((qi) => (qi.id || qi.question) === qId);
                   const qLabel = q?.header || q?.question || qId;
                   return (
                     <div key={qId}>
