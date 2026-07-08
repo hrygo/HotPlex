@@ -127,11 +127,29 @@ func (a *Adapter) handleInteractionEvent(ctx context.Context, evt socketmode.Eve
 		case "decline":
 			ackText = fmt.Sprintf("_Declined by <@%s>_", userID)
 		}
-		_, _, _, err := a.client.UpdateMessageContext(ctx, channelID, threadTS,
-			slack.MsgOptionText(ackText, false),
-		)
-		if err != nil {
-			a.Log.Debug("slack: update interaction message", "err", err)
+
+		var updateErr error
+		if len(callback.Message.Blocks.BlockSet) > 0 {
+			var updatedBlocks []slack.Block
+			for _, b := range callback.Message.Blocks.BlockSet {
+				if b.BlockType() != slack.MBTAction {
+					updatedBlocks = append(updatedBlocks, b)
+				}
+			}
+			ackSection := slack.NewContextBlock("",
+				slack.NewTextBlockObject(slack.MarkdownType, ackText, false, false),
+			)
+			updatedBlocks = append(updatedBlocks, ackSection)
+			_, _, _, updateErr = a.client.UpdateMessageContext(ctx, channelID, threadTS,
+				slack.MsgOptionBlocks(updatedBlocks...),
+			)
+		} else {
+			_, _, _, updateErr = a.client.UpdateMessageContext(ctx, channelID, threadTS,
+				slack.MsgOptionText(ackText, false),
+			)
+		}
+		if updateErr != nil {
+			a.Log.Debug("slack: update interaction message", "err", updateErr)
 		}
 
 		_ = threadTS // thread context

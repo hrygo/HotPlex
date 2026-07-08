@@ -16,6 +16,7 @@ import (
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 
@@ -108,10 +109,12 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) 
 		return h.handleControl(ctx, env)
 	case events.WorkerCmd:
 		return h.handleWorkerCommand(ctx, env)
+	case events.PermissionResponse, events.QuestionResponse, events.ElicitationResponse:
+		return h.handleInteractionResponseEvent(ctx, env)
 	// AEP-011 / AEP-012: pass-through events from worker to all session clients.
-	case events.Reasoning, events.Step, events.PermissionRequest, events.PermissionResponse,
-		events.QuestionRequest, events.QuestionResponse,
-		events.ElicitationRequest, events.ElicitationResponse,
+	case events.Reasoning, events.Step, events.PermissionRequest,
+		events.QuestionRequest,
+		events.ElicitationRequest,
 		events.Message, events.MessageStart, events.MessageEnd:
 		return h.passthroughToSession(ctx, env)
 	default:
@@ -477,4 +480,109 @@ type defaultWorkerFactory struct{}
 
 func (defaultWorkerFactory) NewWorker(t worker.WorkerType) (worker.Worker, error) {
 	return worker.NewWorker(t)
+}
+
+func (h *Handler) handleInteractionResponseEvent(ctx context.Context, env *events.Envelope) error {
+	h.cancelRetryIfNeeded(env.SessionID)
+
+	si, err := h.sm.Get(ctx, env.SessionID)
+	if err != nil {
+		h.log.Warn("gateway: interaction response session not found", "session_id", env.SessionID, "err", err)
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
+	}
+
+	w := h.sm.GetWorker(env.SessionID)
+	if w == nil {
+		h.log.Warn("gateway: interaction response no worker attached", "session_id", env.SessionID)
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "no worker attached to session")
+	}
+
+	metadata, err := interactionResponseMetadata(env.Event.Type, env.Event.Data)
+	if err != nil {
+		h.log.Warn("gateway: normalize interaction response failed", "err", err, "session_id", env.SessionID)
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "invalid response data: %v", err)
+	}
+
+	if err := w.Input(ctx, "", metadata); err != nil {
+		h.log.Warn("gateway: worker interaction response delivery failed", "err", err, "session_id", env.SessionID)
+		code := classifyWorkerError(err)
+		if errors.Is(err, base.ErrInvalidSchema) {
+			code = events.ErrCodeInvalidMessage
+		}
+		// Send error envelope but include request_id in Metadata to allow UI correlation
+		var reqID string
+		if dataMap, ok := env.Event.Data.(map[string]any); ok {
+			reqID, _ = dataMap["id"].(string)
+			if reqID == "" {
+				reqID, _ = dataMap["request_id"].(string)
+			}
+		}
+		errEnv := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.Error, events.ErrorData{
+			Code:    code,
+			Message: fmt.Sprintf("worker response failed: %v", err),
+		})
+		if reqID != "" {
+			errEnv.Metadata = map[string]any{
+				"interaction_error": map[string]any{
+					"request_id": reqID,
+				},
+			}
+		}
+		_ = h.hub.SendToSession(ctx, errEnv)
+		return fmt.Errorf("%s: worker response failed: %w", code, err)
+	}
+
+	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, "")
+	if h.bridge != nil {
+		h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, env.Event.Type, env.Event.Data)
+	}
+	return nil
+}
+
+func interactionResponseMetadata(kind events.Kind, data any) (map[string]any, error) {
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("response data must be a map")
+	}
+
+	metadata := make(map[string]any)
+	switch kind {
+	case events.PermissionResponse:
+		id, _ := dataMap["id"].(string)
+		if id == "" {
+			id, _ = dataMap["request_id"].(string)
+		}
+		allowed, _ := dataMap["allowed"].(bool)
+		reason, _ := dataMap["reason"].(string)
+
+		metadata["permission_response"] = map[string]any{
+			"id":         id,
+			"request_id": id,
+			"allowed":    allowed,
+			"reason":     reason,
+		}
+
+	case events.QuestionResponse:
+		id, _ := dataMap["id"].(string)
+		answers := dataMap["answers"]
+		metadata["question_response"] = map[string]any{
+			"id":      id,
+			"answers": answers,
+		}
+
+	case events.ElicitationResponse:
+		id, _ := dataMap["id"].(string)
+		action, _ := dataMap["action"].(string)
+		content := dataMap["content"]
+		metadata["elicitation_response"] = map[string]any{
+			"id":      id,
+			"action":  action,
+			"content": content,
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported interaction response kind: %s", kind)
+	}
+
+	return metadata, nil
 }

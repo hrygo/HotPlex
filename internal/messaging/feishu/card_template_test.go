@@ -632,7 +632,7 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 
 func TestBuildResolvedCard_Green(t *testing.T) {
 	t.Parallel()
-	card := buildResolvedCard("allow", "已允许", "")
+	card := buildResolvedCard("allow", "已允许", "", "test_summary", "ou_123")
 	require.NotNil(t, card)
 
 	cfg := card["config"].(map[string]any)
@@ -647,14 +647,14 @@ func TestBuildResolvedCard_Green(t *testing.T) {
 
 func TestBuildResolvedCard_Red(t *testing.T) {
 	t.Parallel()
-	card := buildResolvedCard("deny", "已拒绝", "")
+	card := buildResolvedCard("deny", "已拒绝", "", "test_summary", "")
 	hdr := card["header"].(map[string]any)
 	require.Equal(t, "red", hdr["template"])
 }
 
 func TestBuildResolvedCard_ExplicitColor(t *testing.T) {
 	t.Parallel()
-	card := buildResolvedCard("allow", "Custom Label", "blue")
+	card := buildResolvedCard("allow", "Custom Label", "blue", "", "")
 	hdr := card["header"].(map[string]any)
 	require.Equal(t, "blue", hdr["template"])
 	title := hdr["title"].(map[string]any)

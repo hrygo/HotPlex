@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/internal/worker/base"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -25,6 +26,9 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 // Timeout errors (ErrKindTimeout) are not treated as fatal — the worker is still alive.
 // ErrNotImplemented maps to ErrCodeNotSupported for unimplemented worker capabilities.
 func classifyWorkerError(err error) events.ErrorCode {
+	if errors.Is(err, base.ErrInvalidSchema) {
+		return events.ErrCodeInvalidMessage
+	}
 	if errors.Is(err, worker.ErrNotImplemented) {
 		return events.ErrCodeNotSupported
 	}

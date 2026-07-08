@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -286,8 +287,13 @@ func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 		}
 	}
 
-	valAllow := map[string]any{"action": "allow", "request_id": data.ID}
-	valDeny := map[string]any{"action": "deny", "request_id": data.ID}
+	summary := fmt.Sprintf("工具执行: %s", data.ToolName)
+	if data.Description != "" && data.Description != data.ToolName {
+		summary += "\n描述: " + data.Description
+	}
+
+	valAllow := map[string]any{"action": "allow", "request_id": data.ID, "summary": summary}
+	valDeny := map[string]any{"action": "deny", "request_id": data.ID, "summary": summary}
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content.String()},
 		{
@@ -347,6 +353,7 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 				if len([]rune(display)) > 75 {
 					display = string([]rune(display)[:75])
 				}
+				summary := fmt.Sprintf("问题: %s", q.Question)
 				buttons = append(buttons, map[string]any{
 					"tag":  "button",
 					"text": map[string]any{"tag": "plain_text", "content": display},
@@ -356,6 +363,7 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 						"request_id": data.ID,
 						"answer":     sanitized,
 						"label":      display,
+						"summary":    summary,
 					},
 				})
 			}
@@ -395,8 +403,9 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 		}
 	}
 
-	valAccept := map[string]any{"action": "accept", "request_id": data.ID}
-	valDecline := map[string]any{"action": "decline", "request_id": data.ID}
+	summary := fmt.Sprintf("MCP Server: %s\n%s", data.MCPServerName, data.Message)
+	valAccept := map[string]any{"action": "accept", "request_id": data.ID, "summary": summary}
+	valDecline := map[string]any{"action": "decline", "request_id": data.ID, "summary": summary}
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content.String()},
 		{
@@ -421,7 +430,7 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
 }
 
-func buildResolvedCard(action, label, color string) map[string]any {
+func buildResolvedCard(action, label, color, summary, operatorID string) map[string]any {
 	if color == "" {
 		switch action {
 		case "allow", "answer", "accept":
@@ -430,11 +439,42 @@ func buildResolvedCard(action, label, color string) map[string]any {
 			color = "red"
 		}
 	}
+
+	var elements []map[string]any
+	if summary != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": "**原请求：**\n" + summary,
+		})
+	}
+
+	// Add context: operator and time
+	var ctxContent string
+	if operatorID != "" {
+		ctxContent = fmt.Sprintf("操作人: <at id=%s></at>  |  时间: %s", operatorID, time.Now().Format("2006-01-02 15:04:05"))
+	} else {
+		ctxContent = fmt.Sprintf("时间: %s", time.Now().Format("2006-01-02 15:04:05"))
+	}
+
+	elements = append(elements, map[string]any{
+		"tag": "note",
+		"elements": []map[string]any{
+			{
+				"tag":     "plain_text",
+				"content": ctxContent,
+			},
+		},
+	})
+
 	return map[string]any{
+		"schema": "2.0",
 		"config": map[string]any{"wide_screen_mode": true},
 		"header": map[string]any{
 			"title":    map[string]any{"tag": "plain_text", "content": label},
 			"template": color,
+		},
+		"body": map[string]any{
+			"elements": elements,
 		},
 	}
 }
