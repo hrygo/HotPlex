@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import type { InteractionState, InteractionStatus } from "@/lib/adapters/hotplex-runtime-adapter";
+import { useInteractionTimeout } from "@/hooks/useInteractionTimeout";
 
 interface ElicitationFormCardProps {
   toolName: string;
@@ -40,27 +41,10 @@ export function ElicitationFormCard({
   onToggle,
 }: ElicitationFormCardProps) {
   const { t } = useTranslation("chat");
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const { timeLeft, activeStatus } = useInteractionTimeout(initialStatus, interactionState?.expiresAt);
 
   // Local state for schema form fields
   const [formValues, setFormValues] = useState<Record<string, any>>({});
-
-  useEffect(() => {
-    if (initialStatus !== "pending" || !interactionState?.expiresAt) {
-      setTimeLeft(null);
-      return;
-    }
-    const updateTime = () => {
-      const diff = Math.max(0, Math.floor((interactionState.expiresAt! - Date.now()) / 1000));
-      setTimeLeft(diff);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [initialStatus, interactionState?.expiresAt]);
-
-  const activeStatus: InteractionStatus =
-    initialStatus === "pending" && timeLeft !== null && timeLeft <= 0 ? "expired" : initialStatus;
 
   const isInteractive = activeStatus === "pending" || activeStatus === "failed";
 

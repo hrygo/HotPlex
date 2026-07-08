@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import type { InteractionState, InteractionStatus } from "@/lib/adapters/hotplex-runtime-adapter";
+import { useInteractionTimeout } from "@/hooks/useInteractionTimeout";
 
 interface PermissionApprovalCardProps {
   toolName: string;
@@ -25,24 +25,7 @@ export function PermissionApprovalCard({
   onToggle,
 }: PermissionApprovalCardProps) {
   const { t } = useTranslation("chat");
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (initialStatus !== "pending" || !interactionState?.expiresAt) {
-      setTimeLeft(null);
-      return;
-    }
-    const updateTime = () => {
-      const diff = Math.max(0, Math.floor((interactionState.expiresAt! - Date.now()) / 1000));
-      setTimeLeft(diff);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [initialStatus, interactionState?.expiresAt]);
-
-  const activeStatus: InteractionStatus =
-    initialStatus === "pending" && timeLeft !== null && timeLeft <= 0 ? "expired" : initialStatus;
+  const { timeLeft, activeStatus } = useInteractionTimeout(initialStatus, interactionState?.expiresAt);
 
   const title = t("tool.interaction.permission.title", { defaultValue: "Tool Execution Approval" });
   const descText = description || t("tool.interaction.permission.description", { defaultValue: "Agent requests permission to execute the following tool" });
