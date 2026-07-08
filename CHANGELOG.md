@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.32.2] - 2026-07-08
+
+### Summary
+
+v1.32.2 是一次 patch 版本更新，支持 Bearer API 密钥鉴权并同步 WebChat 运行时状态，同时完成了 OAuth SSO 提供商集成的修复，并在开发脚本中优化了后台进程的启动。
+
+### Added
+
+- **Security**: Accept Bearer API keys in Gateway and sync webchat runtime status. (#858)
+
+### Fixed
+
+- **Security**: Complete OAuth SSO provider integration. (#857)
+- **CLI**: Use `nohup` and redirect standard input/output for background gateway and webchat processes in development scripts to prevent job suspension.
+
 ## [1.32.1] - 2026-07-07
 
 ### Summary
