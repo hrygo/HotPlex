@@ -5,16 +5,24 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
+	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 )
+
+type staticConfigProvider struct{ cfg *config.Config }
+
+func (p staticConfigProvider) Get() *config.Config { return p.cfg }
 
 // newWorkspaceSessionEnv reuses the real-store testAuthEnv (auth + cookie + idp +
 // SQLite workspace store) but wires GatewayAPI with mock sm/bridge, so CreateSession
@@ -26,6 +34,43 @@ func newWorkspaceSessionEnv(t *testing.T) (*testAuthEnv, *GatewayAPI, *mockAPISM
 	bridge := new(mockAPIBridge)
 	api := NewGatewayAPI(slog.Default(), env.auth, sm, bridge, config.NewConfigStore(&config.Config{}, nil), nil, nil, env.store)
 	return env, api, sm, bridge
+}
+
+func createAPIKeyViaAdmin(t *testing.T, env *testAuthEnv, rawUserID string) (string, string) {
+	t.Helper()
+	store := env.store.(*session.SQLiteStore)
+	dbResolver := security.NewDBResolver(store.DB(), dbutil.DialectSQLite)
+	t.Cleanup(dbResolver.Close)
+	env.auth.SetKeyResolver(dbResolver)
+
+	cfg := config.Default()
+	cfg.Admin.TokenScopes = map[string][]string{
+		"admin-token": {admin.ScopeAdminWrite, admin.ScopeAdminRead},
+	}
+	adminAPI := admin.New(admin.Deps{
+		Log:            slog.Default(),
+		Config:         staticConfigProvider{cfg: cfg},
+		WorkspaceStore: env.store,
+		DB:             store.DB(),
+		DBResolver:     dbResolver,
+		KeyValidator:   env.auth,
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(`{"user_id":"`+rawUserID+`"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	w := httptest.NewRecorder()
+	adminAPI.Middleware(http.HandlerFunc(adminAPI.HandleAPIKeyUserCreate)).ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	var created admin.APIKeyUser
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&created))
+
+	var storedUserID string
+	err := store.DB().QueryRowContext(req.Context(),
+		"SELECT user_id FROM api_key_users WHERE api_key = ?", created.APIKey,
+	).Scan(&storedUserID)
+	require.NoError(t, err)
+	return created.APIKey, storedUserID
 }
 
 // TestCreateSession_RealStore_OwnerOK: the workspace owner can create a session
@@ -94,4 +139,42 @@ func TestCreateSession_RealStore_KeyMethod3(t *testing.T) {
 	// 方案3: workspace_id participates in the hash. Same inputs → same session id.
 	expected := session.DeriveSessionKey("u-admin", worker.TypeClaudeCode, "c1", ws.ID, ws.WorkDir)
 	require.Equal(t, expected, resp["session_id"], "session_id must be 方案3 derivation")
+}
+
+func TestListSessions_APIKeyCreatedViaAdminAlias(t *testing.T) {
+	t.Parallel()
+	env, api, sm, _ := newWorkspaceSessionEnv(t)
+	apiKey, storedUserID := createAPIKeyViaAdmin(t, env, "alice")
+
+	sm.On("List", mock.Anything, storedUserID, "", "", 100, 0).
+		Return([]*session.SessionInfo{}, nil).Once()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?platform=all&api_key="+url.QueryEscape(apiKey), nil)
+	w := httptest.NewRecorder()
+	api.ListSessions(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	sm.AssertExpectations(t)
+}
+
+func TestCreateSession_APIKeyCreatedViaAdminAlias(t *testing.T) {
+	t.Parallel()
+	env, api, sm, bridge := newWorkspaceSessionEnv(t)
+	apiKey, storedUserID := createAPIKeyViaAdmin(t, env, "alice")
+
+	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound).Once()
+	bridge.On("StartSession", mock.Anything, mock.MatchedBy(func(p worker.SessionStartParams) bool {
+		return p.UserID == storedUserID &&
+			p.ClientKey == "c1" &&
+			p.WorkerType == worker.TypeClaudeCode &&
+			p.Platform == platformWebChat
+	})).Return(nil).Once()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions?client_session_id=c1&api_key="+url.QueryEscape(apiKey), nil)
+	w := httptest.NewRecorder()
+	api.CreateSession(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	bridge.AssertExpectations(t)
+	sm.AssertExpectations(t)
 }

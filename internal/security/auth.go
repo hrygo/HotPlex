@@ -185,17 +185,15 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		return "anonymous", botID, nil
 	}
 
-	// Key lookup using constant-time comparison to prevent timing attacks.
+	// Snapshot resolver/idp under lock, then release before any external lookup.
+	resolver := a.keyResolver
+	idp := a.idp
 	if !a.authenticateKey(key) {
 		a.mu.RUnlock()
 		a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
 			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
-
-	// Snapshot resolver under lock, then release before calling external resolver.
-	resolver := a.keyResolver
-	idp := a.idp
 	a.mu.RUnlock()
 
 	uid := resolveUserIDWith(r.Context(), key, resolver)
@@ -379,12 +377,12 @@ func (a *Authenticator) AuthenticateKey(ctx context.Context, key string) (string
 		return "anonymous", true
 	}
 
+	resolver := a.keyResolver
+	idp := a.idp
 	if !a.authenticateKey(key) {
 		a.mu.RUnlock()
 		return "", false
 	}
-	resolver := a.keyResolver
-	idp := a.idp
 	a.mu.RUnlock()
 
 	uid := resolveUserIDWith(ctx, key, resolver)

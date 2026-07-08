@@ -3,8 +3,10 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/security"
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
@@ -35,6 +39,24 @@ func setupAPIKeyStore(t *testing.T) (*AdminAPI, func()) {
 
 	api := newTestAPI(func(d *Deps) { d.DB = db })
 	return api, func() {}
+}
+
+func setupAPIKeyStoreWithWorkspaceStore(t *testing.T) (*AdminAPI, *session.SQLiteStore) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DB.Path = filepath.Join(t.TempDir(), "test.db")
+	cfg.DB.SQLite.Path = cfg.DB.Path
+	cfg.DB.WALMode = true
+
+	store, err := session.NewSQLiteStore(context.Background(), cfg, sqlutil.NewWriteMu(sqlutil.DialectSQLite))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	api := newTestAPI(func(d *Deps) {
+		d.DB = store.DB()
+		d.WorkspaceStore = store
+	})
+	return api, store
 }
 
 func TestHandleAPIKeyUserList_Empty(t *testing.T) {
@@ -89,6 +111,69 @@ func TestHandleAPIKeyUserCreateAndGet(t *testing.T) {
 	require.Equal(t, "alice", got.UserID)
 }
 
+func TestHandleAPIKeyUserCreate_BindsExistingUsernameToUsersID(t *testing.T) {
+	api, store := setupAPIKeyStoreWithWorkspaceStore(t)
+	ctx := context.Background()
+	require.NoError(t, store.CreateUser(ctx, &security.User{
+		ID: "u-alice", Username: "alice", Role: "user", Status: "active",
+	}, 1700000000))
+
+	body := `{"user_id":"alice","description":"test user"}`
+	r := httptest.NewRequest("POST", "/admin/api-keys", strings.NewReader(body))
+	r = withScope(r, ScopeAdminWrite)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserCreate(w, r)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var created APIKeyUser
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&created))
+	require.Equal(t, "alice", created.UserID, "response should stay user-facing")
+
+	raw, err := api.akStore.get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "u-alice", raw.UserID, "stored api_key_users.user_id must be normalized to users.id")
+}
+
+func TestHandleAPIKeyUserCreate_ProvisionsPseudoUser(t *testing.T) {
+	api, store := setupAPIKeyStoreWithWorkspaceStore(t)
+	ctx := context.Background()
+
+	body := `{"user_id":"alice","description":"service key"}`
+	r := httptest.NewRequest("POST", "/admin/api-keys", strings.NewReader(body))
+	r = withScope(r, ScopeAdminWrite)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserCreate(w, r)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var created APIKeyUser
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&created))
+	require.Equal(t, "alice", created.UserID, "response should keep the original logical identifier")
+
+	raw, err := api.akStore.get(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, "alice", raw.UserID, "stored api_key_users.user_id must be a concrete users.id")
+
+	provisioned, err := store.GetUserByID(ctx, raw.UserID)
+	require.NoError(t, err)
+	require.Equal(t, "apikey:alice", provisioned.Username)
+	require.Empty(t, provisioned.PasswordHash, "pseudo-user must remain API-key-only")
+	require.Equal(t, "active", provisioned.Status)
+}
+
+func TestHandleAPIKeyUserCreate_RejectsWhitespaceUserID(t *testing.T) {
+	api, store := setupAPIKeyStoreWithWorkspaceStore(t)
+	ctx := context.Background()
+
+	r := httptest.NewRequest("POST", "/admin/api-keys", strings.NewReader(`{"user_id":"   "}`))
+	r = withScope(r, ScopeAdminWrite)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserCreate(w, r)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	_, err := store.GetUserByUsername(ctx, security.ReservedUsernamePrefix)
+	require.ErrorIs(t, err, security.ErrUserNotFound)
+}
+
 func TestHandleAPIKeyUserUpdate(t *testing.T) {
 	api, _ := setupAPIKeyStore(t)
 
@@ -112,6 +197,22 @@ func TestHandleAPIKeyUserUpdate(t *testing.T) {
 	var updated APIKeyUser
 	require.NoError(t, json.NewDecoder(tw.Body).Decode(&updated))
 	require.Equal(t, "alice-updated", updated.UserID)
+}
+
+func TestHandleAPIKeyUserUpdate_NotFoundDoesNotProvisionPseudoUser(t *testing.T) {
+	api, store := setupAPIKeyStoreWithWorkspaceStore(t)
+	ctx := context.Background()
+
+	body := `{"user_id":"ghost","description":"updated"}`
+	r := httptest.NewRequest("PATCH", "/admin/api-keys/{id}", strings.NewReader(body))
+	r.SetPathValue("id", "9999")
+	r = withScope(r, ScopeAdminWrite)
+	w := httptest.NewRecorder()
+	api.HandleAPIKeyUserUpdate(w, r)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	_, err := store.GetUserByUsername(ctx, security.ReservedUsernamePrefix+"ghost")
+	require.True(t, errors.Is(err, security.ErrUserNotFound), "unexpected user lookup error: %v", err)
 }
 
 func TestHandleAPIKeyUserDelete(t *testing.T) {

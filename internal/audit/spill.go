@@ -23,9 +23,9 @@ type SpillFile struct {
 	path string
 }
 
-// OpenSpill opens (or creates) a spill file at path with O_APPEND|O_WRONLY|O_SYNC.
+// OpenSpill opens (or creates) a spill file at path with O_RDWR|O_SYNC.
 func OpenSpill(path string) (*SpillFile, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_RDWR|os.O_CREATE|os.O_SYNC, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_SYNC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("audit: open spill: %w", err)
 	}
@@ -41,6 +41,9 @@ func (s *SpillFile) Write(rec SpillRecord) error {
 	payload, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("audit: spill marshal: %w", err)
+	}
+	if _, err := s.f.Seek(0, io.SeekEnd); err != nil {
+		return fmt.Errorf("audit: spill seek to end: %w", err)
 	}
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(payload)))

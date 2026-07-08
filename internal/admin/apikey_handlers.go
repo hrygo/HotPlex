@@ -11,10 +11,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/hrygo/hotplex/internal/dbutil"
+	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/web"
 )
@@ -151,6 +155,72 @@ func (a *AdminAPI) requireUniqueUserID(ctx context.Context, userID string, exclu
 	return nil
 }
 
+// canonicalizeAPIKeyUserID normalizes API key owners onto users.id when the
+// webchat/user store is available. It accepts any of:
+//  1. a real users.id
+//  2. a real username
+//  3. a legacy opaque identifier like "alice", which is provisioned as the
+//     reserved pseudo-user "apikey:alice" (password_hash="" blocks login)
+func (a *AdminAPI) canonicalizeAPIKeyUserID(ctx context.Context, userID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	if a.wsStore == nil {
+		return userID, nil
+	}
+
+	if u, err := a.wsStore.GetUserByID(ctx, userID); err == nil {
+		return u.ID, nil
+	} else if !errors.Is(err, security.ErrUserNotFound) {
+		return "", fmt.Errorf("admin: resolve api key user by id: %w", err)
+	}
+
+	if u, err := a.wsStore.GetUserByUsername(ctx, userID); err == nil {
+		return u.ID, nil
+	} else if !errors.Is(err, security.ErrUserNotFound) {
+		return "", fmt.Errorf("admin: resolve api key user by username: %w", err)
+	}
+
+	pseudoUsername := security.ReservedUsernamePrefix + userID
+	if u, err := a.wsStore.GetUserByUsername(ctx, pseudoUsername); err == nil {
+		return u.ID, nil
+	} else if !errors.Is(err, security.ErrUserNotFound) {
+		return "", fmt.Errorf("admin: resolve api key pseudo-user: %w", err)
+	}
+
+	pseudoUser := &security.User{
+		ID:           uuid.NewString(),
+		Username:     pseudoUsername,
+		PasswordHash: "",
+		Role:         "user",
+		Status:       "active",
+	}
+	now := time.Now().Unix()
+	if err := a.wsStore.CreateUser(ctx, pseudoUser, now); err != nil {
+		// Concurrent creates race on username uniqueness. Re-read before failing.
+		if existing, lookupErr := a.wsStore.GetUserByUsername(ctx, pseudoUsername); lookupErr == nil {
+			return existing.ID, nil
+		}
+		return "", fmt.Errorf("admin: provision api key pseudo-user: %w", err)
+	}
+	return pseudoUser.ID, nil
+}
+
+func (a *AdminAPI) decorateAPIKeyUser(ctx context.Context, u *APIKeyUser) {
+	if a.wsStore == nil || u == nil {
+		return
+	}
+	owner, err := a.wsStore.GetUserByID(ctx, u.UserID)
+	if err != nil {
+		return
+	}
+	if strings.HasPrefix(owner.Username, security.ReservedUsernamePrefix) {
+		u.UserID = strings.TrimPrefix(owner.Username, security.ReservedUsernamePrefix)
+		return
+	}
+	if owner.Username != "" {
+		u.UserID = owner.Username
+	}
+}
+
 // apiKeyUserStore implements APIKeyUserStorer backed by SQLite.
 // PG-backed callers use pgStore (apikey_pg_store.go) instead.
 type apiKeyUserStore struct {
@@ -274,6 +344,7 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 	}
 	for i := range users {
 		users[i].APIKey = maskAPIKey(users[i].APIKey)
+		a.decorateAPIKeyUser(r.Context(), &users[i])
 	}
 	respondJSON(w, users)
 }
@@ -307,6 +378,7 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid json")
 		return
 	}
+	u.UserID = strings.TrimSpace(u.UserID)
 	if u.UserID == "" || len(u.UserID) > 128 {
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "user_id is required (max 128 chars)")
 		return
@@ -315,6 +387,13 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "description too long (max 512 chars)")
 		return
 	}
+	canonicalUserID, err := a.canonicalizeAPIKeyUserID(r.Context(), u.UserID)
+	if err != nil {
+		a.log.Error("admin: canonicalize api key user_id", "error", err)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
+		return
+	}
+	u.UserID = canonicalUserID
 	if err := a.requireUniqueUserID(r.Context(), u.UserID, 0); err != nil {
 		respondStoreError(w, a.log, "admin: check unique user_id", err)
 		return
@@ -329,6 +408,7 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 	if a.keyValidator != nil {
 		a.keyValidator.AddKey(u.APIKey)
 	}
+	a.decorateAPIKeyUser(r.Context(), &u)
 	w.WriteHeader(http.StatusCreated)
 	respondJSON(w, u)
 }
@@ -370,6 +450,7 @@ func (a *AdminAPI) HandleAPIKeyUserGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.APIKey = maskAPIKey(u.APIKey)
+	a.decorateAPIKeyUser(r.Context(), u)
 	respondJSON(w, u)
 }
 
@@ -410,6 +491,7 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid json")
 		return
 	}
+	u.UserID = strings.TrimSpace(u.UserID)
 	if u.UserID == "" || len(u.UserID) > 128 {
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "user_id is required (max 128 chars)")
 		return
@@ -425,6 +507,13 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 		respondStoreError(w, a.log, "admin: get api key user for update", err)
 		return
 	}
+	canonicalUserID, err := a.canonicalizeAPIKeyUserID(r.Context(), u.UserID)
+	if err != nil {
+		a.log.Error("admin: canonicalize api key user_id", "error", err)
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
+		return
+	}
+	u.UserID = canonicalUserID
 	if u.UserID != oldUser.UserID {
 		if err := a.requireUniqueUserID(r.Context(), u.UserID, id); err != nil {
 			respondStoreError(w, a.log, "admin: check unique user_id", err)
@@ -439,7 +528,9 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 	if inv := a.akStore.Invalidator(); inv != nil {
 		inv.Invalidate(oldUser.APIKey)
 	}
-	respondJSON(w, APIKeyUser{ID: id, APIKey: maskAPIKey(oldUser.APIKey), UserID: u.UserID, Description: u.Description})
+	resp := APIKeyUser{ID: id, APIKey: maskAPIKey(oldUser.APIKey), UserID: u.UserID, Description: u.Description}
+	a.decorateAPIKeyUser(r.Context(), &resp)
+	respondJSON(w, resp)
 }
 
 // HandleAPIKeyUserDelete deletes an API key user.

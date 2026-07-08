@@ -70,6 +70,33 @@ func TestSpillFile_Truncate(t *testing.T) {
 	require.Empty(t, records)
 }
 
+func TestSpillFile_WriteAfterTruncate(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "spill_rewrite.wal")
+	sf, err := OpenSpill(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sf.Close() })
+
+	rec1 := SpillRecord{TsMs: 1, UA: &UserActivity{
+		Ts: 1, UserID: "u1", Action: ActionAuthLogin, Outcome: OutcomeSuccess,
+		DetailJSON: `{}`, SelfHash: "h1",
+	}}
+	rec2 := SpillRecord{TsMs: 2, UA: &UserActivity{
+		Ts: 2, UserID: "u2", Action: ActionSessionCreate, Outcome: OutcomeSuccess,
+		DetailJSON: `{}`, SelfHash: "h2",
+	}}
+
+	require.NoError(t, sf.Write(rec1))
+	require.NoError(t, sf.Truncate())
+	require.NoError(t, sf.Write(rec2))
+
+	records, err := sf.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, rec2.TsMs, records[0].TsMs)
+	require.Equal(t, "u2", records[0].UA.UserID)
+}
+
 func TestSpillFile_ManyRecords(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "spill_many.wal")
