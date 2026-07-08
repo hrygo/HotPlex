@@ -13,6 +13,8 @@ interface QuestionItem {
   options?: Array<{ value?: string; label: string }>;
   is_multi_select?: boolean;
   multiSelect?: boolean;
+  multi_select?: boolean;
+  multiple?: boolean;
 }
 
 interface QuestionResponseCardProps {
@@ -138,7 +140,7 @@ export function QuestionResponseCard({
 
           {questions.map((q, idx) => {
             const qKey = q.id || q.question;
-            const isMulti = !!(q.is_multi_select || q.multiSelect);
+            const isMulti = !!(q.is_multi_select || q.multiSelect || q.multi_select || q.multiple);
             const hasOptions = q.options && q.options.length > 0;
             const currentAnswer = answers[qKey] || "";
 
