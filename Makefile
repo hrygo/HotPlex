@@ -342,7 +342,7 @@ webchat-stop:
 webchat-embed:
 	@if [ ! -d $(WEB_CHAT_OUT)/_next ]; then \
 		echo "  $(CYAN)Webchat$(RESET)$(DIM) building from scratch...$(RESET)"; \
-		cd $(WEB_CHAT_DIR) && pnpm install --frozen-lockfile; \
+		(cd $(WEB_CHAT_DIR) && pnpm install --frozen-lockfile); \
 		$(call webchat-build); \
 		echo "  $(GREEN)✓$(RESET) Webchat built"; \
 	elif find $(WEB_CHAT_DIR)/app $(WEB_CHAT_DIR)/lib $(WEB_CHAT_DIR)/components $(WEB_CHAT_DIR)/public \
