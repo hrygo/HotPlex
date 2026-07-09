@@ -613,7 +613,8 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
 	// OpenCode ≥1.17 honors only the `directory` query param; a `project_dir`
-	// JSON body field is ignored and the session falls back to `serve`'s cwd.
+	// JSON body field is ignored and the session falls back to `serve`s cwd.
+	// For older versions (<1.17), we also send `project_dir` in the JSON body.
 	createURL, err := url.Parse(w.httpAddr + "/session")
 	if err != nil {
 		return "", fmt.Errorf("create request: parse url: %w", err)
@@ -624,7 +625,16 @@ func (w *Worker) createSession(ctx context.Context, projectDir string) (string, 
 		createURL.RawQuery = q.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", createURL.String(), strings.NewReader("{}"))
+	body := map[string]any{}
+	if projectDir != "" {
+		body["project_dir"] = projectDir
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", createURL.String(), bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

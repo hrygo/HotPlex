@@ -89,7 +89,11 @@ func (c *ServerCommander) Clear(ctx context.Context) error {
 	var newSession struct {
 		ID string `json:"id"`
 	}
-	if err := c.doPost(ctx, createPath, map[string]any{}, &newSession); err != nil {
+	createBody := map[string]any{}
+	if dir != "" {
+		createBody["project_dir"] = dir
+	}
+	if err := c.doPost(ctx, createPath, createBody, &newSession); err != nil {
 		return fmt.Errorf("opencode clear (create): %w", err)
 	}
 	c.setSessionID(newSession.ID)
