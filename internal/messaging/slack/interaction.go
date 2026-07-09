@@ -72,67 +72,138 @@ func (a *Adapter) handleInteractionEvent(ctx context.Context, evt socketmode.Eve
 			continue
 		}
 
-		// Build response metadata and send through the bridge
+		var (
+			metadata map[string]any
+			ackText  string
+		)
+
 		switch interactionType {
 		case "allow":
-			pi.SendResponse(map[string]any{
+			reason := ""
+			if callback.BlockActionState != nil {
+				if blocks, ok := callback.BlockActionState.Values["reason_block"]; ok {
+					if act, ok := blocks["reason"]; ok {
+						reason = act.Value
+					}
+				}
+			}
+			metadata = map[string]any{
 				"permission_response": map[string]any{
 					"request_id": requestID,
 					"allowed":    true,
-					"reason":     "",
+					"reason":     reason,
 				},
-			})
+			}
+			ackText = fmt.Sprintf("_Allowed by <@%s>_", userID)
+			if reason != "" {
+				ackText += fmt.Sprintf("\n> *Reason:* %s", reason)
+			}
+
 		case "deny":
-			pi.SendResponse(map[string]any{
+			reason := ""
+			if callback.BlockActionState != nil {
+				if blocks, ok := callback.BlockActionState.Values["reason_block"]; ok {
+					if act, ok := blocks["reason"]; ok {
+						reason = act.Value
+					}
+				}
+			}
+			if reason == "" {
+				reason = "user denied"
+			}
+			metadata = map[string]any{
 				"permission_response": map[string]any{
 					"request_id": requestID,
 					"allowed":    false,
-					"reason":     "user denied",
+					"reason":     reason,
 				},
-			})
+			}
+			ackText = fmt.Sprintf("_Denied by <@%s>_", userID)
+			if reason != "" && reason != "user denied" {
+				ackText += fmt.Sprintf("\n> *Reason:* %s", reason)
+			}
+
 		case "answer":
-			pi.SendResponse(map[string]any{
+			customAnswer := ""
+			if callback.BlockActionState != nil {
+				if blocks, ok := callback.BlockActionState.Values["question_custom_block"]; ok {
+					if act, ok := blocks["custom_answer"]; ok {
+						customAnswer = act.Value
+					}
+				}
+			}
+			answer := action.Value
+			if customAnswer != "" {
+				answer = customAnswer
+			}
+			metadata = map[string]any{
 				"question_response": map[string]any{
 					"id": requestID,
 					"answers": map[string]string{
-						"_": action.Value,
+						"_": answer,
 					},
 				},
-			})
+			}
+			ackText = fmt.Sprintf("_Answered by <@%s>_: %s", userID, answer)
+
 		case "accept":
-			pi.SendResponse(map[string]any{
+			comment := ""
+			if callback.BlockActionState != nil {
+				if blocks, ok := callback.BlockActionState.Values["elicitation_comment_block"]; ok {
+					if act, ok := blocks["comment"]; ok {
+						comment = act.Value
+					}
+				}
+			}
+			content := map[string]any{}
+			if comment != "" {
+				content["comment"] = comment
+			}
+			metadata = map[string]any{
 				"elicitation_response": map[string]any{
-					"id":     requestID,
-					"action": "accept",
+					"id":      requestID,
+					"action":  "accept",
+					"content": content,
 				},
-			})
+			}
+			ackText = fmt.Sprintf("_Accepted by <@%s>_", userID)
+			if comment != "" {
+				ackText += fmt.Sprintf("\n> *Comment:* %s", comment)
+			}
+
 		case "decline":
-			pi.SendResponse(map[string]any{
+			comment := ""
+			if callback.BlockActionState != nil {
+				if blocks, ok := callback.BlockActionState.Values["elicitation_comment_block"]; ok {
+					if act, ok := blocks["comment"]; ok {
+						comment = act.Value
+					}
+				}
+			}
+			content := map[string]any{}
+			if comment != "" {
+				content["comment"] = comment
+			}
+			metadata = map[string]any{
 				"elicitation_response": map[string]any{
-					"id":     requestID,
-					"action": "decline",
+					"id":      requestID,
+					"action":  "decline",
+					"content": content,
 				},
-			})
+			}
+			ackText = fmt.Sprintf("_Declined by <@%s>_", userID)
+			if comment != "" {
+				ackText += fmt.Sprintf("\n> *Comment:* %s", comment)
+			}
 		}
 
-		// Update the message to show the specific action taken
-		ackText := fmt.Sprintf("_Response recorded by <@%s>_", userID)
-		switch interactionType {
-		case "allow":
-			ackText = fmt.Sprintf("_Allowed by <@%s>_", userID)
-		case "deny":
-			ackText = fmt.Sprintf("_Denied by <@%s>_", userID)
-		case "accept":
-			ackText = fmt.Sprintf("_Accepted by <@%s>_", userID)
-		case "decline":
-			ackText = fmt.Sprintf("_Declined by <@%s>_", userID)
-		}
+		pi.SendResponse(metadata)
 
 		var updateErr error
 		if len(callback.Message.Blocks.BlockSet) > 0 {
 			var updatedBlocks []slack.Block
 			for _, b := range callback.Message.Blocks.BlockSet {
-				if b.BlockType() != slack.MBTAction {
+				if b.BlockType() != slack.MBTAction && b.BlockType() != slack.MBTInput {
 					updatedBlocks = append(updatedBlocks, b)
 				}
 			}
@@ -202,11 +273,24 @@ func (c *SlackConn) sendPermissionRequest(ctx context.Context, env *events.Envel
 		headerText += fmt.Sprintf("\n```%s```", preview)
 	}
 
+	reasonInput := slack.NewPlainTextInputBlockElement(
+		slack.NewTextBlockObject(slack.PlainTextType, "请填写可选的留言/反馈/拒绝理由...", false, false),
+		"reason",
+	)
+	reasonBlock := slack.NewInputBlock(
+		"reason_block",
+		slack.NewTextBlockObject(slack.PlainTextType, "留言/反馈理由 (可选)", false, false),
+		nil,
+		reasonInput,
+	)
+	reasonBlock.Optional = true
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(slack.MarkdownType, headerText, false, false),
 			nil, nil,
 		),
+		reasonBlock,
 		slack.NewActionBlock(
 			"permission_actions",
 			slack.NewButtonBlockElement(
@@ -333,6 +417,19 @@ func (c *SlackConn) sendQuestionRequest(ctx context.Context, env *events.Envelop
 				buttons...,
 			))
 		}
+
+		customAnswerInput := slack.NewPlainTextInputBlockElement(
+			slack.NewTextBlockObject(slack.PlainTextType, "或者在此输入自定义答案...", false, false),
+			"custom_answer",
+		)
+		customAnswerBlock := slack.NewInputBlock(
+			"question_custom_block",
+			slack.NewTextBlockObject(slack.PlainTextType, "自定义答案 (可选)", false, false),
+			nil,
+			customAnswerInput,
+		)
+		customAnswerBlock.Optional = true
+		blocks = append(blocks, customAnswerBlock)
 	}
 
 	// Sanitize blocks before sending
@@ -400,11 +497,24 @@ func (c *SlackConn) sendElicitationRequest(ctx context.Context, env *events.Enve
 		headerText += fmt.Sprintf("\n<%s|Open external form>", data.URL)
 	}
 
+	commentInput := slack.NewPlainTextInputBlockElement(
+		slack.NewTextBlockObject(slack.PlainTextType, "请填写附加注释/自定义输入...", false, false),
+		"comment",
+	)
+	commentBlock := slack.NewInputBlock(
+		"elicitation_comment_block",
+		slack.NewTextBlockObject(slack.PlainTextType, "附加注释/输入 (可选)", false, false),
+		nil,
+		commentInput,
+	)
+	commentBlock.Optional = true
+
 	blocks := []slack.Block{
 		slack.NewSectionBlock(
 			slack.NewTextBlockObject(slack.MarkdownType, headerText, false, false),
 			nil, nil,
 		),
+		commentBlock,
 		slack.NewActionBlock(
 			"elicitation_actions",
 			slack.NewButtonBlockElement(

@@ -607,8 +607,20 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 	content := md["content"].(string)
 	require.Contains(t, content, "https://github.com/login/oauth", "URL must appear as link in body")
 
-	actionEl := elements[1].(map[string]any)
-	require.Equal(t, "action", actionEl["tag"])
+	var actionEl map[string]any
+	var inputEl map[string]any
+	for _, e := range elements {
+		m := e.(map[string]any)
+		if m["tag"] == "action" {
+			actionEl = m
+		} else if m["tag"] == "input" {
+			inputEl = m
+		}
+	}
+	require.NotNil(t, inputEl, "expected an input element")
+	require.Equal(t, "comment", inputEl["name"])
+	require.NotNil(t, actionEl, "expected an action element")
+
 	buttons := actionEl["actions"].([]any)
 	require.Len(t, buttons, 2)
 
@@ -632,7 +644,7 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 
 func TestBuildResolvedCard_Green(t *testing.T) {
 	t.Parallel()
-	card := buildResolvedCard("allow", "已允许", "", "test_summary", "ou_123")
+	card := buildResolvedCard("allow", "已允许", "", "test_summary", "ou_123", "")
 	require.NotNil(t, card)
 
 	cfg := card["config"].(map[string]any)
@@ -647,14 +659,14 @@ func TestBuildResolvedCard_Green(t *testing.T) {
 
 func TestBuildResolvedCard_Red(t *testing.T) {
 	t.Parallel()
-	card := buildResolvedCard("deny", "已拒绝", "", "test_summary", "")
+	card := buildResolvedCard("deny", "已拒绝", "", "test_summary", "", "")
 	hdr := card["header"].(map[string]any)
 	require.Equal(t, "red", hdr["template"])
 }
 
 func TestBuildResolvedCard_ExplicitColor(t *testing.T) {
 	t.Parallel()
-	card := buildResolvedCard("allow", "Custom Label", "blue", "", "")
+	card := buildResolvedCard("allow", "Custom Label", "blue", "", "", "")
 	hdr := card["header"].(map[string]any)
 	require.Equal(t, "blue", hdr["template"])
 	title := hdr["title"].(map[string]any)

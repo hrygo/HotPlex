@@ -297,6 +297,14 @@ func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content.String()},
 		{
+			"tag":  "input",
+			"name": "reason",
+			"placeholder": map[string]any{
+				"tag":     "plain_text",
+				"content": "请填写可选的留言/反馈/拒绝理由...",
+			},
+		},
+		{
 			"tag": "action",
 			"actions": []map[string]any{
 				{
@@ -375,6 +383,15 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 	}
 
 	elements = append(elements, map[string]any{
+		"tag":  "input",
+		"name": "custom_answer",
+		"placeholder": map[string]any{
+			"tag":     "plain_text",
+			"content": "或者在此输入自定义答案...",
+		},
+	})
+
+	elements = append(elements, map[string]any{
 		"tag":     "markdown",
 		"content": "💬 点击按钮直接选择，或直接回复自定义答案",
 	})
@@ -409,6 +426,14 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content.String()},
 		{
+			"tag":  "input",
+			"name": "comment",
+			"placeholder": map[string]any{
+				"tag":     "plain_text",
+				"content": "请填写附加注释/自定义输入...",
+			},
+		},
+		{
 			"tag": "action",
 			"actions": []map[string]any{
 				{
@@ -430,7 +455,7 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
 }
 
-func buildResolvedCard(action, label, color, summary, operatorID string) map[string]any {
+func buildResolvedCard(action, label, color, summary, operatorID, reason string) map[string]any {
 	if color == "" {
 		switch action {
 		case "allow", "answer", "accept":
@@ -445,6 +470,12 @@ func buildResolvedCard(action, label, color, summary, operatorID string) map[str
 		elements = append(elements, map[string]any{
 			"tag":     "markdown",
 			"content": "**原请求：**\n" + summary,
+		})
+	}
+	if reason != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": "**反馈/理由：**\n" + reason,
 		})
 	}
 

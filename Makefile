@@ -35,6 +35,10 @@ WEB_CHAT_DIR  := webchat
 WEB_CHAT_OUT  := internal/webchat/out
 GRACE_PERIOD  := 7
 
+# Derived paths (DRY: used across build targets)
+BINARY_PATH   := $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)
+BUILD_HEADER  := $(BOLD)$(CYAN)Build$(RESET)  $(DIM)$(VERSION) · $(GIT_SHA) · $(GOOS)/$(GOARCH)$(RESET)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Color
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +61,7 @@ CYAN   := \033[36m
 .PHONY: gateway-start gateway-stop gateway-status gateway-logs
 .PHONY: webchat-dev webchat-stop webchat-embed webchat-rebuild
 .PHONY: docs-build docs-clean docs-lint swagger
+.PHONY: dev-build coverage test-slack-e2e
 .PHONY: test test-short lint fmt quality check clean
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -115,20 +120,35 @@ define check-tool
 	fi
 endef
 
+# ── Reusable build helpers ──────────────────────────────────────────────────
+
+# go-build — compile Go binary, strip duplicated compile+echo across targets.
+define go-build
+	@echo "  $(CYAN)Compiling$(RESET)$(DIM) Go binary...$(RESET)"
+	@CGO_ENABLED=0 go build $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
+		-o $(1) $(MAIN_PATH)
+	@echo "  $(GREEN)✓$(RESET) $(1)"
+endef
+
+# webchat-build — shared pnpm build + output copy logic.
+# NOTE: no @ prefix — $(call ...) inside \ -continued blocks would emit literal @.
+define webchat-build
+	cd $(WEB_CHAT_DIR) && pnpm build && \
+	rm -rf ../$(WEB_CHAT_OUT).tmp && cp -r out ../$(WEB_CHAT_OUT).tmp && \
+	rm -rf ../$(WEB_CHAT_OUT) && mv ../$(WEB_CHAT_OUT).tmp ../$(WEB_CHAT_OUT)
+endef
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Build
 # ─────────────────────────────────────────────────────────────────────────────
 
 build:
-	@echo "$(BOLD)$(CYAN)Build$(RESET)  $(DIM)$(VERSION) · $(GIT_SHA) · $(GOOS)/$(GOARCH)$(RESET)"
+	@echo "$(BUILD_HEADER)"
 	@echo ""
 	@$(MAKE) docs-build --no-print-directory
 	@$(MAKE) webchat-embed --no-print-directory
 	@mkdir -p $(BUILD_DIR) $(LOG_DIR)
-	@echo "  $(CYAN)Compiling$(RESET)$(DIM) Go binary...$(RESET)"
-	@CGO_ENABLED=0 go build $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
-		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
-	@echo "  $(GREEN)✓$(RESET) $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)"
+	$(call go-build,$(BINARY_PATH))
 
 build-windows:
 	@echo "$(CYAN)Cross-compiling for Windows...$(RESET)"
@@ -137,18 +157,15 @@ build-windows:
 	@$(MAKE) build-one GOOS=windows GOARCH=arm64 SUFFIX=.exe --no-print-directory
 
 build-one:
-	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
-		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX) $(MAIN_PATH)
-	@echo "  $(GREEN)✓$(RESET) $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX)"
+	@$(call go-build,$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)$(SUFFIX))
 
 run: build
-	@./$(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) \
-		gateway start -c $(CONFIG_DIR)/config-dev.yaml
+	@./$(BINARY_PATH) gateway start -c $(CONFIG_DIR)/config-dev.yaml
 
 # dev-build: 轻量构建，跳过 swagger，仅保证 go:embed 资源存在 + Go 编译。
 # 供 `make dev` 每次启动前自动产出最新二进制，避免 dev.sh 兜底提示。
 dev-build:
-	@echo "$(BOLD)$(CYAN)Dev Build$(RESET)  $(DIM)$(VERSION) · $(GIT_SHA) · $(GOOS)/$(GOARCH)$(RESET)"
+	@echo "$(BUILD_HEADER)"
 	@mkdir -p $(BUILD_DIR) $(LOG_DIR)
 	@$(MAKE) webchat-embed --no-print-directory
 	@if [ ! -f internal/docs/out/index.html ]; then \
@@ -157,10 +174,7 @@ dev-build:
 	else \
 		echo "  $(DIM)Docs ✓ cached$(RESET)"; \
 	fi
-	@echo "  $(CYAN)Compiling$(RESET)$(DIM) Go binary...$(RESET)"
-	@CGO_ENABLED=0 go build $(BUILD_OPTS) -ldflags="$(LDFLAGS)" \
-		-o $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH) $(MAIN_PATH)
-	@echo "  $(GREEN)✓$(RESET) $(BUILD_DIR)/$(BINARY_NAME)-$(GOOS)-$(GOARCH)"
+	$(call go-build,$(BINARY_PATH))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test
@@ -184,7 +198,7 @@ coverage:
 	@echo "$(BOLD)Per-package coverage:$(RESET)"
 	@go tool cover -func=coverage.out | grep -v "^total:" | sort -t: -k3 -n
 	@echo ""
-	@TOTAL=$$(go tool cover -func=coverage.out | tail -1 | grep -oP '\d+\.\d+') ; \
+	@TOTAL=$$(go tool cover -func=coverage.out | tail -1 | grep -Eo '[0-9]+\.[0-9]+') ; \
 		echo "  $(BOLD)Total: $${TOTAL}%$(RESET)"
 
 test-slack-e2e:
@@ -235,9 +249,10 @@ dev:
 		fi; \
 		echo "  $(DIM)────────────────────────────────────────────────$(RESET)"; \
 		echo "  $(CYAN)Quick Commands$(RESET)"; \
-		printf "    make %-15s %s\n" "dev-logs" "View logs"; \
+		printf "    make %-15s %s\n" "dev-logs"   "View logs"; \
 		printf "    make %-15s %s\n" "dev-status" "Check status"; \
-		printf "    make %-15s %s\n" "dev-stop" "Stop all"; \
+		printf "    make %-15s %s\n" "dev-stop"   "Stop all"; \
+		printf "    make %-15s %s\n" "help"       "Show all commands"; \
 		echo "  $(DIM)────────────────────────────────────────────────$(RESET)"; \
 		echo ""; \
 	else \
@@ -327,9 +342,8 @@ webchat-stop:
 webchat-embed:
 	@if [ ! -d $(WEB_CHAT_OUT)/_next ]; then \
 		echo "  $(CYAN)Webchat$(RESET)$(DIM) building from scratch...$(RESET)"; \
-		cd $(WEB_CHAT_DIR) && pnpm install --frozen-lockfile && pnpm build && \
-		rm -rf ../$(WEB_CHAT_OUT).tmp && cp -r out ../$(WEB_CHAT_OUT).tmp && \
-		rm -rf ../$(WEB_CHAT_OUT) && mv ../$(WEB_CHAT_OUT).tmp ../$(WEB_CHAT_OUT); \
+		cd $(WEB_CHAT_DIR) && pnpm install --frozen-lockfile; \
+		$(call webchat-build); \
 		echo "  $(GREEN)✓$(RESET) Webchat built"; \
 	elif find $(WEB_CHAT_DIR)/app $(WEB_CHAT_DIR)/lib $(WEB_CHAT_DIR)/components $(WEB_CHAT_DIR)/public \
 		$(WEB_CHAT_DIR)/next.config.mjs $(WEB_CHAT_DIR)/tsconfig.json \
@@ -343,9 +357,7 @@ webchat-embed:
 
 webchat-rebuild:
 	@echo "$(CYAN)Rebuilding webchat...$(RESET)"
-	@cd $(WEB_CHAT_DIR) && pnpm build && \
-	rm -rf ../$(WEB_CHAT_OUT).tmp && cp -r out ../$(WEB_CHAT_OUT).tmp && \
-	rm -rf ../$(WEB_CHAT_OUT) && mv ../$(WEB_CHAT_OUT).tmp ../$(WEB_CHAT_OUT)
+	@$(call webchat-build)
 	@echo "  $(GREEN)✓$(RESET) Webchat rebuilt"
 
 # ─────────────────────────────────────────────────────────────────────────────
