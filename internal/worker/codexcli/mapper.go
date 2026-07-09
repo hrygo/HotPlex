@@ -462,23 +462,54 @@ func (m *Mapper) mapNotifTurnCompleted() []*events.Envelope {
 }
 
 func (m *Mapper) mapNotifApproval(params json.RawMessage) []*events.Envelope {
+	// Different approval notification types use different ID fields:
+	//   serverRequest/approval            → requestId
+	//   item/commandExecution/requestApproval → approvalId (null for regular shell) or itemId
+	//   item/fileChange/requestApproval   → itemId
+	// We pick the first non-empty: approvalId → itemId → requestId.
 	var p struct {
-		RequestID string `json:"requestId"`
-		ToolName  string `json:"toolName"`
-		Reason    string `json:"reason,omitempty"`
+		RequestID  string `json:"requestId"`
+		ApprovalID string `json:"approvalId"`
+		ItemID     string `json:"itemId"`
+		ToolName   string `json:"toolName"`
+		Command    string `json:"command"`
+		Reason     string `json:"reason,omitempty"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil
 	}
-	desc := p.ToolName
+
+	// Resolve canonical request ID.
+	requestID := p.ApprovalID
+	if requestID == "" {
+		requestID = p.ItemID
+	}
+	if requestID == "" {
+		requestID = p.RequestID
+	}
+
+	// Resolve tool name: prefer explicit toolName, fall back to command preview.
+	toolName := p.ToolName
+	if toolName == "" && p.Command != "" {
+		if len(p.Command) > 60 {
+			toolName = p.Command[:60] + "…"
+		} else {
+			toolName = p.Command
+		}
+	}
+	if toolName == "" {
+		toolName = "shell command"
+	}
+
+	desc := toolName
 	if p.Reason != "" {
 		desc = p.Reason
 	}
 
 	return []*events.Envelope{
 		newEnvelope(events.PermissionRequest, events.PermissionRequestData{
-			ID:          p.RequestID,
-			ToolName:    p.ToolName,
+			ID:          requestID,
+			ToolName:    toolName,
 			Description: desc,
 		}, m.sessionID, m.nextSeq()),
 	}

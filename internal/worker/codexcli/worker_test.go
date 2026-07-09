@@ -973,6 +973,112 @@ func TestMapNotificationApprovalMethodNames(t *testing.T) {
 	}
 }
 
+// TestMapNotificationApprovalIDFieldPriority verifies that for
+// item/commandExecution/requestApproval the request ID is resolved from
+// approvalId → itemId → requestId (first non-empty wins), and that the
+// command field is used as tool name when toolName is absent.
+func TestMapNotificationApprovalIDFieldPriority(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		params   string
+		wantID   string
+		wantTool string
+	}{
+		{
+			name:     "approvalId takes priority over itemId",
+			params:   `{"approvalId":"appr-1","itemId":"item-1","requestId":"req-1","command":"ls"}`,
+			wantID:   "appr-1",
+			wantTool: "ls",
+		},
+		{
+			name:     "itemId used when approvalId is null/empty",
+			params:   `{"approvalId":null,"itemId":"item-2","requestId":"req-2","command":"cat /etc/hosts"}`,
+			wantID:   "item-2",
+			wantTool: "cat /etc/hosts",
+		},
+		{
+			name:     "itemId used when approvalId is empty string",
+			params:   `{"approvalId":"","itemId":"item-3","command":"echo hi"}`,
+			wantID:   "item-3",
+			wantTool: "echo hi",
+		},
+		{
+			name:     "requestId fallback when approvalId and itemId are absent",
+			params:   `{"requestId":"req-4","toolName":"Bash","reason":"run ls"}`,
+			wantID:   "req-4",
+			wantTool: "Bash",
+		},
+		{
+			name:     "command truncated to 60 runes when toolName absent",
+			params:   `{"itemId":"item-5","command":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+			wantID:   "item-5",
+			wantTool: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…",
+		},
+		{
+			name:     "default tool name when all name fields are empty",
+			params:   `{"itemId":"item-6"}`,
+			wantID:   "item-6",
+			wantTool: "shell command",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := NewMapper("session-1")
+			envs := m.MapNotification("item/commandExecution/requestApproval", json.RawMessage(tc.params))
+			require.Len(t, envs, 1)
+			pr, ok := envs[0].Event.Data.(events.PermissionRequestData)
+			require.True(t, ok)
+			require.Equal(t, tc.wantID, pr.ID, "request ID mismatch")
+			require.Equal(t, tc.wantTool, pr.ToolName, "tool name mismatch")
+		})
+	}
+}
+
+// TestDispatchServerRequestApprovalIDResolution verifies that dispatchServerRequest
+// uses the same approvalId → itemId → requestId priority when building the
+// serverReqIDs map.
+func TestDispatchServerRequestApprovalIDResolution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		frameJSON string
+		wantKey   string
+	}{
+		{
+			name:      "approvalId stored when present",
+			frameJSON: `{"jsonrpc":"2.0","id":10,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","approvalId":"appr-x","itemId":"item-x"}}`,
+			wantKey:   "appr-x",
+		},
+		{
+			name:      "itemId stored when approvalId is null",
+			frameJSON: `{"jsonrpc":"2.0","id":11,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","approvalId":null,"itemId":"item-y"}}`,
+			wantKey:   "item-y",
+		},
+		{
+			name:      "requestId stored as fallback",
+			frameJSON: `{"jsonrpc":"2.0","id":12,"method":"serverRequest/approval","params":{"threadId":"thr-1","requestId":"req-z"}}`,
+			wantKey:   "req-z",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
+			mgr := NewCodexAppServerManager(slog.Default(), cfg)
+			_ = mgr.Subscribe("thr-1", "sess-1")
+			mgr.dispatchFrame([]byte(tc.frameJSON))
+			_, ok := mgr.serverReqIDs.Load(tc.wantKey)
+			require.True(t, ok, "expected serverReqIDs to contain key %q", tc.wantKey)
+		})
+	}
+}
+
 func TestMapNotificationElicitation(t *testing.T) {
 	t.Parallel()
 

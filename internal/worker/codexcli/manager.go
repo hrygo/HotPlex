@@ -609,9 +609,15 @@ func (m *CodexAppServerManager) dispatchResponse(resp *JSONRPCResponse) {
 // It extracts the thread ID, maps the request to AEP envelopes via the converter,
 // and stores the request ID → frame ID mapping so the worker can respond later.
 func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
+	// Parse all possible ID fields — different approval notification types use different names:
+	//   serverRequest/approval                → requestId
+	//   item/commandExecution/requestApproval → approvalId (null for regular shell) or itemId
+	//   item/fileChange/requestApproval       → itemId
 	var params struct {
-		ThreadID  string `json:"threadId"`
-		RequestID string `json:"requestId"`
+		ThreadID   string `json:"threadId"`
+		RequestID  string `json:"requestId"`
+		ApprovalID string `json:"approvalId"`
+		ItemID     string `json:"itemId"`
 	}
 	if frame.Params != nil {
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
@@ -626,9 +632,21 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 		return
 	}
 
-	// Store the JSON-RPC frame ID so HandlePermissionResponse can reply.
-	if params.RequestID != "" {
-		m.serverReqIDs.Store(params.RequestID, frame.ID)
+	// Resolve canonical request ID (mirrors mapNotifApproval priority: approvalId → itemId → requestId).
+	requestID := params.ApprovalID
+	if requestID == "" {
+		requestID = params.ItemID
+	}
+	if requestID == "" {
+		requestID = params.RequestID
+	}
+
+	// Store the JSON-RPC frame ID so RespondServerRequest can reply.
+	if requestID != "" {
+		m.serverReqIDs.Store(requestID, frame.ID)
+	} else {
+		m.log.Warn("codex-app-server: server request has no usable requestId/approvalId/itemId — response routing impossible",
+			"method", frame.Method, "frame_id", frame.ID)
 	}
 
 	// Map and deliver as notification to the subscriber.
