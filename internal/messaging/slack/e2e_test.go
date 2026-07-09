@@ -40,7 +40,7 @@ func newTestAdapter(t *testing.T) *Adapter {
 		rateLimiter:   NewChannelRateLimiter(ctx),
 		activeStreams: make(map[string]*NativeStreamingWriter),
 	}
-	a.ConnPool = messaging.NewConnPool[*SlackConn](func(key string) *SlackConn {
+	a.ConnPool = messaging.NewConnPool(func(key string) *SlackConn {
 		parts := strings.SplitN(key, "#", 2)
 		threadTS := ""
 		if len(parts) > 1 {

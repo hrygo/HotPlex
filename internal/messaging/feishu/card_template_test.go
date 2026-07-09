@@ -611,9 +611,10 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 	var inputEl map[string]any
 	for _, e := range elements {
 		m := e.(map[string]any)
-		if m["tag"] == "action" {
+		switch m["tag"] {
+		case "action":
 			actionEl = m
-		} else if m["tag"] == "input" {
+		case "input":
 			inputEl = m
 		}
 	}
