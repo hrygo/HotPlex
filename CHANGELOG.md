@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.33.2] - 2026-07-09
+
+### Summary
+
+v1.33.2 是一次 patch 版本更新，主要修复了 **OpenCode Server (OCS) 工作区绑定对历史版本（< 1.17）的向下兼容性**。通过在会话初始化请求中同时保留新版的 `directory` 查询参数和旧版的 `project_dir` 消息体载荷，保证了在使用旧版 OCS 服务端时能够正确识别并绑定工作区路径，防止运行中抛出 OCS 实例加载失败的 500 报错。
+
+### Fixed
+
+- **Worker**: Restore `project_dir` field in OCS session creation and clear request payloads to ensure backward compatibility with older OCS versions (<1.17).
+
 ## [1.33.1] - 2026-07-09
 
 ### Summary
