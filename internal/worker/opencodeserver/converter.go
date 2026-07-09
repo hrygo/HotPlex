@@ -234,9 +234,6 @@ func (c *Converter) handlePartUpdated(sessionID string, props json.RawMessage) [
 	// mutations (part.type=="tool"; state.status: pending→running→completed/error).
 	// The schema's session.next.tool.* events are not yet emitted on the live
 	// SSE stream, so this is the canonical tool-call signal.
-	if st.seenToolCalls == nil {
-		st.seenToolCalls = make(map[string]bool)
-	}
 	callID := evt.Part.CallID
 	s := &evt.Part.State
 	input := s.Input
@@ -554,7 +551,9 @@ func (c *Converter) Reset() {
 func (c *Converter) getOrCreateState(sessionID string) *turnState {
 	st, ok := c.states[sessionID]
 	if !ok {
-		st = &turnState{}
+		st = &turnState{
+			seenToolCalls: make(map[string]bool),
+		}
 		c.states[sessionID] = st
 	}
 	return st
@@ -575,6 +574,7 @@ func (c *Converter) getOrCreateState(sessionID string) *turnState {
 // (a turn boundary ends any in-flight reasoning phase). A subsequent call
 // within the same turn returns first=false so callers can suppress duplicate
 // Done events. The turn resets when session.status(busy) arrives.
+// func (c *Converter) consumeDone(sessionID string) (stats map[string]any, first bool) {
 func (c *Converter) consumeDone(sessionID string) (stats map[string]any, first bool) {
 	st := c.getOrCreateState(sessionID) // always create so doneShown dedup works
 	if st.doneShown {
@@ -594,7 +594,10 @@ func (c *Converter) resetForNewTurn(sessionID string) {
 		return
 	}
 	model := st.model
-	*st = turnState{model: model}
+	*st = turnState{
+		model:         model,
+		seenToolCalls: make(map[string]bool),
+	}
 }
 
 // buildStats renders accumulated usage as a Stats map for DoneData.
