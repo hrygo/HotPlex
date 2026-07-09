@@ -447,14 +447,14 @@ func TestBuildPermissionCardWithButtons(t *testing.T) {
 	var actionEl map[string]any
 	for _, e := range elements {
 		m := e.(map[string]any)
-		if m["tag"] == "action" {
+		if m["tag"] == "interactive_container" {
 			actionEl = m
 			break
 		}
 	}
-	require.NotNil(t, actionEl, "expected an action element")
+	require.NotNil(t, actionEl, "expected an interactive_container element")
 
-	buttons := actionEl["actions"].([]any)
+	buttons := actionEl["elements"].([]any)
 	require.Len(t, buttons, 2)
 
 	btn0 := buttons[0].(map[string]any)
@@ -502,13 +502,13 @@ func TestBuildPermissionCardWithButtons_NoArgs(t *testing.T) {
 	var actionEl map[string]any
 	for _, e := range elements {
 		m := e.(map[string]any)
-		if m["tag"] == "action" {
+		if m["tag"] == "interactive_container" {
 			actionEl = m
 			break
 		}
 	}
 	require.NotNil(t, actionEl)
-	buttons := actionEl["actions"].([]any)
+	buttons := actionEl["elements"].([]any)
 	require.Len(t, buttons, 2)
 }
 
@@ -540,14 +540,14 @@ func TestBuildQuestionCardWithButtons(t *testing.T) {
 	var actionEl map[string]any
 	for _, e := range elems {
 		m := e.(map[string]any)
-		if m["tag"] == "action" {
+		if m["tag"] == "interactive_container" {
 			actionEl = m
 			break
 		}
 	}
-	require.NotNil(t, actionEl, "expected an action element")
+	require.NotNil(t, actionEl, "expected an interactive_container element")
 
-	buttons := actionEl["actions"].([]any)
+	buttons := actionEl["elements"].([]any)
 	require.Len(t, buttons, 2)
 
 	for _, b := range buttons {
@@ -582,7 +582,7 @@ func TestBuildQuestionCardWithButtons_NoOptions(t *testing.T) {
 	elems := body["elements"].([]any)
 	for _, e := range elems {
 		m := e.(map[string]any)
-		require.NotEqual(t, "action", m["tag"], "no action element expected when question has no options")
+		require.NotEqual(t, "interactive_container", m["tag"], "no interactive_container element expected when question has no options")
 	}
 }
 
@@ -612,7 +612,7 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 	for _, e := range elements {
 		m := e.(map[string]any)
 		switch m["tag"] {
-		case "action":
+		case "interactive_container":
 			actionEl = m
 		case "input":
 			inputEl = m
@@ -620,9 +620,9 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 	}
 	require.NotNil(t, inputEl, "expected an input element")
 	require.Equal(t, "comment", inputEl["name"])
-	require.NotNil(t, actionEl, "expected an action element")
+	require.NotNil(t, actionEl, "expected an interactive_container element")
 
-	buttons := actionEl["actions"].([]any)
+	buttons := actionEl["elements"].([]any)
 	require.Len(t, buttons, 2)
 
 	btn0 := buttons[0].(map[string]any)
@@ -647,9 +647,6 @@ func TestBuildResolvedCard_Green(t *testing.T) {
 	t.Parallel()
 	card := buildResolvedCard("allow", "已允许", "", "test_summary", "ou_123", "")
 	require.NotNil(t, card)
-
-	cfg := card["config"].(map[string]any)
-	require.Equal(t, true, cfg["wide_screen_mode"])
 
 	hdr := card["header"].(map[string]any)
 	require.Equal(t, "green", hdr["template"])

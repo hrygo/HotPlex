@@ -104,7 +104,6 @@ func TestHandleCardAction_PermissionAllow(t *testing.T) {
 	card, ok := got.Card.Data.(map[string]any)
 	require.True(t, ok, "expected map[string]any, got %T", got.Card.Data)
 	assert.Contains(t, card, "header")
-	assert.Contains(t, card, "config")
 
 	select {
 	case meta := <-respCh:
@@ -132,7 +131,6 @@ func TestHandleCardAction_PermissionDeny(t *testing.T) {
 	card, ok := got.Card.Data.(map[string]any)
 	require.True(t, ok)
 	assert.Contains(t, card, "header")
-	assert.Contains(t, card, "config")
 
 	select {
 	case meta := <-respCh:
@@ -259,7 +257,6 @@ func TestHandleCardAction_ExpiredOrMissing(t *testing.T) {
 	card, ok := got.Card.Data.(map[string]any)
 	require.True(t, ok, "expected map[string]any, got %T", got.Card.Data)
 	assert.Contains(t, card, "header")
-	assert.Contains(t, card, "config")
 	header, ok := card["header"].(map[string]any)
 	require.True(t, ok)
 	title, ok := header["title"].(map[string]any)

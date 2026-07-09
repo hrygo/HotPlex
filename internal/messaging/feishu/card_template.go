@@ -305,8 +305,9 @@ func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 			},
 		},
 		{
-			"tag": "action",
-			"actions": []map[string]any{
+			"tag":       "interactive_container",
+			"direction": "horizontal",
+			"elements": []map[string]any{
 				{
 					"tag":   "button",
 					"text":  map[string]any{"tag": "plain_text", "content": "✅ 允许"},
@@ -323,7 +324,7 @@ func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 		},
 	}
 
-	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
+	return buildCard(header, nil, elements)
 }
 
 func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
@@ -376,8 +377,9 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 				})
 			}
 			elements = append(elements, map[string]any{
-				"tag":     "action",
-				"actions": buttons,
+				"tag":       "interactive_container",
+				"direction": "horizontal",
+				"elements":  buttons,
 			})
 		}
 	}
@@ -396,7 +398,7 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 		"content": "💬 点击按钮直接选择，或直接回复自定义答案",
 	})
 
-	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
+	return buildCard(header, nil, elements)
 }
 
 func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string {
@@ -434,8 +436,9 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 			},
 		},
 		{
-			"tag": "action",
-			"actions": []map[string]any{
+			"tag":       "interactive_container",
+			"direction": "horizontal",
+			"elements": []map[string]any{
 				{
 					"tag":   "button",
 					"text":  map[string]any{"tag": "plain_text", "content": "✅ 接受"},
@@ -452,7 +455,7 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 		},
 	}
 
-	return buildCard(header, map[string]any{"wide_screen_mode": true}, elements)
+	return buildCard(header, nil, elements)
 }
 
 func buildResolvedCard(action, label, color, summary, operatorID, reason string) map[string]any {
@@ -488,18 +491,12 @@ func buildResolvedCard(action, label, color, summary, operatorID, reason string)
 	}
 
 	elements = append(elements, map[string]any{
-		"tag": "note",
-		"elements": []map[string]any{
-			{
-				"tag":     "plain_text",
-				"content": ctxContent,
-			},
-		},
+		"tag":     "markdown",
+		"content": ctxContent,
 	})
 
 	return map[string]any{
 		"schema": "2.0",
-		"config": map[string]any{"wide_screen_mode": true},
 		"header": map[string]any{
 			"title":    map[string]any{"tag": "plain_text", "content": label},
 			"template": color,

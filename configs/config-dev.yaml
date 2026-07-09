@@ -53,6 +53,10 @@ worker:
     password: "${OPENCODE_SERVER_PASSWORD}"
   acp:
     debug: false
+    auto_approve: false
+  codex_cli:
+    sandbox: "workspace-write"
+    approval_mode: "on-request"
 
 log:
   level: "debug"
