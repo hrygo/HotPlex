@@ -24,6 +24,7 @@ type ServerCommander struct {
 	sessionID     string
 	pendingModel  *ModelRef
 	contextWindow int64
+	projectDir    string
 }
 
 // ModelRef stores model selection for subsequent message requests.
@@ -76,10 +77,19 @@ func (c *ServerCommander) Clear(ctx context.Context) error {
 	if err := c.doDelete(ctx, "/session/"+url.PathEscape(c.getSessionID())); err != nil {
 		return fmt.Errorf("opencode clear (delete): %w", err)
 	}
+	c.mu.Lock()
+	dir := c.projectDir
+	c.mu.Unlock()
+	createPath := "/session"
+	if dir != "" {
+		q := url.Values{}
+		q.Set("directory", dir)
+		createPath = "/session?" + q.Encode()
+	}
 	var newSession struct {
 		ID string `json:"id"`
 	}
-	if err := c.doPost(ctx, "/session", map[string]any{}, &newSession); err != nil {
+	if err := c.doPost(ctx, createPath, map[string]any{}, &newSession); err != nil {
 		return fmt.Errorf("opencode clear (create): %w", err)
 	}
 	c.setSessionID(newSession.ID)

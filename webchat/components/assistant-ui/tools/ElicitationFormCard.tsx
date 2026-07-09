@@ -45,6 +45,7 @@ export function ElicitationFormCard({
 
   // Local state for schema form fields
   const [formValues, setFormValues] = useState<Record<string, any>>({});
+  const [customComment, setCustomComment] = useState("");
 
   const isInteractive = activeStatus === "pending" || activeStatus === "failed";
 
@@ -55,11 +56,11 @@ export function ElicitationFormCard({
 
   const handleAction = (action: "accept" | "decline" | "cancel") => {
     if (!isInteractive) return;
-    if (action === "accept") {
-      onRespond?.(action, requestedSchema ? formValues : undefined);
-    } else {
-      onRespond?.(action);
+    const content: Record<string, any> = { ...formValues };
+    if (customComment) {
+      content["comment"] = customComment;
     }
+    onRespond?.(action, Object.keys(content).length > 0 ? content : undefined);
   };
 
   const title = t("tool.interaction.elicitation.title", { defaultValue: "Interactive Request" });
@@ -199,6 +200,23 @@ export function ElicitationFormCard({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Optional custom input */}
+        {(activeStatus === "pending" || activeStatus === "failed") && (
+          <div className="pt-2">
+            <label className="text-xs font-bold text-[var(--text-secondary)] block mb-1">
+              {t("tool.interaction.elicitation.custom_input_label", { defaultValue: "Additional Comments / Custom Input" })}
+            </label>
+            <input
+              type="text"
+              value={customComment}
+              disabled={!isInteractive}
+              onChange={(e) => setCustomComment(e.target.value)}
+              placeholder={t("tool.interaction.elicitation.custom_input_placeholder", { defaultValue: "Or type custom response/notes here..." })}
+              className="w-full text-xs font-mono p-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors disabled:opacity-75 disabled:cursor-not-allowed"
+            />
           </div>
         )}
       </div>

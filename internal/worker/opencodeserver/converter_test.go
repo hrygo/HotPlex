@@ -953,3 +953,96 @@ func TestConverter_OCS117_V1Protocol_Regression(t *testing.T) {
 	require.Len(t, envs, 1, "new turn after busy must emit a fresh Done")
 	require.Equal(t, events.Done, envs[0].Event.Type)
 }
+
+// TestConverter_PartUpdated_ToolLifecycle mirrors the OpenCode 1.17 SSE
+// capture (pending → running → completed / error) where every tool mutation
+// arrives as a message.part.updated event with part.type=="tool". It locks the
+// ToolCall/ToolResult shape from the live capture that replaced the dead
+// session.next.tool.* path (see RCA).
+func TestConverter_PartUpdated_ToolLifecycle(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-tool"
+	partUpdated := func(state map[string]any, tool, callID string) []*events.Envelope {
+		return c.Convert(sid, ocsPartUpdated, rawProps(t, map[string]any{
+			"part": map[string]any{
+				"id":        "prt_" + callID,
+				"messageID": "msg_" + callID,
+				"type":      "tool",
+				"tool":      tool,
+				"callID":    callID,
+				"state":     state,
+			},
+		}))
+	}
+
+	// Step 1: pending — input empty; no envelope yet.
+	envs := partUpdated(map[string]any{"status": "pending", "input": map[string]any{}, "raw": ""}, "read", "call_a")
+	require.Empty(t, envs, "pending mutation should not emit ToolCall")
+
+	// Step 2: running — input parsed; emit ToolCall once.
+	envs = partUpdated(map[string]any{
+		"status": "running",
+		"input":  map[string]any{"filePath": "/x/AGENTS.md", "limit": 5},
+	}, "read", "call_a")
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolCall, envs[0].Event.Type)
+	tc := envs[0].Event.Data.(events.ToolCallData)
+	require.Equal(t, "call_a", tc.ID)
+	require.Equal(t, "read", tc.Name)
+	require.Equal(t, "/x/AGENTS.md", tc.Input["filePath"])
+
+	// Repeated running on the same callID must de-dup.
+	envs = partUpdated(map[string]any{
+		"status": "running",
+		"input":  map[string]any{"filePath": "/y.txt"},
+	}, "read", "call_a")
+	require.Empty(t, envs, "duplicate running on same callID is deduped")
+
+	// Step 3: completed — emit ToolResult with output text.
+	envs = partUpdated(map[string]any{
+		"status": "completed",
+		"input":  map[string]any{"filePath": "/x/AGENTS.md"},
+		"output": "file content here",
+	}, "read", "call_a")
+	require.Len(t, envs, 1)
+	require.Equal(t, events.ToolResult, envs[0].Event.Type)
+	tr := envs[0].Event.Data.(events.ToolResultData)
+	require.Equal(t, "call_a", tr.ID)
+	require.Equal(t, "file content here", tr.Output)
+	require.Empty(t, tr.Error)
+}
+
+// TestConverter_PartUpdated_ToolLifecycle_SkippedRunning asserts that when
+// running is skipped (only terminal seen), ToolCall+ToolResult fire together.
+func TestConverter_PartUpdated_ToolLifecycle_SkippedRunning(t *testing.T) {
+	c := newTestConverter()
+	sid := "ses-tool-fast"
+	partUpdated := func(state map[string]any, tool, callID string) []*events.Envelope {
+		return c.Convert(sid, ocsPartUpdated, rawProps(t, map[string]any{
+			"part": map[string]any{
+				"id":        "prt_" + callID,
+				"messageID": "msg_" + callID,
+				"type":      "tool",
+				"tool":      tool,
+				"callID":    callID,
+				"state":     state,
+			},
+		}))
+	}
+
+	// Only error event seen — no running was observed.
+	envs := partUpdated(map[string]any{
+		"status": "error",
+		"input":  map[string]any{"filePath": "/missing"},
+		"error":  "File not found: /missing",
+	}, "read", "call_b")
+	require.Len(t, envs, 2, "must emit ToolCall+ToolResult when running skipped")
+	require.Equal(t, events.ToolCall, envs[0].Event.Type)
+	require.Equal(t, events.ToolResult, envs[1].Event.Type)
+	tc := envs[0].Event.Data.(events.ToolCallData)
+	require.Equal(t, "call_b", tc.ID)
+	tr := envs[1].Event.Data.(events.ToolResultData)
+	require.Equal(t, "call_b", tr.ID)
+	require.Equal(t, "File not found: /missing", tr.Error)
+	require.Empty(t, tr.Output)
+}

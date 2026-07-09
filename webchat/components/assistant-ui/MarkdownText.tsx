@@ -160,6 +160,14 @@ export function MarkdownText({ text }: { text: string }) {
                         const lang = langMatch?.[1] ?? "";
 
                         if (!className) {
+                            const isTree = /├──|└──|├─|└─|│|──|\|--/.test(raw) || raw.includes("\n");
+                            if (isTree) {
+                                return (
+                                    <code className="block w-full overflow-x-auto whitespace-pre font-mono text-[13px] leading-relaxed bg-[var(--bg-elevated)] text-[var(--accent-gold-bright)] px-4 py-3 my-3 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]">
+                                        {raw}
+                                    </code>
+                                );
+                            }
                             return (
                                 <code className="bg-[var(--bg-elevated)] text-[var(--accent-gold-bright)] px-1.5 py-0.5 rounded-[var(--radius-xs)] text-[0.9em] font-mono border border-[var(--border-subtle)]">
                                     {raw}

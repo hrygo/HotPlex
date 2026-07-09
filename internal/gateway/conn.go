@@ -265,14 +265,44 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 			attribute.String("event_type", string(env.Event.Type)),
 			attribute.Int64("seq", env.Seq),
 		)
-		if err := handler.Handle(context.Background(), env); err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			c.log.Debug("gateway: handle error", "err", err, "session_id", c.sessionID)
-		} else {
-			span.SetStatus(codes.Ok, "")
+
+		isInteraction := env.Event.Type == events.PermissionResponse ||
+			env.Event.Type == events.QuestionResponse ||
+			env.Event.Type == events.ElicitationResponse
+
+		if env.Event.Type == events.Input {
+			if dataMap, ok := env.Event.Data.(map[string]any); ok {
+				if md, ok := dataMap["metadata"].(map[string]any); ok {
+					if md["permission_response"] != nil ||
+						md["question_response"] != nil ||
+						md["elicitation_response"] != nil {
+						isInteraction = true
+					}
+				}
+			}
 		}
-		span.End()
+
+		if isInteraction {
+			go func(e *events.Envelope, s trace.Span) {
+				defer s.End()
+				if err := handler.Handle(context.Background(), e); err != nil {
+					s.RecordError(err)
+					s.SetStatus(codes.Error, err.Error())
+					c.log.Warn("gateway: handle interaction response async error", "err", err, "session_id", c.sessionID)
+				} else {
+					s.SetStatus(codes.Ok, "")
+				}
+			}(env, span)
+		} else {
+			if err := handler.Handle(context.Background(), env); err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				c.log.Debug("gateway: handle error", "err", err, "session_id", c.sessionID)
+			} else {
+				span.SetStatus(codes.Ok, "")
+			}
+			span.End()
+		}
 	}
 }
 

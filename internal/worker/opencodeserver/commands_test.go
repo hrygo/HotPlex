@@ -263,6 +263,34 @@ func TestServerCommanderClear(t *testing.T) {
 	require.Equal(t, "new-sess-456", c.SessionID())
 }
 
+func TestServerCommanderClear_WithProjectDir(t *testing.T) {
+	t.Parallel()
+	deleteCalled, createCalled := false, false
+	c, _ := newTestCommander(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalled = true
+			require.Contains(t, r.URL.Path, "/session/sess-test-123")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/session" {
+			createCalled = true
+			require.Equal(t, "/tmp/project", r.URL.Query().Get("directory"))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "new-sess-789"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	c.mu.Lock()
+	c.projectDir = "/tmp/project"
+	c.mu.Unlock()
+	require.NoError(t, c.Clear(context.Background()))
+	require.True(t, deleteCalled)
+	require.True(t, createCalled)
+	require.Equal(t, "new-sess-789", c.SessionID())
+}
+
 func TestServerCommanderClearWithErrors(t *testing.T) {
 	t.Parallel()
 

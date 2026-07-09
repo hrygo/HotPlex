@@ -612,8 +612,19 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 }
 
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
-	reqBody := strings.NewReader(fmt.Sprintf(`{"project_dir": %q}`, projectDir))
-	req, err := http.NewRequestWithContext(ctx, "POST", w.httpAddr+"/session", reqBody)
+	// OpenCode ≥1.17 honors only the `directory` query param; a `project_dir`
+	// JSON body field is ignored and the session falls back to `serve`'s cwd.
+	createURL, err := url.Parse(w.httpAddr + "/session")
+	if err != nil {
+		return "", fmt.Errorf("create request: parse url: %w", err)
+	}
+	if projectDir != "" {
+		q := createURL.Query()
+		q.Set("directory", projectDir)
+		createURL.RawQuery = q.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", createURL.String(), strings.NewReader("{}"))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -691,6 +702,7 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 		baseURL:       w.httpAddr,
 		sessionID:     serverSessionID,
 		contextWindow: w.singleton.cfg.ContextWindow,
+		projectDir:    session.ProjectDir,
 	}
 	if err := w.applyPermissions(ctx, session); err != nil {
 		w.Log.Warn("opencodeserver: failed to set permissions", "session_id", serverSessionID, "err", err)

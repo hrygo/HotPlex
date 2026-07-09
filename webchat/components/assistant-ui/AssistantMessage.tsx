@@ -57,10 +57,16 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                 const partIndex = parts.indexOf(p);
                 const isLastPart = partIndex === parts.length - 1;
                 const isComplete = p.status?.type === "complete" || p.status?.type === "error";
-                const isExpanded = !!expandedTools[p.toolCallId || partIndex];
+                const isExpanded = expandedTools[p.toolCallId || partIndex] !== undefined
+                  ? expandedTools[p.toolCallId || partIndex]
+                  : isLastPart;
 
-                const isCompacted = !isLastPart && isComplete && !isExpanded;
-                const toggle = () => setExpandedTools(prev => ({ ...prev, [p.toolCallId || partIndex]: !prev[p.toolCallId || partIndex] }));
+                const isCompacted = isComplete && !isExpanded;
+                const toggle = () => setExpandedTools(prev => {
+                  const key = p.toolCallId || partIndex;
+                  const currentVal = prev[key] !== undefined ? prev[key] : isLastPart;
+                  return { ...prev, [key]: !currentVal };
+                });
 
                 const category = getToolCategory(p.toolName);
                 const args = p.args ?? {};
@@ -85,12 +91,12 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                   >
                     {(() => {
                       switch (category) {
-                        case "terminal": return <TerminalTool command={extractCommand(args)} stdout={p.result?.stdout || (typeof p.result === 'string' ? p.result : '')} stderr={p.result?.stderr} status={status} onToggle={!isLastPart ? toggle : undefined} />;
-                        case "file": return <FileDiffTool toolName={p.toolName} filePath={extractFilePath(args)} content={extractFileContent(args, p.result)} status={status} onToggle={!isLastPart ? toggle : undefined} />;
-                        case "search": return <SearchTool toolName={p.toolName} query={args.query || args.pattern} results={p.result} status={status} onToggle={!isLastPart ? toggle : undefined} />;
-                        case "list": return <ListTool toolName={p.toolName} path={extractFilePath(args)} items={p.result} status={status} onToggle={!isLastPart ? toggle : undefined} />;
-                        case "todo": return <TodoTool todo={args.todo} todos={args.todos} status={status === "running" ? "running" : "complete"} onToggle={!isLastPart ? toggle : undefined} />;
-                        case "ai": return <AgentTool description={args.description} prompt={args.prompt} subagent_type={args.subagent_type} run_in_background={args.run_in_background} status={status === "running" ? "running" : "complete"} onToggle={!isLastPart ? toggle : undefined} />;
+                        case "terminal": return <TerminalTool command={extractCommand(args)} stdout={p.result?.stdout || (typeof p.result === 'string' ? p.result : '')} stderr={p.result?.stderr} status={status} onToggle={toggle} />;
+                        case "file": return <FileDiffTool toolName={p.toolName} filePath={extractFilePath(args)} content={extractFileContent(args, p.result)} status={status} onToggle={toggle} />;
+                        case "search": return <SearchTool toolName={p.toolName} query={args.query || args.pattern} results={p.result} status={status} onToggle={toggle} />;
+                        case "list": return <ListTool toolName={p.toolName} path={extractFilePath(args)} items={p.result} status={status} onToggle={toggle} />;
+                        case "todo": return <TodoTool todo={args.todo} todos={args.todos} status={status === "running" ? "running" : "complete"} onToggle={toggle} />;
+                        case "ai": return <AgentTool description={args.description} prompt={args.prompt} subagent_type={args.subagent_type} run_in_background={args.run_in_background} status={status === "running" ? "running" : "complete"} onToggle={toggle} />;
                         case "permission": {
                           const interaction = p.args?.interaction;
                           const resolvedStatus = interaction?.status || (status === "error" ? "failed" : status === "complete" ? "resolved" : "pending");
@@ -106,7 +112,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                                 status={resolvedStatus}
                                 interactionState={interaction}
                                 onRespond={onRespondQuestion}
-                                onToggle={!isLastPart ? toggle : undefined}
+                                onToggle={toggle}
                               />
                             );
                           } else if (p.toolName === "elicitation") {
@@ -122,7 +128,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                                 status={resolvedStatus}
                                 interactionState={interaction}
                                 onRespond={onRespondElicitation}
-                                onToggle={!isLastPart ? toggle : undefined}
+                                onToggle={toggle}
                               />
                             );
                           } else {
@@ -137,7 +143,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
                                 status={resolvedStatus}
                                 interactionState={interaction}
                                 onRespond={onRespondPerm}
-                                onToggle={!isLastPart ? toggle : undefined}
+                                onToggle={toggle}
                               />
                             );
                           }

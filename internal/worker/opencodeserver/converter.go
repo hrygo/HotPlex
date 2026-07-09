@@ -49,6 +49,9 @@ type turnState struct {
 	model           string // "providerID/modelID" from step.started
 	doneShown       bool   // true once Done has been emitted for this turn (dedup)
 	parts           map[string]partState
+	// seenToolCalls dedups ToolCall per callID across the multi-mutation
+	// message.part.updated lifecycle (pending → running → completed/error).
+	seenToolCalls map[string]bool
 }
 
 type partState struct {
@@ -196,6 +199,14 @@ func (c *Converter) handlePartUpdated(sessionID string, props json.RawMessage) [
 			MessageID string `json:"messageID"`
 			Type      string `json:"type"`
 			Ignored   bool   `json:"ignored"`
+			Tool      string `json:"tool"`
+			CallID    string `json:"callID"`
+			State     struct {
+				Status string         `json:"status"`
+				Input  map[string]any `json:"input"`
+				Output string         `json:"output"`
+				Error  string         `json:"error"`
+			} `json:"state"`
 		} `json:"part"`
 	}
 	if err := json.Unmarshal(props, &evt); err != nil {
@@ -213,6 +224,65 @@ func (c *Converter) handlePartUpdated(sessionID string, props json.RawMessage) [
 		typ:       evt.Part.Type,
 		messageID: evt.Part.MessageID,
 		ignored:   evt.Part.Ignored,
+	}
+
+	if evt.Part.Type != "tool" || evt.Part.CallID == "" {
+		return nil
+	}
+
+	// OpenCode 1.17 emits the tool lifecycle as repeated message.part.updated
+	// mutations (part.type=="tool"; state.status: pending→running→completed/error).
+	// The schema's session.next.tool.* events are not yet emitted on the live
+	// SSE stream, so this is the canonical tool-call signal.
+	if st.seenToolCalls == nil {
+		st.seenToolCalls = make(map[string]bool)
+	}
+	callID := evt.Part.CallID
+	s := &evt.Part.State
+	input := s.Input
+	if input == nil {
+		input = map[string]any{}
+	}
+
+	switch s.Status {
+	case "running":
+		if st.seenToolCalls[callID] {
+			return nil
+		}
+		st.seenToolCalls[callID] = true
+		return []*events.Envelope{
+			events.NewEnvelope(aep.NewID(), sessionID, 0, events.ToolCall, events.ToolCallData{
+				ID:    callID,
+				Name:  evt.Part.Tool,
+				Input: input,
+			}),
+		}
+	case "completed", "error":
+		var envs []*events.Envelope
+		if !st.seenToolCalls[callID] {
+			st.seenToolCalls[callID] = true
+			envs = append(envs, events.NewEnvelope(aep.NewID(), sessionID, 0, events.ToolCall, events.ToolCallData{
+				ID:    callID,
+				Name:  evt.Part.Tool,
+				Input: input,
+			}))
+		}
+		if s.Status == "completed" {
+			envs = append(envs, events.NewEnvelope(aep.NewID(), sessionID, 0, events.ToolResult, events.ToolResultData{
+				ID:     callID,
+				Output: s.Output,
+			}))
+		} else {
+			msg := s.Error
+			if msg == "" {
+				msg = "tool failed"
+			}
+			envs = append(envs, events.NewEnvelope(aep.NewID(), sessionID, 0, events.ToolResult, events.ToolResultData{
+				ID:    callID,
+				Error: msg,
+			}))
+		}
+		return envs
 	}
 	return nil
 }

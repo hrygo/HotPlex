@@ -27,6 +27,7 @@ BUILD_OPTS   := -trimpath
 
 GATEWAY_PID   := $(HOME)/.hotplex/.pids/gateway.pid
 GATEWAY_LOG   := $(LOG_DIR)/hotplex.log
+GATEWAY_ADDR  ?= 127.0.0.1:8888
 WEB_CHAT_PID  := $(HOME)/.hotplex/.pids/hotplex-webchat.pid
 WEB_CHAT_PORT := 3000
 WEB_CHAT_LOG  := $(CURDIR)/$(LOG_DIR)/webchat.log
@@ -217,15 +218,34 @@ check: quality build
 # Dev Environment
 # ─────────────────────────────────────────────────────────────────────────────
 
-dev: dev-start
-	@echo ""
-	@echo "  $(DIM)─────────────────────────────────────$(RESET)"
-	@echo "  $(GREEN)✓ Dev environment ready$(RESET)"
-	@echo ""
-	@printf "    make %-12s %s\n" "dev-logs" "View logs"
-	@printf "    make %-12s %s\n" "dev-status" "Check status"
-	@printf "    make %-12s %s\n" "dev-stop" "Stop all"
-	@echo ""
+dev:
+	@rm -f "$(GATEWAY_LOG)"
+	@$(MAKE) dev-start
+	@if curl -sf "http://$(GATEWAY_ADDR)/health" >/dev/null 2>&1; then \
+		echo ""; \
+		if [ -f "$(GATEWAY_LOG)" ]; then \
+			LINE=$$(grep -n 'HOTPLEX.*GATEWAY' "$(GATEWAY_LOG)" 2>/dev/null | head -1 | cut -d: -f1); \
+			if [ -n "$$LINE" ]; then \
+				START=$$((LINE - 8)); \
+				[ $$START -lt 1 ] && START=1; \
+				tail -n +$$START "$(GATEWAY_LOG)" | head -40; \
+			else \
+				head -40 "$(GATEWAY_LOG)"; \
+			fi; \
+		fi; \
+		echo "  $(DIM)────────────────────────────────────────────────$(RESET)"; \
+		echo "  $(CYAN)Quick Commands$(RESET)"; \
+		printf "    make %-15s %s\n" "dev-logs" "View logs"; \
+		printf "    make %-15s %s\n" "dev-status" "Check status"; \
+		printf "    make %-15s %s\n" "dev-stop" "Stop all"; \
+		echo "  $(DIM)────────────────────────────────────────────────$(RESET)"; \
+		echo ""; \
+	else \
+		echo ""; \
+		echo "  $(RED)✗$(RESET) Gateway is not responding at http://$(GATEWAY_ADDR)"; \
+		echo "    Run $(CYAN)make dev-logs$(RESET) to check for errors."; \
+		echo ""; \
+	fi
 
 dev-start: dev-build
 	@$(MAKE) gateway-start

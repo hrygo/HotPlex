@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import type { InteractionState, InteractionStatus } from "@/lib/adapters/hotplex-runtime-adapter";
@@ -26,6 +27,8 @@ export function PermissionApprovalCard({
 }: PermissionApprovalCardProps) {
   const { t } = useTranslation("chat");
   const { timeLeft, activeStatus } = useInteractionTimeout(initialStatus, interactionState?.expiresAt);
+  const [reason, setReason] = useState("");
+  const isInteractive = activeStatus === "pending" || activeStatus === "failed";
 
   const title = t("tool.interaction.permission.title", { defaultValue: "Tool Execution Approval" });
   const descText = description || t("tool.interaction.permission.description", { defaultValue: "Agent requests permission to execute the following tool" });
@@ -99,17 +102,27 @@ export function PermissionApprovalCard({
               {t("tool.interaction.permission.failed", { error: interactionState.error, defaultValue: `Submission failed: ${interactionState.error}` })}
             </div>
           )}
+          <div className="mb-2">
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={t("tool.interaction.permission.reason_placeholder", { defaultValue: "Provide feedback/reason (optional)..." })}
+              className="w-full text-xs font-mono px-3 py-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors disabled:opacity-75"
+              disabled={!isInteractive}
+            />
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => onRespond?.(true)}
+              onClick={() => onRespond?.(true, reason)}
               className="flex-1 py-2 rounded-[var(--radius-sm)] bg-[var(--accent-emerald)] text-black font-bold text-xs transition-all hover:opacity-90 active:scale-[0.98]"
             >
               {t("tool.interaction.permission.approve", { defaultValue: "Approve" })}
             </button>
             <button
               type="button"
-              onClick={() => onRespond?.(false)}
+              onClick={() => onRespond?.(false, reason)}
               className="flex-1 py-2 rounded-[var(--radius-sm)] bg-[var(--accent-coral)] text-white font-bold text-xs transition-all hover:opacity-90 active:scale-[0.98]"
             >
               {t("tool.interaction.permission.reject", { defaultValue: "Reject" })}
@@ -126,24 +139,38 @@ export function PermissionApprovalCard({
       )}
 
       {activeStatus === "resolved" && (
-        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-[var(--border-subtle)] bg-[rgba(16,185,129,0.04)]">
-          <svg className="w-4 h-4 text-[var(--accent-emerald)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-          </svg>
-          <span className="text-xs font-mono font-medium text-[var(--accent-emerald)]">
-            {t("tool.interaction.permission.approved", { defaultValue: "Approved" })}
-          </span>
+        <div className="border-t border-[var(--border-subtle)] bg-[rgba(16,185,129,0.04)]">
+          <div className="flex items-center gap-2 px-4 py-2.5">
+            <svg className="w-4 h-4 text-[var(--accent-emerald)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="text-xs font-mono font-medium text-[var(--accent-emerald)]">
+              {t("tool.interaction.permission.approved", { defaultValue: "Approved" })}
+            </span>
+          </div>
+          {interactionState?.response?.reason && (
+            <div className="px-4 pb-2.5 text-xs text-[var(--text-secondary)] font-mono pl-10 leading-normal border-t border-[rgba(16,185,129,0.08)] pt-1.5">
+              <span className="text-[var(--text-faint)]">Feedback:</span> <span className="text-[var(--text-primary)]">{interactionState.response.reason}</span>
+            </div>
+          )}
         </div>
       )}
 
       {activeStatus === "rejected" && (
-        <div className="flex items-center gap-2 px-4 py-2.5 border-t border-[var(--border-subtle)] bg-[rgba(239,68,68,0.04)]">
-          <svg className="w-4 h-4 text-[var(--accent-coral)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-          <span className="text-xs font-mono font-medium text-[var(--accent-coral)]">
-            {t("tool.interaction.permission.rejected", { defaultValue: "Rejected" })}
-          </span>
+        <div className="border-t border-[var(--border-subtle)] bg-[rgba(239,68,68,0.04)]">
+          <div className="flex items-center gap-2 px-4 py-2.5">
+            <svg className="w-4 h-4 text-[var(--accent-coral)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <span className="text-xs font-mono font-medium text-[var(--accent-coral)]">
+              {t("tool.interaction.permission.rejected", { defaultValue: "Rejected" })}
+            </span>
+          </div>
+          {interactionState?.response?.reason && (
+            <div className="px-4 pb-2.5 text-xs text-[var(--text-secondary)] font-mono pl-10 leading-normal border-t border-[rgba(239,68,68,0.08)] pt-1.5">
+              <span className="text-[var(--text-faint)]">Reason:</span> <span className="text-[var(--text-primary)]">{interactionState.response.reason}</span>
+            </div>
+          )}
         </div>
       )}
 

@@ -28,6 +28,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 import signal
 import threading
 
@@ -81,8 +82,9 @@ class OCSClient:
             return False
 
     def create_session(self, project_dir: str = "") -> str | None:
-        body = {"project_dir": project_dir} if project_dir else {}
-        code, result = self._request("POST", "/session", body)
+        # See worker.go createSession: opencode honors only the `directory` query param.
+        path = "/session?" + urllib.parse.urlencode({"directory": project_dir}) if project_dir else "/session"
+        code, result = self._request("POST", path, {})
         if code in (200, 201) and result:
             sid = result.get("id", "")
             log(f"Created session: {sid}", "OK")

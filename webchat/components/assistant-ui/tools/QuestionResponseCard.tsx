@@ -48,6 +48,8 @@ export function QuestionResponseCard({
 
   const handleOptionSelect = (qId: string, val: string, isMulti: boolean) => {
     if (!isInteractive) return;
+    // Clear custom text for this question
+    setTextAnswers((prev) => ({ ...prev, [qId]: "" }));
 
     if (isMulti) {
       const currentSet = new Set(selectedMulti[qId] || []);
@@ -65,6 +67,8 @@ export function QuestionResponseCard({
 
   const handleTextChange = (qId: string, val: string) => {
     if (!isInteractive) return;
+    // Clear multi-select and option selection for this question
+    setSelectedMulti((prev) => ({ ...prev, [qId]: new Set() }));
     setTextAnswers((prev) => ({ ...prev, [qId]: val }));
     setAnswers((prev) => ({ ...prev, [qId]: val }));
   };
@@ -206,6 +210,17 @@ export function QuestionResponseCard({
                         </label>
                       );
                     })}
+                    {/* Optional custom input */}
+                    <div className="pt-1.5">
+                      <input
+                        type="text"
+                        value={textAnswers[qKey] || ""}
+                        disabled={!isInteractive}
+                        onChange={(e) => handleTextChange(qKey, e.target.value)}
+                        placeholder={t("tool.interaction.question.custom_input_placeholder", { defaultValue: "Or type custom answer here..." })}
+                        className="w-full text-xs font-mono px-3 py-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors disabled:opacity-75 disabled:cursor-not-allowed"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="pl-5">
