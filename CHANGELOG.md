@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.33.1] - 2026-07-09
+
+### Summary
+
+v1.33.1 是一次 patch 版本更新，主要优化了 **交互式问答与授权响应的处理性能与跨平台体验**。通过将 WebSocket 连接事件处理解耦为异步执行，消除了客户端的阻塞 hang 起风险；在前端 WebChat UI、飞书端与 Slack 端，全面对齐并支持了交互卡片的自定义理由及文本直接回复（Write-in Inputs），并自动清理和回显决断内容。此外，优化了 OpenCode Server (OCS) 的 `seenToolCalls` 状态过滤，保证了流式工具状态的高效去重。
+
+### Added
+
+- **WebChat UI**: Add custom text write-in inputs and feedback fields for question, permission, and elicitation cards.
+- **Messaging**: Support CardKit input fields in Feishu interaction cards and Block Kit input blocks in Slack interaction cards, extracting and routing user-submitted comments or reasons back to the worker.
+
+### Changed
+
+- **Gateway Core**: Execute interaction responses asynchronously in background goroutines within the WebSocket read pump, resolving UI blocking and socket hangs.
+- **Worker**: Initialize `seenToolCalls` on state creation and turn boundaries inside OpenCode Server converter to improve tool invocation dedup reliability.
+- **WebChat UI**: Decouple default tool card expansion from collapse interactions, allowing the last tool card of a message to be collapsed.
+- **WebChat UI**: Auto-wrap inline code blocks containing tree-drawing characters or newlines into preformatted scrollable blocks for directory trees.
+
+### Fixed
+
+- **Worker**: Add project directory configuration check to ensure the directory query parameter is correctly cleared and forwarded.
+
 ## [1.33.0] - 2026-07-08
 
 ### Summary
