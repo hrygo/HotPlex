@@ -718,11 +718,7 @@ func TestLocalFileToImagePart_NonImageFile(t *testing.T) {
 func TestSlackConn_StreamWriterFieldExists(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   nil,
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Verify fields exist and are accessible
 	require.Nil(t, conn.streamWriter)
@@ -749,11 +745,7 @@ func TestSlackConn_WriteCtx_NilEnvelope(t *testing.T) {
 func TestSlackConn_WriteCtx_DoneEventClosesStreamWriter(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Set up a mock stream writer
 	conn.streamWriter = &NativeStreamingWriter{}
@@ -769,11 +761,7 @@ func TestSlackConn_WriteCtx_DoneEventClosesStreamWriter(t *testing.T) {
 func TestSlackConn_WriteCtx_ErrorEventClosesStreamWriter(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Set up a mock stream writer
 	conn.streamWriter = &NativeStreamingWriter{}
@@ -789,19 +777,7 @@ func TestSlackConn_WriteCtx_ErrorEventClosesStreamWriter(t *testing.T) {
 func TestSlackConn_Close_CleansUpStreamWriter(t *testing.T) {
 	t.Parallel()
 
-	adapter := &Adapter{
-		BaseAdapter: messaging.BaseAdapter[*SlackConn]{
-			PlatformAdapter: messaging.PlatformAdapter{Log: slog.New(slog.NewTextHandler(io.Discard, nil))},
-			ConnPool:        messaging.NewConnPool[*SlackConn](nil),
-		},
-		activeStreams: make(map[string]*NativeStreamingWriter),
-	}
-
-	conn := &SlackConn{
-		adapter:   adapter,
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Set up a mock stream writer
 	conn.streamWriter = &NativeStreamingWriter{}
@@ -817,11 +793,7 @@ func TestSlackConn_Close_CleansUpStreamWriter(t *testing.T) {
 func TestSlackConn_closeStreamWriter_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Nil writer - should be nil
 	require.Nil(t, conn.streamWriter)
@@ -913,11 +885,7 @@ func TestSlackConn_ExtractResponseText_DoneEvent(t *testing.T) {
 func TestSlackConn_MultipleSessions_CreatesNewWriterEachTime(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// First session - no writer yet
 	require.Nil(t, conn.streamWriter)
@@ -943,9 +911,7 @@ func TestSlackConn_ThreadTS_UpdateFromCallback(t *testing.T) {
 	t.Parallel()
 
 	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "", // No thread initially
+		threadTS: "", // No thread initially
 	}
 
 	// Simulate callback updating threadTS
@@ -961,11 +927,7 @@ func TestSlackConn_writeWithStreaming_NilAdapter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	conn := &SlackConn{
-		adapter:   nil,
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Should return error when adapter is nil
 	err := conn.writeWithStreaming(ctx, "test text")
@@ -992,11 +954,7 @@ func TestAC11_DeltaEventsUseStreaming(t *testing.T) {
 func TestAC13_DoneEventClosesStream(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Create a mock stream writer
 	conn.streamWriter = &NativeStreamingWriter{}
@@ -1011,11 +969,7 @@ func TestAC13_DoneEventClosesStream(t *testing.T) {
 func TestAC14_ErrorEventClosesStream(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Create a mock stream writer
 	conn.streamWriter = &NativeStreamingWriter{}
@@ -1030,11 +984,7 @@ func TestAC14_ErrorEventClosesStream(t *testing.T) {
 func TestAC15_MultipleSessionsCreateNewWriters(t *testing.T) {
 	t.Parallel()
 
-	conn := &SlackConn{
-		adapter:   &Adapter{},
-		channelID: "C123",
-		threadTS:  "123.456",
-	}
+	conn := &SlackConn{}
 
 	// Session 1: Create writer and complete
 	writer1 := &NativeStreamingWriter{}
@@ -2102,7 +2052,7 @@ func TestHandlerMu_MultipleAcquireRelease(t *testing.T) {
 	t.Parallel()
 	// Verify that handlerMu can be acquired multiple times in sequence
 	// (simulating sequential message processing in the same thread).
-	conn := &SlackConn{channelID: "C_test", threadTS: "123.000"}
+	conn := &SlackConn{}
 
 	for i := 0; i < 5; i++ {
 		conn.handlerMu.Lock()
