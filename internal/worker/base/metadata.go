@@ -18,6 +18,13 @@ type MetadataHandler interface {
 	HandleElicitationResponse(ctx context.Context, reqID string, action string, content map[string]any) error
 }
 
+// OrderedQuestionResponseHandler is implemented by workers whose native
+// protocol needs the original question order in addition to the standard
+// question-text-to-answer map.
+type OrderedQuestionResponseHandler interface {
+	HandleQuestionResponseWithOrder(ctx context.Context, reqID string, answers map[string]string, questionOrder []string) error
+}
+
 // DispatchMetadata checks metadata for control response keys and dispatches
 // to the handler. Returns (true, nil) if handled, (false, nil) if no match,
 // or (true, err) on dispatch failure.
@@ -44,6 +51,9 @@ func DispatchMetadata(ctx context.Context, metadata map[string]any, h MetadataHa
 				return true, fmt.Errorf("%w: %w", ErrInvalidSchema, err)
 			}
 		}
+		if ordered, ok := h.(OrderedQuestionResponseHandler); ok {
+			return true, ordered.HandleQuestionResponseWithOrder(ctx, reqID, answers, parseQuestionOrder(qResp["question_order"]))
+		}
 		return true, h.HandleQuestionResponse(ctx, reqID, answers)
 	}
 	if eResp, ok := metadata["elicitation_response"].(map[string]any); ok {
@@ -63,6 +73,23 @@ func DispatchMetadata(ctx context.Context, metadata map[string]any, h MetadataHa
 		return true, h.HandleElicitationResponse(ctx, reqID, action, content)
 	}
 	return false, nil
+}
+
+func parseQuestionOrder(value any) []string {
+	switch order := value.(type) {
+	case []string:
+		return order
+	case []any:
+		result := make([]string, 0, len(order))
+		for _, item := range order {
+			if question, ok := item.(string); ok && question != "" {
+				result = append(result, question)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 func parseAnswers(answersRaw any) (map[string]string, error) {

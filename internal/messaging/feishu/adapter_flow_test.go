@@ -665,14 +665,15 @@ func TestAdapterFlow_RegisterInteraction_CallbackConsumed(t *testing.T) {
 	conn.sessionID = "sess-ricb"
 	conn.mu.Unlock()
 
-	// Register via registerInteraction (creates SendResponse closure with nil bridge).
+	// Register via registerInteraction. Without a bridge, delivery must fail
+	// visibly and retain the pending request for retry.
 	a.registerInteraction("perm-ricb", "sess-ricb", "owner-ricb", events.PermissionRequest, conn)
 	require.Equal(t, 1, a.Interactions.Len())
 
 	// Consume the interaction via checkPendingInteraction.
 	consumed := a.checkPendingInteraction(context.Background(), "允许", "owner-ricb", conn)
 	require.True(t, consumed)
-	require.Equal(t, 0, a.Interactions.Len())
+	require.Equal(t, 1, a.Interactions.Len())
 }
 
 // ---------------------------------------------------------------------------

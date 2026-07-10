@@ -942,7 +942,7 @@ func TestHandleInput_InteractionResponse_RoutesToWorker(t *testing.T) {
 	}
 }
 
-func TestHandleInput_NoWorker_GracefulReturn(t *testing.T) {
+func TestHandleInput_NoWorker_ReturnsError(t *testing.T) {
 	sm := new(mockInputSM)
 	sm.On("GetWorker", "s1").Return(nil) // no worker
 
@@ -951,11 +951,12 @@ func TestHandleInput_NoWorker_GracefulReturn(t *testing.T) {
 		"permission_response": map[string]any{"decision": "allow"},
 	}))
 
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interaction response dropped")
 	sm.AssertExpectations(t)
 }
 
-func TestHandleInput_WorkerInputError_GracefulReturn(t *testing.T) {
+func TestHandleInput_WorkerInputError_ReturnsError(t *testing.T) {
 	sm := new(mockInputSM)
 	w := new(mockWorkerForHandler)
 	sm.On("GetWorker", "s1").Return(w)
@@ -966,7 +967,8 @@ func TestHandleInput_WorkerInputError_GracefulReturn(t *testing.T) {
 		"question_response": map[string]any{"answer": "yes"},
 	}))
 
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interaction response failed")
 	sm.AssertExpectations(t)
 	w.AssertExpectations(t)
 }

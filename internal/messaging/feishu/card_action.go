@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"strings"
+	"time"
 
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 
@@ -18,7 +20,7 @@ const (
 	cardActionDecline = "decline"
 )
 
-func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.CardActionTriggerEvent) (resp *callback.CardActionTriggerResponse, err error) {
+func (a *Adapter) handleCardActionTrigger(ctx context.Context, event *callback.CardActionTriggerEvent) (resp *callback.CardActionTriggerResponse, err error) {
 	// Panic recovery: WS handler convention (see ws.go). Named returns are
 	// required so the defer can set `err` and prevent a higher-level crash.
 	defer func() {
@@ -75,17 +77,11 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 		resolvedReason = reason
 
 	case cardActionAnswer:
-		answer, _ := val["answer"].(string)
-		customAnswer, _ := formVal["custom_answer"].(string)
-		if customAnswer != "" {
-			answer = customAnswer
-		} else if answer == "" {
-			answer, _ = val["label"].(string)
-		}
-		metadata = messaging.BuildQuestionResponse(requestID, answer)
+		answers := questionAnswers(formVal, val)
+		metadata = messaging.BuildQuestionResponseAnswersWithOrder(requestID, answers, questionAnswerOrder(val, answers))
 		resolvedLabel = "✅ 已回答"
 		resolvedColor = "green"
-		resolvedReason = answer
+		resolvedReason = strings.Join(questionAnswerValues(answers), "、")
 
 	case cardActionAccept:
 		comment, _ := formVal["comment"].(string)
@@ -126,31 +122,50 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 		return wrapResolvedCard(buildResolvedCard("deny", "未知操作", headerGrey, summary, "", "")), nil
 	}
 
-	// Owner check BEFORE Complete — preserves the interaction for non-owner
-	// clicks. If we Completed first, the original watchTimeout goroutine
-	// (still running) would race the re-Registered entry, eventually firing
-	// on the new one and dispatching an auto-deny through the stale
-	// SendResponse closure. The legitimate owner would then be denied by
-	// their own timeout.
+	// Verify the owner before claiming the request so a non-owner cannot block
+	// the legitimate responder from completing it.
 	pending, exists := a.Interactions.Get(requestID)
 	if !exists {
 		resp = wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "", summary, "", ""))
 		return
 	}
 	if pending.OwnerID != "" && pending.OwnerID != openID {
-		// Silent ignore: non-owner click leaves the interaction pending so
-		// the rightful owner can still respond.
-		return nil, nil
+		return wrapResolvedCard(buildResolvedCard("deny", "仅发起人可操作", headerGrey, "", "", "")), nil
 	}
 
-	pi, ok := a.Interactions.Complete(requestID)
+	pi, ok := a.Interactions.Claim(requestID)
 	if !ok {
 		resp = wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "", summary, "", ""))
 		return
 	}
 
-	if pi.SendResponse != nil {
+	// Card callbacks must respond within three seconds. Spend at most two
+	// seconds delivering to the active worker, leaving room for callback
+	// serialization and transport overhead.
+	deliveryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if pi.SendResponseSync != nil {
+		err = pi.SendResponseSync(deliveryCtx, metadata)
+	} else if pi.SendResponse != nil {
+		// Compatibility for manually registered interactions in tests and third
+		// party adapters. Native Feishu interactions always provide the
+		// synchronous sender above.
 		pi.SendResponse(metadata)
+	} else {
+		err = fmt.Errorf("feishu: interaction has no response sender")
+	}
+	if err != nil {
+		a.Interactions.Release(requestID)
+		a.Log.Warn("feishu: interaction response delivery failed",
+			"request_id", requestID,
+			"action", actionType,
+			"operator", openID,
+			"err", err)
+		return wrapResolvedCard(buildRetryCard(val, summary, err.Error())), nil
+	}
+
+	if _, ok := a.Interactions.CompleteClaimed(requestID); !ok {
+		return wrapResolvedCard(buildResolvedCard("deny", "已过期或已响应", "", summary, "", "")), nil
 	}
 
 	a.Log.Info("feishu: interaction resolved via card button",
@@ -158,13 +173,98 @@ func (a *Adapter) handleCardActionTrigger(_ context.Context, event *callback.Car
 		"action", actionType,
 		"operator", openID)
 
+	if actionType == cardActionAllow || actionType == cardActionAnswer || actionType == cardActionAccept {
+		resolvedLabel += "，Agent 继续执行"
+	}
 	return wrapResolvedCard(buildResolvedCard(actionType, resolvedLabel, resolvedColor, summary, openID, resolvedReason)), nil
+}
+
+func questionAnswers(formVal, value map[string]any) map[string]string {
+	answers := make(map[string]string)
+	questionKeys, _ := value["question_keys"].(map[string]any)
+	for key, raw := range formVal {
+		if key != "custom_answer" && !strings.HasPrefix(key, "answer_") {
+			continue
+		}
+		if answer := formAnswerValue(raw); answer != "" {
+			if key == "custom_answer" {
+				key = "_"
+			} else if question, ok := questionKeys[key].(string); ok && question != "" {
+				key = question
+			}
+			answers[key] = answer
+		}
+	}
+	if len(answers) > 0 {
+		return answers
+	}
+	answer, _ := value["answer"].(string)
+	if answer == "" {
+		answer, _ = value["label"].(string)
+	}
+	if answer != "" {
+		question, _ := value["question"].(string)
+		if question == "" {
+			question = "_"
+		}
+		answers[question] = answer
+	}
+	return answers
+}
+
+func formAnswerValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []string:
+		return strings.Join(v, ", ")
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return ""
+	}
+}
+
+func questionAnswerValues(answers map[string]string) []string {
+	values := make([]string, 0, len(answers))
+	for _, answer := range answers {
+		if answer != "" {
+			values = append(values, answer)
+		}
+	}
+	return values
+}
+
+func questionAnswerOrder(value map[string]any, answers map[string]string) []string {
+	raw, _ := value["question_order"].([]any)
+	if len(raw) == 0 {
+		if order, ok := value["question_order"].([]string); ok {
+			return order
+		}
+		if question, ok := value["question"].(string); ok && question != "" {
+			return []string{question}
+		}
+		return nil
+	}
+	order := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if question, ok := item.(string); ok && answers[question] != "" {
+			order = append(order, question)
+		}
+	}
+	return order
 }
 
 func wrapResolvedCard(card map[string]any) *callback.CardActionTriggerResponse {
 	return &callback.CardActionTriggerResponse{
 		Card: &callback.Card{
-			Type: "card_json",
+			Type: "raw",
 			Data: card,
 		},
 	}

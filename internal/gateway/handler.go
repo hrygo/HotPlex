@@ -134,8 +134,8 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "malformed input data")
 	}
 
-	if h.tryInteractionResponse(ctx, env, data) {
-		return nil
+	if handled, err := h.tryInteractionResponse(ctx, env, data); handled {
+		return err
 	}
 
 	content, _ := data["content"].(string)
@@ -154,15 +154,15 @@ func (h *Handler) cancelRetryIfNeeded(sessionID string) {
 
 // tryInteractionResponse routes permission/question/elicitation responses directly
 // to the worker, bypassing command detection and state transitions.
-func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelope, data map[string]any) bool {
+func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelope, data map[string]any) (bool, error) {
 	md, ok := data["metadata"].(map[string]any)
 	if !ok {
-		return false
+		return false, nil
 	}
 	if md["permission_response"] == nil &&
 		md["question_response"] == nil &&
 		md["elicitation_response"] == nil {
-		return false
+		return false, nil
 	}
 
 	respType := "unknown"
@@ -186,6 +186,7 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 				"err", err,
 				"type", respType,
 				"session_id", env.SessionID)
+			return true, fmt.Errorf("gateway: %s interaction response failed: %w", respType, err)
 		} else if h.bridge != nil {
 			h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
 		}
@@ -193,8 +194,9 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 		h.log.Warn("gateway: interaction response dropped — no worker",
 			"type", respType,
 			"session_id", env.SessionID)
+		return true, fmt.Errorf("gateway: %s interaction response dropped: no worker for session %s", respType, env.SessionID)
 	}
-	return true
+	return true, nil
 }
 
 // tryCommandDispatch detects help/control/worker commands and dispatches them.

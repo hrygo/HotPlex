@@ -42,6 +42,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -292,8 +293,12 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 }
 
 func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	return w.HandleQuestionResponseWithOrder(ctx, reqID, answers, nil)
+}
+
+func (w *Worker) HandleQuestionResponseWithOrder(ctx context.Context, reqID string, answers map[string]string, questionOrder []string) error {
 	return w.httpPost(ctx, fmt.Sprintf("/question/%s/reply", url.PathEscape(reqID)),
-		map[string][][]string{"answers": answersToArrays(answers)})
+		map[string][][]string{"answers": answersToOrderedArrays(answers, questionOrder)})
 }
 
 func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
@@ -938,9 +943,27 @@ func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 }
 
 func answersToArrays(m map[string]string) [][]string {
+	return answersToOrderedArrays(m, nil)
+}
+
+func answersToOrderedArrays(m map[string]string, questionOrder []string) [][]string {
 	result := make([][]string, 0, len(m))
-	for _, v := range m {
-		result = append(result, []string{v})
+	seen := make(map[string]struct{}, len(questionOrder))
+	for _, question := range questionOrder {
+		if answer, ok := m[question]; ok {
+			result = append(result, []string{answer})
+			seen[question] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		if _, ok := seen[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = append(result, []string{m[key]})
 	}
 	return result
 }

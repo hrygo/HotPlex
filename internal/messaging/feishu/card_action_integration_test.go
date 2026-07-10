@@ -58,6 +58,10 @@ func TestCardActionFlow_PermissionAllow_EndToEnd(t *testing.T) {
 		SendResponse: func(meta map[string]any) {
 			received <- meta
 		},
+		SendResponseSync: func(_ context.Context, meta map[string]any) error {
+			received <- meta
+			return nil
+		},
 	})
 	require.Equal(t, 1, a.Interactions.Len(),
 		"precondition: one interaction must be registered before the click")
@@ -93,8 +97,8 @@ func TestCardActionFlow_PermissionAllow_EndToEnd(t *testing.T) {
 
 	title, ok := header["title"].(map[string]any)
 	require.True(t, ok, "header.title must be map[string]any, got %T", header["title"])
-	assert.Equal(t, "✅ 已允许", title["content"],
-		"allow action must surface the '已允许' resolved label")
+	assert.Equal(t, "✅ 已允许，Agent 继续执行", title["content"],
+		"allow action must surface the delivery-confirmed label")
 
 	// ── Assert: SendResponse received with correct payload ──────────────────
 	select {

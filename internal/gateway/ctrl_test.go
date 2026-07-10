@@ -323,14 +323,16 @@ func TestHandleInput_InteractionResponse_NoWorker(t *testing.T) {
 	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
 	require.NoError(t, err)
 	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
-	// No worker attached — interaction response should not error.
+	// No worker attached — interaction response should fail instead of silently
+	// acknowledging a response that cannot reach the waiting worker.
 
 	md := map[string]any{
 		"permission_response": map[string]any{"request_id": "req_1", "allowed": true},
 	}
 	env := inputEnvelopeWithMetadata(sid, "", md)
 	err = handler.handleInput(context.Background(), env)
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interaction response dropped")
 }
 
 func TestHandleInput_PlatformMetadataNotRouted(t *testing.T) {

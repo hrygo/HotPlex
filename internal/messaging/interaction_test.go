@@ -1,6 +1,8 @@
 package messaging
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -12,6 +14,16 @@ import (
 
 	"github.com/hrygo/hotplex/pkg/events"
 )
+
+type interactionCaptureHandler struct {
+	err error
+	env *events.Envelope
+}
+
+func (h *interactionCaptureHandler) Handle(_ context.Context, env *events.Envelope) error {
+	h.env = env
+	return h.err
+}
 
 // ---------------------------------------------------------------------------
 // InteractionManager tests
@@ -107,6 +119,47 @@ func TestInteractionManager_Complete_NotFound(t *testing.T) {
 	m := NewInteractionManager(slog.Default())
 	_, ok := m.Complete("nonexistent")
 	require.False(t, ok)
+}
+
+func TestInteractionManager_ClaimReleaseAndComplete(t *testing.T) {
+	t.Parallel()
+
+	m := NewInteractionManager(slog.Default())
+	m.Register(&PendingInteraction{
+		ID:        "req-claim",
+		SessionID: "sess-1",
+		Type:      events.PermissionRequest,
+		CreatedAt: time.Now(),
+		Timeout:   time.Hour,
+	})
+
+	_, ok := m.Claim("req-claim")
+	require.True(t, ok)
+	_, ok = m.Claim("req-claim")
+	require.False(t, ok, "only one resolver may claim a request")
+	require.Empty(t, m.GetBySession("sess-1"), "claimed requests must not be consumed by text fallback")
+	require.True(t, m.Release("req-claim"))
+	_, ok = m.Claim("req-claim")
+	require.True(t, ok, "released request must be retryable")
+	_, ok = m.CompleteClaimed("req-claim")
+	require.True(t, ok)
+	require.Zero(t, m.Len())
+}
+
+func TestSendInteractionResponsePropagatesGatewayResult(t *testing.T) {
+	t.Parallel()
+
+	metadata := BuildPermissionResponse("req-delivery", true, "")
+	handler := &interactionCaptureHandler{}
+	bridge := NewBridge(slog.Default(), PlatformFeishu, nil, handler, nil, "", "", "", "")
+	require.NoError(t, SendInteractionResponse(context.Background(), bridge, "req-delivery", "sess-1", "owner-1", nil, metadata))
+	require.NotNil(t, handler.env)
+	require.Equal(t, "sess-1", handler.env.SessionID)
+	require.Equal(t, "owner-1", handler.env.OwnerID)
+
+	handler.err = errors.New("worker unavailable")
+	err := SendInteractionResponse(context.Background(), bridge, "req-delivery", "sess-1", "owner-1", nil, metadata)
+	require.ErrorIs(t, err, handler.err)
 }
 
 func TestInteractionManager_Len(t *testing.T) {

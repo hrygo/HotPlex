@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ const (
 	headerOrange = "orange"
 	headerYellow = "yellow"
 	headerViolet = "violet"
+	headerRed    = "red"
 )
 
 // cardHeader defines a Card JSON 2.0 header component.
@@ -255,53 +257,96 @@ func questionFooterHint(questions []events.Question) string {
 	return "💬 点击按钮复制选项文本，粘贴发送即可响应\n也可直接回复选项文本或自定义答案"
 }
 
+func technicalDetails(content string) map[string]any {
+	return map[string]any{
+		"tag":      "collapsible_panel",
+		"expanded": false,
+		"header": map[string]any{
+			"title": map[string]any{"tag": "plain_text", "content": "技术详情"},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": truncateCardText(content, 3000)},
+		},
+	}
+}
+
+func truncateCardText(content string, maxBytes int) string {
+	content = messaging.SanitizeText(content)
+	if len(content) <= maxBytes {
+		return content
+	}
+	var out strings.Builder
+	for _, r := range content {
+		if out.Len()+len(string(r))+len("…") > maxBytes {
+			break
+		}
+		out.WriteRune(r)
+	}
+	out.WriteString("…")
+	return out.String()
+}
+
+func permissionActionSummary(toolName string) string {
+	name := strings.ToLower(toolName)
+	switch {
+	case strings.Contains(name, "write"), strings.Contains(name, "patch"), strings.Contains(name, "edit"):
+		return "修改文件或配置"
+	case strings.Contains(name, "read"), strings.Contains(name, "search"):
+		return "读取项目内容"
+	case strings.Contains(name, "command"), strings.Contains(name, "shell"), strings.Contains(name, "bash"), strings.Contains(name, "exec"):
+		return "执行命令"
+	default:
+		return "执行工具操作"
+	}
+}
+
+func elicitationDataScope(data *events.ElicitationRequestData) string {
+	if len(data.RequestedSchema) == 0 {
+		return "数据范围未说明。仅在你确认后，Agent 才会继续向该服务提交所需信息。"
+	}
+	return "请求的数据结构已在技术详情中列出；仅在你确认后，Agent 才会继续提交所需信息。"
+}
+
 func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 	header := cardHeader{
-		Title:    data.ToolName,
-		Subtitle: messaging.SanitizeText(data.Description),
+		Title:    permissionActionSummary(data.ToolName),
+		Subtitle: "待你确认",
 		Template: headerOrange,
-		Tags:     []cardTag{{Text: "pending", Color: "orange"}},
+		Tags:     []cardTag{{Text: "需要授权", Color: "orange"}},
 	}
 
-	var content strings.Builder
-	fmt.Fprintf(&content, "**%s**\n%s", data.ToolName, messaging.SanitizeText(data.Description))
+	purpose := truncateCardText(data.Description, 600)
+	if purpose == "" || purpose == truncateCardText(data.ToolName, 600) {
+		purpose = "Agent 请求执行一项工具操作。"
+	}
+	var details strings.Builder
+	fmt.Fprintf(&details, "**工具**\n%s", truncateCardText(data.ToolName, 200))
 	if len(data.Args) > 0 {
-		content.WriteString("\n\n参数：")
-		const maxArgBytes = 500
-		truncated := false
-		for i, arg := range data.Args {
-			if i > 0 {
-				content.WriteString(", ")
+		details.WriteString("\n\n**参数**")
+		for _, arg := range data.Args {
+			if details.Len() >= 2000 {
+				details.WriteString("\n…参数已截断")
+				break
 			}
-			sanitized := messaging.SanitizeText(arg)
-			// Truncate at 500 bytes to avoid oversized card payload (Feishu card 30KB limit).
-			// Stacked args (e.g., base64 file contents) can blow past this easily.
-			if content.Len()+len(sanitized) > maxArgBytes {
-				if !truncated {
-					content.WriteString("...")
-					truncated = true
-				}
-				continue
-			}
-			content.WriteString(sanitized)
+			details.WriteString("\n" + truncateCardText(arg, 600))
 		}
 	}
+	details.WriteString("\n\n**请求 ID**\n" + messaging.SanitizeText(data.ID))
 
-	summary := fmt.Sprintf("工具执行: %s", data.ToolName)
-	if data.Description != "" && data.Description != data.ToolName {
-		summary += "\n描述: " + data.Description
-	}
+	summary := permissionActionSummary(data.ToolName)
 
 	valAllow := map[string]any{"action": "allow", "request_id": data.ID, "summary": summary}
 	valDeny := map[string]any{"action": "deny", "request_id": data.ID, "summary": summary}
 	elements := []map[string]any{
-		{"tag": "markdown", "content": content.String()},
+		{"tag": "markdown", "content": "**目的**\n" + purpose},
+		{"tag": "markdown", "content": "**影响范围**\n操作详情会影响当前会话或其关联资源；请在技术详情中核对具体参数。"},
+		technicalDetails(details.String()),
 		{
 			"tag":  "input",
 			"name": "reason",
 			"placeholder": map[string]any{
 				"tag":     "plain_text",
-				"content": "请填写可选的留言/反馈/拒绝理由...",
+				"content": "可选：填写拒绝理由或补充说明",
 			},
 		},
 		{
@@ -310,13 +355,13 @@ func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 			"elements": []map[string]any{
 				{
 					"tag":   "button",
-					"text":  map[string]any{"tag": "plain_text", "content": "✅ 允许"},
+					"text":  map[string]any{"tag": "plain_text", "content": "允许并继续"},
 					"type":  "primary",
 					"value": valAllow,
 				},
 				{
 					"tag":   "button",
-					"text":  map[string]any{"tag": "plain_text", "content": "❌ 拒绝"},
+					"text":  map[string]any{"tag": "plain_text", "content": "拒绝"},
 					"type":  "danger",
 					"value": valDeny,
 				},
@@ -328,17 +373,26 @@ func buildPermissionCardWithButtons(data *events.PermissionRequestData) string {
 }
 
 func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
-	title := data.ToolName
-	if title == "" {
-		title = "用户输入请求"
-	}
 	header := cardHeader{
-		Title:    title,
+		Title:    "需要你的输入",
+		Subtitle: "待你回答",
 		Template: headerYellow,
+		Tags:     []cardTag{{Text: "待回答", Color: "yellow"}},
 	}
 
+	useForm := len(data.Questions) > 1
+	for _, question := range data.Questions {
+		if question.MultiSelect {
+			useForm = true
+			break
+		}
+	}
 	var elements []map[string]any
-	for _, q := range data.Questions {
+	formElements := make([]map[string]any, 0, len(data.Questions)+2)
+	questionKeys := make(map[string]any, len(data.Questions))
+	questionOrder := make([]string, 0, len(data.Questions))
+	for index, q := range data.Questions {
+		questionOrder = append(questionOrder, truncateCardText(q.Question, 600))
 		headerLabel := messaging.SanitizeText(q.Header)
 		if headerLabel == "" {
 			headerLabel = "Question"
@@ -347,14 +401,42 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "**%s**\n%s", headerLabel, messaging.SanitizeText(q.Question))
 		if q.MultiSelect {
-			sb.WriteString("\n*（可多选）*")
+			sb.WriteString("\n*可多选*")
+		}
+		for _, opt := range q.Options {
+			if desc := truncateCardText(opt.Description, 180); desc != "" {
+				fmt.Fprintf(&sb, "\n- **%s**：%s", truncateCardText(opt.Label, 75), desc)
+			}
 		}
 		elements = append(elements, map[string]any{
 			"tag":     "markdown",
 			"content": sb.String(),
 		})
 
-		if len(q.Options) > 0 {
+		if useForm {
+			name := fmt.Sprintf("answer_%d", index)
+			questionKeys[name] = truncateCardText(q.Question, 600)
+			if len(q.Options) == 0 {
+				formElements = append(formElements, map[string]any{
+					"tag": "input", "name": name,
+					"placeholder": map[string]any{"tag": "plain_text", "content": "输入你的答案"},
+				})
+				continue
+			}
+			options := make([]map[string]any, 0, len(q.Options))
+			for _, opt := range q.Options {
+				label := truncateCardText(opt.Label, 75)
+				options = append(options, map[string]any{"text": map[string]any{"tag": "plain_text", "content": label}, "value": label})
+			}
+			tag := "select_static"
+			if q.MultiSelect {
+				tag = "multi_select_static"
+			}
+			formElements = append(formElements, map[string]any{
+				"tag": tag, "name": name, "width": "fill", "required": false,
+				"placeholder": map[string]any{"tag": "plain_text", "content": "请选择"}, "options": options,
+			})
+		} else if len(q.Options) > 0 {
 			buttons := make([]map[string]any, 0, len(q.Options))
 			for _, opt := range q.Options {
 				sanitized := messaging.SanitizeText(opt.Label)
@@ -362,17 +444,19 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 				if len([]rune(display)) > 75 {
 					display = string([]rune(display)[:75])
 				}
-				summary := fmt.Sprintf("问题: %s", q.Question)
+				summary := "已选择回答"
 				buttons = append(buttons, map[string]any{
 					"tag":  "button",
 					"text": map[string]any{"tag": "plain_text", "content": display},
 					"type": "primary",
 					"value": map[string]any{
-						"action":     "answer",
-						"request_id": data.ID,
-						"answer":     sanitized,
-						"label":      display,
-						"summary":    summary,
+						"action":         "answer",
+						"request_id":     data.ID,
+						"answer":         sanitized,
+						"label":          display,
+						"question":       truncateCardText(q.Question, 600),
+						"question_order": []string{truncateCardText(q.Question, 600)},
+						"summary":        summary,
 					},
 				})
 			}
@@ -383,19 +467,40 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 			})
 		}
 	}
+	if useForm {
+		formElements = append(formElements, map[string]any{
+			"tag": "button", "text": map[string]any{"tag": "plain_text", "content": "提交答案"}, "type": "primary",
+			"complex_interaction": true, "action_type": "form_submit", "name": "submit_question",
+			"value": map[string]any{"action": "answer", "request_id": data.ID, "summary": "已提交回答", "question_keys": questionKeys, "question_order": questionOrder},
+		})
+		elements = append(elements, map[string]any{"tag": "form", "name": "question_answers", "elements": formElements})
+		return buildCard(header, nil, elements)
+	}
 
 	elements = append(elements, map[string]any{
 		"tag":  "input",
 		"name": "custom_answer",
 		"placeholder": map[string]any{
 			"tag":     "plain_text",
-			"content": "或者在此输入自定义答案...",
+			"content": "或者输入自定义答案",
 		},
 	})
 
 	elements = append(elements, map[string]any{
-		"tag":     "markdown",
-		"content": "💬 点击按钮直接选择，或直接回复自定义答案",
+		"tag":       "interactive_container",
+		"direction": "horizontal",
+		"elements": []map[string]any{
+			{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": "提交自定义答案"},
+				"type": "primary",
+				"value": map[string]any{
+					"action":     "answer",
+					"request_id": data.ID,
+					"summary":    "已提交自定义回答",
+				},
+			},
+		},
 	})
 
 	return buildCard(header, nil, elements)
@@ -403,36 +508,46 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 
 func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string {
 	header := cardHeader{
-		Title:    data.MCPServerName,
-		Subtitle: messaging.SanitizeText(data.Message),
+		Title:    "外部服务请求",
+		Subtitle: "待你确认",
 		Template: headerViolet,
+		Tags:     []cardTag{{Text: "信息收集", Color: "purple"}},
 	}
 
-	var content strings.Builder
-	fmt.Fprintf(&content, "**%s**\n%s", data.MCPServerName, messaging.SanitizeText(data.Message))
+	var details strings.Builder
+	fmt.Fprintf(&details, "**服务**\n%s\n\n**请求内容**\n%s", truncateCardText(data.MCPServerName, 200), truncateCardText(data.Message, 1200))
 	if data.URL != "" {
 		// Validate URL scheme to prevent javascript: or data: injection in Feishu markdown links.
 		// Only http:// and https:// are safe in Feishu card markdown.
 		display := data.URL
 		if !strings.HasPrefix(data.URL, "http://") && !strings.HasPrefix(data.URL, "https://") {
-			display = messaging.SanitizeText(data.URL)
-			fmt.Fprintf(&content, "\n\n📋 %s", display)
+			display = truncateCardText(data.URL, 500)
+			fmt.Fprintf(&details, "\n\n**外部链接**\n%s", display)
 		} else {
-			fmt.Fprintf(&content, "\n\n[🔗 %s](%s)", messaging.SanitizeText(display), display)
+			fmt.Fprintf(&details, "\n\n**外部链接**\n[%s](%s)", messaging.SanitizeText(display), display)
 		}
 	}
+	if len(data.RequestedSchema) > 0 {
+		if schema, err := json.Marshal(data.RequestedSchema); err == nil {
+			details.WriteString("\n\n**请求数据结构**\n" + truncateCardText(string(schema), 800))
+		}
+	}
+	details.WriteString("\n\n**请求 ID**\n" + messaging.SanitizeText(data.ID))
 
-	summary := fmt.Sprintf("MCP Server: %s\n%s", data.MCPServerName, data.Message)
+	summary := "外部服务信息收集"
 	valAccept := map[string]any{"action": "accept", "request_id": data.ID, "summary": summary}
 	valDecline := map[string]any{"action": "decline", "request_id": data.ID, "summary": summary}
 	elements := []map[string]any{
-		{"tag": "markdown", "content": content.String()},
+		{"tag": "markdown", "content": "**请求来源**\n" + truncateCardText(data.MCPServerName, 200)},
+		{"tag": "markdown", "content": "**目的**\n" + truncateCardText(data.Message, 600)},
+		{"tag": "markdown", "content": "**数据与影响**\n" + elicitationDataScope(data)},
+		technicalDetails(details.String()),
 		{
 			"tag":  "input",
 			"name": "comment",
 			"placeholder": map[string]any{
 				"tag":     "plain_text",
-				"content": "请填写附加注释/自定义输入...",
+				"content": "可选：补充说明或自定义输入",
 			},
 		},
 		{
@@ -441,13 +556,13 @@ func buildElicitationCardWithButtons(data *events.ElicitationRequestData) string
 			"elements": []map[string]any{
 				{
 					"tag":   "button",
-					"text":  map[string]any{"tag": "plain_text", "content": "✅ 接受"},
+					"text":  map[string]any{"tag": "plain_text", "content": "接受并继续"},
 					"type":  "primary",
 					"value": valAccept,
 				},
 				{
 					"tag":   "button",
-					"text":  map[string]any{"tag": "plain_text", "content": "❌ 拒绝"},
+					"text":  map[string]any{"tag": "plain_text", "content": "拒绝"},
 					"type":  "danger",
 					"value": valDecline,
 				},
@@ -504,5 +619,55 @@ func buildResolvedCard(action, label, color, summary, operatorID, reason string)
 		"body": map[string]any{
 			"elements": elements,
 		},
+	}
+}
+
+// buildRetryCard keeps a failed interaction actionable without claiming it was
+// accepted by the worker. The original callback value is preserved so retry
+// follows the same permission, answer, or elicitation route.
+func buildRetryCard(value map[string]any, summary, failure string) map[string]any {
+	retryValue := make(map[string]any, len(value))
+	for key, item := range value {
+		retryValue[key] = item
+	}
+
+	elements := []map[string]any{
+		{
+			"tag":     "markdown",
+			"content": "响应暂未提交给 Agent。请重试；如问题持续，请稍后重新发起请求。",
+		},
+	}
+	if failure != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": "**失败原因**\n" + truncateCardText(failure, 240),
+		})
+	}
+	if summary != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": "**请求摘要**\n" + messaging.SanitizeText(summary),
+		})
+	}
+	elements = append(elements, map[string]any{
+		"tag":       "interactive_container",
+		"direction": "horizontal",
+		"elements": []map[string]any{
+			{
+				"tag":   "button",
+				"text":  map[string]any{"tag": "plain_text", "content": "重试提交"},
+				"type":  "primary",
+				"value": retryValue,
+			},
+		},
+	})
+
+	return map[string]any{
+		"schema": "2.0",
+		"header": map[string]any{
+			"title":    map[string]any{"tag": "plain_text", "content": "提交失败，可重试"},
+			"template": headerRed,
+		},
+		"body": map[string]any{"elements": elements},
 	}
 }
