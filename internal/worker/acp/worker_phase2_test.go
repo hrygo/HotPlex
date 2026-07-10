@@ -698,3 +698,179 @@ func TestFmtStartError_PathErrorPermission(t *testing.T) {
 	require.Contains(t, err.Error(), "not executable")
 	require.Contains(t, err.Error(), "execute permission")
 }
+
+// ─── HandlePermissionResponse ─────────────────────────────────────────────────
+
+func TestHandlePermissionResponse_NoPendingRequest(t *testing.T) {
+	t.Parallel()
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	err := w.HandlePermissionResponse(context.Background(), "nonexistent", true, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending permission request")
+}
+
+func TestHandlePermissionResponse_Allow_ForwardsToAgent(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	pm := &PermissionMapResult{
+		RequestID:     mustMarshal(55),
+		AllowOptionID: "allow_always",
+		DenyOptionID:  "reject_once",
+	}
+	w.pendingPerm.Store("perm-55", pm)
+
+	resultCh := make(chan map[string]any, 1)
+	go func() {
+		scanner := NewScanner(agentStdinR)
+		scanner.Scan()
+		var resp JSONRPCResponse
+		_ = json.Unmarshal(scanner.Bytes(), &resp)
+		var outcome map[string]any
+		_ = json.Unmarshal(resp.Result, &outcome)
+		resultCh <- outcome
+		agentStdoutW.Close()
+	}()
+
+	err := w.HandlePermissionResponse(ctx, "perm-55", true, "")
+	require.NoError(t, err)
+
+	select {
+	case got := <-resultCh:
+		require.Equal(t, "selected", got["outcome"])
+		require.Equal(t, "allow_always", got["optionId"])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent response")
+	}
+
+	_, ok := w.pendingPerm.Load("perm-55")
+	require.False(t, ok, "pending permission must be cleared after successful response")
+}
+
+func TestHandlePermissionResponse_Deny_ForwardsToAgent(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	pm := &PermissionMapResult{
+		RequestID:     mustMarshal(56),
+		AllowOptionID: "allow_always",
+		DenyOptionID:  "reject_once",
+	}
+	w.pendingPerm.Store("perm-56", pm)
+
+	resultCh := make(chan map[string]any, 1)
+	go func() {
+		scanner := NewScanner(agentStdinR)
+		scanner.Scan()
+		var resp JSONRPCResponse
+		_ = json.Unmarshal(scanner.Bytes(), &resp)
+		var outcome map[string]any
+		_ = json.Unmarshal(resp.Result, &outcome)
+		resultCh <- outcome
+		agentStdoutW.Close()
+	}()
+
+	err := w.HandlePermissionResponse(ctx, "perm-56", false, "")
+	require.NoError(t, err)
+
+	select {
+	case got := <-resultCh:
+		require.Equal(t, "selected", got["outcome"])
+		require.Equal(t, "reject_once", got["optionId"])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent response")
+	}
+
+	_, ok := w.pendingPerm.Load("perm-56")
+	require.False(t, ok)
+}
+
+func TestHandlePermissionResponse_WriteFailureRetainsPending(t *testing.T) {
+	t.Parallel()
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	require.NoError(t, writer.Close())
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = NewACPClient(writer, strings.NewReader(""), nil)
+	pm := &PermissionMapResult{
+		RequestID:     mustMarshal(57),
+		AllowOptionID: "allow_always",
+		DenyOptionID:  "reject_once",
+	}
+	w.pendingPerm.Store("perm-57", pm)
+
+	err := w.HandlePermissionResponse(context.Background(), "perm-57", true, "")
+	require.Error(t, err)
+	_, ok := w.pendingPerm.Load("perm-57")
+	require.True(t, ok, "a failed write must retain the permission for retry")
+}
+
+// ─── HandleQuestionResponseOptions (MultiAnswer path) ────────────────────────
+
+func TestHandleQuestionResponseOptions_ForwardsToAgent(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	w.pendingRequests.Store("q-multi", &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      mustMarshal(88),
+		Method:  "session/request_question",
+	})
+
+	go func() {
+		scanner := NewScanner(agentStdinR)
+		scanner.Scan()
+		_ = scanner.Bytes()
+		agentStdoutW.Close()
+	}()
+
+	err := w.HandleQuestionResponseOptions(ctx, "q-multi", map[string][]string{
+		"checks": {"Unit", "Race"},
+	}, []string{"checks"})
+	require.NoError(t, err)
+
+	_, ok := w.pendingRequests.Load("q-multi")
+	require.False(t, ok, "pending request must be cleared after successful response")
+}
+
+func TestHandleQuestionResponseOptions_NoPendingRequest(t *testing.T) {
+	t.Parallel()
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	err := w.HandleQuestionResponseOptions(context.Background(), "nonexistent", nil, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending question request")
+}
