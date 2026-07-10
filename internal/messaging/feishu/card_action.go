@@ -161,7 +161,7 @@ func (a *Adapter) handleCardActionTrigger(ctx context.Context, event *callback.C
 			"action", actionType,
 			"operator", openID,
 			"err", err)
-		return wrapResolvedCard(buildRetryCard(val, summary, "")), nil
+		return wrapResolvedCard(buildRetryCard(val, summary, "当前 Worker 未能接收响应，请稍后重试。")), nil
 	}
 
 	if _, ok := a.Interactions.CompleteClaimed(requestID); !ok {

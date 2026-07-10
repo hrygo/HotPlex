@@ -152,6 +152,8 @@ func TestHandleCardAction_DeliveryFailureKeepsRequestRetryable(t *testing.T) {
 	require.True(t, ok)
 	header := card["header"].(map[string]any)
 	require.Equal(t, "提交失败，可重试", header["title"].(map[string]any)["content"])
+	body := card["body"].(map[string]any)["elements"].([]map[string]any)
+	require.Contains(t, body[1]["content"].(string), "Worker 未能接收响应")
 	// The raw delivery error must not surface in the user-facing card.
 	bodyBytes, _ := json.Marshal(got)
 	assert.NotContains(t, string(bodyBytes), "worker unavailable")
