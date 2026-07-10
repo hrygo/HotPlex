@@ -161,7 +161,7 @@ func (a *Adapter) handleCardActionTrigger(ctx context.Context, event *callback.C
 			"action", actionType,
 			"operator", openID,
 			"err", err)
-		return wrapResolvedCard(buildRetryCard(val, summary, err.Error())), nil
+		return wrapResolvedCard(buildRetryCard(val, summary, "")), nil
 	}
 
 	if _, ok := a.Interactions.CompleteClaimed(requestID); !ok {

@@ -174,6 +174,8 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, userID stri
 	// confirms that it accepted the metadata.
 	claimed, ok := a.Interactions.Claim(matched.ID)
 	if !ok {
+		// Request resolved/cancelled concurrently; surface it instead of silent consume.
+		_ = a.sendTextMessage(ctx, conn.chatID, "该请求已过期或已响应")
 		return true
 	}
 	deliveryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
