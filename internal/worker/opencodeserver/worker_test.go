@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -277,6 +278,42 @@ func newWorkerWithMockServer(t *testing.T, handler http.HandlerFunc) (*Worker, *
 		log:       w.Log,
 	}
 	return w, srv
+}
+
+func TestCreateSession_CreatesProjectDir(t *testing.T) {
+	t.Parallel()
+
+	w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/session" {
+			rw.WriteHeader(http.StatusNotFound)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(map[string]string{"id": "ses_new"})
+	})
+
+	// Nested, non-existent target under a temp dir.
+	projectDir := filepath.Join(t.TempDir(), "a", "b", "c")
+	require.NoDirExists(t, projectDir)
+
+	sessionID, err := w.createSession(context.Background(), projectDir)
+	require.NoError(t, err)
+	require.Equal(t, "ses_new", sessionID)
+	require.DirExists(t, projectDir) // MkdirAll created the nested path
+}
+
+func TestCreateSession_EmptyProjectDir_NoError(t *testing.T) {
+	t.Parallel()
+
+	w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(rw).Encode(map[string]string{"id": "ses_new"})
+	})
+
+	// Empty projectDir must skip MkdirAll and still succeed.
+	sessionID, err := w.createSession(context.Background(), "")
+	require.NoError(t, err)
+	require.Equal(t, "ses_new", sessionID)
 }
 
 func TestInput_PermissionResponse_Allowed(t *testing.T) {

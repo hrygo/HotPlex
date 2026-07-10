@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -343,6 +344,17 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 		w.closeAndMarkDone()
 		w.mu.Unlock()
 		return fmt.Errorf("codexcli: %s: manager process not running", errPrefix)
+	}
+
+	// Ensure the working directory exists before starting a thread bound to it.
+	// codex runs as a shared app-server singleton (proc.Dir=""), so the workdir
+	// is only passed via the JSON cwd field in buildThreadStartParams. If it does
+	// not exist, codex receives a non-existent cwd and later turns fail — same
+	// class of bug as opencode_server (see #863).
+	if session.ProjectDir != "" {
+		if err := os.MkdirAll(session.ProjectDir, 0o755); err != nil {
+			return fmt.Errorf("codexcli: %s: create workdir: %w", errPrefix, err)
+		}
 	}
 
 	cfg := resolveConfig()

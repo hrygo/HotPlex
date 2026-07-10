@@ -41,6 +41,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -626,6 +627,17 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 }
 
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
+	// Ensure the project directory exists before binding a session to it.
+	// opencode serve is a shared singleton started without any session context,
+	// so the workdir is only known here, per session. If it does not exist,
+	// OCS receives a non-existent directory and later message handling fails
+	// (observed as HTTP 500 "Unexpected server error" on Windows).
+	if projectDir != "" {
+		if err := os.MkdirAll(projectDir, 0o755); err != nil {
+			return "", fmt.Errorf("create session workdir: %w", err)
+		}
+	}
+
 	// OpenCode ≥1.17 honors only the `directory` query param; a `project_dir`
 	// JSON body field is ignored and the session falls back to `serve`s cwd.
 	// For older versions (<1.17), we also send `project_dir` in the JSON body.
