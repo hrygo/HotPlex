@@ -527,7 +527,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 	})
 	cfgStore.RegisterFunc(func(prev, next *config.Config) {
-		if prev.Worker.ClaudeCode.Command != next.Worker.ClaudeCode.Command {
+		if !reflect.DeepEqual(prev.Worker.ClaudeCode, next.Worker.ClaudeCode) {
 			claudecode.InitConfig(next.Worker.ClaudeCode)
 		}
 	})

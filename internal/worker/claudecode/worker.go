@@ -298,17 +298,43 @@ func permissionModeToCCArg(mode string) (permArg string, skip bool) {
 }
 
 // resolvePermissionMode returns the effective PermissionMode tier for a session.
-// A non-empty session mode wins (workspace sessions inject their tier via the bridge, so
-// the operator default never overrides an explicit session/workspace tier). An empty
-// session mode (platform/cron sessions — Slack/Feishu/cron) falls back to the
-// operator-configured default (worker.claude_code.permission_mode; "" = bypass). This is
-// CC's counterpart to codex's sandboxFromSession fallback; without it CC was the only
-// worker unable to reach workspace tier under a platform session.
+// An empty session mode (platform/cron sessions — Slack/Feishu/cron, where the bridge
+// injects "") falls back to the operator-configured default (worker.claude_code.
+// permission_mode; "" = bypass). A non-empty session mode (workspace sessions) is then
+// clamped to never EXCEED the operator tier — the operator config is a permissiveness
+// ceiling, mirroring codex's codexSandboxRank/codexApprovalRank clamp, so a workspace
+// admin's permissive override (e.g. auto-edit) cannot widen past a restrictive operator
+// policy (e.g. read-only). Without the fallback CC was the only worker unable to reach
+// workspace tier under a platform session; without the clamp it was the only worker that
+// could violate the operator ceiling documented at worker.NormalizePermissionMode.
 func resolvePermissionMode(sessionMode, operatorMode string) string {
-	if sessionMode != "" {
-		return sessionMode
+	effective := sessionMode
+	if effective == "" {
+		effective = operatorMode
 	}
-	return operatorMode
+	if operatorMode != "" && ccPermissionRank(effective) > ccPermissionRank(operatorMode) {
+		effective = operatorMode
+	}
+	return effective
+}
+
+// ccPermissionRank returns a permissiveness rank for a PermissionMode tier (higher =
+// more permissive): read-only < workspace < auto-edit < bypass. resolvePermissionMode
+// uses it to clamp a session tier down to the operator ceiling. Mirrors codexcli's
+// codexSandboxRank. Unknown values return 0 (least permissive) so any recognized
+// operator tier can clamp them.
+func ccPermissionRank(mode string) int {
+	switch mode {
+	case worker.PermissionModeReadOnly:
+		return 0
+	case worker.PermissionModeWorkspace:
+		return 1
+	case worker.PermissionModeAutoEdit:
+		return 2
+	case worker.PermissionModeBypass:
+		return 3
+	}
+	return 0
 }
 
 func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string, error) {

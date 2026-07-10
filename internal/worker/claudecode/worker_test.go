@@ -944,10 +944,12 @@ func TestInitConfig_PermissionSettings(t *testing.T) {
 	origCmd := commandParts.Load()
 	origPP := permissionPrompt.Load()
 	origAA := permissionAutoApprove.Load()
+	origOPM := operatorPermissionMode.Load()
 	defer func() {
 		commandParts.Store(origCmd)
 		permissionPrompt.Store(origPP)
 		permissionAutoApprove.Store(origAA)
+		operatorPermissionMode.Store(origOPM)
 	}()
 
 	tests := []struct {
