@@ -47,10 +47,18 @@ var permissionPrompt atomic.Value // bool
 // permissionAutoApprove lists tool names to auto-approve without user interaction.
 var permissionAutoApprove atomic.Value // []string
 
+// operatorPermissionMode is the operator-configured PermissionMode tier applied when a
+// session carries no explicit override (platform/cron sessions — bridge injects "" so
+// operator config is honored, mirroring codex_cli.sandbox+approval_mode and
+// acp.auto_approve). Loaded from worker.claude_code.permission_mode via InitConfig;
+// "" = bypass (legacy default). See resolvePermissionMode.
+var operatorPermissionMode atomic.Value // string
+
 func init() {
 	commandParts.Store([]string{"claude"})
 	permissionPrompt.Store(false)
 	permissionAutoApprove.Store([]string{})
+	operatorPermissionMode.Store("")
 }
 
 // InitConfig applies Claude Code worker configuration.
@@ -67,6 +75,7 @@ func InitConfig(cfg config.ClaudeCodeConfig) {
 		autoApprove = []string{}
 	}
 	permissionAutoApprove.Store(autoApprove)
+	operatorPermissionMode.Store(cfg.PermissionMode)
 	if err := security.RegisterCommand(parts[0]); err != nil {
 		slog.Default().Error("claudecode: failed to register command", "command", parts[0], "err", err)
 	}
@@ -288,6 +297,20 @@ func permissionModeToCCArg(mode string) (permArg string, skip bool) {
 	}
 }
 
+// resolvePermissionMode returns the effective PermissionMode tier for a session.
+// A non-empty session mode wins (workspace sessions inject their tier via the bridge, so
+// the operator default never overrides an explicit session/workspace tier). An empty
+// session mode (platform/cron sessions — Slack/Feishu/cron) falls back to the
+// operator-configured default (worker.claude_code.permission_mode; "" = bypass). This is
+// CC's counterpart to codex's sandboxFromSession fallback; without it CC was the only
+// worker unable to reach workspace tier under a platform session.
+func resolvePermissionMode(sessionMode, operatorMode string) string {
+	if sessionMode != "" {
+		return sessionMode
+	}
+	return operatorMode
+}
+
 func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string, error) {
 	args := []string{
 		"--print",
@@ -331,9 +354,12 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	// --permission-prompt-tool disabled (default):
 	//   - All ask results auto-denied by Claude Code in headless mode
 	// Permission mode: map the unified 4 tiers to CC native args (issue #789).
-	// Empty PermissionMode ("worker default") → bypass; a non-empty tier maps per the table.
-	// SkipPermissions is kept as a legacy escape hatch (no production setter today).
-	permArg, skip := permissionModeToCCArg(session.PermissionMode)
+	// Empty session PermissionMode (platform/cron sessions) falls back to the operator
+	// default (worker.claude_code.permission_mode) via resolvePermissionMode; an explicit
+	// session tier (workspace sessions) always wins. SkipPermissions is a legacy escape hatch.
+	operatorMode, _ := operatorPermissionMode.Load().(string)
+	effectiveMode := resolvePermissionMode(session.PermissionMode, operatorMode)
+	permArg, skip := permissionModeToCCArg(effectiveMode)
 	if skip || session.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	} else if permArg != "" {

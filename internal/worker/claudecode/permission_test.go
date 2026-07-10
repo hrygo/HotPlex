@@ -31,3 +31,26 @@ func TestPermissionModeToCCArg(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvePermissionMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		sessionMode  string
+		operatorMode string
+		want         string
+	}{
+		{"explicit session tier wins over operator", worker.PermissionModeAutoEdit, worker.PermissionModeWorkspace, worker.PermissionModeAutoEdit},
+		{"session tier wins over empty operator", worker.PermissionModeReadOnly, "", worker.PermissionModeReadOnly},
+		{"operator fallback on empty session (platform/cron)", "", worker.PermissionModeWorkspace, worker.PermissionModeWorkspace},
+		{"operator bypass honored on empty session", "", worker.PermissionModeBypass, worker.PermissionModeBypass},
+		{"both empty → empty (CC maps to bypass)", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolvePermissionMode(tt.sessionMode, tt.operatorMode)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
