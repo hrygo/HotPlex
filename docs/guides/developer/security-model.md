@@ -150,10 +150,11 @@ Cron 执行和 Session 启动时，Gateway 注入以下环境变量：
 
 ### API Key
 
-`internal/security/auth.go` 提供双层 Key 提取：
+`internal/security/auth.go` 提供三层 Key 提取（按优先级）：
 
 1. **HTTP Header**（`X-API-Key`，可自定义）
-2. **Query Parameter**（`api_key`，浏览器 WebSocket 客户端专用）
+2. **Authorization Bearer**（`Authorization: Bearer <key>`，缺省回退；适配 OpenAPI/Scalar 控制台与多数 SDK 默认行为）
+3. **Query Parameter**（`api_key`，浏览器 WebSocket 客户端专用）
 
 开发模式下未配置 API Key 时，所有请求以 `anonymous` 身份通过。生产环境必须配置 API Key。
 
@@ -161,7 +162,7 @@ Cron 执行和 Session 启动时，Gateway 注入以下环境变量：
 
 `internal/security/auth.go` 提供认证机制：
 
-1. **API Key**：通过 `X-API-Key` Header 或 `?api_key=` Query Param 携带。`Authenticator` 在内存 `map` 中验证，支持热重载（`ReloadKeys`）。
+1. **API Key**：通过 `X-API-Key` Header、`Authorization: Bearer <key>` 或 `?api_key=` Query Param 携带（三者等价，提取顺序见上文）。`Authenticator` 在内存 `map` 中验证，支持热重载（`ReloadKeys`）。
 2. **Bot ID**：通过 `X-Bot-ID` Header 或 `bot_id` 查询参数指定 Bot 身份。每个 Bot 只能操作属于自己的 Session，**禁止跨 Bot 访问**。使用 `security.BotIDFromRequest(r)` 提取 Bot ID。
 
 开发模式下未配置 API Key 时，所有请求以 `anonymous` 身份通过。生产环境必须配置 API Key。

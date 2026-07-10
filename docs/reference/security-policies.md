@@ -16,6 +16,8 @@ HotPlex Gateway 的安全策略分布在多个配置层：环境变量、`config
 
 API Key 通过 `HOTPLEX_SECURITY_API_KEY_1..N` 环境变量设置。为空时进入 dev mode（允许所有请求）。
 
+客户端可通过三种通道传递同一个 API Key（提取顺序见下方认证流程）：自定义 Header（默认 `X-API-Key`）、标准 `Authorization: Bearer <key>`（适配 OpenAPI/Scalar 控制台及多数 SDK 的默认行为）、query parameter。三者为同一 Key 的不同携带方式，校验逻辑一致。
+
 ### 环境变量
 
 ```bash
@@ -31,9 +33,10 @@ HOTPLEX_SECURITY_API_KEY_2=key-2
 
 ```
 1. 检查 HTTP Header（默认 X-API-Key）
-2. 若 Header 为空，检查 query parameter（api_key）
-3. Key 匹配 validKey map → 通过
-4. 未配置任何 Key → 开发模式（anonymous 通过）
+2. 若 Header 为空，检查 Authorization Bearer（Authorization: Bearer <key>）
+3. 若仍为空，检查 query parameter（api_key）
+4. Key 匹配 validKey map → 通过
+5. 未配置任何 Key → 开发模式（anonymous 通过）
 ```
 
 ### Admin Token
