@@ -611,11 +611,7 @@ func (w *AppServerWorker) LastIO() time.Time {
 }
 
 func (w *AppServerWorker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
-	decision := "decline"
-	if allowed {
-		decision = "accept"
-	}
-	result := map[string]any{"decision": decision}
+	result := map[string]any{"decision": w.manager.ApprovalDecision(reqID, allowed)}
 	if reason != "" {
 		result["reason"] = reason
 	}

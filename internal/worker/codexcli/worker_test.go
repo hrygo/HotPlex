@@ -611,6 +611,75 @@ func TestAppServerWorkerHandlePermissionResponse(t *testing.T) {
 	require.Contains(t, err.Error(), "no pending server request")
 }
 
+func TestAppServerWorkerHandlePermissionResponseMethodSpecificDecision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		method  string
+		allowed bool
+		want    string
+	}{
+		{
+			name:    "v2 command allow",
+			method:  codexMethodCommandApproval,
+			allowed: true,
+			want:    "accept",
+		},
+		{
+			name:    "v2 file deny",
+			method:  codexMethodFileChangeApproval,
+			allowed: false,
+			want:    "decline",
+		},
+		{
+			name:    "legacy exec allow",
+			method:  codexMethodExecCommandApproval,
+			allowed: true,
+			want:    "approved",
+		},
+		{
+			name:    "legacy apply patch deny",
+			method:  codexMethodApplyPatchApproval,
+			allowed: false,
+			want:    "denied",
+		},
+		{
+			name:    "legacy generic allow",
+			method:  codexMethodServerRequestApproval,
+			allowed: true,
+			want:    "approved",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			w := newTestAppServerWorker(t)
+			reqID := strings.ReplaceAll(tc.name, " ", "-")
+			w.manager.serverReqIDs.Store(reqID, int64(42))
+			w.manager.serverReqMethods.Store(reqID, tc.method)
+
+			var buf strings.Builder
+			w.manager.stdin = struct {
+				io.Writer
+				io.Closer
+			}{
+				Writer: &buf,
+				Closer: io.NopCloser(nil),
+			}
+
+			err := w.HandlePermissionResponse(context.Background(), reqID, tc.allowed, "")
+			require.NoError(t, err)
+			require.Contains(t, buf.String(), fmt.Sprintf(`"decision":%q`, tc.want))
+
+			_, ok := w.manager.serverReqMethods.Load(reqID)
+			require.False(t, ok, "method metadata should be cleared after response")
+		})
+	}
+}
+
 func TestAppServerWorkerHandleQuestionResponse(t *testing.T) {
 	t.Parallel()
 
@@ -889,7 +958,7 @@ func TestDispatchServerRequestWithoutThreadID(t *testing.T) {
 	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}
 	mgr := NewCodexAppServerManager(slog.Default(), cfg)
 
-	// Server request without threadId should be dropped without storing requestID.
+	// Server request without threadId/conversationId should be dropped without storing requestID.
 	frame := &JSONRPCFrame{
 		JSONRPC: "2.0",
 		ID:      50,
@@ -943,6 +1012,25 @@ func TestRespondServerRequest(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no pending server request")
 	})
+
+	t.Run("write_failure_keeps_request_retryable", func(t *testing.T) {
+		t.Parallel()
+
+		mgr := NewCodexAppServerManager(slog.Default(), cfg)
+		mgr.serverReqIDs.Store("req-retry", int64(43))
+		mgr.serverReqMethods.Store("req-retry", codexMethodCommandApproval)
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		require.NoError(t, writer.Close())
+		mgr.stdin = writer
+
+		err := mgr.RespondServerRequest(context.Background(), "req-retry", map[string]string{"decision": "accept"})
+		require.Error(t, err)
+		_, ok := mgr.serverReqIDs.Load("req-retry")
+		require.True(t, ok, "a failed write must retain the request for retry")
+		_, ok = mgr.serverReqMethods.Load("req-retry")
+		require.True(t, ok, "method metadata must survive a failed write")
+	})
 }
 
 // ─── Approval Method Name Coverage ─────────────────────────────────────
@@ -951,9 +1039,11 @@ func TestMapNotificationApprovalMethodNames(t *testing.T) {
 	t.Parallel()
 
 	methods := []string{
-		"serverRequest/approval",
-		"item/commandExecution/requestApproval",
-		"item/fileChange/requestApproval",
+		codexMethodServerRequestApproval,
+		codexMethodCommandApproval,
+		codexMethodFileChangeApproval,
+		codexMethodExecCommandApproval,
+		codexMethodApplyPatchApproval,
 	}
 
 	for _, method := range methods {
@@ -1038,6 +1128,53 @@ func TestMapNotificationApprovalIDFieldPriority(t *testing.T) {
 	}
 }
 
+func TestMapNotificationLegacyApproval(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		method   string
+		params   string
+		wantID   string
+		wantTool string
+	}{
+		{
+			name:     "exec approval uses approvalId and command array preview",
+			method:   codexMethodExecCommandApproval,
+			params:   `{"approvalId":"appr-legacy","callId":"call-legacy","command":["echo","hello"],"reason":"run command"}`,
+			wantID:   "appr-legacy",
+			wantTool: "echo hello",
+		},
+		{
+			name:     "exec approval falls back to callId",
+			method:   codexMethodExecCommandApproval,
+			params:   `{"approvalId":null,"callId":"call-only","command":["pwd"]}`,
+			wantID:   "call-only",
+			wantTool: "pwd",
+		},
+		{
+			name:     "apply patch uses callId",
+			method:   codexMethodApplyPatchApproval,
+			params:   `{"callId":"patch-call","reason":"apply patch"}`,
+			wantID:   "patch-call",
+			wantTool: "shell command",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := NewMapper("session-1")
+			envs := m.MapNotification(tc.method, json.RawMessage(tc.params))
+			require.Len(t, envs, 1)
+			pr, ok := envs[0].Event.Data.(events.PermissionRequestData)
+			require.True(t, ok)
+			require.Equal(t, tc.wantID, pr.ID)
+			require.Equal(t, tc.wantTool, pr.ToolName)
+		})
+	}
+}
+
 // TestDispatchServerRequestApprovalIDResolution verifies that dispatchServerRequest
 // uses the same approvalId → itemId → requestId priority when building the
 // serverReqIDs map.
@@ -1045,24 +1182,40 @@ func TestDispatchServerRequestApprovalIDResolution(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		frameJSON string
-		wantKey   string
+		name       string
+		frameJSON  string
+		wantKey    string
+		wantMethod string
 	}{
 		{
-			name:      "approvalId stored when present",
-			frameJSON: `{"jsonrpc":"2.0","id":10,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","approvalId":"appr-x","itemId":"item-x"}}`,
-			wantKey:   "appr-x",
+			name:       "approvalId stored when present",
+			frameJSON:  `{"jsonrpc":"2.0","id":10,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","approvalId":"appr-x","itemId":"item-x"}}`,
+			wantKey:    "appr-x",
+			wantMethod: codexMethodCommandApproval,
 		},
 		{
-			name:      "itemId stored when approvalId is null",
-			frameJSON: `{"jsonrpc":"2.0","id":11,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","approvalId":null,"itemId":"item-y"}}`,
-			wantKey:   "item-y",
+			name:       "itemId stored when approvalId is null",
+			frameJSON:  `{"jsonrpc":"2.0","id":11,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","approvalId":null,"itemId":"item-y"}}`,
+			wantKey:    "item-y",
+			wantMethod: codexMethodCommandApproval,
 		},
 		{
-			name:      "requestId stored as fallback",
-			frameJSON: `{"jsonrpc":"2.0","id":12,"method":"serverRequest/approval","params":{"threadId":"thr-1","requestId":"req-z"}}`,
-			wantKey:   "req-z",
+			name:       "requestId stored as fallback",
+			frameJSON:  `{"jsonrpc":"2.0","id":12,"method":"serverRequest/approval","params":{"threadId":"thr-1","requestId":"req-z"}}`,
+			wantKey:    "req-z",
+			wantMethod: codexMethodServerRequestApproval,
+		},
+		{
+			name:       "legacy exec uses conversationId and approvalId",
+			frameJSON:  `{"jsonrpc":"2.0","id":13,"method":"execCommandApproval","params":{"conversationId":"thr-1","callId":"call-x","approvalId":"appr-legacy","command":["echo","hello"],"cwd":"/tmp"}}`,
+			wantKey:    "appr-legacy",
+			wantMethod: codexMethodExecCommandApproval,
+		},
+		{
+			name:       "legacy apply patch uses conversationId and callId",
+			frameJSON:  `{"jsonrpc":"2.0","id":14,"method":"applyPatchApproval","params":{"conversationId":"thr-1","callId":"patch-call","fileChanges":{},"reason":"patch"}}`,
+			wantKey:    "patch-call",
+			wantMethod: codexMethodApplyPatchApproval,
 		},
 	}
 
@@ -1075,6 +1228,9 @@ func TestDispatchServerRequestApprovalIDResolution(t *testing.T) {
 			mgr.dispatchFrame([]byte(tc.frameJSON))
 			_, ok := mgr.serverReqIDs.Load(tc.wantKey)
 			require.True(t, ok, "expected serverReqIDs to contain key %q", tc.wantKey)
+			method, ok := mgr.serverReqMethods.Load(tc.wantKey)
+			require.True(t, ok, "expected serverReqMethods to contain key %q", tc.wantKey)
+			require.Equal(t, tc.wantMethod, method)
 		})
 	}
 }

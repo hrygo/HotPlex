@@ -101,6 +101,26 @@ func TestHandleQuestionResponse_NoPendingRequest(t *testing.T) {
 	require.Contains(t, err.Error(), "no pending question request")
 }
 
+func TestHandleQuestionResponse_WriteFailureRetainsPendingRequest(t *testing.T) {
+	t.Parallel()
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	require.NoError(t, writer.Close())
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = NewACPClient(writer, strings.NewReader(""), nil)
+	w.pendingRequests.Store("99", &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      mustMarshal(99),
+		Method:  "session/request_question",
+	})
+
+	err := w.HandleQuestionResponse(context.Background(), "99", map[string]string{"answer": "42"})
+	require.Error(t, err)
+	_, ok := w.pendingRequests.Load("99")
+	require.True(t, ok, "a failed write must retain the request for retry")
+}
+
 func TestHandleElicitationResponse_ForwardsToAgent(t *testing.T) {
 	t.Parallel()
 

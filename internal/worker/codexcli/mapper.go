@@ -106,9 +106,11 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		return m.mapNotifTurnCompleted()
 	case "turn/failed":
 		return m.mapTurnFailed()
-	case "serverRequest/approval",
-		"item/commandExecution/requestApproval",
-		"item/fileChange/requestApproval":
+	case codexMethodServerRequestApproval,
+		codexMethodCommandApproval,
+		codexMethodFileChangeApproval,
+		codexMethodExecCommandApproval,
+		codexMethodApplyPatchApproval:
 		return m.mapNotifApproval(params)
 	case "mcpServer/elicitation/request":
 		return m.mapNotifElicitation(params)
@@ -463,16 +465,19 @@ func (m *Mapper) mapNotifTurnCompleted() []*events.Envelope {
 
 func (m *Mapper) mapNotifApproval(params json.RawMessage) []*events.Envelope {
 	// Different approval notification types use different ID fields:
-	//   serverRequest/approval            → requestId
+	//   serverRequest/approval                → requestId
 	//   item/commandExecution/requestApproval → approvalId (null for regular shell) or itemId
-	//   item/fileChange/requestApproval   → itemId
-	// We pick the first non-empty: approvalId → itemId → requestId.
+	//   item/fileChange/requestApproval       → itemId
+	//   execCommandApproval                   → approvalId or callId
+	//   applyPatchApproval                    → callId
+	// We pick the first non-empty: approvalId → itemId → requestId → callId.
 	var p struct {
 		RequestID  string `json:"requestId"`
 		ApprovalID string `json:"approvalId"`
 		ItemID     string `json:"itemId"`
+		CallID     string `json:"callId"`
 		ToolName   string `json:"toolName"`
-		Command    string `json:"command"`
+		Command    any    `json:"command"`
 		Reason     string `json:"reason,omitempty"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
@@ -487,14 +492,20 @@ func (m *Mapper) mapNotifApproval(params json.RawMessage) []*events.Envelope {
 	if requestID == "" {
 		requestID = p.RequestID
 	}
+	if requestID == "" {
+		requestID = p.CallID
+	}
 
 	// Resolve tool name: prefer explicit toolName, fall back to command preview.
 	toolName := p.ToolName
-	if toolName == "" && p.Command != "" {
-		if len(p.Command) > 60 {
-			toolName = p.Command[:60] + "…"
-		} else {
-			toolName = p.Command
+	if toolName == "" {
+		command := approvalCommandPreview(p.Command)
+		if command != "" {
+			if len(command) > 60 {
+				toolName = command[:60] + "…"
+			} else {
+				toolName = command
+			}
 		}
 	}
 	if toolName == "" {
@@ -512,6 +523,23 @@ func (m *Mapper) mapNotifApproval(params json.RawMessage) []*events.Envelope {
 			ToolName:    toolName,
 			Description: desc,
 		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func approvalCommandPreview(command any) string {
+	switch v := command.(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, part := range v {
+			if s, ok := part.(string); ok && s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, " ")
+	default:
+		return ""
 	}
 }
 

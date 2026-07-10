@@ -39,6 +39,14 @@ const (
 	scannerMaxSize           = 10 * 1024 * 1024 // 10 MB
 )
 
+const (
+	codexMethodServerRequestApproval = "serverRequest/approval"
+	codexMethodCommandApproval       = "item/commandExecution/requestApproval"
+	codexMethodFileChangeApproval    = "item/fileChange/requestApproval"
+	codexMethodExecCommandApproval   = "execCommandApproval"
+	codexMethodApplyPatchApproval    = "applyPatchApproval"
+)
+
 // CodexAppServerManager manages a single shared `codex app-server` process
 // via stdio JSON-RPC across all Codex CLI sessions. The process is lazily
 // started on first Acquire and shut down when the last session releases.
@@ -70,6 +78,10 @@ type CodexAppServerManager struct {
 	// serverReqIDs maps approval requestID → JSON-RPC frame ID for server-initiated
 	// requests, so the worker can respond via RespondServerRequest.
 	serverReqIDs sync.Map // map[string]int64
+
+	// serverReqMethods maps approval requestID → JSON-RPC method. Codex uses
+	// different decision enums for v2 and legacy approval requests.
+	serverReqMethods sync.Map // map[string]string
 
 	nextReqID atomic.Int64
 
@@ -613,11 +625,15 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 	//   serverRequest/approval                → requestId
 	//   item/commandExecution/requestApproval → approvalId (null for regular shell) or itemId
 	//   item/fileChange/requestApproval       → itemId
+	//   execCommandApproval                   → approvalId or callId
+	//   applyPatchApproval                    → callId
 	var params struct {
-		ThreadID   string `json:"threadId"`
-		RequestID  string `json:"requestId"`
-		ApprovalID string `json:"approvalId"`
-		ItemID     string `json:"itemId"`
+		ThreadID       string `json:"threadId"`
+		ConversationID string `json:"conversationId"`
+		RequestID      string `json:"requestId"`
+		ApprovalID     string `json:"approvalId"`
+		ItemID         string `json:"itemId"`
+		CallID         string `json:"callId"`
 	}
 	if frame.Params != nil {
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
@@ -626,13 +642,18 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 		}
 	}
 
-	if params.ThreadID == "" {
-		m.log.Debug("codex-app-server: server request without threadId, dropping",
+	threadID := params.ThreadID
+	if threadID == "" {
+		threadID = params.ConversationID
+	}
+	if threadID == "" {
+		m.log.Debug("codex-app-server: server request without threadId/conversationId, dropping",
 			"method", frame.Method, "id", frame.ID)
 		return
 	}
 
-	// Resolve canonical request ID (mirrors mapNotifApproval priority: approvalId → itemId → requestId).
+	// Resolve canonical request ID (mirrors mapNotifApproval priority:
+	// approvalId → itemId → requestId → callId).
 	requestID := params.ApprovalID
 	if requestID == "" {
 		requestID = params.ItemID
@@ -640,12 +661,16 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 	if requestID == "" {
 		requestID = params.RequestID
 	}
+	if requestID == "" {
+		requestID = params.CallID
+	}
 
 	// Store the JSON-RPC frame ID so RespondServerRequest can reply.
 	if requestID != "" {
 		m.serverReqIDs.Store(requestID, frame.ID)
+		m.serverReqMethods.Store(requestID, frame.Method)
 	} else {
-		m.log.Warn("codex-app-server: server request has no usable requestId/approvalId/itemId — response routing impossible",
+		m.log.Warn("codex-app-server: server request has no usable requestId/approvalId/itemId/callId — response routing impossible",
 			"method", frame.Method, "frame_id", frame.ID)
 	}
 
@@ -678,7 +703,7 @@ func (m *CodexAppServerManager) RespondServerRequest(ctx context.Context, reqID 
 		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
 	}
 
-	v, ok := m.serverReqIDs.LoadAndDelete(reqID)
+	v, ok := m.serverReqIDs.Load(reqID)
 	if !ok {
 		return fmt.Errorf("codex-app-server: no pending server request for %q", reqID)
 	}
@@ -692,7 +717,42 @@ func (m *CodexAppServerManager) RespondServerRequest(ctx context.Context, reqID 
 		ID:      rpcID,
 		Result:  raw,
 	}
-	return m.writeFrame(ctx, resp)
+	if err := m.writeFrame(ctx, resp); err != nil {
+		return err
+	}
+	m.serverReqIDs.Delete(reqID)
+	m.serverReqMethods.Delete(reqID)
+	return nil
+}
+
+func (m *CodexAppServerManager) ApprovalDecision(reqID string, allowed bool) string {
+	method := ""
+	if v, ok := m.serverReqMethods.Load(reqID); ok {
+		method, _ = v.(string)
+	}
+	return codexApprovalDecision(method, allowed)
+}
+
+func codexApprovalDecision(method string, allowed bool) string {
+	if isLegacyApprovalMethod(method) {
+		if allowed {
+			return "approved"
+		}
+		return "denied"
+	}
+	if allowed {
+		return "accept"
+	}
+	return "decline"
+}
+
+func isLegacyApprovalMethod(method string) bool {
+	switch method {
+	case codexMethodServerRequestApproval, codexMethodExecCommandApproval, codexMethodApplyPatchApproval:
+		return true
+	default:
+		return false
+	}
 }
 
 // ─── Thread Lifecycle ─────────────────────────────────────────────────────
@@ -952,13 +1012,18 @@ func (m *CodexAppServerManager) StartReview(threadID string, target map[string]a
 // delivers envelopes to the subscriber channel. Locks subMu once per notification.
 func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification) {
 	var params struct {
-		ThreadID string `json:"threadId"`
+		ThreadID       string `json:"threadId"`
+		ConversationID string `json:"conversationId"`
 	}
 	if notif.Params != nil {
 		if err := json.Unmarshal(notif.Params, &params); err != nil {
 			m.log.Warn("codex-app-server: unmarshal notification params", "err", err)
 			return
 		}
+	}
+
+	if params.ThreadID == "" {
+		params.ThreadID = params.ConversationID
 	}
 
 	if params.ThreadID == "" {
