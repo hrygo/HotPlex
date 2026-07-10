@@ -278,13 +278,17 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 	env := s.buildEnv()
 	s.proc = proc.New(proc.Opts{Logger: s.log})
 
-	stdin, stdout, _, err := s.proc.Start(context.Background(), binary, fullArgs, env, "")
+	stdin, stdout, stderr, err := s.proc.Start(context.Background(), binary, fullArgs, env, "")
 	if err != nil {
 		s.proc = nil
 		s.state = stateIdle
 		return fmt.Errorf("opencode-server-singleton: start process: %w", err)
 	}
 	_ = stdin
+
+	// Continuously drain OCS stderr so errors (including HTTP 500 ref stacks)
+	// are captured in the gateway log instead of trapped in the pipe.
+	go s.readStderr(stderr)
 
 	// Discover actual port from stdout (opencode serve prints it).
 	actualPort, err := s.discoverPort(stdout, s.cfg.ReadyTimeout)
@@ -371,6 +375,21 @@ func (s *SingletonProcessManager) discoverPort(stdout *os.File, timeout time.Dur
 		// The goroutine's defer will get os.ErrClosed, which is harmless.
 		_ = stdout.Close()
 		return 0, fmt.Errorf("timeout discovering port")
+	}
+}
+
+// readStderr drains the opencode serve process stderr line by line into the
+// gateway log. OCS writes internal errors and stack traces (referenced by the
+// "ref" field in HTTP 500 responses) to stderr; previously this stream was
+// discarded, making 500 errors opaque. The goroutine returns when stderr is
+// closed by process exit.
+func (s *SingletonProcessManager) readStderr(stderr *os.File) {
+	defer func() { _ = stderr.Close() }()
+	scanner := bufio.NewScanner(stderr)
+	// OCS stack traces can exceed the default 64 KiB limit; raise the cap.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		s.log.Warn("opencode-server-singleton: stderr", "line", scanner.Text())
 	}
 }
 
