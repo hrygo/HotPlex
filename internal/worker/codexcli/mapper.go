@@ -112,7 +112,11 @@ func (m *Mapper) MapNotification(method string, params json.RawMessage) []*event
 		codexMethodExecCommandApproval,
 		codexMethodApplyPatchApproval:
 		return m.mapNotifApproval(params)
-	case "mcpServer/elicitation/request":
+	case codexMethodPermissionsApproval:
+		return m.mapNotifPermissionsApproval(params)
+	case codexMethodRequestUserInput:
+		return m.mapNotifRequestUserInput(params)
+	case codexMethodMCPElicitation:
 		return m.mapNotifElicitation(params)
 	case "thread/started":
 		return nil
@@ -543,10 +547,90 @@ func approvalCommandPreview(command any) string {
 	}
 }
 
+func (m *Mapper) mapNotifPermissionsApproval(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		RequestID   string         `json:"requestId"`
+		ItemID      string         `json:"itemId"`
+		Reason      string         `json:"reason"`
+		CWD         string         `json:"cwd"`
+		Permissions map[string]any `json:"permissions"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	requestID := p.ItemID
+	if requestID == "" {
+		requestID = p.RequestID
+	}
+	description := p.Reason
+	if description == "" {
+		description = "Codex requests additional sandbox permissions"
+	}
+	inputRaw, _ := json.Marshal(map[string]any{
+		"cwd":         p.CWD,
+		"permissions": p.Permissions,
+	})
+	return []*events.Envelope{
+		newEnvelope(events.PermissionRequest, events.PermissionRequestData{
+			ID:          requestID,
+			ToolName:    "request_permissions",
+			Description: description,
+			InputRaw:    inputRaw,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
+func (m *Mapper) mapNotifRequestUserInput(params json.RawMessage) []*events.Envelope {
+	var p struct {
+		RequestID string `json:"requestId"`
+		ItemID    string `json:"itemId"`
+		Questions []struct {
+			ID       string `json:"id"`
+			Header   string `json:"header"`
+			Question string `json:"question"`
+			Options  []struct {
+				Label       string `json:"label"`
+				Description string `json:"description"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil
+	}
+	requestID := p.ItemID
+	if requestID == "" {
+		requestID = p.RequestID
+	}
+	questions := make([]events.Question, 0, len(p.Questions))
+	for _, question := range p.Questions {
+		options := make([]events.QuestionOption, 0, len(question.Options))
+		for _, option := range question.Options {
+			options = append(options, events.QuestionOption{
+				Label:       option.Label,
+				Description: option.Description,
+			})
+		}
+		questions = append(questions, events.Question{
+			ID:       question.ID,
+			Header:   question.Header,
+			Question: question.Question,
+			Options:  options,
+		})
+	}
+	return []*events.Envelope{
+		newEnvelope(events.QuestionRequest, events.QuestionRequestData{
+			ID:        requestID,
+			ToolName:  "request_user_input",
+			Questions: questions,
+		}, m.sessionID, m.nextSeq()),
+	}
+}
+
 func (m *Mapper) mapNotifElicitation(params json.RawMessage) []*events.Envelope {
 	var p struct {
 		RequestID       string         `json:"requestId"`
 		MCPServerName   string         `json:"mcpServerName"`
+		ServerName      string         `json:"serverName"`
 		Message         string         `json:"message"`
 		Mode            string         `json:"mode,omitempty"`
 		URL             string         `json:"url,omitempty"`
@@ -556,6 +640,9 @@ func (m *Mapper) mapNotifElicitation(params json.RawMessage) []*events.Envelope 
 	if err := json.Unmarshal(params, &p); err != nil {
 		slog.Warn("codexcli: unmarshal elicitation params", "err", err, "raw", string(params))
 		return nil
+	}
+	if p.MCPServerName == "" {
+		p.MCPServerName = p.ServerName
 	}
 
 	return []*events.Envelope{

@@ -541,6 +541,26 @@ func (h *Handler) handleInteractionResponseEvent(ctx context.Context, env *event
 	if h.bridge != nil {
 		h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, env.Event.Type, env.Event.Data)
 	}
+	// Explicit AEP interaction responses (used by WebChat) are acknowledged
+	// only after the Worker native response endpoint accepts them. WebSocket
+	// send success alone is not delivery success, so the browser treats this
+	// correlated echo as the authoritative resolved/rejected transition.
+	if h.hub != nil {
+		ack := events.NewEnvelope(
+			aep.NewID(),
+			env.SessionID,
+			h.hub.NextSeq(env.SessionID),
+			env.Event.Type,
+			env.Event.Data,
+		)
+		ack.OwnerID = env.OwnerID
+		if err := h.hub.SendToSession(ctx, ack); err != nil {
+			h.log.Warn("gateway: interaction response ack delivery failed",
+				"err", err,
+				"type", env.Event.Type,
+				"session_id", env.SessionID)
+		}
+	}
 	return nil
 }
 

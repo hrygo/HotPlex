@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrInvalidSchema is returned when the interaction response payload does not match the expected schema.
@@ -25,6 +26,13 @@ type OrderedQuestionResponseHandler interface {
 	HandleQuestionResponseWithOrder(ctx context.Context, reqID string, answers map[string]string, questionOrder []string) error
 }
 
+// MultiAnswerQuestionResponseHandler preserves multiple selected values per
+// question for native protocols that support them. Workers without this
+// optional interface receive a deterministic comma-joined compatibility map.
+type MultiAnswerQuestionResponseHandler interface {
+	HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, questionOrder []string) error
+}
+
 // DispatchMetadata checks metadata for control response keys and dispatches
 // to the handler. Returns (true, nil) if handled, (false, nil) if no match,
 // or (true, err) on dispatch failure.
@@ -43,16 +51,21 @@ func DispatchMetadata(ctx context.Context, metadata map[string]any, h MetadataHa
 	}
 	if qResp, ok := metadata["question_response"].(map[string]any); ok {
 		reqID, _ := qResp["id"].(string)
-		var answers map[string]string
+		var answerOptions map[string][]string
 		if answersRaw := qResp["answers"]; answersRaw != nil {
 			var err error
-			answers, err = parseAnswers(answersRaw)
+			answerOptions, err = parseAnswerOptions(answersRaw)
 			if err != nil {
 				return true, fmt.Errorf("%w: %w", ErrInvalidSchema, err)
 			}
 		}
+		questionOrder := parseQuestionOrder(qResp["question_order"])
+		if multi, ok := h.(MultiAnswerQuestionResponseHandler); ok {
+			return true, multi.HandleQuestionResponseOptions(ctx, reqID, answerOptions, questionOrder)
+		}
+		answers := flattenAnswerOptions(answerOptions)
 		if ordered, ok := h.(OrderedQuestionResponseHandler); ok {
-			return true, ordered.HandleQuestionResponseWithOrder(ctx, reqID, answers, parseQuestionOrder(qResp["question_order"]))
+			return true, ordered.HandleQuestionResponseWithOrder(ctx, reqID, answers, questionOrder)
 		}
 		return true, h.HandleQuestionResponse(ctx, reqID, answers)
 	}
@@ -92,24 +105,55 @@ func parseQuestionOrder(value any) []string {
 	}
 }
 
-func parseAnswers(answersRaw any) (map[string]string, error) {
+func parseAnswerOptions(answersRaw any) (map[string][]string, error) {
 	if answersRaw == nil {
 		return nil, nil
 	}
 	if mStr, ok := answersRaw.(map[string]string); ok {
-		return mStr, nil
+		result := make(map[string][]string, len(mStr))
+		for key, value := range mStr {
+			result[key] = []string{value}
+		}
+		return result, nil
+	}
+	if mSlice, ok := answersRaw.(map[string][]string); ok {
+		return mSlice, nil
 	}
 	mAny, ok := answersRaw.(map[string]any)
 	if !ok {
 		return nil, errors.New("answers must be a map")
 	}
-	res := make(map[string]string, len(mAny))
+	res := make(map[string][]string, len(mAny))
 	for k, v := range mAny {
-		s, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("value for key %q must be a string", k)
+		switch value := v.(type) {
+		case string:
+			res[k] = []string{value}
+		case []string:
+			res[k] = value
+		case []any:
+			values := make([]string, 0, len(value))
+			for _, item := range value {
+				text, ok := item.(string)
+				if !ok {
+					return nil, fmt.Errorf("value for key %q must contain only strings", k)
+				}
+				values = append(values, text)
+			}
+			res[k] = values
+		default:
+			return nil, fmt.Errorf("value for key %q must be a string or string array", k)
 		}
-		res[k] = s
 	}
 	return res, nil
+}
+
+func flattenAnswerOptions(answers map[string][]string) map[string]string {
+	if answers == nil {
+		return nil
+	}
+	result := make(map[string]string, len(answers))
+	for key, values := range answers {
+		result[key] = strings.Join(values, ", ")
+	}
+	return result
 }

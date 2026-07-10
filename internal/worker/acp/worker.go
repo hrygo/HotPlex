@@ -29,11 +29,12 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ worker.Worker                 = (*Worker)(nil)
-	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
-	_ worker.WorkerCommander        = (*Worker)(nil)
-	_ worker.ControlRequester       = (*Worker)(nil)
-	_ base.MetadataHandler          = (*Worker)(nil)
+	_ worker.Worker                           = (*Worker)(nil)
+	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
+	_ worker.WorkerCommander                  = (*Worker)(nil)
+	_ worker.ControlRequester                 = (*Worker)(nil)
+	_ base.MetadataHandler                    = (*Worker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
 )
 
 // commandParts stores the space-split command (binary + optional prefix args).
@@ -966,6 +967,10 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 }
 
 func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	return w.respondToServerRequest(ctx, reqID, "question", answers)
+}
+
+func (w *Worker) HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, _ []string) error {
 	return w.respondToServerRequest(ctx, reqID, "question", answers)
 }
 

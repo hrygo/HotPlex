@@ -86,6 +86,41 @@ func TestAdapterFlow_WriteCtx_ErrorEvent_WithStreamCtrl(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAdapterFlow_WriteCtx_ErrorReplacesPlaceholderInExistingCard(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter(t)
+	a.Interactions = messaging.NewInteractionManager(discardLogger)
+	conn := NewFeishuConn(a, "chat123", "", "")
+
+	ctrl := newTestStreamingCtrl()
+	require.True(t, ctrl.transition(PhaseCreating))
+	require.True(t, ctrl.transition(PhaseStreaming))
+	ctrl.mu.Lock()
+	ctrl.placeholder = "正在处理"
+	ctrl.lastFlushed = "正在处理"
+	ctrl.streamingActive = false
+	ctrl.mu.Unlock()
+	conn.EnableStreaming(ctrl)
+	conn.mu.Lock()
+	conn.platformMsgID = "original-user-message"
+	conn.mu.Unlock()
+
+	env := &events.Envelope{
+		Version:   events.Version,
+		SessionID: "sess-error-placeholder",
+		Event: events.Event{
+			Type: events.Error,
+			Data: events.ErrorData{Code: "MODEL_ERROR", Message: "model upgrade required"},
+		},
+	}
+
+	require.NoError(t, conn.WriteCtx(context.Background(), env))
+	require.Equal(t, "model upgrade required", ctrl.Content(),
+		"the existing message card must contain the terminal error instead of an empty placeholder")
+	require.Equal(t, PhaseCompleted, ctrl.getPhase())
+}
+
 func TestAdapterFlow_WriteCtx_ToolCallEvent(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)

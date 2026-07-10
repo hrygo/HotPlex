@@ -29,6 +29,7 @@ import (
 // Compile-time interface compliance checks.
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
+var _ base.MetadataHandler = (*Worker)(nil)
 
 // trySender is a named interface for non-blocking envelope send.
 // Production: *base.Conn. Tests: mockConn. Compile-time safe.

@@ -31,8 +31,11 @@ import type {
   ToolResultData,
   DoneData,
   PermissionRequestData,
+  PermissionResponseData,
   QuestionRequestData,
+  QuestionResponseData,
   ElicitationRequestData,
+  ElicitationResponseData,
   ReasoningData,
   StepData,
   PongData,
@@ -74,8 +77,11 @@ export interface BrowserClientEvents {
   reasoning: (data: ReasoningData, env: Envelope) => void;
   step: (data: StepData, env: Envelope) => void;
   permissionRequest: (data: PermissionRequestData, env: Envelope) => void;
+  permissionResponse: (data: PermissionResponseData, env: Envelope) => void;
   questionRequest: (data: QuestionRequestData, env: Envelope) => void;
+  questionResponse: (data: QuestionResponseData, env: Envelope) => void;
   elicitationRequest: (data: ElicitationRequestData, env: Envelope) => void;
+  elicitationResponse: (data: ElicitationResponseData, env: Envelope) => void;
   reconnect: (data: ControlData, env: Envelope) => void;
   sessionInvalid: (data: ControlData, env: Envelope) => void;
   throttle: (data: ControlData, env: Envelope) => void;
@@ -402,12 +408,24 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         this.emit('permissionRequest', event.data as PermissionRequestData, env);
         break;
 
+      case EventKind.PermissionResponse:
+        this.emit('permissionResponse', event.data as PermissionResponseData, env);
+        break;
+
       case EventKind.QuestionRequest:
         this.emit('questionRequest', event.data as QuestionRequestData, env);
         break;
 
+      case EventKind.QuestionResponse:
+        this.emit('questionResponse', event.data as QuestionResponseData, env);
+        break;
+
       case EventKind.ElicitationRequest:
         this.emit('elicitationRequest', event.data as ElicitationRequestData, env);
+        break;
+
+      case EventKind.ElicitationResponse:
+        this.emit('elicitationResponse', event.data as ElicitationResponseData, env);
         break;
 
       case EventKind.Pong:
@@ -501,7 +519,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this._send(env);
   }
 
-  sendQuestionResponse(questionId: string, answers: Record<string, string>): void {
+  sendQuestionResponse(questionId: string, answers: Record<string, string | string[]>): void {
     const env = createQuestionResponseEnvelope(this._sessionId!, questionId, answers);
     this._send(env);
   }

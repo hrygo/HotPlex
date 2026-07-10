@@ -103,7 +103,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
 
                           if (p.toolName === "question_request") {
                             const onRespondQuestion = p.toolCallId && onInteractionRespond
-                              ? (answers: Record<string, string>) => onInteractionRespond(p.toolCallId, { type: "question", answers })
+                              ? (answers: Record<string, string | string[]>) => onInteractionRespond(p.toolCallId, { type: "question", answers })
                               : undefined;
                             return (
                               <QuestionResponseCard

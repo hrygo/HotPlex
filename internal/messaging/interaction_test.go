@@ -367,7 +367,7 @@ func TestInteractionManager_WatchTimeout_QuestionRequest(t *testing.T) {
 		qrMap, ok := qr.(map[string]any)
 		require.True(t, ok)
 		require.Equal(t, "timeout-question", qrMap["id"])
-		require.Equal(t, map[string]string{}, qrMap["answers"])
+		require.Equal(t, map[string][]string{}, qrMap["answers"])
 	case <-time.After(2 * time.Second):
 		require.Fail(t, "SendResponse should be called after timeout")
 	}

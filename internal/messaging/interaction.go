@@ -91,6 +91,16 @@ func BuildQuestionResponseAnswers(requestID string, answers map[string]string) m
 // BuildQuestionResponseAnswersWithOrder includes the original question order
 // for workers whose native protocol accepts positional answer arrays.
 func BuildQuestionResponseAnswersWithOrder(requestID string, answers map[string]string, questionOrder []string) map[string]any {
+	options := make(map[string][]string, len(answers))
+	for question, answer := range answers {
+		options[question] = []string{answer}
+	}
+	return BuildQuestionResponseOptionsWithOrder(requestID, options, questionOrder)
+}
+
+// BuildQuestionResponseOptionsWithOrder preserves all selected values for
+// multi-select questions while remaining compatible with single answers.
+func BuildQuestionResponseOptionsWithOrder(requestID string, answers map[string][]string, questionOrder []string) map[string]any {
 	response := map[string]any{
 		"id":      requestID,
 		"answers": answers,
@@ -120,12 +130,13 @@ const (
 
 // PendingInteraction represents an interaction request awaiting a user response.
 type PendingInteraction struct {
-	ID        string        // request ID from the worker
-	SessionID string        // session ID
-	OwnerID   string        // user ID of the interaction owner (for auth verification)
-	Type      events.Kind   // PermissionRequest, QuestionRequest, ElicitationRequest
-	CreatedAt time.Time     // when the request was created
-	Timeout   time.Duration // timeout duration
+	ID        string            // request ID from the worker
+	SessionID string            // session ID
+	OwnerID   string            // user ID of the interaction owner (for auth verification)
+	Type      events.Kind       // PermissionRequest, QuestionRequest, ElicitationRequest
+	CreatedAt time.Time         // when the request was created
+	Timeout   time.Duration     // timeout duration
+	Questions []events.Question // original question schema for platform form decoding
 	// SendResponse sends the user's response back through the bridge.
 	// The metadata map contains the response data specific to the interaction type.
 	SendResponse func(metadata map[string]any)

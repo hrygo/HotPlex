@@ -128,7 +128,11 @@ type Worker struct {
 	workerSessionID atomic.Value // string
 }
 
-var _ worker.WorkerSessionIDHandler = (*Worker)(nil)
+var (
+	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
+	_ base.MetadataHandler                    = (*Worker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
+)
 
 func (w *Worker) GetWorkerSessionID() string {
 	w.Mu.Lock()
@@ -299,6 +303,11 @@ func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answe
 func (w *Worker) HandleQuestionResponseWithOrder(ctx context.Context, reqID string, answers map[string]string, questionOrder []string) error {
 	return w.httpPost(ctx, fmt.Sprintf("/question/%s/reply", url.PathEscape(reqID)),
 		map[string][][]string{"answers": answersToOrderedArrays(answers, questionOrder)})
+}
+
+func (w *Worker) HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, questionOrder []string) error {
+	return w.httpPost(ctx, fmt.Sprintf("/question/%s/reply", url.PathEscape(reqID)),
+		map[string][][]string{"answers": answerOptionsToOrderedArrays(answers, questionOrder)})
 }
 
 func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
@@ -964,6 +973,28 @@ func answersToOrderedArrays(m map[string]string, questionOrder []string) [][]str
 	sort.Strings(keys)
 	for _, key := range keys {
 		result = append(result, []string{m[key]})
+	}
+	return result
+}
+
+func answerOptionsToOrderedArrays(answers map[string][]string, questionOrder []string) [][]string {
+	result := make([][]string, 0, len(answers))
+	seen := make(map[string]struct{}, len(questionOrder))
+	for _, question := range questionOrder {
+		if values, ok := answers[question]; ok {
+			result = append(result, append([]string(nil), values...))
+			seen[question] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(answers))
+	for key := range answers {
+		if _, ok := seen[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = append(result, append([]string(nil), answers[key]...))
 	}
 	return result
 }

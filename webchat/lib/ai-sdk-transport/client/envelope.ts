@@ -215,8 +215,8 @@ export function createPermissionResponseEnvelope(
 export function createQuestionResponseEnvelope(
   sessionId: string,
   questionId: string,
-  answers: Record<string, string>
-): Envelope<{ id: string; answers: Record<string, string> }> {
+  answers: Record<string, string | string[]>
+): Envelope<{ id: string; answers: Record<string, string | string[]> }> {
   return createEnvelope(
     newEventId(),
     sessionId,

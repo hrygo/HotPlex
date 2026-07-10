@@ -244,9 +244,9 @@ func TestHandleCardAction_QuestionAnswer(t *testing.T) {
 		qr, ok := meta["question_response"].(map[string]any)
 		require.True(t, ok)
 		assert.Equal(t, "req-q-1", qr["id"])
-		answers, ok := qr["answers"].(map[string]string)
+		answers, ok := qr["answers"].(map[string][]string)
 		require.True(t, ok)
-		assert.Equal(t, "Yes", answers["_"])
+		assert.Equal(t, []string{"Yes"}, answers["_"])
 	case <-time.After(2 * time.Second):
 		t.Fatal("SendResponse was not called within 2s")
 	}
@@ -266,9 +266,9 @@ func TestHandleCardAction_QuestionFormMultiSelect(t *testing.T) {
 	require.NoError(t, err)
 	meta := <-respCh
 	response := meta["question_response"].(map[string]any)
-	answers := response["answers"].(map[string]string)
-	require.Equal(t, "A, B", answers["选择范围"])
-	require.Equal(t, "C", answers["确认结果"])
+	answers := response["answers"].(map[string][]string)
+	require.Equal(t, []string{"A", "B"}, answers["选择范围"])
+	require.Equal(t, []string{"C"}, answers["确认结果"])
 	require.Equal(t, []string{"选择范围", "确认结果"}, response["question_order"])
 }
 

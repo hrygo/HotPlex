@@ -392,7 +392,11 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 	questionKeys := make(map[string]any, len(data.Questions))
 	questionOrder := make([]string, 0, len(data.Questions))
 	for index, q := range data.Questions {
-		questionOrder = append(questionOrder, truncateCardText(q.Question, 600))
+		questionKey := q.ID
+		if questionKey == "" {
+			questionKey = truncateCardText(q.Question, 600)
+		}
+		questionOrder = append(questionOrder, questionKey)
 		headerLabel := messaging.SanitizeText(q.Header)
 		if headerLabel == "" {
 			headerLabel = "Question"
@@ -415,7 +419,7 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 
 		if useForm {
 			name := fmt.Sprintf("answer_%d", index)
-			questionKeys[name] = truncateCardText(q.Question, 600)
+			questionKeys[name] = questionKey
 			if len(q.Options) == 0 {
 				formElements = append(formElements, map[string]any{
 					"tag": "input", "name": name,
@@ -454,8 +458,8 @@ func buildQuestionCardWithButtons(data *events.QuestionRequestData) string {
 						"request_id":     data.ID,
 						"answer":         sanitized,
 						"label":          display,
-						"question":       truncateCardText(q.Question, 600),
-						"question_order": []string{truncateCardText(q.Question, 600)},
+						"question":       questionKey,
+						"question_order": []string{questionKey},
 						"summary":        summary,
 					},
 				})

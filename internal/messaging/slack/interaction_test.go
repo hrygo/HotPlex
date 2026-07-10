@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -174,6 +175,38 @@ func TestCheckPendingInteraction_PermissionAllow(t *testing.T) {
 	require.Equal(t, 0, a.Interactions.Len())
 }
 
+func TestCheckPendingInteraction_DeliveryFailureRemainsRetryable(t *testing.T) {
+	t.Parallel()
+
+	a := newTestInteractionAdapter()
+	a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	attempts := 0
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "req-retry",
+		SessionID: "sess-retry",
+		OwnerID:   "U1",
+		Type:      events.PermissionRequest,
+		Timeout:   5 * time.Minute,
+		SendResponseSync: func(_ context.Context, metadata map[string]any) error {
+			attempts++
+			if attempts == 1 {
+				return fmt.Errorf("worker unavailable")
+			}
+			return nil
+		},
+	})
+
+	require.True(t, a.checkPendingInteraction(context.Background(), "allow req-retry", "C1", "", "U1"))
+	require.Equal(t, 1, a.Interactions.Len(), "failed delivery must remain pending for retry")
+	_, ok := a.Interactions.Get("req-retry")
+	require.True(t, ok)
+
+	require.True(t, a.checkPendingInteraction(context.Background(), "allow req-retry", "C1", "", "U1"))
+	require.Equal(t, 2, attempts)
+	require.Zero(t, a.Interactions.Len(), "successful retry must complete the interaction")
+}
+
 func TestCheckPendingInteraction_PermissionDeny(t *testing.T) {
 	t.Parallel()
 	a := newTestInteractionAdapter()
@@ -267,8 +300,35 @@ func TestCheckPendingInteraction_QuestionRawText(t *testing.T) {
 	require.True(t, consumed)
 	qr := capturedMetadata["question_response"].(map[string]any)
 	require.Equal(t, "req-question", qr["id"])
-	answers := qr["answers"].(map[string]string)
-	require.Equal(t, "yes", answers["_"])
+	answers := qr["answers"].(map[string][]string)
+	require.Equal(t, []string{"yes"}, answers["_"])
+}
+
+func TestSlackQuestionAnswers_MultiQuestionAndMultiSelect(t *testing.T) {
+	t.Parallel()
+
+	questions := []events.Question{
+		{ID: "environment", Question: "Where?"},
+		{ID: "checks", Question: "Which checks?", MultiSelect: true},
+		{ID: "notes", Question: "Notes?"},
+	}
+	state := &slack.BlockActionStates{Values: map[string]map[string]slack.BlockAction{
+		"question_answer_0": {
+			"answer_0": {SelectedOption: slack.OptionBlockObject{Value: "Staging"}},
+		},
+		"question_answer_1": {
+			"answer_1": {SelectedOptions: []slack.OptionBlockObject{{Value: "Unit"}, {Value: "Race"}}},
+		},
+		"question_answer_2": {
+			"answer_2": {Value: "Run before merge"},
+		},
+	}}
+
+	answers, order := slackQuestionAnswers(questions, state, "submit")
+	require.Equal(t, []string{"environment", "checks", "notes"}, order)
+	require.Equal(t, []string{"Staging"}, answers["environment"])
+	require.Equal(t, []string{"Unit", "Race"}, answers["checks"])
+	require.Equal(t, []string{"Run before merge"}, answers["notes"])
 }
 
 func TestCheckPendingInteraction_OwnerMismatch(t *testing.T) {

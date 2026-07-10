@@ -78,7 +78,7 @@ func (a *Adapter) handleCardActionTrigger(ctx context.Context, event *callback.C
 
 	case cardActionAnswer:
 		answers := questionAnswers(formVal, val)
-		metadata = messaging.BuildQuestionResponseAnswersWithOrder(requestID, answers, questionAnswerOrder(val, answers))
+		metadata = messaging.BuildQuestionResponseOptionsWithOrder(requestID, answers, questionAnswerOrder(val, answers))
 		resolvedLabel = "✅ 已回答"
 		resolvedColor = "green"
 		resolvedReason = strings.Join(questionAnswerValues(answers), "、")
@@ -179,14 +179,14 @@ func (a *Adapter) handleCardActionTrigger(ctx context.Context, event *callback.C
 	return wrapResolvedCard(buildResolvedCard(actionType, resolvedLabel, resolvedColor, summary, openID, resolvedReason)), nil
 }
 
-func questionAnswers(formVal, value map[string]any) map[string]string {
-	answers := make(map[string]string)
+func questionAnswers(formVal, value map[string]any) map[string][]string {
+	answers := make(map[string][]string)
 	questionKeys, _ := value["question_keys"].(map[string]any)
 	for key, raw := range formVal {
 		if key != "custom_answer" && !strings.HasPrefix(key, "answer_") {
 			continue
 		}
-		if answer := formAnswerValue(raw); answer != "" {
+		if answer := formAnswerValues(raw); len(answer) > 0 {
 			if key == "custom_answer" {
 				key = "_"
 			} else if question, ok := questionKeys[key].(string); ok && question != "" {
@@ -207,17 +207,20 @@ func questionAnswers(formVal, value map[string]any) map[string]string {
 		if question == "" {
 			question = "_"
 		}
-		answers[question] = answer
+		answers[question] = []string{answer}
 	}
 	return answers
 }
 
-func formAnswerValue(value any) string {
+func formAnswerValues(value any) []string {
 	switch v := value.(type) {
 	case string:
-		return strings.TrimSpace(v)
+		if answer := strings.TrimSpace(v); answer != "" {
+			return []string{answer}
+		}
+		return nil
 	case []string:
-		return strings.Join(v, ", ")
+		return v
 	case []any:
 		parts := make([]string, 0, len(v))
 		for _, item := range v {
@@ -225,23 +228,25 @@ func formAnswerValue(value any) string {
 				parts = append(parts, text)
 			}
 		}
-		return strings.Join(parts, ", ")
+		return parts
 	default:
-		return ""
+		return nil
 	}
 }
 
-func questionAnswerValues(answers map[string]string) []string {
-	values := make([]string, 0, len(answers))
-	for _, answer := range answers {
-		if answer != "" {
-			values = append(values, answer)
+func questionAnswerValues(answers map[string][]string) []string {
+	var values []string
+	for _, answerOptions := range answers {
+		for _, answer := range answerOptions {
+			if answer != "" {
+				values = append(values, answer)
+			}
 		}
 	}
 	return values
 }
 
-func questionAnswerOrder(value map[string]any, answers map[string]string) []string {
+func questionAnswerOrder(value map[string]any, answers map[string][]string) []string {
 	raw, _ := value["question_order"].([]any)
 	if len(raw) == 0 {
 		if order, ok := value["question_order"].([]string); ok {
@@ -254,7 +259,7 @@ func questionAnswerOrder(value map[string]any, answers map[string]string) []stri
 	}
 	order := make([]string, 0, len(raw))
 	for _, item := range raw {
-		if question, ok := item.(string); ok && answers[question] != "" {
+		if question, ok := item.(string); ok && len(answers[question]) > 0 {
 			order = append(order, question)
 		}
 	}

@@ -363,18 +363,27 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) error {
 	streamCtrl := c.clearActiveIndicators(ctx)
 	c.adapter.Interactions.CancelAll(env.SessionID)
+	errMsg := messaging.ExtractErrorMessage(env)
 	// Reset paragraph counter on error.
 	c.mu.Lock()
 	c.paraBreaker.Reset()
 	c.mu.Unlock()
 	if streamCtrl != nil && streamCtrl.IsCreated() {
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := streamCtrl.Close(closeCtx); err != nil {
-			c.adapter.Log.Warn("feishu: failed to close streaming card on error", "err", err)
+		// Finalize the existing message card with the error. Closing an empty
+		// placeholder and then replying separately creates a phantom message card.
+		if errMsg != "" {
+			streamCtrl.SetTerminalContent(errMsg)
 		}
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := streamCtrl.Close(closeCtx)
 		closeCancel()
+		if err != nil {
+			c.adapter.Log.Warn("feishu: failed to close streaming card on error", "err", err)
+		} else if errMsg != "" {
+			return nil
+		}
 	}
-	if errMsg := messaging.ExtractErrorMessage(env); errMsg != "" {
+	if errMsg != "" {
 		c.mu.RLock()
 		platformMsgID := c.platformMsgID
 		c.mu.RUnlock()

@@ -123,6 +123,11 @@ type AppServerWorker struct {
 	historyInjected bool
 }
 
+var (
+	_ base.MetadataHandler                    = (*AppServerWorker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler = (*AppServerWorker)(nil)
+)
+
 // appConn implements worker.SessionConn for the app-server mode.
 type appConn struct {
 	userID    string
@@ -611,19 +616,25 @@ func (w *AppServerWorker) LastIO() time.Time {
 }
 
 func (w *AppServerWorker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
-	result := map[string]any{"decision": w.manager.ApprovalDecision(reqID, allowed)}
-	if reason != "" {
-		result["reason"] = reason
+	result, err := w.manager.PermissionResponseResult(reqID, allowed, reason)
+	if err != nil {
+		return err
 	}
 	return w.manager.RespondServerRequest(ctx, reqID, result)
 }
 
 func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
-	result := map[string]any{
-		"behavior": "allow",
-		"updatedInput": map[string]any{
-			"answers": answers,
-		},
+	result, err := w.manager.QuestionResponseResult(reqID, answers)
+	if err != nil {
+		return err
+	}
+	return w.manager.RespondServerRequest(ctx, reqID, result)
+}
+
+func (w *AppServerWorker) HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, _ []string) error {
+	result, err := w.manager.QuestionResponseOptionsResult(reqID, answers)
+	if err != nil {
+		return err
 	}
 	return w.manager.RespondServerRequest(ctx, reqID, result)
 }
