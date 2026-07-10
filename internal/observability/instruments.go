@@ -283,6 +283,28 @@ func GatewayMessages() metric.Int64Counter {
 	return gatewayMessages
 }
 
+var (
+	gatewayPermissionDedupHits     metric.Int64Counter
+	gatewayPermissionDedupHitsInit sync.Once
+)
+
+// GatewayPermissionDedupHits counts permission requests suppressed because the
+// same owner+fingerprint was denied within the dedup window. See
+// docs/specs/Permission-Deny-Dedup-Spec.md.
+func GatewayPermissionDedupHits() metric.Int64Counter {
+	gatewayPermissionDedupHitsInit.Do(func() {
+		var err error
+		gatewayPermissionDedupHits, err = Meter().Int64Counter(
+			"hotplex.gateway.permission_dedup.hits",
+			metric.WithDescription("Permission requests suppressed after a recent user denial"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.permission_dedup.hits", err)
+		}
+	})
+	return gatewayPermissionDedupHits
+}
+
 func GatewayEvents() metric.Int64Counter {
 	gatewayEventsInit.Do(func() {
 		var err error

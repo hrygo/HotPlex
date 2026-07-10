@@ -88,6 +88,11 @@ type Bridge struct {
 	// Optional: nil means tool-call audit is disabled (mirrors the pattern on
 	// Handler/Hub/Conn). Injected via SetAuditCollector during gateway init.
 	auditCollector *audit.Collector
+
+	// dedup suppresses repeated permission cards after a user denial (Permission-
+	// Deny-Dedup-Spec). Nil when the feature is disabled. Methods are nil-safe,
+	// so call sites can invoke b.dedup.* unconditionally.
+	dedup *PermissionDenyDedup
 }
 
 type crashHistory struct {
@@ -127,7 +132,50 @@ func NewBridge(deps BridgeDeps) *Bridge {
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))
 	b.agentConfigExclude.Store(deps.AgentConfigExclude)
+	if deps.PermissionDedupEnabled && deps.PermissionDedupWindow > 0 {
+		b.dedup = newPermissionDenyDedup(deps.PermissionDedupWindow, nil)
+	}
 	return b
+}
+
+// RecordPermissionDeny registers a user's tool denial so a same-fingerprint
+// retry within the window is auto-suppressed. Called by Handler on the deny
+// inflow path. Nil-safe via b.dedup.
+func (b *Bridge) RecordPermissionDeny(sessionID, reqID, ownerID string) {
+	if b.dedup != nil {
+		b.dedup.RecordDeny(sessionID, reqID, ownerID)
+	}
+}
+
+// suppressPermissionRequest checks the dedup cache for a recently denied
+// owner+fingerprint. On hit it delivers a local denial to the worker and
+// returns true so the caller skips forwarding the card to the client. On miss
+// (or feature disabled / extract failure) it returns false and the request
+// flows through normally; the reqID→fp mapping is registered for a later
+// RecordPermissionDeny to resolve.
+func (b *Bridge) suppressPermissionRequest(ctx context.Context, env *events.Envelope, w worker.Worker) bool {
+	if b.dedup == nil {
+		return false
+	}
+	data, err := messaging.ExtractPermissionData(env)
+	if err != nil {
+		return false // fail-open: malformed request flows through
+	}
+	fp := ComputeFingerprint(data.ToolName, data.Args)
+	if !b.dedup.RegisterRequest(env.SessionID, env.ID, env.OwnerID, fp) {
+		return false
+	}
+	b.log.Info("bridge: suppressing repeated permission request",
+		"request_id", env.ID, "tool", data.ToolName, "session_id", env.SessionID)
+	if c := observability.GatewayPermissionDedupHits(); c != nil {
+		c.Add(ctx, 1, metric.WithAttributes(attribute.String("tool", data.ToolName)))
+	}
+	denyMd := messaging.BuildPermissionResponse(env.ID, false, "previously denied within dedup window")
+	if err := w.Input(ctx, "", denyMd); err != nil {
+		b.log.Warn("bridge: local deny delivery failed for suppressed permission request",
+			"request_id", env.ID, "err", err)
+	}
+	return true
 }
 
 // SetWorkerFactory replaces the default worker factory. Used by tests to inject
@@ -555,6 +603,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	}
 	b.accumMu.Unlock()
 	b.compressCache.Delete(sessionID)
+	b.dedup.ClearSession(sessionID) // nil-safe: reset clears denial memory so the user can re-authorize
 
 	if !result.ConnReplaced {
 		return nil

@@ -455,21 +455,23 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	bridge := gateway.NewBridge(gateway.BridgeDeps{
-		Log:                   log,
-		Hub:                   hub,
-		SM:                    sm,
-		EventCollector:        stores.collector,
-		TurnsQuerier:          stores.event, // SQLiteStore implements TurnQuerier
-		RetryCtrl:             retryCtrl,
-		AgentConfigDir:        agentConfigDir,
-		TurnTimeout:           cfg.Worker.TurnTimeout,
-		WorkerEnv:             buildWorkerEnv(cfg),
-		WorkerEnvBlocklist:    cfg.Worker.EnvBlocklist,
-		CronEnv:               buildCronEnv(cfg),
-		MCPConfigJSON:         buildMCPConfigJSON(cfg),
-		AgentConfigExclude:    buildAgentConfigExclude(cfg),
-		DefaultPermissionMode: cfg.Worker.DefaultPermissionMode,
-		WSStore:               stores.wsStore,
+		Log:                    log,
+		Hub:                    hub,
+		SM:                     sm,
+		EventCollector:         stores.collector,
+		TurnsQuerier:           stores.event, // SQLiteStore implements TurnQuerier
+		RetryCtrl:              retryCtrl,
+		AgentConfigDir:         agentConfigDir,
+		TurnTimeout:            cfg.Worker.TurnTimeout,
+		WorkerEnv:              buildWorkerEnv(cfg),
+		WorkerEnvBlocklist:     cfg.Worker.EnvBlocklist,
+		CronEnv:                buildCronEnv(cfg),
+		MCPConfigJSON:          buildMCPConfigJSON(cfg),
+		AgentConfigExclude:     buildAgentConfigExclude(cfg),
+		DefaultPermissionMode:  cfg.Worker.DefaultPermissionMode,
+		WSStore:                stores.wsStore,
+		PermissionDedupEnabled: cfg.Worker.PermissionDenyDedup.Enabled,
+		PermissionDedupWindow:  cfg.Worker.PermissionDenyDedup.Window,
 	})
 
 	// One-time validation sweep: surface stale/invalid agent_config_overrides

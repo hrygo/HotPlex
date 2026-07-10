@@ -189,6 +189,7 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 			return true, fmt.Errorf("gateway: %s interaction response failed: %w", respType, err)
 		} else if h.bridge != nil {
 			h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
+			h.recordPermissionDenial(respType, md, env)
 		}
 	} else {
 		h.log.Warn("gateway: interaction response dropped — no worker",
@@ -197,6 +198,27 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 		return true, fmt.Errorf("gateway: %s interaction response dropped: no worker for session %s", respType, env.SessionID)
 	}
 	return true, nil
+}
+
+// recordPermissionDenial registers a user's tool denial in the bridge dedup
+// cache so a same-fingerprint retry within the window is auto-suppressed.
+// Watchdog auto-denials (reason "interaction timed out") are excluded — a
+// timeout is not a user decision, and the user deserves a fresh card on retry.
+func (h *Handler) recordPermissionDenial(respType string, md map[string]any, env *events.Envelope) {
+	if respType != "permission" {
+		return
+	}
+	pr, ok := md["permission_response"].(map[string]any)
+	if !ok {
+		return
+	}
+	if allowed, _ := pr["allowed"].(bool); allowed {
+		return
+	}
+	if reason, _ := pr["reason"].(string); reason == "interaction timed out" {
+		return
+	}
+	h.bridge.RecordPermissionDeny(env.SessionID, env.ID, env.OwnerID)
 }
 
 // tryCommandDispatch detects help/control/worker commands and dispatches them.

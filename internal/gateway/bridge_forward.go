@@ -249,6 +249,15 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	env.SessionID = sessionID
 	env.OwnerID = fc.sessOwner
 
+	// Permission dedup: suppress repeated cards for a recently denied
+	// owner+fingerprint. On hit, deliver a local denial to the worker instead
+	// of forwarding the request to the client. See Permission-Deny-Dedup-Spec.
+	if env.Event.Type == events.PermissionRequest {
+		if b.suppressPermissionRequest(opts.ctx, env, w) {
+			return
+		}
+	}
+
 	deltaContent, reasoningContent := b.extractTurnContent(env, fc)
 
 	// Stats accumulation.

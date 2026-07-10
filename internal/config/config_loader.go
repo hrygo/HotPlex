@@ -74,6 +74,8 @@ func Load(filePath string) (*Config, error) {
 	_ = v.BindEnv("worker.auto_retry.max_retries")
 	_ = v.BindEnv("worker.claude_code.command")
 	_ = v.BindEnv("worker.claude_code.permission_mode")
+	_ = v.BindEnv("worker.permission_deny_dedup.enabled")
+	_ = v.BindEnv("worker.permission_deny_dedup.window")
 	_ = v.BindEnv("worker.codex_cli.command")
 	_ = v.BindEnv("worker.codex_cli.model")
 	_ = v.BindEnv("worker.codex_cli.sandbox")

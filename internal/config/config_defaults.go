@@ -81,6 +81,10 @@ func Default() *Config {
 				IdleDrainPeriod: 30 * time.Minute,
 			},
 			DefaultPermissionMode: "workspace", // r3 (#804): bridge injects this when a workspace has no explicit override; default tightened from bypass→workspace so injection is a blast-radius reduction, not an escalation
+			PermissionDenyDedup: PermissionDenyDedupConfig{
+				Enabled: true,
+				Window:  60 * time.Second,
+			},
 		},
 		Security: SecurityConfig{
 			APIKeyHeader:    "X-API-Key",
