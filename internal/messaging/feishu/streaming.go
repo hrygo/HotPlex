@@ -677,6 +677,25 @@ func (c *StreamingCardController) Content() string {
 	return c.buf.String()
 }
 
+// SetTerminalContent replaces an active placeholder/partial response with a
+// terminal message before Close rebuilds the same card. It is used by error
+// paths to avoid leaving an empty placeholder card and sending the real error
+// as a second message.
+func (c *StreamingCardController) SetTerminalContent(text string) bool {
+	if text == "" || c.getPhase() >= PhaseCompleted {
+		return false
+	}
+	text = messaging.SanitizeText(text)
+	c.mu.Lock()
+	c.buf.Reset()
+	c.buf.WriteString(text)
+	c.bufRunes = utf8.RuneCountInString(text)
+	c.bytesWritten = int64(len(text))
+	c.placeholder = ""
+	c.mu.Unlock()
+	return true
+}
+
 func (c *StreamingCardController) Close(ctx context.Context) error {
 	phase := c.getPhase()
 

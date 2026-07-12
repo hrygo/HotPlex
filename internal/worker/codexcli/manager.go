@@ -39,6 +39,17 @@ const (
 	scannerMaxSize           = 10 * 1024 * 1024 // 10 MB
 )
 
+const (
+	codexMethodServerRequestApproval = "serverRequest/approval"
+	codexMethodCommandApproval       = "item/commandExecution/requestApproval"
+	codexMethodFileChangeApproval    = "item/fileChange/requestApproval"
+	codexMethodPermissionsApproval   = "item/permissions/requestApproval"
+	codexMethodRequestUserInput      = "item/tool/requestUserInput"
+	codexMethodMCPElicitation        = "mcpServer/elicitation/request"
+	codexMethodExecCommandApproval   = "execCommandApproval"
+	codexMethodApplyPatchApproval    = "applyPatchApproval"
+)
+
 // CodexAppServerManager manages a single shared `codex app-server` process
 // via stdio JSON-RPC across all Codex CLI sessions. The process is lazily
 // started on first Acquire and shut down when the last session releases.
@@ -67,9 +78,19 @@ type CodexAppServerManager struct {
 	// pending maps JSON-RPC request IDs to response channels.
 	pending sync.Map // map[int64]chan *JSONRPCResponse
 
-	// serverReqIDs maps approval requestID → JSON-RPC frame ID for server-initiated
+	// serverReqIDs maps interaction requestID → raw JSON-RPC frame ID for server-initiated
 	// requests, so the worker can respond via RespondServerRequest.
-	serverReqIDs sync.Map // map[string]int64
+	serverReqIDs sync.Map // map[string]JSONRPCID
+
+	// serverReqMethods maps approval requestID → JSON-RPC method. Codex uses
+	// different decision enums for v2 and legacy approval requests.
+	serverReqMethods sync.Map // map[string]string
+
+	// serverReqParams retains the original request params until the response is
+	// successfully written. Method-specific response codecs (notably granular
+	// permissions) need fields from the original request.
+	serverReqParams  sync.Map // map[string]json.RawMessage
+	serverReqThreads sync.Map // map[string]string (interaction requestID → threadID)
 
 	nextReqID atomic.Int64
 
@@ -238,6 +259,7 @@ func (m *CodexAppServerManager) Unsubscribe(threadID string) {
 	m.subMu.Unlock()
 
 	m.deleteConverter(threadID)
+	m.clearServerRequestsForThread(threadID)
 }
 
 // Call sends a JSON-RPC request to the app-server process and waits for a response.
@@ -353,6 +375,7 @@ func (m *CodexAppServerManager) Shutdown(ctx context.Context) {
 	}
 
 	m.clearConverters()
+	m.clearAllServerRequests()
 }
 
 // IsRunning reports whether the singleton process is currently running.
@@ -545,10 +568,10 @@ func (m *CodexAppServerManager) readNotifications(ctx context.Context, reader io
 // dispatchFrame parses a single JSON-RPC frame and routes to the correct handler.
 //
 // Routing logic (in order):
-//  1. Method != "" && ID != 0 → server-initiated request (e.g. approval)
-//  2. ID != 0 && Method == "" → response to a client request
-//  3. ID == 0 && Error != nil → error with no ID, dropped
-//  4. ID == 0 && Method != "" → notification
+//  1. Method != "" && ID present → server-initiated request (e.g. approval)
+//  2. ID present && Method == "" → response to a client request
+//  3. ID absent && Error != nil → uncorrelated error, dropped
+//  4. ID absent && Method != "" → notification
 func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 	var frame JSONRPCFrame
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -557,15 +580,20 @@ func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 	}
 
 	// Server-initiated request (has both ID and Method, e.g. approval).
-	if frame.Method != "" && frame.ID != 0 {
+	if frame.Method != "" && frame.ID.IsSet() {
 		m.dispatchServerRequest(&frame)
 		return
 	}
 
-	if frame.ID != 0 {
+	if frame.ID.IsSet() {
+		responseID, ok := frame.ID.Int64()
+		if !ok {
+			m.log.Warn("codex-app-server: response has non-integer client request id", "id", frame.ID.Key())
+			return
+		}
 		resp := &JSONRPCResponse{
 			JSONRPC: frame.JSONRPC,
-			ID:      frame.ID,
+			ID:      responseID,
 			Result:  frame.Result,
 			Error:   frame.Error,
 		}
@@ -573,9 +601,9 @@ func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 		return
 	}
 
-	// ID == 0: notification or unknown.
+	// ID absent: notification or unknown.
 	if frame.Error != nil {
-		m.log.Debug("codex-app-server: error frame with ID=0, dropping", "error", frame.Error.Message)
+		m.log.Debug("codex-app-server: error frame without ID, dropping", "error", frame.Error.Message)
 		return
 	}
 
@@ -587,7 +615,7 @@ func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 		}
 		m.dispatchNotification(notif)
 	} else {
-		m.log.Debug("codex-app-server: frame with ID=0, no method, no error — dropped")
+		m.log.Debug("codex-app-server: frame without ID, method, or error — dropped")
 	}
 }
 
@@ -613,11 +641,15 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 	//   serverRequest/approval                → requestId
 	//   item/commandExecution/requestApproval → approvalId (null for regular shell) or itemId
 	//   item/fileChange/requestApproval       → itemId
+	//   execCommandApproval                   → approvalId or callId
+	//   applyPatchApproval                    → callId
 	var params struct {
-		ThreadID   string `json:"threadId"`
-		RequestID  string `json:"requestId"`
-		ApprovalID string `json:"approvalId"`
-		ItemID     string `json:"itemId"`
+		ThreadID       string `json:"threadId"`
+		ConversationID string `json:"conversationId"`
+		RequestID      string `json:"requestId"`
+		ApprovalID     string `json:"approvalId"`
+		ItemID         string `json:"itemId"`
+		CallID         string `json:"callId"`
 	}
 	if frame.Params != nil {
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
@@ -626,13 +658,18 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 		}
 	}
 
-	if params.ThreadID == "" {
-		m.log.Debug("codex-app-server: server request without threadId, dropping",
+	threadID := params.ThreadID
+	if threadID == "" {
+		threadID = params.ConversationID
+	}
+	if threadID == "" {
+		m.log.Debug("codex-app-server: server request without threadId/conversationId, dropping",
 			"method", frame.Method, "id", frame.ID)
 		return
 	}
 
-	// Resolve canonical request ID (mirrors mapNotifApproval priority: approvalId → itemId → requestId).
+	// Resolve canonical request ID (mirrors mapNotifApproval priority:
+	// approvalId → itemId → requestId → callId).
 	requestID := params.ApprovalID
 	if requestID == "" {
 		requestID = params.ItemID
@@ -640,12 +677,25 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 	if requestID == "" {
 		requestID = params.RequestID
 	}
+	if requestID == "" {
+		requestID = params.CallID
+	}
 
-	// Store the JSON-RPC frame ID so RespondServerRequest can reply.
+	// When params do not carry an interaction identifier (current MCP
+	// elicitation), derive a stable opaque AEP ID from the JSON-RPC ID.
+	if requestID == "" {
+		requestID = "codex-rpc:" + frame.ID.Key()
+	}
+
+	// Store the JSON-RPC frame ID and method metadata so the worker can reply
+	// using the correct native response schema.
 	if requestID != "" {
-		m.serverReqIDs.Store(requestID, frame.ID)
+		m.serverReqIDs.Store(requestID, frame.ID.Clone())
+		m.serverReqMethods.Store(requestID, frame.Method)
+		m.serverReqParams.Store(requestID, append(json.RawMessage(nil), frame.Params...))
+		m.serverReqThreads.Store(requestID, threadID)
 	} else {
-		m.log.Warn("codex-app-server: server request has no usable requestId/approvalId/itemId — response routing impossible",
+		m.log.Warn("codex-app-server: server request has no usable requestId/approvalId/itemId/callId — response routing impossible",
 			"method", frame.Method, "frame_id", frame.ID)
 	}
 
@@ -653,7 +703,7 @@ func (m *CodexAppServerManager) dispatchServerRequest(frame *JSONRPCFrame) {
 	notif := &JSONRPCNotification{
 		JSONRPC: frame.JSONRPC,
 		Method:  frame.Method,
-		Params:  frame.Params,
+		Params:  injectServerRequestID(frame.Params, requestID),
 	}
 	m.dispatchNotification(notif)
 }
@@ -668,8 +718,10 @@ func (m *CodexAppServerManager) RespondServerRequest(ctx context.Context, reqID 
 		_, hasBehavior := check["behavior"]
 		_, hasDecision := check["decision"]
 		_, hasAction := check["action"]
-		if !hasBehavior && !hasDecision && !hasAction {
-			return fmt.Errorf("codex-app-server: server response for %q missing behavior, decision, or action key", reqID)
+		_, hasAnswers := check["answers"]
+		_, hasPermissions := check["permissions"]
+		if !hasBehavior && !hasDecision && !hasAction && !hasAnswers && !hasPermissions {
+			return fmt.Errorf("codex-app-server: server response for %q has no recognized result key", reqID)
 		}
 	}
 
@@ -678,21 +730,232 @@ func (m *CodexAppServerManager) RespondServerRequest(ctx context.Context, reqID 
 		return fmt.Errorf("codex-app-server: marshal server response: %w", err)
 	}
 
-	v, ok := m.serverReqIDs.LoadAndDelete(reqID)
+	v, ok := m.serverReqIDs.Load(reqID)
 	if !ok {
 		return fmt.Errorf("codex-app-server: no pending server request for %q", reqID)
 	}
-	rpcID, ok := v.(int64)
-	if !ok {
+	rpcID, ok := serverRequestJSONRPCID(v)
+	if !ok || !rpcID.IsSet() {
 		return fmt.Errorf("codex-app-server: invalid rpc id type for %q", reqID)
 	}
 
-	resp := JSONRPCResponse{
+	resp := JSONRPCServerResponse{
 		JSONRPC: "2.0",
 		ID:      rpcID,
 		Result:  raw,
 	}
-	return m.writeFrame(ctx, resp)
+	if err := m.writeFrame(ctx, resp); err != nil {
+		return err
+	}
+	m.clearServerRequest(reqID)
+	return nil
+}
+
+func serverRequestJSONRPCID(value any) (JSONRPCID, bool) {
+	switch id := value.(type) {
+	case JSONRPCID:
+		return id.Clone(), true
+	case int64: // compatibility with older in-process registrations/tests
+		return integerJSONRPCID(id), true
+	default:
+		return nil, false
+	}
+}
+
+func injectServerRequestID(params json.RawMessage, requestID string) json.RawMessage {
+	if requestID == "" {
+		return params
+	}
+	var values map[string]any
+	if len(params) == 0 || json.Unmarshal(params, &values) != nil {
+		return params
+	}
+	if current, _ := values["requestId"].(string); current == "" {
+		values["requestId"] = requestID
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return params
+	}
+	return encoded
+}
+
+func (m *CodexAppServerManager) ApprovalDecision(reqID string, allowed bool) string {
+	method := m.ServerRequestMethod(reqID)
+	return codexApprovalDecision(method, allowed)
+}
+
+func (m *CodexAppServerManager) ServerRequestMethod(reqID string) string {
+	method := ""
+	if v, ok := m.serverReqMethods.Load(reqID); ok {
+		method, _ = v.(string)
+	}
+	return method
+}
+
+func (m *CodexAppServerManager) PermissionResponseResult(reqID string, allowed bool, reason string) (map[string]any, error) {
+	if m.ServerRequestMethod(reqID) != codexMethodPermissionsApproval {
+		result := map[string]any{"decision": m.ApprovalDecision(reqID, allowed)}
+		if reason != "" {
+			result["reason"] = reason
+		}
+		return result, nil
+	}
+
+	permissions := map[string]any{}
+	if allowed {
+		params, ok := m.serverRequestParams(reqID)
+		if !ok {
+			return nil, fmt.Errorf("codex-app-server: missing permissions request params for %q", reqID)
+		}
+		var request struct {
+			Permissions map[string]any `json:"permissions"`
+		}
+		if err := json.Unmarshal(params, &request); err != nil {
+			return nil, fmt.Errorf("codex-app-server: decode permissions request %q: %w", reqID, err)
+		}
+		if request.Permissions != nil {
+			permissions = request.Permissions
+		}
+	}
+	return map[string]any{
+		"scope":       "turn",
+		"permissions": permissions,
+	}, nil
+}
+
+func (m *CodexAppServerManager) QuestionResponseResult(reqID string, answers map[string]string) (map[string]any, error) {
+	answerOptions := make(map[string][]string, len(answers))
+	for key, answer := range answers {
+		answerOptions[key] = []string{answer}
+	}
+	return m.QuestionResponseOptionsResult(reqID, answerOptions)
+}
+
+func (m *CodexAppServerManager) QuestionResponseOptionsResult(reqID string, answers map[string][]string) (map[string]any, error) {
+	if m.ServerRequestMethod(reqID) != codexMethodRequestUserInput {
+		flattened := make(map[string]string, len(answers))
+		for key, options := range answers {
+			flattened[key] = strings.Join(options, ", ")
+		}
+		return map[string]any{
+			"behavior": "allow",
+			"updatedInput": map[string]any{
+				"answers": flattened,
+			},
+		}, nil
+	}
+
+	params, ok := m.serverRequestParams(reqID)
+	if !ok {
+		return nil, fmt.Errorf("codex-app-server: missing user-input request params for %q", reqID)
+	}
+	var request struct {
+		Questions []struct {
+			ID       string `json:"id"`
+			Question string `json:"question"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(params, &request); err != nil {
+		return nil, fmt.Errorf("codex-app-server: decode user-input request %q: %w", reqID, err)
+	}
+
+	nativeAnswers := make(map[string]any, len(answers))
+	consumed := make(map[string]bool, len(answers))
+	for _, question := range request.Questions {
+		answer, found := answers[question.ID]
+		if found {
+			consumed[question.ID] = true
+		} else {
+			answer, found = answers[question.Question]
+			if found {
+				consumed[question.Question] = true
+			}
+		}
+		if found {
+			nativeAnswers[question.ID] = map[string]any{"answers": answer}
+		}
+	}
+	for key, answer := range answers {
+		if !consumed[key] {
+			nativeAnswers[key] = map[string]any{"answers": answer}
+		}
+	}
+	return map[string]any{"answers": nativeAnswers}, nil
+}
+
+func (m *CodexAppServerManager) serverRequestParams(reqID string) (json.RawMessage, bool) {
+	value, ok := m.serverReqParams.Load(reqID)
+	if !ok {
+		return nil, false
+	}
+	params, ok := value.(json.RawMessage)
+	return params, ok
+}
+
+func (m *CodexAppServerManager) clearServerRequest(reqID string) {
+	m.serverReqIDs.Delete(reqID)
+	m.serverReqMethods.Delete(reqID)
+	m.serverReqParams.Delete(reqID)
+	m.serverReqThreads.Delete(reqID)
+}
+
+func (m *CodexAppServerManager) clearServerRequestsForThread(threadID string) {
+	m.serverReqThreads.Range(func(key, value any) bool {
+		requestID, keyOK := key.(string)
+		requestThread, valueOK := value.(string)
+		if keyOK && valueOK && requestThread == threadID {
+			m.clearServerRequest(requestID)
+		}
+		return true
+	})
+}
+
+func (m *CodexAppServerManager) clearAllServerRequests() {
+	m.serverReqIDs.Range(func(key, _ any) bool {
+		if requestID, ok := key.(string); ok {
+			m.clearServerRequest(requestID)
+		}
+		return true
+	})
+}
+
+func (m *CodexAppServerManager) clearServerRequestByRPCID(id JSONRPCID) {
+	if !id.IsSet() {
+		return
+	}
+	m.serverReqIDs.Range(func(key, value any) bool {
+		stored, ok := serverRequestJSONRPCID(value)
+		if !ok || string(stored) != string(id) {
+			return true
+		}
+		if requestID, ok := key.(string); ok {
+			m.clearServerRequest(requestID)
+		}
+		return true
+	})
+}
+
+func codexApprovalDecision(method string, allowed bool) string {
+	if isLegacyApprovalMethod(method) {
+		if allowed {
+			return "approved"
+		}
+		return "denied"
+	}
+	if allowed {
+		return "accept"
+	}
+	return "decline"
+}
+
+func isLegacyApprovalMethod(method string) bool {
+	switch method {
+	case codexMethodServerRequestApproval, codexMethodExecCommandApproval, codexMethodApplyPatchApproval:
+		return true
+	default:
+		return false
+	}
 }
 
 // ─── Thread Lifecycle ─────────────────────────────────────────────────────
@@ -951,14 +1214,27 @@ func (m *CodexAppServerManager) StartReview(threadID string, target map[string]a
 // dispatchNotification extracts the thread ID, converts via the mapper, and
 // delivers envelopes to the subscriber channel. Locks subMu once per notification.
 func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification) {
+	if notif.Method == "serverRequest/resolved" {
+		var resolved struct {
+			RequestID JSONRPCID `json:"requestId"`
+		}
+		if len(notif.Params) > 0 && json.Unmarshal(notif.Params, &resolved) == nil {
+			m.clearServerRequestByRPCID(resolved.RequestID)
+		}
+	}
 	var params struct {
-		ThreadID string `json:"threadId"`
+		ThreadID       string `json:"threadId"`
+		ConversationID string `json:"conversationId"`
 	}
 	if notif.Params != nil {
 		if err := json.Unmarshal(notif.Params, &params); err != nil {
 			m.log.Warn("codex-app-server: unmarshal notification params", "err", err)
 			return
 		}
+	}
+
+	if params.ThreadID == "" {
+		params.ThreadID = params.ConversationID
 	}
 
 	if params.ThreadID == "" {
@@ -1082,6 +1358,7 @@ func (m *CodexAppServerManager) monitorProcess() {
 
 	if wasRunning {
 		m.clearConverters()
+		m.clearAllServerRequests()
 		m.subsClosed.Store(true)
 		m.subMu.Lock()
 		for id, ch := range m.subscribers {

@@ -942,7 +942,7 @@ func TestHandleInput_InteractionResponse_RoutesToWorker(t *testing.T) {
 	}
 }
 
-func TestHandleInput_NoWorker_GracefulReturn(t *testing.T) {
+func TestHandleInput_NoWorker_ReturnsError(t *testing.T) {
 	sm := new(mockInputSM)
 	sm.On("GetWorker", "s1").Return(nil) // no worker
 
@@ -951,11 +951,12 @@ func TestHandleInput_NoWorker_GracefulReturn(t *testing.T) {
 		"permission_response": map[string]any{"decision": "allow"},
 	}))
 
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interaction response dropped")
 	sm.AssertExpectations(t)
 }
 
-func TestHandleInput_WorkerInputError_GracefulReturn(t *testing.T) {
+func TestHandleInput_WorkerInputError_ReturnsError(t *testing.T) {
 	sm := new(mockInputSM)
 	w := new(mockWorkerForHandler)
 	sm.On("GetWorker", "s1").Return(w)
@@ -966,7 +967,45 @@ func TestHandleInput_WorkerInputError_GracefulReturn(t *testing.T) {
 		"question_response": map[string]any{"answer": "yes"},
 	}))
 
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interaction response failed")
+	sm.AssertExpectations(t)
+	w.AssertExpectations(t)
+}
+
+func TestHandleInteractionResponseEvent_SendsCorrelatedSuccessAck(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := new(mockWorkerForHandler)
+	sm.On("Get", "s-interaction-ack").Return(&session.SessionInfo{Platform: "webchat"}, nil)
+	sm.On("GetWorker", "s-interaction-ack").Return(w)
+	w.On("Input", mock.Anything, "", mock.MatchedBy(func(metadata map[string]any) bool {
+		response, ok := metadata["permission_response"].(map[string]any)
+		return ok && response["request_id"] == "perm-ack-1" && response["allowed"] == true
+	})).Return(nil)
+
+	hub := newTestHub(t)
+	platformConn := &mockPlatformConn{}
+	hub.JoinPlatformSession("s-interaction-ack", platformConn)
+	h := &Handler{log: slog.Default(), hub: hub, sm: sm}
+	env := events.NewEnvelope("response-env", "s-interaction-ack", 7, events.PermissionResponse, map[string]any{
+		"id":      "perm-ack-1",
+		"allowed": true,
+	})
+	env.OwnerID = "user-1"
+
+	require.NoError(t, h.handleInteractionResponseEvent(context.Background(), env))
+	require.Eventually(t, func() bool {
+		return len(platformConn.envelopes()) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	ack := platformConn.envelopes()[0]
+	require.Equal(t, events.PermissionResponse, ack.Event.Type)
+	data, ok := ack.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "perm-ack-1", data["id"])
+	require.Equal(t, true, data["allowed"])
 	sm.AssertExpectations(t)
 	w.AssertExpectations(t)
 }

@@ -68,10 +68,6 @@ func (a *Adapter) handleInteractionEvent(ctx context.Context, evt socketmode.Eve
 				"request_id", requestID, "expected_owner", pi.OwnerID, "actual_user", userID)
 			continue
 		}
-		if _, ok := a.Interactions.Complete(requestID); !ok {
-			continue
-		}
-
 		var (
 			metadata map[string]any
 			ackText  string
@@ -124,27 +120,9 @@ func (a *Adapter) handleInteractionEvent(ctx context.Context, evt socketmode.Eve
 			}
 
 		case "answer":
-			customAnswer := ""
-			if callback.BlockActionState != nil {
-				if blocks, ok := callback.BlockActionState.Values["question_custom_block"]; ok {
-					if act, ok := blocks["custom_answer"]; ok {
-						customAnswer = act.Value
-					}
-				}
-			}
-			answer := action.Value
-			if customAnswer != "" {
-				answer = customAnswer
-			}
-			metadata = map[string]any{
-				"question_response": map[string]any{
-					"id": requestID,
-					"answers": map[string]string{
-						"_": answer,
-					},
-				},
-			}
-			ackText = fmt.Sprintf("_Answered by <@%s>_: %s", userID, answer)
+			answers, order := slackQuestionAnswers(pi.Questions, callback.BlockActionState, action.Value)
+			metadata = messaging.BuildQuestionResponseOptionsWithOrder(requestID, answers, order)
+			ackText = fmt.Sprintf("_Answered by <@%s>_", userID)
 
 		case "accept":
 			comment := ""
@@ -197,7 +175,26 @@ func (a *Adapter) handleInteractionEvent(ctx context.Context, evt socketmode.Eve
 			}
 		}
 
-		pi.SendResponse(metadata)
+		if metadata == nil {
+			continue
+		}
+		if err := a.deliverInteractionResponse(ctx, requestID, metadata); err != nil {
+			a.Log.Warn("slack: interaction response delivery failed",
+				"request_id", requestID,
+				"type", interactionType,
+				"user_id", userID,
+				"err", err)
+			if len(callback.Message.Blocks.BlockSet) > 0 {
+				blocks := append([]slack.Block(nil), callback.Message.Blocks.BlockSet...)
+				blocks = append(blocks, slack.NewContextBlock("interaction_delivery_error",
+					slack.NewTextBlockObject(slack.MarkdownType,
+						":warning: Response was not submitted. Please retry.", false, false),
+				))
+				_, _, _, _ = a.client.UpdateMessageContext(ctx, channelID, threadTS,
+					slack.MsgOptionBlocks(blocks...))
+			}
+			continue
+		}
 
 		var updateErr error
 		if len(callback.Message.Blocks.BlockSet) > 0 {
@@ -382,8 +379,15 @@ func (c *SlackConn) sendQuestionRequest(ctx context.Context, env *events.Envelop
 	}
 
 	var blocks []slack.Block
+	useForm := len(data.Questions) > 1
+	for _, question := range data.Questions {
+		if question.MultiSelect {
+			useForm = true
+			break
+		}
+	}
 
-	for _, q := range data.Questions {
+	for index, q := range data.Questions {
 		headerLabel := q.Header
 		if headerLabel == "" {
 			headerLabel = "Question"
@@ -394,7 +398,43 @@ func (c *SlackConn) sendQuestionRequest(ctx context.Context, env *events.Envelop
 			nil, nil,
 		))
 
-		// Build option buttons
+		if useForm {
+			blockID := fmt.Sprintf("question_answer_%d", index)
+			actionID := fmt.Sprintf("answer_%d", index)
+			var element slack.BlockElement
+			if len(q.Options) == 0 {
+				element = slack.NewPlainTextInputBlockElement(
+					slack.NewTextBlockObject(slack.PlainTextType, "Enter your answer", false, false),
+					actionID,
+				)
+			} else {
+				options := make([]*slack.OptionBlockObject, 0, len(q.Options))
+				for _, option := range q.Options {
+					options = append(options, slack.NewOptionBlockObject(
+						option.Label,
+						slack.NewTextBlockObject(slack.PlainTextType, truncateSlackLabel(option.Label), false, false),
+						nil,
+					))
+				}
+				placeholder := slack.NewTextBlockObject(slack.PlainTextType, "Select an answer", false, false)
+				if q.MultiSelect {
+					element = slack.NewOptionsMultiSelectBlockElement(slack.MultiOptTypeStatic, placeholder, actionID, options...)
+				} else {
+					element = slack.NewOptionsSelectBlockElement(slack.OptTypeStatic, placeholder, actionID, options...)
+				}
+			}
+			input := slack.NewInputBlock(
+				blockID,
+				slack.NewTextBlockObject(slack.PlainTextType, headerLabel, false, false),
+				nil,
+				element,
+			)
+			input.Optional = true
+			blocks = append(blocks, input)
+			continue
+		}
+
+		// Single-choice single-question requests keep the compact button UI.
 		var buttons []slack.BlockElement
 		for _, opt := range q.Options {
 			label := opt.Label
@@ -431,6 +471,16 @@ func (c *SlackConn) sendQuestionRequest(ctx context.Context, env *events.Envelop
 		customAnswerBlock.Optional = true
 		blocks = append(blocks, customAnswerBlock)
 	}
+	if useForm {
+		blocks = append(blocks, slack.NewActionBlock(
+			"question_submit",
+			slack.NewButtonBlockElement(
+				interactionActionPrefix+"/answer/"+data.ID,
+				"submit",
+				slack.NewTextBlockObject(slack.PlainTextType, "Submit answers", false, true),
+			).WithStyle(slack.StylePrimary),
+		))
+	}
 
 	// Sanitize blocks before sending
 	blocks = SanitizeBlocks(blocks)
@@ -459,7 +509,7 @@ func (c *SlackConn) sendQuestionRequest(ctx context.Context, env *events.Envelop
 		}
 	}
 
-	c.adapter.registerInteraction(data.ID, env.SessionID, env.OwnerID, events.QuestionRequest, msgTS, c)
+	c.adapter.registerInteraction(data.ID, env.SessionID, env.OwnerID, events.QuestionRequest, msgTS, c, data.Questions...)
 
 	c.adapter.Log.Info("slack: question request posted",
 		"request_id", data.ID,
@@ -563,16 +613,118 @@ func (c *SlackConn) sendElicitationRequest(ctx context.Context, env *events.Enve
 }
 
 // registerInteraction registers a pending interaction with the adapter's manager.
-func (a *Adapter) registerInteraction(requestID, sessionID, ownerID string, kind events.Kind, _ string, conn *SlackConn) {
+func (a *Adapter) registerInteraction(requestID, sessionID, ownerID string, kind events.Kind, _ string, conn *SlackConn, questions ...events.Question) {
 	a.Interactions.Register(&messaging.PendingInteraction{
-		ID:           requestID,
-		SessionID:    sessionID,
-		OwnerID:      ownerID,
-		Type:         kind,
-		CreatedAt:    getTimeNow(),
-		Timeout:      messaging.DefaultInteractionTimeout,
-		SendResponse: messaging.NewSendResponseFunc(a.Log, a.Bridge(), requestID, sessionID, ownerID, conn),
+		ID:               requestID,
+		SessionID:        sessionID,
+		OwnerID:          ownerID,
+		Type:             kind,
+		CreatedAt:        getTimeNow(),
+		Timeout:          messaging.DefaultInteractionTimeout,
+		Questions:        append([]events.Question(nil), questions...),
+		SendResponse:     messaging.NewSendResponseFunc(a.Log, a.Bridge(), requestID, sessionID, ownerID, conn),
+		SendResponseSync: messaging.NewSendResponseSyncFunc(a.Bridge(), requestID, sessionID, ownerID, conn),
 	})
+}
+
+func truncateSlackLabel(label string) string {
+	label = messaging.SanitizeText(label)
+	runes := []rune(label)
+	if len(runes) > 75 {
+		return string(runes[:72]) + "..."
+	}
+	return label
+}
+
+func slackQuestionKey(question events.Question) string {
+	if question.ID != "" {
+		return question.ID
+	}
+	if question.Question != "" {
+		return question.Question
+	}
+	return "_"
+}
+
+func slackQuestionAnswers(questions []events.Question, state *slack.BlockActionStates, fallback string) (map[string][]string, []string) {
+	answers := make(map[string][]string)
+	order := make([]string, 0, len(questions))
+	for index, question := range questions {
+		key := slackQuestionKey(question)
+		order = append(order, key)
+		if state == nil {
+			continue
+		}
+		blockID := fmt.Sprintf("question_answer_%d", index)
+		actionID := fmt.Sprintf("answer_%d", index)
+		block, ok := state.Values[blockID]
+		if !ok {
+			continue
+		}
+		action, ok := block[actionID]
+		if !ok {
+			continue
+		}
+		values := make([]string, 0, len(action.SelectedOptions))
+		for _, option := range action.SelectedOptions {
+			if option.Value != "" {
+				values = append(values, option.Value)
+			}
+		}
+		switch {
+		case len(values) > 0:
+			answers[key] = values
+		case action.SelectedOption.Value != "":
+			answers[key] = []string{action.SelectedOption.Value}
+		case strings.TrimSpace(action.Value) != "":
+			answers[key] = []string{strings.TrimSpace(action.Value)}
+		}
+	}
+	if len(questions) == 1 {
+		key := slackQuestionKey(questions[0])
+		if state != nil {
+			if block, ok := state.Values["question_custom_block"]; ok {
+				if action, ok := block["custom_answer"]; ok && strings.TrimSpace(action.Value) != "" {
+					answers[key] = []string{strings.TrimSpace(action.Value)}
+				}
+			}
+		}
+		if len(answers[key]) == 0 && fallback != "" && fallback != "submit" {
+			answers[key] = []string{fallback}
+		}
+	}
+	if len(questions) == 0 && fallback != "" && fallback != "submit" {
+		answers["_"] = []string{fallback}
+		order = []string{"_"}
+	}
+	return answers, order
+}
+
+func (a *Adapter) deliverInteractionResponse(ctx context.Context, requestID string, metadata map[string]any) error {
+	interaction, ok := a.Interactions.Claim(requestID)
+	if !ok {
+		return fmt.Errorf("slack: interaction %s is expired, completed, or already submitting", requestID)
+	}
+
+	deliveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var err error
+	switch {
+	case interaction.SendResponseSync != nil:
+		err = interaction.SendResponseSync(deliveryCtx, metadata)
+	case interaction.SendResponse != nil:
+		interaction.SendResponse(metadata)
+	default:
+		err = fmt.Errorf("slack: interaction has no response sender")
+	}
+	if err != nil {
+		a.Interactions.Release(requestID)
+		return err
+	}
+	if _, ok := a.Interactions.CompleteClaimed(requestID); !ok {
+		return fmt.Errorf("slack: interaction %s changed state after delivery", requestID)
+	}
+	return nil
 }
 
 // checkPendingInteraction checks if a text message is a response to a pending
@@ -666,11 +818,19 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, channelID, 
 		return false
 	}
 
-	if _, ok := a.Interactions.Complete(matched.ID); !ok {
-		return false
+	if err := a.deliverInteractionResponse(ctx, matched.ID, metadata); err != nil {
+		a.Log.Warn("slack: text interaction response delivery failed",
+			"request_id", matched.ID,
+			"type", matched.Type,
+			"user", userID,
+			"err", err)
+		opts := []slack.MsgOption{slack.MsgOptionText(":warning: Response was not submitted. Please retry.", false)}
+		if threadTS != "" {
+			opts = append(opts, slack.MsgOptionTS(threadTS))
+		}
+		_, _, _ = a.client.PostMessageContext(ctx, channelID, opts...)
+		return true
 	}
-
-	matched.SendResponse(metadata)
 
 	a.Log.Info("slack: interaction response received via text",
 		"request_id", matched.ID,

@@ -22,7 +22,7 @@ interface QuestionResponseCardProps {
   questions?: QuestionItem[];
   status: InteractionStatus;
   interactionState?: InteractionState;
-  onRespond?: (answers: Record<string, string>) => void;
+  onRespond?: (answers: Record<string, string | string[]>) => void;
   onToggle?: () => void;
 }
 
@@ -78,11 +78,15 @@ export function QuestionResponseCard({
     if (!isInteractive) return;
 
     // Validate that all questions have some answer
-    const finalAnswers: Record<string, string> = {};
+    const finalAnswers: Record<string, string | string[]> = {};
     for (const q of questions) {
       const qKey = q.id || q.question;
+      const isMulti = !!(q.is_multi_select || q.multiSelect || q.multi_select || q.multiple);
+      const selected = selectedMulti[qKey];
       const ans = answers[qKey] || textAnswers[qKey] || "";
-      finalAnswers[qKey] = ans;
+      finalAnswers[qKey] = isMulti && selected?.size
+        ? Array.from(selected)
+        : ans;
     }
 
     onRespond?.(finalAnswers);

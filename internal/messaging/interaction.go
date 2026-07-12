@@ -16,32 +16,49 @@ func NewSendResponseFunc(log *slog.Logger, bridge *Bridge, requestID, sessionID,
 	return func(metadata map[string]any) {
 		respCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		env := &events.Envelope{
-			Version:   events.Version,
-			ID:        requestID,
-			SessionID: sessionID,
-			Event: events.Event{
-				Type: events.Input,
-				Data: map[string]any{
-					"content":  "",
-					"metadata": metadata,
-				},
-			},
-			OwnerID: ownerID,
-		}
-		if bridge != nil {
-			if err := bridge.Handle(respCtx, env, conn); err != nil {
-				log.Error("interaction: failed to send response",
-					"request_id", requestID,
-					"session_id", sessionID,
-					"err", err)
-			}
-		} else {
-			log.Error("interaction: bridge not available",
+		if err := SendInteractionResponse(respCtx, bridge, requestID, sessionID, ownerID, conn, metadata); err != nil {
+			log.Error("interaction: failed to send response",
 				"request_id", requestID,
-				"session_id", sessionID)
+				"session_id", sessionID,
+				"err", err)
 		}
 	}
+}
+
+// NewSendResponseSyncFunc creates a response sender for interactive clients
+// that must render an accurate success or failure state before acknowledging a
+// button click. A nil error means the current worker accepted the response.
+func NewSendResponseSyncFunc(bridge *Bridge, requestID, sessionID, ownerID string, conn PlatformConn) func(context.Context, map[string]any) error {
+	return func(ctx context.Context, metadata map[string]any) error {
+		return SendInteractionResponse(ctx, bridge, requestID, sessionID, ownerID, conn, metadata)
+	}
+}
+
+// SendInteractionResponse delivers a standard interaction response through the
+// gateway to the active worker. It is shared by asynchronous timeout handling
+// and synchronous card actions so only successful worker delivery is reported
+// as a submitted response.
+func SendInteractionResponse(ctx context.Context, bridge *Bridge, requestID, sessionID, ownerID string, conn PlatformConn, metadata map[string]any) error {
+	if bridge == nil {
+		return fmt.Errorf("interaction: bridge not available")
+	}
+	env := &events.Envelope{
+		Version:   events.Version,
+		ID:        requestID,
+		SessionID: sessionID,
+		Event: events.Event{
+			Type: events.Input,
+			Data: map[string]any{
+				"content":  "",
+				"metadata": metadata,
+			},
+		},
+		OwnerID: ownerID,
+	}
+	if err := bridge.Handle(ctx, env, conn); err != nil {
+		return fmt.Errorf("interaction: send response: %w", err)
+	}
+	return nil
 }
 
 // BuildPermissionResponse creates a permission_response metadata map.
@@ -61,11 +78,38 @@ func BuildQuestionResponse(requestID, answer string) map[string]any {
 	if answer != "" {
 		answers["_"] = answer
 	}
+	return BuildQuestionResponseAnswers(requestID, answers)
+}
+
+// BuildQuestionResponseAnswers creates a question_response with one or more
+// named answers. Form-based cards use this for multi-select and multi-question
+// requests, while the single-answer helper retains the legacy "_" key.
+func BuildQuestionResponseAnswers(requestID string, answers map[string]string) map[string]any {
+	return BuildQuestionResponseAnswersWithOrder(requestID, answers, nil)
+}
+
+// BuildQuestionResponseAnswersWithOrder includes the original question order
+// for workers whose native protocol accepts positional answer arrays.
+func BuildQuestionResponseAnswersWithOrder(requestID string, answers map[string]string, questionOrder []string) map[string]any {
+	options := make(map[string][]string, len(answers))
+	for question, answer := range answers {
+		options[question] = []string{answer}
+	}
+	return BuildQuestionResponseOptionsWithOrder(requestID, options, questionOrder)
+}
+
+// BuildQuestionResponseOptionsWithOrder preserves all selected values for
+// multi-select questions while remaining compatible with single answers.
+func BuildQuestionResponseOptionsWithOrder(requestID string, answers map[string][]string, questionOrder []string) map[string]any {
+	response := map[string]any{
+		"id":      requestID,
+		"answers": answers,
+	}
+	if len(questionOrder) > 0 {
+		response["question_order"] = questionOrder
+	}
 	return map[string]any{
-		"question_response": map[string]any{
-			"id":      requestID,
-			"answers": answers,
-		},
+		"question_response": response,
 	}
 }
 
@@ -86,17 +130,23 @@ const (
 
 // PendingInteraction represents an interaction request awaiting a user response.
 type PendingInteraction struct {
-	ID        string        // request ID from the worker
-	SessionID string        // session ID
-	OwnerID   string        // user ID of the interaction owner (for auth verification)
-	Type      events.Kind   // PermissionRequest, QuestionRequest, ElicitationRequest
-	CreatedAt time.Time     // when the request was created
-	Timeout   time.Duration // timeout duration
+	ID        string            // request ID from the worker
+	SessionID string            // session ID
+	OwnerID   string            // user ID of the interaction owner (for auth verification)
+	Type      events.Kind       // PermissionRequest, QuestionRequest, ElicitationRequest
+	CreatedAt time.Time         // when the request was created
+	Timeout   time.Duration     // timeout duration
+	Questions []events.Question // original question schema for platform form decoding
 	// SendResponse sends the user's response back through the bridge.
 	// The metadata map contains the response data specific to the interaction type.
 	SendResponse func(metadata map[string]any)
+	// SendResponseSync delivers the response and reports whether the active
+	// worker accepted it. Interactive card actions use it to avoid presenting a
+	// successful state before the worker can continue.
+	SendResponseSync func(context.Context, map[string]any) error
 	// cancelCh is closed by CancelAll to abort the watchTimeout goroutine.
-	cancelCh chan struct{}
+	cancelCh  chan struct{}
+	resolving bool
 }
 
 // InteractionManager manages pending user interactions (permission requests,
@@ -156,6 +206,50 @@ func (m *InteractionManager) Complete(requestID string) (*PendingInteraction, bo
 	return pi, ok
 }
 
+// Claim marks a pending interaction as being delivered. Only one button or
+// text response can claim a request; callers must follow with CompleteClaimed
+// on success or Release on failure.
+func (m *InteractionManager) Claim(requestID string) (*PendingInteraction, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pi, ok := m.pending[requestID]
+	if !ok || pi.resolving {
+		return nil, false
+	}
+	pi.resolving = true
+	return pi, true
+}
+
+// CompleteClaimed removes an interaction after its response was successfully
+// accepted by the worker. It rejects unclaimed requests to preserve the
+// claim/finish/release state machine.
+func (m *InteractionManager) CompleteClaimed(requestID string) (*PendingInteraction, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pi, ok := m.pending[requestID]
+	if !ok || !pi.resolving {
+		return nil, false
+	}
+	delete(m.pending, requestID)
+	return pi, true
+}
+
+// Release makes a claimed interaction available for retry after a delivery
+// failure. It is safe to call after cancellation; in that case it is a no-op.
+func (m *InteractionManager) Release(requestID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pi, ok := m.pending[requestID]
+	if !ok || !pi.resolving {
+		return false
+	}
+	pi.resolving = false
+	return true
+}
+
 // Len returns the number of pending interactions.
 func (m *InteractionManager) Len() int {
 	m.mu.RLock()
@@ -191,7 +285,7 @@ func (m *InteractionManager) GetBySession(sessionID string) []*PendingInteractio
 
 	var result []*PendingInteraction
 	for _, pi := range m.pending {
-		if pi.SessionID == sessionID {
+		if pi.SessionID == sessionID && !pi.resolving {
 			result = append(result, pi)
 		}
 	}
@@ -213,8 +307,14 @@ func (m *InteractionManager) watchTimeout(pi *PendingInteraction) {
 	case <-timer.C:
 	}
 
-	// Try to complete (remove) the interaction; if already gone, user responded.
-	if _, ok := m.Complete(pi.ID); !ok {
+	// Claim before auto-denying. A card click may already be submitting the
+	// response; in that case it owns the resolution and the timeout must not
+	// race it with a stale denial.
+	claimed, ok := m.Claim(pi.ID)
+	if !ok {
+		return
+	}
+	if _, ok := m.CompleteClaimed(pi.ID); !ok {
 		return
 	}
 
@@ -238,11 +338,11 @@ func (m *InteractionManager) watchTimeout(pi *PendingInteraction) {
 		// Send auto-deny/reject response based on type
 		switch pi.Type {
 		case events.PermissionRequest:
-			pi.SendResponse(BuildPermissionResponse(pi.ID, false, "interaction timed out"))
+			claimed.SendResponse(BuildPermissionResponse(claimed.ID, false, "interaction timed out"))
 		case events.QuestionRequest:
-			pi.SendResponse(BuildQuestionResponse(pi.ID, ""))
+			claimed.SendResponse(BuildQuestionResponse(claimed.ID, ""))
 		case events.ElicitationRequest:
-			pi.SendResponse(BuildElicitationResponse(pi.ID, "cancel"))
+			claimed.SendResponse(BuildElicitationResponse(claimed.ID, "cancel"))
 		}
 	}()
 }

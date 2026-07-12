@@ -313,6 +313,7 @@ type QuestionOption struct {
 
 // Question represents a single question with options.
 type Question struct {
+	ID          string           `json:"id,omitempty"`
 	Question    string           `json:"question"`
 	Header      string           `json:"header"`
 	Options     []QuestionOption `json:"options"`

@@ -1049,6 +1049,24 @@ func TestAnswersToArrays(t *testing.T) {
 	}
 }
 
+func TestAnswersToOrderedArrays_PreservesQuestionOrder(t *testing.T) {
+	t.Parallel()
+	answers := map[string]string{"第二题": "B", "第一题": "A"}
+	require.Equal(t, [][]string{{"A"}, {"B"}}, answersToOrderedArrays(answers, []string{"第一题", "第二题"}))
+}
+
+func TestAnswerOptionsToOrderedArraysPreservesMultiSelect(t *testing.T) {
+	t.Parallel()
+	answers := map[string][]string{
+		"checks":      {"Unit", "Race"},
+		"environment": {"Staging"},
+	}
+	require.Equal(t,
+		[][]string{{"Staging"}, {"Unit", "Race"}},
+		answerOptionsToOrderedArrays(answers, []string{"environment", "checks"}),
+	)
+}
+
 // Consolidated: conn tests
 func TestConn(t *testing.T) {
 	t.Parallel()

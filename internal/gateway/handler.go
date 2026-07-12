@@ -134,8 +134,8 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "malformed input data")
 	}
 
-	if h.tryInteractionResponse(ctx, env, data) {
-		return nil
+	if handled, err := h.tryInteractionResponse(ctx, env, data); handled {
+		return err
 	}
 
 	content, _ := data["content"].(string)
@@ -154,15 +154,15 @@ func (h *Handler) cancelRetryIfNeeded(sessionID string) {
 
 // tryInteractionResponse routes permission/question/elicitation responses directly
 // to the worker, bypassing command detection and state transitions.
-func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelope, data map[string]any) bool {
+func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelope, data map[string]any) (bool, error) {
 	md, ok := data["metadata"].(map[string]any)
 	if !ok {
-		return false
+		return false, nil
 	}
 	if md["permission_response"] == nil &&
 		md["question_response"] == nil &&
 		md["elicitation_response"] == nil {
-		return false
+		return false, nil
 	}
 
 	respType := "unknown"
@@ -186,15 +186,39 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 				"err", err,
 				"type", respType,
 				"session_id", env.SessionID)
+			return true, fmt.Errorf("gateway: %s interaction response failed: %w", respType, err)
 		} else if h.bridge != nil {
 			h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
+			h.recordPermissionDenial(respType, md, env)
 		}
 	} else {
 		h.log.Warn("gateway: interaction response dropped — no worker",
 			"type", respType,
 			"session_id", env.SessionID)
+		return true, fmt.Errorf("gateway: %s interaction response dropped: no worker for session %s", respType, env.SessionID)
 	}
-	return true
+	return true, nil
+}
+
+// recordPermissionDenial registers a user's tool denial in the bridge dedup
+// cache so a same-fingerprint retry within the window is auto-suppressed.
+// Watchdog auto-denials (reason "interaction timed out") are excluded — a
+// timeout is not a user decision, and the user deserves a fresh card on retry.
+func (h *Handler) recordPermissionDenial(respType string, md map[string]any, env *events.Envelope) {
+	if respType != "permission" {
+		return
+	}
+	pr, ok := md["permission_response"].(map[string]any)
+	if !ok {
+		return
+	}
+	if allowed, _ := pr["allowed"].(bool); allowed {
+		return
+	}
+	if reason, _ := pr["reason"].(string); reason == "interaction timed out" {
+		return
+	}
+	h.bridge.RecordPermissionDeny(env.SessionID, env.ID, env.OwnerID)
 }
 
 // tryCommandDispatch detects help/control/worker commands and dispatches them.
@@ -538,6 +562,26 @@ func (h *Handler) handleInteractionResponseEvent(ctx context.Context, env *event
 	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, "")
 	if h.bridge != nil {
 		h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, env.Event.Type, env.Event.Data)
+	}
+	// Explicit AEP interaction responses (used by WebChat) are acknowledged
+	// only after the Worker native response endpoint accepts them. WebSocket
+	// send success alone is not delivery success, so the browser treats this
+	// correlated echo as the authoritative resolved/rejected transition.
+	if h.hub != nil {
+		ack := events.NewEnvelope(
+			aep.NewID(),
+			env.SessionID,
+			h.hub.NextSeq(env.SessionID),
+			env.Event.Type,
+			env.Event.Data,
+		)
+		ack.OwnerID = env.OwnerID
+		if err := h.hub.SendToSession(ctx, ack); err != nil {
+			h.log.Warn("gateway: interaction response ack delivery failed",
+				"err", err,
+				"type", env.Event.Type,
+				"session_id", env.SessionID)
+		}
 	}
 	return nil
 }

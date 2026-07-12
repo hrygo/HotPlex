@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -122,6 +123,11 @@ type AppServerWorker struct {
 	pendingHistory  []worker.ConversationTurn
 	historyInjected bool
 }
+
+var (
+	_ base.MetadataHandler                    = (*AppServerWorker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler = (*AppServerWorker)(nil)
+)
 
 // appConn implements worker.SessionConn for the app-server mode.
 type appConn struct {
@@ -338,6 +344,17 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 		w.closeAndMarkDone()
 		w.mu.Unlock()
 		return fmt.Errorf("codexcli: %s: manager process not running", errPrefix)
+	}
+
+	// Ensure the working directory exists before starting a thread bound to it.
+	// codex runs as a shared app-server singleton (proc.Dir=""), so the workdir
+	// is only passed via the JSON cwd field in buildThreadStartParams. If it does
+	// not exist, codex receives a non-existent cwd and later turns fail — same
+	// class of bug as opencode_server (see #863).
+	if session.ProjectDir != "" {
+		if err := os.MkdirAll(session.ProjectDir, 0o755); err != nil {
+			return fmt.Errorf("codexcli: %s: create workdir: %w", errPrefix, err)
+		}
 	}
 
 	cfg := resolveConfig()
@@ -611,23 +628,25 @@ func (w *AppServerWorker) LastIO() time.Time {
 }
 
 func (w *AppServerWorker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
-	decision := "decline"
-	if allowed {
-		decision = "accept"
-	}
-	result := map[string]any{"decision": decision}
-	if reason != "" {
-		result["reason"] = reason
+	result, err := w.manager.PermissionResponseResult(reqID, allowed, reason)
+	if err != nil {
+		return err
 	}
 	return w.manager.RespondServerRequest(ctx, reqID, result)
 }
 
 func (w *AppServerWorker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
-	result := map[string]any{
-		"behavior": "allow",
-		"updatedInput": map[string]any{
-			"answers": answers,
-		},
+	result, err := w.manager.QuestionResponseResult(reqID, answers)
+	if err != nil {
+		return err
+	}
+	return w.manager.RespondServerRequest(ctx, reqID, result)
+}
+
+func (w *AppServerWorker) HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, _ []string) error {
+	result, err := w.manager.QuestionResponseOptionsResult(reqID, answers)
+	if err != nil {
+		return err
 	}
 	return w.manager.RespondServerRequest(ctx, reqID, result)
 }

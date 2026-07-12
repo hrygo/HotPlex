@@ -745,6 +745,38 @@ func TestControlHandler_SendElicitationResponse(t *testing.T) {
 	require.Equal(t, "accept", resp.Response.Response["action"])
 }
 
+func TestControlHandler_SendPermissionResponse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		allowed bool
+		reason  string
+	}{
+		{"allow_with_reason", true, "approved by user"},
+		{"deny_without_reason", false, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			log := newTestLogger()
+			var buf bytes.Buffer
+			ch := NewControlHandler(log, &buf)
+
+			err := ch.SendPermissionResponse(context.Background(), "req_p1", tc.allowed, tc.reason)
+			require.NoError(t, err)
+
+			var resp ControlResponse
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+			require.Equal(t, "req_p1", resp.Response.RequestID)
+			require.Equal(t, "success", resp.Response.Subtype)
+			require.Equal(t, tc.allowed, resp.Response.Response["allowed"])
+			require.Equal(t, tc.reason, resp.Response.Response["reason"])
+		})
+	}
+}
+
 func TestSessionFileGlobs(t *testing.T) {
 	t.Parallel()
 
@@ -912,10 +944,12 @@ func TestInitConfig_PermissionSettings(t *testing.T) {
 	origCmd := commandParts.Load()
 	origPP := permissionPrompt.Load()
 	origAA := permissionAutoApprove.Load()
+	origOPM := operatorPermissionMode.Load()
 	defer func() {
 		commandParts.Store(origCmd)
 		permissionPrompt.Store(origPP)
 		permissionAutoApprove.Store(origAA)
+		operatorPermissionMode.Store(origOPM)
 	}()
 
 	tests := []struct {

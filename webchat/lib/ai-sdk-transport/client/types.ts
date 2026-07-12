@@ -158,9 +158,11 @@ export interface QuestionOption {
 }
 
 export interface QuestionItem {
+  id?: string;
   header?: string;
   question: string;
   options?: QuestionOption[];
+  multi_select?: boolean;
 }
 
 export interface QuestionRequestData {
@@ -170,7 +172,7 @@ export interface QuestionRequestData {
 
 export interface QuestionResponseData {
   id: string;
-  answers: Record<string, string>;
+  answers: Record<string, string | string[]>;
 }
 
 export interface ElicitationRequestData {

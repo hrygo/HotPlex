@@ -29,11 +29,12 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ worker.Worker                 = (*Worker)(nil)
-	_ worker.WorkerSessionIDHandler = (*Worker)(nil)
-	_ worker.WorkerCommander        = (*Worker)(nil)
-	_ worker.ControlRequester       = (*Worker)(nil)
-	_ base.MetadataHandler          = (*Worker)(nil)
+	_ worker.Worker                           = (*Worker)(nil)
+	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
+	_ worker.WorkerCommander                  = (*Worker)(nil)
+	_ worker.ControlRequester                 = (*Worker)(nil)
+	_ base.MetadataHandler                    = (*Worker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
 )
 
 // commandParts stores the space-split command (binary + optional prefix args).
@@ -934,7 +935,7 @@ func (w *Worker) handleSetPermissionMode(body map[string]any) (map[string]any, e
 // ─── MetadataHandler ─────────────────────────────────────────────────────────
 
 func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, _ string) error {
-	result, ok := w.pendingPerm.LoadAndDelete(reqID)
+	result, ok := w.pendingPerm.Load(reqID)
 	if !ok {
 		return fmt.Errorf("acp: no pending permission request: %s", reqID)
 	}
@@ -958,10 +959,18 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 	if client == nil {
 		return fmt.Errorf("acp: permission response: worker not started")
 	}
-	return client.RespondRequest(ctx, pm.RequestID, outcome)
+	if err := client.RespondRequest(ctx, pm.RequestID, outcome); err != nil {
+		return err
+	}
+	w.pendingPerm.Delete(reqID)
+	return nil
 }
 
 func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	return w.respondToServerRequest(ctx, reqID, "question", answers)
+}
+
+func (w *Worker) HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, _ []string) error {
 	return w.respondToServerRequest(ctx, reqID, "question", answers)
 }
 
@@ -976,7 +985,7 @@ func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action st
 // respondToServerRequest is the shared logic for forwarding client responses
 // back to the agent for non-permission server-initiated requests.
 func (w *Worker) respondToServerRequest(ctx context.Context, reqID, kind string, outcome any) error {
-	req, ok := w.pendingRequests.LoadAndDelete(reqID)
+	req, ok := w.pendingRequests.Load(reqID)
 	if !ok {
 		return fmt.Errorf("acp: no pending %s request: %s", kind, reqID)
 	}
@@ -990,7 +999,11 @@ func (w *Worker) respondToServerRequest(ctx context.Context, reqID, kind string,
 	if !ok {
 		return fmt.Errorf("acp: %s response: invalid request type %T", kind, req)
 	}
-	return client.RespondRequest(ctx, acpReq.ID, outcome)
+	if err := client.RespondRequest(ctx, acpReq.ID, outcome); err != nil {
+		return err
+	}
+	w.pendingRequests.Delete(reqID)
+	return nil
 }
 
 // ─── readLoop ────────────────────────────────────────────────────────────────

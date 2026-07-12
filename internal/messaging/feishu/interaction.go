@@ -98,13 +98,14 @@ func (c *FeishuConn) sendElicitationRequest(ctx context.Context, env *events.Env
 // registerInteraction registers a pending interaction with the adapter's manager.
 func (a *Adapter) registerInteraction(requestID, sessionID, ownerID string, kind events.Kind, conn *FeishuConn) {
 	a.Interactions.Register(&messaging.PendingInteraction{
-		ID:           requestID,
-		SessionID:    sessionID,
-		OwnerID:      ownerID,
-		Type:         kind,
-		CreatedAt:    time.Now(),
-		Timeout:      messaging.DefaultInteractionTimeout,
-		SendResponse: messaging.NewSendResponseFunc(a.Log, a.Bridge(), requestID, sessionID, ownerID, conn),
+		ID:               requestID,
+		SessionID:        sessionID,
+		OwnerID:          ownerID,
+		Type:             kind,
+		CreatedAt:        time.Now(),
+		Timeout:          messaging.DefaultInteractionTimeout,
+		SendResponse:     messaging.NewSendResponseFunc(a.Log, a.Bridge(), requestID, sessionID, ownerID, conn),
+		SendResponseSync: messaging.NewSendResponseSyncFunc(a.Bridge(), requestID, sessionID, ownerID, conn),
 	})
 }
 
@@ -168,15 +169,37 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, userID stri
 		metadata = messaging.BuildElicitationResponse(matched.ID, action)
 	}
 
-	// Complete (remove) the interaction
-	if completed, ok := a.Interactions.Complete(matched.ID); !ok {
-		return false
-	} else {
-		_ = completed
+	// Claim first so text replies and card clicks cannot deliver the same
+	// response twice. Keep the interaction pending until the active worker
+	// confirms that it accepted the metadata.
+	claimed, ok := a.Interactions.Claim(matched.ID)
+	if !ok {
+		// Request resolved/cancelled concurrently; surface it instead of silent consume.
+		_ = a.sendTextMessage(ctx, conn.chatID, "该请求已过期或已响应")
+		return true
 	}
-
-	// Send the response
-	matched.SendResponse(metadata)
+	deliveryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var err error
+	if claimed.SendResponseSync != nil {
+		err = claimed.SendResponseSync(deliveryCtx, metadata)
+	} else if claimed.SendResponse != nil {
+		claimed.SendResponse(metadata)
+	} else {
+		err = fmt.Errorf("feishu: interaction has no response sender")
+	}
+	if err != nil {
+		a.Interactions.Release(matched.ID)
+		a.Log.Warn("feishu: text interaction response delivery failed",
+			"request_id", matched.ID,
+			"type", matched.Type,
+			"err", err)
+		_ = a.sendTextMessage(ctx, conn.chatID, "⚠️ 响应未提交，请稍后重试")
+		return true
+	}
+	if _, ok := a.Interactions.CompleteClaimed(matched.ID); !ok {
+		return true
+	}
 
 	a.Log.Info("feishu: interaction response received via text",
 		"request_id", matched.ID,
@@ -184,13 +207,13 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, userID stri
 		"text_preview", truncate(text, 50))
 
 	// Send acknowledgment
-	ackText := "✅ 已收到响应"
+	ackText := "✅ 已提交，Agent 继续执行"
 	if matched.Type == events.PermissionRequest {
 		if d, ok := metadata["permission_response"].(map[string]any); ok {
 			if allowed, _ := d["allowed"].(bool); allowed {
-				ackText = "✅ 已允许"
+				ackText = "✅ 已允许，Agent 继续执行"
 			} else {
-				ackText = "🚫 已拒绝"
+				ackText = "🚫 已拒绝，Agent 将不会执行此操作"
 			}
 		}
 	}

@@ -1,9 +1,11 @@
 package opencodeserver
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"runtime"
 	"testing"
 	"time"
@@ -460,4 +462,39 @@ func TestSingletonProcessManager_IdleDrain_KillsWithoutProcMuDeadlock(t *testing
 	case <-time.After(3 * time.Second):
 		t.Fatal("idle-drain deadlocked on proc.mu — process never killed (P1-1 regression)")
 	}
+}
+
+func TestSingletonProcessManager_readStderr(t *testing.T) {
+	t.Parallel()
+
+	// Capture log output to verify stderr lines are forwarded to the logger.
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	mgr := NewSingletonProcessManager(log, config.OpenCodeServerConfig{})
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	// Write two lines then close the write-end to simulate process exit (EOF).
+	_, err = io.WriteString(w, "err one\nerr two\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	// readStderr must drain to EOF and return, not block forever.
+	done := make(chan struct{})
+	go func() {
+		mgr.readStderr(r)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readStderr did not return after stderr was closed")
+	}
+
+	output := buf.String()
+	require.Contains(t, output, "err one")
+	require.Contains(t, output, "err two")
 }

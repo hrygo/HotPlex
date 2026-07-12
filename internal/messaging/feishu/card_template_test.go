@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -460,20 +461,30 @@ func TestBuildPermissionCardWithButtons(t *testing.T) {
 	btn0 := buttons[0].(map[string]any)
 	require.Equal(t, "button", btn0["tag"])
 	require.Equal(t, "primary", btn0["type"])
-	require.Equal(t, "✅ 允许", btn0["text"].(map[string]any)["content"])
+	require.Equal(t, "允许并继续", btn0["text"].(map[string]any)["content"])
 	val0 := btn0["value"].(map[string]any)
 	require.Equal(t, "allow", val0["action"])
 	require.Equal(t, "perm-1", val0["request_id"])
 
 	btn1 := buttons[1].(map[string]any)
 	require.Equal(t, "danger", btn1["type"])
-	require.Equal(t, "❌ 拒绝", btn1["text"].(map[string]any)["content"])
+	require.Equal(t, "拒绝", btn1["text"].(map[string]any)["content"])
 	val1 := btn1["value"].(map[string]any)
 	require.Equal(t, "deny", val1["action"])
 	require.Equal(t, "perm-1", val1["request_id"])
 
 	hdr := card["header"].(map[string]any)
 	require.Equal(t, "orange", hdr["template"])
+	require.Equal(t, "执行命令", hdr["title"].(map[string]any)["content"], "raw tool names must not become the card title")
+
+	var details map[string]any
+	for _, e := range elements {
+		m := e.(map[string]any)
+		if m["tag"] == "collapsible_panel" {
+			details = m
+		}
+	}
+	require.NotNil(t, details, "raw command details must be collapsed")
 }
 
 func TestBuildPermissionCardWithButtons_NoArgs(t *testing.T) {
@@ -496,7 +507,7 @@ func TestBuildPermissionCardWithButtons_NoArgs(t *testing.T) {
 	md := elements[0].(map[string]any)
 	require.Equal(t, "markdown", md["tag"])
 	content := md["content"].(string)
-	require.Contains(t, content, "Read")
+	require.Contains(t, content, "目的")
 	require.NotContains(t, content, "参数：")
 
 	var actionEl map[string]any
@@ -580,10 +591,57 @@ func TestBuildQuestionCardWithButtons_NoOptions(t *testing.T) {
 
 	body := card["body"].(map[string]any)
 	elems := body["elements"].([]any)
+	var submit map[string]any
 	for _, e := range elems {
 		m := e.(map[string]any)
-		require.NotEqual(t, "interactive_container", m["tag"], "no interactive_container element expected when question has no options")
+		if m["tag"] == "interactive_container" {
+			submit = m
+		}
 	}
+	require.NotNil(t, submit, "custom answers require a submit action")
+	buttons := submit["elements"].([]any)
+	require.Len(t, buttons, 1)
+	require.Equal(t, "提交自定义答案", buttons[0].(map[string]any)["text"].(map[string]any)["content"])
+}
+
+func TestBuildQuestionCardWithButtons_MultiSelectUsesSingleFormSubmit(t *testing.T) {
+	t.Parallel()
+	got := buildQuestionCardWithButtons(&events.QuestionRequestData{
+		ID: "q-multi",
+		Questions: []events.Question{{
+			Header: "范围", Question: "选择所有适用项", MultiSelect: true,
+			Options: []events.QuestionOption{{Label: "A", Description: "第一项"}, {Label: "B", Description: "第二项"}},
+		}},
+	})
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+	elements := card["body"].(map[string]any)["elements"].([]any)
+	require.Len(t, elements, 2)
+	form := elements[1].(map[string]any)
+	require.Equal(t, "form", form["tag"])
+	formElements := form["elements"].([]any)
+	require.Equal(t, "multi_select_static", formElements[0].(map[string]any)["tag"])
+	require.Equal(t, "form_submit", formElements[1].(map[string]any)["action_type"])
+	questionKeys := formElements[1].(map[string]any)["value"].(map[string]any)["question_keys"].(map[string]any)
+	require.Equal(t, "选择所有适用项", questionKeys["answer_0"])
+	require.Contains(t, elements[0].(map[string]any)["content"].(string), "第一项")
+}
+
+func TestBuildPermissionCardWithButtons_TruncatesOversizedArgument(t *testing.T) {
+	t.Parallel()
+	got := buildPermissionCardWithButtons(&events.PermissionRequestData{ID: "p-limit", ToolName: "Bash", Args: []string{strings.Repeat("x", 10000)}})
+	var card map[string]any
+	require.NoError(t, json.Unmarshal([]byte(got), &card))
+	elements := card["body"].(map[string]any)["elements"].([]any)
+	for _, element := range elements {
+		item := element.(map[string]any)
+		if item["tag"] == "collapsible_panel" {
+			content := item["elements"].([]any)[0].(map[string]any)["content"].(string)
+			require.LessOrEqual(t, len(content), 3000)
+			return
+		}
+	}
+	t.Fatal("technical details panel missing")
 }
 
 func TestBuildElicitationCardWithButtons(t *testing.T) {
@@ -602,10 +660,16 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 	body := card["body"].(map[string]any)
 	elements := body["elements"].([]any)
 
-	md := elements[0].(map[string]any)
-	require.Equal(t, "markdown", md["tag"])
-	content := md["content"].(string)
-	require.Contains(t, content, "https://github.com/login/oauth", "URL must appear as link in body")
+	var details map[string]any
+	for _, e := range elements {
+		m := e.(map[string]any)
+		if m["tag"] == "collapsible_panel" {
+			details = m
+		}
+	}
+	require.NotNil(t, details, "technical URL details should be collapsible")
+	detailElements := details["elements"].([]any)
+	require.Contains(t, detailElements[0].(map[string]any)["content"].(string), "https://github.com/login/oauth")
 
 	var actionEl map[string]any
 	var inputEl map[string]any
@@ -627,14 +691,14 @@ func TestBuildElicitationCardWithButtons(t *testing.T) {
 
 	btn0 := buttons[0].(map[string]any)
 	require.Equal(t, "primary", btn0["type"])
-	require.Equal(t, "✅ 接受", btn0["text"].(map[string]any)["content"])
+	require.Equal(t, "接受并继续", btn0["text"].(map[string]any)["content"])
 	val0 := btn0["value"].(map[string]any)
 	require.Equal(t, "accept", val0["action"])
 	require.Equal(t, "e-1", val0["request_id"])
 
 	btn1 := buttons[1].(map[string]any)
 	require.Equal(t, "danger", btn1["type"])
-	require.Equal(t, "❌ 拒绝", btn1["text"].(map[string]any)["content"])
+	require.Equal(t, "拒绝", btn1["text"].(map[string]any)["content"])
 	val1 := btn1["value"].(map[string]any)
 	require.Equal(t, "decline", val1["action"])
 	require.Equal(t, "e-1", val1["request_id"])

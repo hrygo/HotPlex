@@ -487,20 +487,31 @@ func (p PostgresConfig) DSN() string {
 
 // WorkerConfig holds per-worker defaults.
 type WorkerConfig struct {
-	MaxLifetime           time.Duration        `mapstructure:"max_lifetime"`
-	IdleTimeout           time.Duration        `mapstructure:"idle_timeout"`
-	ExecutionTimeout      time.Duration        `mapstructure:"execution_timeout"`
-	TurnTimeout           time.Duration        `mapstructure:"turn_timeout"`
-	EnvBlocklist          []string             `mapstructure:"env_blocklist"`
-	DefaultWorkDir        string               `mapstructure:"default_work_dir"`
-	PIDDir                string               `mapstructure:"pid_dir"`
-	AutoRetry             AutoRetryConfig      `mapstructure:"auto_retry"`
-	OpenCodeServer        OpenCodeServerConfig `mapstructure:"opencode_server"`
-	ClaudeCode            ClaudeCodeConfig     `mapstructure:"claude_code"`
-	CodexCLI              CodexCLIConfig       `mapstructure:"codex_cli"`
-	ACP                   ACPConfig            `mapstructure:"acp"`
-	Environment           []string             `mapstructure:"environment"`
-	DefaultPermissionMode string               `mapstructure:"default_permission_mode"` // r3 (#804): bridge injects this for workspaces with no explicit override; seeded "workspace" by Default()
+	MaxLifetime           time.Duration             `mapstructure:"max_lifetime"`
+	IdleTimeout           time.Duration             `mapstructure:"idle_timeout"`
+	ExecutionTimeout      time.Duration             `mapstructure:"execution_timeout"`
+	TurnTimeout           time.Duration             `mapstructure:"turn_timeout"`
+	EnvBlocklist          []string                  `mapstructure:"env_blocklist"`
+	DefaultWorkDir        string                    `mapstructure:"default_work_dir"`
+	PIDDir                string                    `mapstructure:"pid_dir"`
+	AutoRetry             AutoRetryConfig           `mapstructure:"auto_retry"`
+	OpenCodeServer        OpenCodeServerConfig      `mapstructure:"opencode_server"`
+	ClaudeCode            ClaudeCodeConfig          `mapstructure:"claude_code"`
+	CodexCLI              CodexCLIConfig            `mapstructure:"codex_cli"`
+	ACP                   ACPConfig                 `mapstructure:"acp"`
+	Environment           []string                  `mapstructure:"environment"`
+	DefaultPermissionMode string                    `mapstructure:"default_permission_mode"` // r3 (#804): bridge injects this for workspaces with no explicit override; seeded "workspace" by Default()
+	PermissionDenyDedup   PermissionDenyDedupConfig `mapstructure:"permission_deny_dedup"`
+}
+
+// PermissionDenyDedupConfig controls suppression of repeated permission cards
+// after a user denial. Within Window after a deny, the same owner+fingerprint is
+// auto-denied locally without forwarding a new card to the client — closes the
+// "deny → agent retries the same tool seconds later → new card" loop. See
+// docs/specs/Permission-Deny-Dedup-Spec.md.
+type PermissionDenyDedupConfig struct {
+	Enabled bool          `mapstructure:"enabled"`
+	Window  time.Duration `mapstructure:"window"`
 }
 
 // MCPServerConfig defines a single MCP server for worker startup.
@@ -525,6 +536,7 @@ func (c *MCPServerConfig) Validate() error {
 // ClaudeCodeConfig holds Claude Code worker startup settings.
 type ClaudeCodeConfig struct {
 	Command               string                      `mapstructure:"command"`                 // binary + optional subcommand, e.g. "claude" or "ccr code"
+	PermissionMode        string                      `mapstructure:"permission_mode"`         // operator default PermissionMode tier for sessions with no explicit override (platform/cron: bridge injects ""); "" = bypass. Valid: read-only|workspace|auto-edit|bypass. Counterpart to codex_cli.sandbox+approval_mode / acp.auto_approve.
 	PermissionPrompt      bool                        `mapstructure:"permission_prompt"`       // enable --permission-prompt-tool stdio for interaction chain
 	PermissionAutoApprove []string                    `mapstructure:"permission_auto_approve"` // tool names to auto-approve without user interaction
 	MCPServers            map[string]*MCPServerConfig `mapstructure:"mcp_servers"`             // user-configured MCP servers; empty = default discovery

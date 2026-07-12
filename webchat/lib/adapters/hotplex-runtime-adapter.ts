@@ -16,8 +16,11 @@ import type {
     InitConfig,
     ContextUsageData,
     PermissionRequestData,
+    PermissionResponseData,
     QuestionRequestData,
+    QuestionResponseData,
     ElicitationRequestData,
+    ElicitationResponseData,
 } from "@/lib/ai-sdk-transport/client/types";
 import {
     WorkerStdioCommand,
@@ -310,6 +313,9 @@ export function useHotPlexRuntime({
     const interactionMapRef = useRef<
         Map<string, { type: "permission" | "question" | "elicitation" }>
     >(new Map());
+    const interactionAckTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+        new Map(),
+    );
 
     // Cache min turn ID for cursor-based pagination (avoid O(n) scan on each load)
     const minIdRef = useRef<number>(0);
@@ -782,6 +788,65 @@ export function useHotPlexRuntime({
             }
         };
 
+        const updateInteractionState = (
+            requestId: string,
+            status: InteractionStatus,
+            response?: unknown,
+            error?: string,
+            onlySubmitting = false,
+        ) => {
+            const timer = interactionAckTimersRef.current.get(requestId);
+            if (timer) {
+                clearTimeout(timer);
+                interactionAckTimersRef.current.delete(requestId);
+            }
+            setMessages((prev) => prev.map((msg) => {
+                if (msg.role !== "assistant") return msg;
+                let found = false;
+                const parts = msg.parts.map((part) => {
+                    if (part.type !== "tool-call" || part.toolCallId !== requestId) {
+                        return part;
+                    }
+                    const interaction = part.args?.interaction;
+                    if (!interaction || (onlySubmitting && interaction.status !== "submitting")) {
+                        return part;
+                    }
+                    found = true;
+                    return {
+                        ...part,
+                        args: {
+                            ...part.args,
+                            interaction: {
+                                ...interaction,
+                                status,
+                                response,
+                                error,
+                            },
+                        },
+                    };
+                });
+                return found ? { ...msg, parts } : msg;
+            }));
+        };
+
+        const handlePermissionResponse = (data: PermissionResponseData) => {
+            if (!data?.id) return;
+            updateInteractionState(data.id, data.allowed ? "resolved" : "rejected", data);
+            interactionMapRef.current.delete(data.id);
+        };
+
+        const handleQuestionResponse = (data: QuestionResponseData) => {
+            if (!data?.id) return;
+            updateInteractionState(data.id, "resolved", data);
+            interactionMapRef.current.delete(data.id);
+        };
+
+        const handleElicitationResponse = (data: ElicitationResponseData) => {
+            if (!data?.id) return;
+            updateInteractionState(data.id, data.action === "accept" ? "resolved" : "rejected", data);
+            interactionMapRef.current.delete(data.id);
+        };
+
         const handleError = (data: ErrorData, env: Envelope) => {
             const isBusy = (data?.code as string) === "SESSION_BUSY";
 
@@ -790,33 +855,14 @@ export function useHotPlexRuntime({
                                        (data?.message || "").includes("invalid response data");
             if (isInteractionError) {
                 const reqId = env?.metadata?.interaction_error?.request_id;
-                setMessages((prev) => {
-                    return prev.map((msg) => {
-                        if (msg.role !== "assistant") return msg;
-                        let found = false;
-                        const parts = msg.parts.map((p) => {
-                            if (p.type === "tool-call" && p.args?.interaction) {
-                                const inter = p.args.interaction;
-                                if ((reqId && p.toolCallId === reqId) || (!reqId && inter.status === "submitting")) {
-                                    found = true;
-                                    return {
-                                        ...p,
-                                        args: {
-                                            ...p.args,
-                                            interaction: {
-                                                ...inter,
-                                                status: "failed" as const,
-                                                error: data?.message || "Failed to deliver response to worker",
-                                            },
-                                        },
-                                    };
-                                }
-                            }
-                            return p;
-                        });
-                        return found ? { ...msg, parts } : msg;
-                    });
-                });
+                if (reqId) {
+                    updateInteractionState(
+                        reqId,
+                        "failed",
+                        undefined,
+                        data?.message || "Failed to deliver response to worker",
+                    );
+                }
             }
 
             const isResumeRetry = (data?.code as string) === "RESUME_RETRY";
@@ -1007,6 +1053,15 @@ export function useHotPlexRuntime({
 
         const handleDisconnected = (reason: string) => {
             logger.info("RuntimeAdapter", "Disconnected", { reason });
+            for (const requestId of interactionMapRef.current.keys()) {
+                updateInteractionState(
+                    requestId,
+                    "failed",
+                    undefined,
+                    "Connection closed before the response was confirmed",
+                    true,
+                );
+            }
             setIsRunning(false);
             setConnectionState("disconnected");
         };
@@ -1156,6 +1211,7 @@ export function useHotPlexRuntime({
             });
         };
         client.on("permissionRequest", handlePermissionRequest);
+        client.on("permissionResponse", handlePermissionResponse);
 
         const handleQuestionRequest = (
             data: QuestionRequestData,
@@ -1198,6 +1254,7 @@ export function useHotPlexRuntime({
             });
         };
         client.on("questionRequest", handleQuestionRequest);
+        client.on("questionResponse", handleQuestionResponse);
 
         const handleElicitationRequest = (
             data: ElicitationRequestData,
@@ -1239,6 +1296,7 @@ export function useHotPlexRuntime({
             });
         };
         client.on("elicitationRequest", handleElicitationRequest);
+        client.on("elicitationResponse", handleElicitationResponse);
 
         // eslint-disable-next-line react-hooks/set-state-in-effect -- connection lifecycle state
         setConnectionState("connecting");
@@ -1287,10 +1345,17 @@ export function useHotPlexRuntime({
             client.off("contextUsage", handleContextUsage);
             client.off("skillsList", handleSkillsList);
             client.off("permissionRequest", handlePermissionRequest);
+            client.off("permissionResponse", handlePermissionResponse);
             client.off("questionRequest", handleQuestionRequest);
+            client.off("questionResponse", handleQuestionResponse);
             client.off("elicitationRequest", handleElicitationRequest);
+            client.off("elicitationResponse", handleElicitationResponse);
             // eslint-disable-next-line react-hooks/exhaustive-deps -- interactionMapRef is a stable singleton map
             interactionMapRef.current.clear();
+            for (const timer of interactionAckTimersRef.current.values()) {
+                clearTimeout(timer);
+            }
+            interactionAckTimersRef.current.clear();
             client.disconnect();
             clientRef.current = null;
         };
@@ -1510,7 +1575,7 @@ export function useHotPlexRuntime({
                 type: "permission" | "question" | "elicitation";
                 allowed?: boolean;
                 reason?: string;
-                answers?: Record<string, string>;
+                answers?: Record<string, string | string[]>;
                 action?: "accept" | "decline" | "cancel";
                 content?: Record<string, unknown>;
             },
@@ -1565,40 +1630,43 @@ export function useHotPlexRuntime({
                         break;
                 }
 
-                // Transition status to resolved/rejected
-                setMessages((prev) => {
-                    return prev.map((msg) => {
+                // WebSocket send only proves that the frame entered the socket.
+                // Stay in submitting until Gateway echoes the correlated response
+                // after the Worker native endpoint accepts it.
+                const existingTimer = interactionAckTimersRef.current.get(toolCallId);
+                if (existingTimer) clearTimeout(existingTimer);
+                const timer = setTimeout(() => {
+                    interactionAckTimersRef.current.delete(toolCallId);
+                    setMessages((prev) => prev.map((msg) => {
                         if (msg.role !== "assistant") return msg;
                         let found = false;
-                        const parts = msg.parts.map((p) => {
-                            if (p.type === "tool-call" && p.toolCallId === toolCallId) {
-                                found = true;
-                                const inter = p.args?.interaction;
-                                let nextStatus: InteractionStatus = "resolved";
-                                if (response.type === "permission" && !response.allowed) {
-                                    nextStatus = "rejected";
-                                } else if (response.type === "elicitation" && response.action !== "accept") {
-                                    nextStatus = "rejected";
-                                }
-                                return {
-                                    ...p,
-                                    args: {
-                                        ...p.args,
-                                        interaction: {
-                                            ...inter,
-                                            status: nextStatus,
-                                            response: response,
-                                        },
+                        const parts = msg.parts.map((part) => {
+                            if (part.type !== "tool-call" || part.toolCallId !== toolCallId) return part;
+                            const interaction = part.args?.interaction;
+                            if (!interaction || interaction.status !== "submitting") return part;
+                            found = true;
+                            return {
+                                ...part,
+                                args: {
+                                    ...part.args,
+                                    interaction: {
+                                        ...interaction,
+                                        status: "failed" as const,
+                                        error: "Timed out waiting for the Worker to confirm this response",
                                     },
-                                };
-                            }
-                            return p;
+                                },
+                            };
                         });
                         return found ? { ...msg, parts } : msg;
-                    });
-                });
-                interactionMapRef.current.delete(toolCallId);
+                    }));
+                }, 15_000);
+                interactionAckTimersRef.current.set(toolCallId, timer);
             } catch (err) {
+                const timer = interactionAckTimersRef.current.get(toolCallId);
+                if (timer) {
+                    clearTimeout(timer);
+                    interactionAckTimersRef.current.delete(toolCallId);
+                }
                 // Transition status to failed
                 setMessages((prev) => {
                     return prev.map((msg) => {

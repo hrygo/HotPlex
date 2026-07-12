@@ -41,7 +41,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -127,7 +129,11 @@ type Worker struct {
 	workerSessionID atomic.Value // string
 }
 
-var _ worker.WorkerSessionIDHandler = (*Worker)(nil)
+var (
+	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
+	_ base.MetadataHandler                    = (*Worker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
+)
 
 func (w *Worker) GetWorkerSessionID() string {
 	w.Mu.Lock()
@@ -292,8 +298,17 @@ func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, all
 }
 
 func (w *Worker) HandleQuestionResponse(ctx context.Context, reqID string, answers map[string]string) error {
+	return w.HandleQuestionResponseWithOrder(ctx, reqID, answers, nil)
+}
+
+func (w *Worker) HandleQuestionResponseWithOrder(ctx context.Context, reqID string, answers map[string]string, questionOrder []string) error {
 	return w.httpPost(ctx, fmt.Sprintf("/question/%s/reply", url.PathEscape(reqID)),
-		map[string][][]string{"answers": answersToArrays(answers)})
+		map[string][][]string{"answers": answersToOrderedArrays(answers, questionOrder)})
+}
+
+func (w *Worker) HandleQuestionResponseOptions(ctx context.Context, reqID string, answers map[string][]string, questionOrder []string) error {
+	return w.httpPost(ctx, fmt.Sprintf("/question/%s/reply", url.PathEscape(reqID)),
+		map[string][][]string{"answers": answerOptionsToOrderedArrays(answers, questionOrder)})
 }
 
 func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action string, content map[string]any) error {
@@ -612,6 +627,17 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 }
 
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
+	// Ensure the project directory exists before binding a session to it.
+	// opencode serve is a shared singleton started without any session context,
+	// so the workdir is only known here, per session. If it does not exist,
+	// OCS receives a non-existent directory and later message handling fails
+	// (observed as HTTP 500 "Unexpected server error" on Windows).
+	if projectDir != "" {
+		if err := os.MkdirAll(projectDir, 0o755); err != nil {
+			return "", fmt.Errorf("create session workdir: %w", err)
+		}
+	}
+
 	// OpenCode ≥1.17 honors only the `directory` query param; a `project_dir`
 	// JSON body field is ignored and the session falls back to `serve`s cwd.
 	// For older versions (<1.17), we also send `project_dir` in the JSON body.
@@ -938,9 +964,49 @@ func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 }
 
 func answersToArrays(m map[string]string) [][]string {
+	return answersToOrderedArrays(m, nil)
+}
+
+func answersToOrderedArrays(m map[string]string, questionOrder []string) [][]string {
 	result := make([][]string, 0, len(m))
-	for _, v := range m {
-		result = append(result, []string{v})
+	seen := make(map[string]struct{}, len(questionOrder))
+	for _, question := range questionOrder {
+		if answer, ok := m[question]; ok {
+			result = append(result, []string{answer})
+			seen[question] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		if _, ok := seen[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = append(result, []string{m[key]})
+	}
+	return result
+}
+
+func answerOptionsToOrderedArrays(answers map[string][]string, questionOrder []string) [][]string {
+	result := make([][]string, 0, len(answers))
+	seen := make(map[string]struct{}, len(questionOrder))
+	for _, question := range questionOrder {
+		if values, ok := answers[question]; ok {
+			result = append(result, append([]string(nil), values...))
+			seen[question] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(answers))
+	for key := range answers {
+		if _, ok := seen[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result = append(result, append([]string(nil), answers[key]...))
 	}
 	return result
 }

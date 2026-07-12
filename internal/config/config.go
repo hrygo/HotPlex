@@ -120,6 +120,15 @@ func (c *Config) Validate() []string {
 	default:
 		errs = append(errs, "worker.default_permission_mode must be one of read-only|workspace|auto-edit|bypass (or empty for worker default)")
 	}
+	// ClaudeCode operator permission_mode: same tier set; "" = bypass (legacy default).
+	switch c.Worker.ClaudeCode.PermissionMode {
+	case "", "read-only", "workspace", "auto-edit", "bypass":
+	default:
+		errs = append(errs, "worker.claude_code.permission_mode must be one of read-only|workspace|auto-edit|bypass (or empty for bypass)")
+	}
+	if c.Worker.PermissionDenyDedup.Enabled && c.Worker.PermissionDenyDedup.Window <= 0 {
+		errs = append(errs, "worker.permission_deny_dedup.window must be > 0 when enabled")
+	}
 
 	return errs
 }

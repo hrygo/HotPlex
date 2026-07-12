@@ -1,6 +1,9 @@
 package codexcli
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // CodexEvent is a Codex JSONL event.
 type CodexEvent struct {
@@ -110,11 +113,70 @@ var EnvBlocklist = []string{"HOTPLEX_", "CODEX_", "CODEXCLI"}
 // second unmarshal.
 type JSONRPCFrame struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id"`
+	ID      JSONRPCID       `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *JSONRPCError   `json:"error,omitempty"`
+}
+
+// JSONRPCID preserves a JSON-RPC request ID exactly as received. Codex uses
+// both integer and string IDs, and integer zero is a valid first server-request
+// ID. A zero-length value means the id field was absent.
+type JSONRPCID json.RawMessage
+
+func (id *JSONRPCID) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*id = nil
+		return nil
+	}
+	var integer int64
+	if err := json.Unmarshal(data, &integer); err == nil {
+		*id = append((*id)[:0], data...)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*id = append((*id)[:0], data...)
+		return nil
+	}
+	return fmt.Errorf("codex-app-server: invalid JSON-RPC id: %s", data)
+}
+
+func (id JSONRPCID) MarshalJSON() ([]byte, error) {
+	if len(id) == 0 {
+		return []byte("null"), nil
+	}
+	return id, nil
+}
+
+func (id JSONRPCID) IsSet() bool { return len(id) > 0 }
+
+func (id JSONRPCID) Int64() (int64, bool) {
+	var value int64
+	if len(id) == 0 || json.Unmarshal(id, &value) != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+func (id JSONRPCID) Key() string {
+	if len(id) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(id, &text) == nil {
+		return text
+	}
+	return string(id)
+}
+
+func (id JSONRPCID) Clone() JSONRPCID {
+	return append(JSONRPCID(nil), id...)
+}
+
+func integerJSONRPCID(id int64) JSONRPCID {
+	return JSONRPCID(json.RawMessage(fmt.Sprintf("%d", id)))
 }
 
 type JSONRPCRequest struct {
@@ -133,6 +195,15 @@ type JSONRPCNotification struct {
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *JSONRPCError   `json:"error,omitempty"`
+}
+
+// JSONRPCServerResponse is used only when answering a server-initiated
+// request. Unlike client responses, its ID must be echoed without coercion.
+type JSONRPCServerResponse struct {
+	JSONRPC string          `json:"jsonrpc,omitempty"`
+	ID      JSONRPCID       `json:"id"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *JSONRPCError   `json:"error,omitempty"`
 }
