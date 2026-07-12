@@ -239,3 +239,24 @@ func TestSendInputBeforeConnect(t *testing.T) {
 	err := c.SendInput(context.Background(), "test")
 	require.ErrorIs(t, err, ErrNotConnected)
 }
+
+func TestSendInputWithIDRejectsEmptyID(t *testing.T) {
+	t.Parallel()
+	c := &Client{}
+	err := c.SendInputWithID(context.Background(), "", "test")
+	require.EqualError(t, err, "client: client message ID is required")
+}
+
+func TestEvent_AsInputAckData(t *testing.T) {
+	t.Parallel()
+	event := Event{Data: map[string]any{
+		"client_message_id": "evt-1",
+		"execution_id":      "exec-1",
+		"status":            "delivered",
+	}}
+	ack, ok := event.AsInputAckData()
+	require.True(t, ok)
+	require.Equal(t, "evt-1", ack.ClientMessageID)
+	require.Equal(t, "exec-1", ack.ExecutionID)
+	require.Equal(t, ExecutionStatusDelivered, ack.Status)
+}

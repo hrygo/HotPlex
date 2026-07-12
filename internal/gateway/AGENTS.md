@@ -20,6 +20,7 @@ testutil/       # WebSocket mock helpers for tests
 | Broadcast hub | `hub.go:68` | Hub struct, Run() goroutine, seq gen |
 | Connection pumps | `conn.go:35` | Conn struct, ReadPump/WritePump goroutines |
 | Event dispatch | `handler.go` | Handler: handleInput, handlePing, handleControl, handleWorkerCommand, handleSkillsList |
+| Input idempotency | `handler.go` + `internal/execution` | Durable accept → `input.ack` → Worker delivery outcome; duplicate IDs never redeliver |
 | Passthrough feedback | `handler.go` | `handlePassthroughCommand`: sends message AEP after WorkerCommander ops; rejects /effort, /commit |
 | Fast reconnect | `conn.go:377` | Skips Transition when session already running with live worker |
 | Session lifecycle | `bridge.go` | Bridge: StartSession, ResumeSession, forwardEvents, InputRecoverer |

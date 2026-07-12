@@ -41,6 +41,16 @@ export interface InputData {
   metadata?: Record<string, unknown>;
 }
 
+export type ExecutionStatus = 'accepted' | 'delivered' | 'unknown' | 'failed';
+
+export interface InputAckData {
+  client_message_id: string;
+  execution_id: string;
+  status: ExecutionStatus;
+  duplicate?: boolean;
+  error_code?: ErrorCode;
+}
+
 export interface MessageStartData {
   id: string;
   role: string;
@@ -356,6 +366,7 @@ export interface ClientState {
 export interface ServerEventDataMap {
   [EventKind.Error]: ErrorData;
   [EventKind.State]: StateData;
+  [EventKind.InputAck]: InputAckData;
   [EventKind.Done]: DoneData;
   [EventKind.Message]: MessageData;
   [EventKind.MessageStart]: MessageStartData;
@@ -378,6 +389,7 @@ export interface ServerEventDataMap {
 export interface ServerEventEnvelopeMap {
   [EventKind.Error]: Envelope<ErrorData>;
   [EventKind.State]: Envelope<StateData>;
+  [EventKind.InputAck]: Envelope<InputAckData>;
   [EventKind.Done]: Envelope<DoneData>;
   [EventKind.Message]: Envelope<MessageData>;
   [EventKind.MessageStart]: Envelope<MessageStartData>;

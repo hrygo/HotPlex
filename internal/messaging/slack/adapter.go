@@ -584,6 +584,9 @@ func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelI
 	if envelope == nil {
 		return fmt.Errorf("slack: failed to build envelope")
 	}
+	if data, ok := envelope.Event.Data.(map[string]any); ok && platformMsgID != "" {
+		data["platform_msg_id"] = platformMsgID
+	}
 
 	defer conn.lockHandlerMu()()
 	msgCtx, cancel := context.WithTimeout(ctx, handlerMsgTimeout)

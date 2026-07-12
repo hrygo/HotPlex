@@ -17,6 +17,7 @@ const (
 	Error               Kind = "error"
 	State               Kind = "state"
 	Input               Kind = "input"
+	InputAck            Kind = "input.ack" // durable input acceptance/delivery acknowledgement (S→C)
 	Done                Kind = "done"
 	Message             Kind = "message"
 	MessageStart        Kind = "message.start"
@@ -190,6 +191,27 @@ type StateData struct {
 type InputData struct {
 	Content  string         `json:"content"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// ExecutionStatus is the durable delivery state reported by InputAck.
+type ExecutionStatus string
+
+const (
+	ExecutionStatusAccepted  ExecutionStatus = "accepted"
+	ExecutionStatusDelivered ExecutionStatus = "delivered"
+	ExecutionStatusUnknown   ExecutionStatus = "unknown"
+	ExecutionStatusFailed    ExecutionStatus = "failed"
+)
+
+// InputAckData correlates a client input envelope with its durable execution.
+// Duplicate is true when the gateway replayed the existing outcome instead of
+// invoking Worker.Input again.
+type InputAckData struct {
+	ClientMessageID string          `json:"client_message_id"`
+	ExecutionID     string          `json:"execution_id"`
+	Status          ExecutionStatus `json:"status"`
+	Duplicate       bool            `json:"duplicate,omitempty"`
+	ErrorCode       ErrorCode       `json:"error_code,omitempty"`
 }
 
 // MessageStartData is the payload for MessageStart events.

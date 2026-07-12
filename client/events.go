@@ -12,6 +12,7 @@ const (
 	EventError               = string(events.Error)
 	EventState               = string(events.State)
 	EventInput               = string(events.Input)
+	EventInputAck            = string(events.InputAck)
 	EventDone                = string(events.Done)
 	EventMessage             = string(events.Message)
 	EventMessageStart        = string(events.MessageStart)
@@ -85,6 +86,8 @@ type (
 	MessageDeltaData        = events.MessageDeltaData
 	MessageEndData          = events.MessageEndData
 	StateData               = events.StateData
+	InputAckData            = events.InputAckData
+	ExecutionStatus         = events.ExecutionStatus
 	ReasoningData           = events.ReasoningData
 	StepData                = events.StepData
 	DoneData                = events.DoneData
@@ -112,6 +115,14 @@ type (
 	PlanData                = events.PlanData
 	PlanItem                = events.PlanItem
 	ModeUpdateData          = events.ModeUpdateData
+)
+
+// Durable input execution status values.
+const (
+	ExecutionStatusAccepted  = events.ExecutionStatusAccepted
+	ExecutionStatusDelivered = events.ExecutionStatusDelivered
+	ExecutionStatusUnknown   = events.ExecutionStatusUnknown
+	ExecutionStatusFailed    = events.ExecutionStatusFailed
 )
 
 // ErrorData is the payload of an error event.
