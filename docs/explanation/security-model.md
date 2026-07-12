@@ -48,7 +48,7 @@ HotPlex Gateway 的安全模型遵循两条核心原则：
 
 | 通道 | API Key | Bot ID | 适用场景 |
 |------|---------|--------|---------|
-| HTTP Header | `X-API-Key` | `X-Bot-ID` | REST API、CLI、服务端客户端 |
+| HTTP Header | `X-API-Key`（或 `Authorization: Bearer`） | `X-Bot-ID` | REST API、CLI、服务端客户端 |
 | Query Param | `api_key` | `bot_id` | 浏览器 WebSocket（无法发送自定义 Header） |
 | HMAC Cookie | 登录后签发 | `bot_id` | WebChat（登录后 Gateway 签发 HttpOnly cookie，绑定真实用户身份；SameSite=None 支持跨域） |
 | Init Envelope | `auth.token` | `auth.bot_id` | 浏览器 WebSocket 延迟认证（跨域场景） |
@@ -59,7 +59,7 @@ HotPlex Gateway 的安全模型遵循两条核心原则：
 
 ```
 Client ──X-API-Key──> HTTP Upgrade ──> Authenticator.AuthenticateRequest()
-         X-Bot-ID                     ├─ 提取 API Key（header 优先，query param 兜底）
+         X-Bot-ID                     ├─ 提取 API Key（X-API-Key header 优先，缺省回退 Authorization Bearer，最后 query param）
                                       ├─ 校验 Key 合法性（恒定时间比较）
                                       ├─ 解析 Bot ID
                                       └─ 返回 (userID, botID, nil) 或 ErrUnauthorized
