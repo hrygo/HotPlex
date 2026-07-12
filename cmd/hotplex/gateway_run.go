@@ -33,6 +33,7 @@ import (
 	"github.com/hrygo/hotplex/internal/cron"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -180,6 +181,7 @@ type GatewayDeps struct {
 	SessionMgr      *session.Manager
 	EventStore      eventStoreProvider
 	EventCollector  *eventstore.Collector
+	ExecutionStore  execution.Store
 	Auth            *security.Authenticator
 	Handler         *gateway.Handler
 	Bridge          *gateway.Bridge
@@ -486,12 +488,13 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
 
 	handler := gateway.NewHandler(gateway.HandlerDeps{
-		Log:           log,
-		Hub:           hub,
-		SM:            sm,
-		Auth:          auth,
-		Bridge:        bridge,
-		SkillsLocator: skillsLocator,
+		Log:            log,
+		Hub:            hub,
+		SM:             sm,
+		Auth:           auth,
+		Bridge:         bridge,
+		SkillsLocator:  skillsLocator,
+		ExecutionStore: stores.execution,
 	})
 	handler.SetAuditCollector(auditCollector)
 	hub.SetAuditCollector(auditCollector)
@@ -701,6 +704,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		SessionMgr:      sm,
 		EventStore:      stores.event,
 		EventCollector:  stores.collector,
+		ExecutionStore:  stores.execution,
 		Auth:            auth,
 		Handler:         handler,
 		Bridge:          bridge,
@@ -1094,6 +1098,7 @@ func initOrphanCleanup(ctx context.Context, cfg *config.Config, log *slog.Logger
 
 type gatewayStores struct {
 	session     session.Store
+	execution   execution.Store
 	event       eventStoreProvider
 	turnQuerier eventstore.TurnQuerier
 	collector   *eventstore.Collector
@@ -1136,10 +1141,16 @@ func initSQLiteStores(ctx context.Context, cfg *config.Config, log *slog.Logger)
 
 	// EventStore shares the session store's *sql.DB (schema managed by goose migration 002).
 	eventStore := eventstore.NewSQLiteStore(sessionStore.DB(), writeMu)
+	executionStore, err := execution.NewSQLStore(ctx, sessionStore.DB(), dbutil.DialectSQLite, writeMu, log)
+	if err != nil {
+		_ = sessionStore.Close()
+		return nil, fmt.Errorf("execution store init: %w", err)
+	}
 	dbResolver := security.NewDBResolver(sessionStore.DB(), dbutil.DialectSQLite)
 
 	return &gatewayStores{
 		session:     sessionStore,
+		execution:   executionStore,
 		wsStore:     sessionStore,
 		event:       eventStore,
 		turnQuerier: eventStore,
@@ -1165,6 +1176,11 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 	}
 
 	eventStore := eventstore.NewPGStore(db, log)
+	executionStore, err := execution.NewSQLStore(ctx, db.DB, dbutil.DialectPostgres, nil, log)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("pg: execution store: %w", err)
+	}
 	cronStore := cron.NewPGStore(db, log)
 	chatAccessStore := messaging.NewChatAccessPGStore(db, log)
 	dbResolver := security.NewDBResolver(db.DB, dbutil.DialectPostgres)
@@ -1179,6 +1195,7 @@ func initPGStores(ctx context.Context, cfg *config.Config, log *slog.Logger) (*g
 
 	return &gatewayStores{
 		session:     sessionStore,
+		execution:   executionStore,
 		wsStore:     wsStore,
 		event:       eventStore,
 		turnQuerier: eventStore,

@@ -71,6 +71,11 @@ type Event struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// AsInputAckData parses a durable input acknowledgement.
+func (e Event) AsInputAckData() (InputAckData, bool) {
+	return events.DecodeAs[InputAckData](e.Data)
+}
+
 // AsDoneData parses event data as DoneData.
 func (e Event) AsDoneData() (DoneData, bool) { return events.DecodeAs[DoneData](e.Data) }
 
@@ -391,11 +396,21 @@ func (c *Client) State() SessionState {
 
 // SendInput sends a user input message.
 func (c *Client) SendInput(ctx context.Context, content string, metadata ...map[string]any) error {
+	return c.SendInputWithID(ctx, aep.NewID(), content, metadata...)
+}
+
+// SendInputWithID sends input with a caller-stable client message ID. Reusing
+// the same ID with the same payload after a reconnect is idempotent; reusing it
+// with different data is rejected by the gateway.
+func (c *Client) SendInputWithID(ctx context.Context, clientMessageID, content string, metadata ...map[string]any) error {
+	if clientMessageID == "" {
+		return errors.New("client: client message ID is required")
+	}
 	data := map[string]any{"content": content}
 	if len(metadata) > 0 && metadata[0] != nil {
 		data["metadata"] = metadata[0]
 	}
-	return c.send(ctx, events.Input, data, PriorityData)
+	return c.sendWithID(ctx, clientMessageID, events.Input, data, PriorityData)
 }
 
 // SendInputAsync sends input and blocks until the resulting task is complete or context is canceled.
@@ -540,6 +555,10 @@ func (c *Client) Close() error {
 // ─── Private ─────────────────────────────────────────────────────────────────
 
 func (c *Client) send(ctx context.Context, kind events.Kind, data any, priority Priority) error {
+	return c.sendWithID(ctx, aep.NewID(), kind, data, priority)
+}
+
+func (c *Client) sendWithID(ctx context.Context, eventID string, kind events.Kind, data any, priority Priority) error {
 	c.mu.Lock()
 	closed := c.closed
 	sessionID := c.sessionID
@@ -552,7 +571,7 @@ func (c *Client) send(ctx context.Context, kind events.Kind, data any, priority 
 		return ErrNotConnected
 	}
 
-	env := events.NewEnvelope(aep.NewID(), sessionID, seq, kind, data)
+	env := events.NewEnvelope(eventID, sessionID, seq, kind, data)
 	env.Priority = priority
 	frame, err := aep.EncodeJSON(env)
 	if err != nil {

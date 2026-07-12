@@ -109,7 +109,17 @@ WebSocket 连接建立后的**第一帧**必须是 `init`，30 秒超时。
 }
 ```
 
-Session 处于 `RUNNING` 时发送 input 会被拒绝（`SESSION_BUSY`）。
+外层 Envelope 的 `id` 同时作为默认 `client_message_id`。客户端在连接中断、
+ACK 丢失等投递结果不明的情况下重发时，必须复用原 Envelope（包括相同 `id`）；
+同一 Session 内，相同 ID + 相同 payload 不会再次调用 Worker，相同 ID + 不同
+payload 会返回 `INVALID_MESSAGE`。消息平台适配器使用平台原生 message ID。
+
+`failed` 或 `SESSION_BUSY` 表示本次投递已明确失败，后续逻辑重试应使用新 ID。
+`unknown` 表示可能已产生副作用：复用原 ID 只会查询现状；若用户明确接受重复风险
+并决定再次执行，则必须创建新 ID。
+
+只有实际投递给 Worker 的普通输入进入持久化账本；Gateway 自身处理的帮助、
+控制和 Worker 命令不产生 `input.ack`。
 
 ### permission_response（权限响应）
 
@@ -209,6 +219,33 @@ Session 处于 `RUNNING` 时发送 input 会被拒绝（`SESSION_BUSY`）。
 ```
 
 错误时 `state` 为 `"deleted"`，附带 `error` + `code` 字段。
+
+### input.ack（输入持久化与投递确认）
+
+```json
+{
+  "type": "input.ack",
+  "data": {
+    "client_message_id": "evt_<uuid>",
+    "execution_id": "exec_<uuid>",
+    "status": "accepted",
+    "duplicate": false
+  }
+}
+```
+
+Gateway 在输入写入持久化账本后先发送 `accepted`，在 `Worker.Input` 返回后再发送
+最终投递状态：
+
+| Status | 说明 |
+|--------|------|
+| `accepted` | 已持久化，尚未确认 Worker 是否接受 |
+| `delivered` | Worker 输入端点已接受 |
+| `unknown` | 超时或重启导致结果不确定；为避免重复副作用，Gateway 不自动重投 |
+| `failed` | Worker 明确拒绝或投递失败；`error_code` 提供分类 |
+
+`duplicate: true` 表示 Gateway 返回已有记录且未再次调用 Worker。`input.ack`
+使用 control priority，绕过普通 broadcast 背压队列。
 
 ### message.start / message.delta / message.end（流式输出）
 
@@ -418,6 +455,7 @@ Worker 产出过快时，Gateway 使用 bounded channel（默认容量 256）缓
 |---------|---------|
 | `message.delta` / `raw` | **可丢弃**（非阻塞 select） |
 | `message` / `done` / `error` / `control` | **不可丢弃**（阻塞发送） |
+| `input.ack` | **直接投递**（control priority） |
 | `priority: "control"` | 跳过背压队列，直接发送 |
 
 丢弃的 delta 不消耗 seq，通过 `done.dropped` 标记通知 Client。
@@ -432,6 +470,8 @@ Client                          Server
   |<-- init_ack(session_id) ------|
   |                               |
   |--- input(content) ----------->|--- state(running)
+  |<-- input.ack(accepted) -------|--- 持久化入口账本
+  |<-- input.ack(delivered) ------|--- Worker 接受输入
   |                               |--- message.start
   |<-- message.delta * ------------|--- message.delta
   |<-- message.end ---------------|
@@ -444,7 +484,7 @@ Client                          Server
 ```
 Client ←→ Server
 
-Input Flow:     input → [state(running)] → [tool_call → tool_result]* → [message.delta*] → done
+Input Flow:     input → input.ack(accepted) → input.ack(delivered|unknown|failed) → [tool_call → tool_result]* → [message.delta*] → done
 Control Flow:   control(action) → state(new_state) / error
 Interactive:    permission_request ←→ permission_response
                 question_request ←→ question_response
@@ -456,4 +496,4 @@ Heartbeat:      ping ←→ pong
 
 **必须支持**：`init`、`input`、`control`、`ping`、`init_ack`、`message.delta`、`state`、`error`、`done`、`pong`
 
-**可选扩展**：`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`
+**可选扩展**：`input.ack`、`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`

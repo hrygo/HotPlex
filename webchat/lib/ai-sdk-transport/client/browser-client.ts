@@ -23,6 +23,7 @@ import type {
   InitAckData,
   ErrorData,
   StateData,
+  InputAckData,
   MessageDeltaData,
   MessageData,
   MessageStartData,
@@ -74,6 +75,7 @@ export interface BrowserClientEvents {
   done: (data: DoneData, env: Envelope) => void;
   error: (data: ErrorData, env: Envelope) => void;
   state: (data: StateData, env: Envelope) => void;
+  inputAck: (data: InputAckData, env: Envelope) => void;
   reasoning: (data: ReasoningData, env: Envelope) => void;
   step: (data: StepData, env: Envelope) => void;
   permissionRequest: (data: PermissionRequestData, env: Envelope) => void;
@@ -362,6 +364,10 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       case EventKind.State:
         this._state = (event.data as StateData).state;
         this.emit('state', event.data as StateData, env);
+        break;
+
+      case EventKind.InputAck:
+        this.emit('inputAck', event.data as InputAckData, env);
         break;
 
       case EventKind.Done:
@@ -706,6 +712,9 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       this.inputRetryTimer = null;
 
       if (this.ws && this.ws.readyState === WebSocket.OPEN && this.pendingInput) {
+        // SESSION_BUSY is a definitive rejection, so a later attempt gets a
+        // fresh client message ID. Only ambiguous transport retries should
+        // reuse an ID and rely on the gateway's idempotency ledger.
         this.sendInput(this.pendingInput.content);
       }
     }, ProtocolConstants.SessionBusyRetryDelayMs);

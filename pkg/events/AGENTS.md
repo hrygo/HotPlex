@@ -23,7 +23,7 @@ helpers.go    # 类型提取辅助（DecodeAs 泛型、Map*Response 适配、数
 
 ## Kind 常量（events.go:15-52）
 
-**协议核心**：`Init` `Error` `State` `Input` `Done` `Control` `Ping` `Pong`
+**协议核心**：`Init` `Error` `State` `Input` `InputAck` `Done` `Control` `Ping` `Pong`
 **消息流（S→C）**：`Message` `MessageStart` `MessageDelta` `MessageEnd`
 **Tool（S→C）**：`ToolCall` `ToolResult` `Reasoning` `Step` `Raw`
 **用户交互**：`PermissionRequest/Response` `QuestionRequest/Response` `ElicitationRequest/Response`
@@ -38,6 +38,7 @@ helpers.go    # 类型提取辅助（DecodeAs 泛型、Map*Response 适配、数
 | Error | `ErrorData{Code, Message}` | 178 |
 | State | `StateData{State, Message}` | 184 |
 | Input | `InputData{Content, Metadata}` | 190 |
+| InputAck | `InputAckData{ClientMessageID, ExecutionID, Status, Duplicate, ErrorCode}` | 196 |
 | Message(Delta|Start|End) | `MessageDeltaData`/`StartData`/`EndData` | 196/204/210 |
 | Message | `MessageData`（非流式、向后兼容） | 265 |
 | ToolCall/Result | 带 ACP 扩展字段（Title/Kind/Locations、Status/Diff） | 228/239 |

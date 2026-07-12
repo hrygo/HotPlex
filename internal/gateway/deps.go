@@ -6,18 +6,20 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 )
 
 // HandlerDeps groups all dependencies for Handler construction.
 type HandlerDeps struct {
-	Log           *slog.Logger
-	Hub           *Hub
-	SM            SessionManager
-	Auth          *security.Authenticator
-	Bridge        *Bridge
-	SkillsLocator SkillsLocator
+	Log            *slog.Logger
+	Hub            *Hub
+	SM             SessionManager
+	Auth           *security.Authenticator
+	Bridge         *Bridge
+	SkillsLocator  SkillsLocator
+	ExecutionStore execution.Store
 }
 
 // WorkspaceOverridesReader is the narrow workspace-store subset Bridge needs to

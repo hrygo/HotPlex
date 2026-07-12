@@ -127,6 +127,7 @@ export function createInitEnvelope(
       EventKind.Done,
       EventKind.Error,
       EventKind.State,
+      EventKind.InputAck,
       EventKind.Reasoning,
       EventKind.Step,
       EventKind.Control,

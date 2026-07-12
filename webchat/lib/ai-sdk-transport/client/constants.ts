@@ -8,6 +8,7 @@ export const EventKind = {
   Error: 'error',
   State: 'state',
   Input: 'input',
+  InputAck: 'input.ack',
   Done: 'done',
   Message: 'message',
   MessageStart: 'message.start',

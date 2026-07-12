@@ -40,6 +40,7 @@ type Envelope struct {
 | `raw` | **可丢弃** | 同上 |
 | `state` / `done` / `error` | **永不丢弃** | 阻塞发送，保证送达 |
 | `control` | **直接投递** | 绕过 broadcast 队列 |
+| `input.ack` | **直接投递** | control priority；确认持久化与 Worker 投递结果 |
 
 丢弃标记：`done` 事件的 `Data.dropped` 字段为 `true` 时，表示本次 Turn 中有 delta 被丢弃。
 
@@ -64,7 +65,11 @@ type InputData struct {
 }
 ```
 
-Session 繁忙时返回 `SESSION_BUSY` 错误（硬拒绝，不排队）。
+Envelope `id` 是默认 `client_message_id`。重试必须复用同一 Envelope；相同 ID
+和 payload 会返回已有 execution 而不会再次调用 Worker，相同 ID 搭配不同 payload
+会返回 `INVALID_MESSAGE`。这里的“重试”指连接中断或 ACK 丢失等结果不明的重发；
+已收到 `failed` / `SESSION_BUSY` 后的新尝试应使用新 ID。`unknown` 记录复用原 ID
+只查询现状；只有用户接受重复副作用风险时，才应以新 ID 再次执行。
 
 #### `permission_response` — 权限响应
 
@@ -115,6 +120,24 @@ type ControlData struct {
 ```
 
 ### S → C（Server → Client）
+
+#### `input.ack` — 输入持久化与投递确认
+
+```go
+type ExecutionStatus string // accepted / delivered / unknown / failed
+
+type InputAckData struct {
+    ClientMessageID string          `json:"client_message_id"`
+    ExecutionID     string          `json:"execution_id"`
+    Status          ExecutionStatus `json:"status"`
+    Duplicate       bool            `json:"duplicate,omitempty"`
+    ErrorCode       ErrorCode       `json:"error_code,omitempty"`
+}
+```
+
+新输入通常产生两次 ACK：持久化后的 `accepted`，以及 Worker 调用返回后的
+`delivered`、`unknown` 或 `failed`。`unknown` 表示存在重复副作用风险，Gateway
+不会自动重投。重复 Envelope 只返回当前记录，并将 `duplicate` 设为 `true`。
 
 #### `state` — 状态变更
 

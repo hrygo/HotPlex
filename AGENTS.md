@@ -172,6 +172,7 @@
 - `observability/` - Prometheus 指标 + OpenTelemetry 分布式追踪（30+ 指标、W3C TraceContext 传播、`sync.Once` 懒注册 + noop 降级）
 - `service/` - 跨平台系统服务管理（systemd/launchd/SCM）
 - `eventstore/` - 会话事件持久化 + delta 聚合
+- `execution/` - 普通输入持久化入口账本、幂等去重与投递状态
 - `updater/` - 自更新（GitHub API、sha256 校验、原子替换）
 - `dbutil/` - 数据库方言抽象（Dialect, Rebind, BoolValue）、DB 封装、跨 store 连接生命周期
 - `sqlutil/` - SQLite 驱动（modernc.org/sqlite，纯 Go）+ PostgreSQL 驱动（jackc/pgx/v5）+ `WriteMu` 跨 store 全局写序列化（消除 SQLITE_BUSY，PG 下为 no-op）

@@ -366,6 +366,23 @@ func TestNewEnvelope(t *testing.T) {
 	}
 }
 
+func TestInputAckData_JSONContract(t *testing.T) {
+	t.Parallel()
+	data, err := json.Marshal(InputAckData{
+		ClientMessageID: "evt_client",
+		ExecutionID:     "exec_1",
+		Status:          ExecutionStatusDelivered,
+		Duplicate:       true,
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"client_message_id":"evt_client",
+		"execution_id":"exec_1",
+		"status":"delivered",
+		"duplicate":true
+	}`, string(data))
+}
+
 func TestIsValidTransition_InvalidStateConstant(t *testing.T) {
 	// Test with an invalid/unknown state constant that's not in ValidTransitions map
 	invalidState := SessionState("unknown_state")
