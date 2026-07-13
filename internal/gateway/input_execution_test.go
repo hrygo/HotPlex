@@ -101,6 +101,8 @@ func TestInputExecution_DeliveredAckAfterWorkerAccepts(t *testing.T) {
 func TestInputExecution_DuplicateReplaysAckWithoutWorkerCall(t *testing.T) {
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusDelivered), duplicate: true}
 	h, sm, w, conn := newExecutionHandler(t, store, nil)
+	retryCancel := make(chan struct{})
+	h.bridge = &Bridge{retryCancel: map[string]chan struct{}{"s-exec": retryCancel}}
 	env := inputEnvelope("s-exec", "hello")
 	env.ID = "evt-client-1"
 
@@ -112,6 +114,40 @@ func TestInputExecution_DuplicateReplaysAckWithoutWorkerCall(t *testing.T) {
 	sm.AssertExpectations(t)
 	sm.AssertNotCalled(t, "GetWorker", mock.Anything)
 	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+	select {
+	case <-retryCancel:
+		t.Fatal("duplicate input cancelled the active LLM retry")
+	default:
+	}
+	_, retryStillPending := h.bridge.retryCancel["s-exec"]
+	require.True(t, retryStillPending)
+}
+
+func TestInputExecution_DuplicateDoesNotResumeTerminatedSession(t *testing.T) {
+	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusDelivered), duplicate: true}
+	sm := new(mockInputSM)
+	sm.On("Get", "s-exec").Return(&session.SessionInfo{
+		State:    events.StateTerminated,
+		Platform: "webchat",
+	}, nil)
+	hub := newTestHub(t)
+	conn := &mockPlatformConn{}
+	hub.JoinPlatformSession("s-exec", conn)
+	h := &Handler{
+		log:            testLogger(t),
+		hub:            hub,
+		sm:             sm,
+		bridge:         &Bridge{retryCancel: make(map[string]chan struct{})},
+		executionStore: store,
+	}
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.NoError(t, h.handleInput(context.Background(), env))
+	requireInputAcks(t, conn, events.ExecutionStatusDelivered)
+	require.True(t, conn.envelopes()[0].Event.Data.(events.InputAckData).Duplicate)
+	sm.AssertExpectations(t)
+	sm.AssertNotCalled(t, "GetWorker", mock.Anything)
 }
 
 func TestInputExecution_TimeoutBecomesUnknown(t *testing.T) {
