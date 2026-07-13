@@ -123,6 +123,7 @@ type Manager struct {
 	gcReset chan time.Duration // signals GC ticker reset
 
 	OnTerminate   func(sessionID string)
+	OnDelete      func(ctx context.Context, info SessionInfo)
 	StateNotifier func(ctx context.Context, sessionID string, state events.SessionState, message string)
 
 	auditCollector *audit.Collector // issue #833 P1; nil = audit disabled
@@ -914,17 +915,33 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 	return true
 }
 
-// Delete marks a session as DELETED and removes it from the in-memory cache.
+// Delete marks a session as DELETED, terminates any attached worker, and removes
+// it from the in-memory cache.
 // Lock ordering: m.mu → ms.mu (same as AttachWorker/DetachWorker to avoid deadlock).
 // DB write is performed outside locks to avoid holding mutexes during I/O.
 func (m *Manager) Delete(ctx context.Context, id string) error {
 	// Acquire m.mu first to maintain consistent lock order with AttachWorker.
+	var workerToTerminate worker.Worker
 	m.mu.Lock()
 	ms, ok := m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		// Session not in memory — remove from database directly.
-		return m.store.DeletePhysical(ctx, id)
+		// Session not in memory — remove from database directly. Preserve its
+		// metadata first so an explicitly deleted persistent worker session can
+		// be cleaned up after the local delete succeeds.
+		var deletedInfo *SessionInfo
+		if m.OnDelete != nil {
+			if info, err := m.store.Get(ctx, id); err == nil {
+				deletedInfo = info
+			}
+		}
+		if err := m.store.DeletePhysical(ctx, id); err != nil {
+			return err
+		}
+		if deletedInfo != nil {
+			m.notifyDelete(*deletedInfo)
+		}
+		return nil
 	}
 
 	ms.mu.Lock()
@@ -974,6 +991,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		// No gap worker — commit candidate and delete atomically under both locks.
 		ms.info = candidate
 		if hasWorkerAfter {
+			workerToTerminate = ms.worker
 			workersRunningGauge(string(workerType)).Add(-1)
 			// Release against the workspace the quota was acquired on at attach
 			// time (review P2 quota-drift fix), not the live ms.info.WorkspaceID.
@@ -988,6 +1006,8 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Unlock()
 
 	m.notifyStateChange(ctx, id, events.StateDeleted, "session deleted")
+	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
+	m.notifyDelete(candidate)
 
 	m.log.Info("session: deleted", "session_id", id)
 	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess)
@@ -1001,8 +1021,11 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	ms, ok := m.sessions[id]
 	var workerToKill worker.Worker
 	var workerType string
+	var deletedInfo *SessionInfo
 	if ok {
 		ms.mu.Lock()
+		info := ms.info
+		deletedInfo = &info
 		wasRunning := ms.info.State == events.StateRunning
 		if ms.worker != nil {
 			workerToKill = ms.worker
@@ -1017,6 +1040,11 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 	}
 	m.mu.Unlock()
+	if deletedInfo == nil && m.OnDelete != nil {
+		if info, err := m.store.Get(ctx, id); err == nil {
+			deletedInfo = info
+		}
+	}
 
 	if workerToKill != nil {
 		if err := workerToKill.Kill(); err != nil {
@@ -1025,7 +1053,13 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 	}
 
-	return m.store.DeletePhysical(ctx, id)
+	if err := m.store.DeletePhysical(ctx, id); err != nil {
+		return err
+	}
+	if deletedInfo != nil {
+		m.notifyDelete(*deletedInfo)
+	}
+	return nil
 }
 
 // ValidateOwnership checks whether the given userID owns the session.
@@ -1463,8 +1497,13 @@ func (m *Manager) gc(ctx context.Context) {
 	}
 	cronCutoff := now.Add(-cfg.Session.CronTermRetention)
 	defaultCutoff := now.Add(-cfg.Session.TermRetention)
-	if err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff); err != nil {
+	deleted, err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff)
+	if err != nil {
 		m.log.Error("session: gc (delete_terminated) failed", "err", err)
+	} else {
+		for _, info := range deleted {
+			m.notifyDelete(*info)
+		}
 	}
 }
 
@@ -1492,6 +1531,15 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 	}
 	if (state == events.StateTerminated || state == events.StateDeleted) && m.OnTerminate != nil {
 		m.safeGo(func() { m.OnTerminate(sessionID) })
+	}
+}
+
+// notifyDelete runs the worker-runtime cleanup callback after an explicit
+// session deletion has been persisted. It intentionally does not run for
+// TERMINATED transitions: those sessions must remain resumable.
+func (m *Manager) notifyDelete(info SessionInfo) {
+	if m.OnDelete != nil {
+		m.safeGo(func() { m.OnDelete(context.Background(), info) })
 	}
 }
 

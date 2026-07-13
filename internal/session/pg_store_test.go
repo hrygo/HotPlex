@@ -102,15 +102,21 @@ func TestPGStore_DeleteTerminated(t *testing.T) {
 	cronCutoff := time.UnixMilli(1000)
 	defaultCutoff := time.UnixMilli(2000)
 
-	q := dbutil.DialectPostgres.Rebind(
-		"DELETE FROM sessions WHERE state = ? AND ((source = 'cron' AND updated_at <= ?) OR (source != 'cron' AND updated_at <= ?))")
-
-	mock.ExpectExec(regexp.QuoteMeta(q)).
+	q := store.queries["store.delete_terminated"]
+	rows := sqlmock.NewRows([]string{
+		"id", "user_id", "owner_id", "worker_session_id", "worker_type", "state", "bot_id", "bot_name",
+		"platform", "platform_key_json", "work_dir", "title", "created_at", "updated_at",
+		"expires_at", "idle_expires_at", "context_json", "source", "client_key", "workspace_id",
+	}).AddRow("sess-old", "u1", "u1", "ocs-old", "opencode_server", string(events.StateTerminated), "", "",
+		"webchat", "", "", "", time.Now(), time.Now(), nil, nil, nil, "", "", "")
+	mock.ExpectQuery(regexp.QuoteMeta(q)).
 		WithArgs(string(events.StateTerminated), cronCutoff, defaultCutoff).
-		WillReturnResult(sqlmock.NewResult(0, 3))
+		WillReturnRows(rows)
 
-	err := store.DeleteTerminated(context.Background(), cronCutoff, defaultCutoff)
+	deleted, err := store.DeleteTerminated(context.Background(), cronCutoff, defaultCutoff)
 	require.NoError(t, err)
+	require.Len(t, deleted, 1)
+	require.Equal(t, "ocs-old", deleted[0].WorkerSessionID)
 }
 
 func TestPGStore_GetSessionsByState(t *testing.T) {

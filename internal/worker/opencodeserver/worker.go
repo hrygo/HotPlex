@@ -337,7 +337,12 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	ocsSessionID := session.WorkerSessionID
 	if ocsSessionID != "" {
 		w.Log.Debug("opencodeserver: resume step 3 - checking session existence", "ocs_session_id", ocsSessionID)
-		if w.ocsSessionExists(ctx, ocsSessionID) {
+		exists, err := w.ocsSessionExists(ctx, ocsSessionID)
+		if err != nil {
+			w.release()
+			return err
+		}
+		if exists {
 			w.Log.Info("opencodeserver: resuming existing OCS session",
 				"ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
 			w.initSessionConn(ctx, ocsSessionID, session)
@@ -476,7 +481,7 @@ func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return worker.ResetResult{}, fmt.Errorf("opencodeserver: reset: status %d: %s", resp.StatusCode, string(body))
 	}
@@ -751,19 +756,25 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 
 // ocsSessionExists checks whether a session exists on the OpenCode server
 // by issuing a lightweight GET to the session messages endpoint.
-func (w *Worker) ocsSessionExists(ctx context.Context, sessionID string) bool {
-	checkURL := fmt.Sprintf("%s/session/%s/message?limit=1", w.httpAddr, url.QueryEscape(sessionID))
+func (w *Worker) ocsSessionExists(ctx context.Context, sessionID string) (bool, error) {
+	checkURL := fmt.Sprintf("%s/session/%s/message?limit=1", w.httpAddr, url.PathEscape(sessionID))
 	req, err := http.NewRequestWithContext(ctx, "GET", checkURL, http.NoBody)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("%w: build OCS session request: %w", worker.ErrResumeCheckFailed, err)
 	}
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("%w: query OCS session: %w", worker.ErrResumeCheckFailed, err)
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("%w: OCS session query returned status %d: %s", worker.ErrResumeCheckFailed, resp.StatusCode, string(body))
+	}
+	return true, nil
 }
 
 // ─── Shared Lifecycle Helpers ──────────────────────────────────────────────────
@@ -865,14 +876,13 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 	}
 }
 
-// release closes the SSE subscription, deletes the server-side session, and
-// releases the singleton ref.
+// release closes the SSE subscription and releases the singleton ref. The OCS
+// session is deliberately retained so a later HotPlex resume can reuse its
+// conversation context.
 func (w *Worker) release() {
 	w.Mu.Lock()
 	sseCancel := w.sseCancel
 	sessionID := ""
-	httpAddr := w.httpAddr
-	client := w.client
 	if w.httpConn != nil {
 		sessionID = w.httpConn.getSessionID()
 	}
@@ -884,12 +894,6 @@ func (w *Worker) release() {
 
 	if sessionID != "" && w.singleton != nil {
 		w.singleton.Unsubscribe(sessionID)
-	}
-
-	// Delete the server-side session to prevent resource accumulation.
-	// Best-effort: errors are logged but do not block cleanup.
-	if sessionID != "" && httpAddr != "" && client != nil {
-		w.deleteOCSSession(sessionID, httpAddr, client)
 	}
 
 	w.releaseOnce.Do(func() {
@@ -908,27 +912,38 @@ func (w *Worker) release() {
 	}
 }
 
-// deleteOCSSession sends DELETE /session/{id} to the OCS server to clean up
-// server-side session state. Best-effort — failures are logged, not returned.
-func (w *Worker) deleteOCSSession(sessionID, httpAddr string, client *http.Client) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+// DeletePersistedSession removes a server-side session after its owning
+// HotPlex session has been explicitly deleted. It acquires a short-lived
+// singleton reference so cleanup also works for already-terminated sessions.
+func DeletePersistedSession(ctx context.Context, sessionID string) error {
+	mgr := singleton.Load()
+	if mgr == nil {
+		return fmt.Errorf("opencodeserver: singleton not initialized")
+	}
+	httpAddr, client, _, _, err := mgr.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: acquire server for session cleanup: %w", err)
+	}
+	defer mgr.Release()
+	return deleteOCSSession(ctx, sessionID, httpAddr, client)
+}
+
+// deleteOCSSession sends DELETE /session/{id} to the OCS server.
+func deleteOCSSession(ctx context.Context, sessionID, httpAddr string, client *http.Client) error {
 	req, err := http.NewRequestWithContext(ctx, "DELETE", httpAddr+"/session/"+url.PathEscape(sessionID), http.NoBody)
 	if err != nil {
-		w.Log.Debug("opencodeserver: delete session request error", "err", err)
-		return
+		return fmt.Errorf("opencodeserver: build delete request: %w", err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		w.Log.Debug("opencodeserver: delete session failed", "session_id", sessionID, "err", err)
-		return
+		return fmt.Errorf("opencodeserver: delete session %s: %w", sessionID, err)
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		w.Log.Debug("opencodeserver: delete session unexpected status",
-			"session_id", sessionID, "status", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("opencodeserver: delete session %s: unexpected status %d", sessionID, resp.StatusCode)
 	}
+	return nil
 }
 
 func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
@@ -1204,4 +1219,5 @@ func init() {
 	worker.Register(worker.TypeOpenCodeSrv, func() (worker.Worker, error) {
 		return New(), nil
 	})
+	worker.RegisterSessionCleanup(worker.TypeOpenCodeSrv, DeletePersistedSession)
 }

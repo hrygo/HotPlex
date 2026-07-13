@@ -23,7 +23,7 @@ type Store interface {
 	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
-	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error
+	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
 	Close() error
@@ -230,14 +230,24 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 }
 
 // Events lifecycle is managed independently — session deletion does not cascade to events.
-func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
-	return s.writeMu.WithLock(func() error {
-		_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error) {
+	deleted := make([]*SessionInfo, 0)
+	err := s.writeMu.WithLock(func() error {
+		rows, err := s.db.QueryContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
 		if err != nil {
 			return fmt.Errorf("session store: delete terminated: %w", err)
 		}
-		return nil
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			info, err := scanSession(rows)
+			if err != nil {
+				return fmt.Errorf("session store: scan deleted session: %w", err)
+			}
+			deleted = append(deleted, info)
+		}
+		return rows.Err()
 	})
+	return deleted, err
 }
 
 func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {

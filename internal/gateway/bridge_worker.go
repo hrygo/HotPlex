@@ -184,6 +184,12 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
 	if p.retryDepth == 0 {
 		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1, lastInput: p.lastInput}); err != nil {
+			if errors.Is(err, worker.ErrResumeCheckFailed) {
+				b.log.Warn("bridge: resume verification failed during crash recovery; preserving session context",
+					"session_id", p.sessionID, "worker_type", p.workerType, "err", err)
+				b.sendError(p.sessionID, events.ErrCodeInternalError, "Unable to verify the previous worker session. Please retry later.")
+				return false
+			}
 			b.log.Warn("bridge: resume retry failed synchronously, falling back to fresh start", "session_id", p.sessionID, "worker_type", p.workerType, "err", err)
 		} else {
 			b.log.Info("bridge: resume retry succeeded", "session_id", p.sessionID, "worker_type", p.workerType)

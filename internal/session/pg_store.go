@@ -136,12 +136,21 @@ func (s *pgStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string, 
 }
 
 // DeleteTerminated removes terminated sessions older than the respective cutoffs.
-func (s *pgStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
-	_, err := s.db.ExecContext(ctx, s.queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+func (s *pgStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
 	if err != nil {
-		return fmt.Errorf("session store: delete terminated: %w", err)
+		return nil, fmt.Errorf("session store: delete terminated: %w", err)
 	}
-	return nil
+	defer func() { _ = rows.Close() }()
+	deleted := make([]*SessionInfo, 0)
+	for rows.Next() {
+		info, err := scanSession(rows)
+		if err != nil {
+			return nil, fmt.Errorf("session store: scan deleted session: %w", err)
+		}
+		deleted = append(deleted, info)
+	}
+	return deleted, rows.Err()
 }
 
 // DeletePhysical deletes a session by ID, bypassing the state machine.

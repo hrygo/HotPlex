@@ -41,6 +41,7 @@ import (
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/webchat"
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/acp"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
 	"github.com/hrygo/hotplex/internal/worker/codexcli"
@@ -332,6 +333,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Info("gateway: session terminated", "session_id", sessionID)
 		if cronScheduler != nil {
 			cronScheduler.CleanupForSession(sessionID)
+		}
+	}
+	sm.OnDelete = func(ctx context.Context, info session.SessionInfo) {
+		if err := worker.CleanupSession(ctx, info.WorkerType, info.WorkerSessionID); err != nil {
+			log.Warn("gateway: worker session cleanup failed",
+				"session_id", info.ID,
+				"worker_type", info.WorkerType,
+				"worker_session_id", info.WorkerSessionID,
+				"err", err)
 		}
 	}
 

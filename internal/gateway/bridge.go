@@ -511,6 +511,9 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.Session
 			b.log.Info("bridge: orphan platform session terminated, attempting resume", "session_id", sessionID)
 			injectSandbox(si.PlatformKey, sandbox)
 			if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
+				if errors.Is(err, worker.ErrResumeCheckFailed) {
+					return fmt.Errorf("bridge: resume verification failed for terminated session: %w", err)
+				}
 				b.log.Warn("bridge: resume failed for terminated session, falling back to new session",
 					"session_id", sessionID, "err", err)
 				return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, botName, injectExclude...)
@@ -527,6 +530,9 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.Session
 		// the latest config, not a potentially stale persisted value.
 		injectSandbox(si.PlatformKey, sandbox)
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
+			if errors.Is(err, worker.ErrResumeCheckFailed) {
+				return fmt.Errorf("bridge: resume verification failed: %w", err)
+			}
 			b.log.Warn("bridge: resume failed, falling back to new session",
 				"session_id", sessionID, "state", si.State, "err", err)
 			return b.startOrResumeOnInUse(ctx, sessionID, ownerID, worker.WorkerType(workerType), workDir, platform, platformKey, botID, botName, injectExclude...)

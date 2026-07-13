@@ -663,6 +663,11 @@ func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *s
 	defer resumeCancel()
 	resumeErr := c.starter.ResumeSession(resumeCtx, sessionID, workDir)
 	if resumeErr != nil {
+		if errors.Is(resumeErr, worker.ErrResumeCheckFailed) {
+			c.hub.InitThrottle.RecordFailure(sessionID)
+			c.sendInitError(events.ErrCodeInternalError, "unable to verify the previous worker session; retry later")
+			return nil, fmt.Errorf("resume verification failed: %w", resumeErr)
+		}
 		startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer startCancel()
 		if err := c.starter.StartSession(startCtx, worker.SessionStartParams{
