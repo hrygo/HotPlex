@@ -358,7 +358,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     const { event } = env;
 
     switch (event.type) {
-      case EventKind.Error:
+      case EventKind.Error: {
         const errData = event.data as ErrorData;
         if (!event.data || Object.keys(event.data).length === 0) {
           logger.warn('BrowserClient', 'Received empty error data', { envId: env?.id });
@@ -374,13 +374,14 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           this._handleSessionBusy();
         }
         break;
+      }
 
       case EventKind.State:
         this._state = (event.data as StateData).state;
         this.emit('state', event.data as StateData, env);
         break;
 
-      case EventKind.InputAck:
+      case EventKind.InputAck: {
         const ackData = event.data as InputAckData;
         if (this.pendingInput?.clientMessageId === ackData.client_message_id &&
             ackData.status !== 'accepted') {
@@ -399,6 +400,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         }
         this.emit('inputAck', ackData, env);
         break;
+      }
 
       case EventKind.Done:
         this.emit('done', event.data as DoneData, env);
