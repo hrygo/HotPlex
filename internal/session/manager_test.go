@@ -62,9 +62,15 @@ func (m *mockStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error) {
 	args := m.Called(ctx, cronCutoff, defaultCutoff)
-	return args.Error(0)
+	if len(args) == 1 {
+		return nil, args.Error(0)
+	}
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*SessionInfo), args.Error(1)
 }
 
 func (m *mockStore) DeletePhysical(ctx context.Context, id string) error {
@@ -442,6 +448,35 @@ func TestManager_Delete(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestManager_DeleteTerminatesAttachedWorker(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	w := newMockWorker(worker.TypeOpenCodeSrv, 0)
+	w.On("Terminate", mock.Anything).Return(nil).Once()
+	seed := &SessionInfo{
+		ID:         "sess_delete_worker",
+		UserID:     "user1",
+		WorkerType: worker.TypeOpenCodeSrv,
+		State:      events.StateRunning,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	m.mu.Lock()
+	m.sessions[seed.ID] = &managedSession{info: *seed, worker: w}
+	m.mu.Unlock()
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+
+	require.NoError(t, m.Delete(ctx, seed.ID))
+	w.AssertExpectations(t)
+}
+
 func TestManager_DeletePhysical(t *testing.T) {
 	t.Parallel()
 
@@ -498,6 +533,89 @@ func TestManager_DeletePhysical(t *testing.T) {
 		err := m.DeletePhysical(ctx, "db_fail")
 		require.Error(t, err)
 	})
+}
+
+func TestManager_DeleteNotifiesWorkerSessionCleanup(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	seed := &SessionInfo{
+		ID:              "sess_cleanup",
+		UserID:          "user1",
+		WorkerType:      worker.TypeOpenCodeSrv,
+		WorkerSessionID: "ocs-session-1",
+		State:           events.StateTerminated,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	m.mu.Lock()
+	m.sessions[seed.ID] = &managedSession{info: *seed}
+	m.mu.Unlock()
+
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+	cleaned := make(chan SessionInfo, 1)
+	m.OnDelete = func(_ context.Context, info SessionInfo) { cleaned <- info }
+
+	require.NoError(t, m.Delete(ctx, seed.ID))
+	require.Eventually(t, func() bool { return len(cleaned) == 1 }, time.Second, 10*time.Millisecond)
+	info := <-cleaned
+	require.Equal(t, worker.TypeOpenCodeSrv, info.WorkerType)
+	require.Equal(t, "ocs-session-1", info.WorkerSessionID)
+}
+
+func TestManager_DeleteNotInMemoryNotifiesWorkerSessionCleanup(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("Get", ctx, "sess_stored_cleanup").Return(&SessionInfo{
+		ID:              "sess_stored_cleanup",
+		WorkerType:      worker.TypeOpenCodeSrv,
+		WorkerSessionID: "ocs-stored",
+	}, nil)
+	store.On("DeletePhysical", ctx, "sess_stored_cleanup").Return(nil)
+
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+	cleaned := make(chan SessionInfo, 1)
+	m.OnDelete = func(_ context.Context, info SessionInfo) { cleaned <- info }
+
+	require.NoError(t, m.Delete(ctx, "sess_stored_cleanup"))
+	require.Eventually(t, func() bool { return len(cleaned) == 1 }, time.Second, 10*time.Millisecond)
+	info := <-cleaned
+	require.Equal(t, "ocs-stored", info.WorkerSessionID)
+}
+
+func TestManager_GC_NotifiesWorkerSessionCleanupForRetentionDeletion(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("GetExpiredMaxLifetime", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
+	store.On("GetExpiredIdle", mock.Anything, mock.AnythingOfType("time.Time")).Return([]string(nil), nil)
+	store.On("DeleteTerminated", mock.Anything, mock.AnythingOfType("time.Time"), mock.AnythingOfType("time.Time")).
+		Return([]*SessionInfo{{ID: "sess_expired", WorkerType: worker.TypeOpenCodeSrv, WorkerSessionID: "ocs-expired"}}, nil)
+
+	m, err := NewManager(ctx, nil, cfg, nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+	cleaned := make(chan SessionInfo, 1)
+	m.OnDelete = func(_ context.Context, info SessionInfo) { cleaned <- info }
+
+	m.gc(ctx)
+	require.Eventually(t, func() bool { return len(cleaned) == 1 }, time.Second, 10*time.Millisecond)
+	info := <-cleaned
+	require.Equal(t, "ocs-expired", info.WorkerSessionID)
 }
 
 func TestManager_ValidateOwnership(t *testing.T) {

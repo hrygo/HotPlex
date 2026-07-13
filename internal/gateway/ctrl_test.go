@@ -63,9 +63,15 @@ func (m *mockStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+func (m *mockStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*session.SessionInfo, error) {
 	args := m.Called(ctx, cronCutoff, defaultCutoff)
-	return args.Error(0)
+	if len(args) == 1 {
+		return nil, args.Error(0)
+	}
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*session.SessionInfo), args.Error(1)
 }
 
 func (m *mockStore) DeletePhysical(ctx context.Context, id string) error {

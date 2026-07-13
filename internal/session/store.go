@@ -23,7 +23,7 @@ type Store interface {
 	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
 	GetExpiredIdle(ctx context.Context, now time.Time) ([]string, error)
-	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error
+	DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 	GetSessionsByState(ctx context.Context, state events.SessionState) ([]string, error)
 	Close() error
@@ -98,16 +98,29 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 	}
 
 	return s.writeMu.WithLock(func() error {
-		_, err := s.db.ExecContext(ctx, queries["sessions.upsert_session"],
-			info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
-			info.Platform, string(pkJSON), info.WorkDir, info.Title,
-			info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-			string(ctxJSON), info.Source, info.ClientKey, nullableString(info.WorkspaceID),
-		)
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := ensureSQLiteLifecycleLock(ctx, tx, info.ID); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, queries["sessions.upsert_session"], upsertSessionArgs(info, ctxJSON, pkJSON)...)
+		if err != nil {
+			if isCleanupPendingError(err) {
+				return ErrSessionCleanupPending
+			}
 			return fmt.Errorf("session store: upsert: %w", err)
 		}
-		return nil
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("session store: upsert rows affected: %w", err)
+		}
+		if updated == 0 {
+			return ErrSessionCleanupPending
+		}
+		return tx.Commit()
 	})
 }
 
@@ -117,9 +130,22 @@ func (s *SQLiteStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSe
 	ctx, cancel := upsertTimeout(ctx)
 	defer cancel()
 	return s.writeMu.WithLock(func() error {
-		_, err := s.db.ExecContext(ctx, queries["sessions.update_worker_session_id"], workerSessionID, id)
+		result, err := s.db.ExecContext(ctx, queries["sessions.update_worker_session_id"], workerSessionID, id)
 		if err != nil {
 			return fmt.Errorf("session store: update worker session id: %w", err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("session store: worker session id rows affected: %w", err)
+		}
+		if updated == 0 {
+			pending, err := s.HasPendingCleanup(ctx, id)
+			if err != nil {
+				return fmt.Errorf("session store: check cleanup task: %w", err)
+			}
+			if pending {
+				return ErrSessionCleanupPending
+			}
 		}
 		return nil
 	})
@@ -166,6 +192,13 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	info, err := scanSession(s.db.QueryRowContext(ctx, queries["store.get_session"], id))
 	if errors.Is(err, sql.ErrNoRows) {
+		pending, pendingErr := s.HasPendingCleanup(ctx, id)
+		if pendingErr != nil {
+			return nil, fmt.Errorf("session store: check cleanup task: %w", pendingErr)
+		}
+		if pending {
+			return nil, ErrSessionCleanupPending
+		}
 		return nil, ErrSessionNotFound
 	}
 	if err != nil {
@@ -230,14 +263,58 @@ func (s *SQLiteStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]stri
 }
 
 // Events lifecycle is managed independently — session deletion does not cascade to events.
-func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
-	return s.writeMu.WithLock(func() error {
-		_, err := s.db.ExecContext(ctx, queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+func (s *SQLiteStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error) {
+	deleted := make([]*SessionInfo, 0)
+	err := s.writeMu.WithLock(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("session store: delete terminated: %w", err)
+			return err
 		}
-		return nil
+		defer func() { _ = tx.Rollback() }()
+		rows, err := tx.QueryContext(ctx, queries["store.select_terminated_ids"], events.StateTerminated, cronCutoff, defaultCutoff)
+		if err != nil {
+			return fmt.Errorf("session store: select terminated: %w", err)
+		}
+		ids, err := collectIDs(rows)
+		if err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		now := time.Now()
+		for _, id := range ids {
+			if err := ensureSQLiteLifecycleLock(ctx, tx, id); err != nil {
+				return err
+			}
+			deletedRows, err := tx.QueryContext(ctx, queries["store.delete_terminated_by_id"], id, events.StateTerminated, cronCutoff, defaultCutoff)
+			if err != nil {
+				return fmt.Errorf("session store: delete terminated: %w", err)
+			}
+			if deletedRows.Next() {
+				info, err := scanSession(deletedRows)
+				if err != nil {
+					_ = deletedRows.Close()
+					return fmt.Errorf("session store: scan deleted session: %w", err)
+				}
+				deleted = append(deleted, info)
+				if err := insertCleanupTask(ctx, tx, info, now); err != nil {
+					_ = deletedRows.Close()
+					return err
+				}
+			}
+			if err := deletedRows.Err(); err != nil {
+				_ = deletedRows.Close()
+				return err
+			}
+			if err := deletedRows.Close(); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
 	})
+	return deleted, err
 }
 
 func (s *SQLiteStore) DeletePhysical(ctx context.Context, id string) error {

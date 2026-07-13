@@ -26,16 +26,18 @@ import (
 
 // Errors returned by the session manager.
 var (
-	ErrSessionNotFound   = errors.New("session: not found")
-	ErrSessionNotActive  = errors.New("session: not active")
-	ErrSessionBusy       = errors.New("session: busy")
-	ErrInvalidTransition = errors.New("session: invalid state transition")
-	ErrPoolExhausted     = errors.New("session: pool exhausted")
-	ErrUserQuotaExceeded = errors.New("session: user quota exceeded")
-	ErrOwnershipMismatch = errors.New("session: ownership mismatch")
-	ErrMaxTurnsReached   = errors.New("session: max turns reached")
-	ErrWorkerAttached    = errors.New("session: worker already attached")
-	ErrClientKeyTooLong  = errors.New("session: client_key too long")
+	ErrSessionNotFound       = errors.New("session: not found")
+	ErrSessionNotActive      = errors.New("session: not active")
+	ErrSessionBusy           = errors.New("session: busy")
+	ErrInvalidTransition     = errors.New("session: invalid state transition")
+	ErrPoolExhausted         = errors.New("session: pool exhausted")
+	ErrUserQuotaExceeded     = errors.New("session: user quota exceeded")
+	ErrOwnershipMismatch     = errors.New("session: ownership mismatch")
+	ErrMaxTurnsReached       = errors.New("session: max turns reached")
+	ErrWorkerAttached        = errors.New("session: worker already attached")
+	ErrClientKeyTooLong      = errors.New("session: client_key too long")
+	ErrSessionCleanupPending = errors.New("session: cleanup pending")
+	ErrCleanupLeaseLost      = errors.New("session: cleanup task lease lost")
 )
 
 // MaxClientKeyLen is the maximum allowed length for ClientKey.
@@ -123,6 +125,7 @@ type Manager struct {
 	gcReset chan time.Duration // signals GC ticker reset
 
 	OnTerminate   func(sessionID string)
+	OnDelete      func(ctx context.Context, info SessionInfo)
 	StateNotifier func(ctx context.Context, sessionID string, state events.SessionState, message string)
 
 	auditCollector *audit.Collector // issue #833 P1; nil = audit disabled
@@ -189,6 +192,7 @@ type managedSession struct {
 	attachedWorkspaceID string
 	TurnCount           int
 	startedAt           time.Time
+	deleting            bool // guarded by mu; prevents AttachWorker during durable delete
 	log                 *slog.Logger
 	mu                  sync.RWMutex // protects state transitions and input handling; reads use RLock
 }
@@ -481,6 +485,9 @@ func (m *Manager) UpdateWorkDir(ctx context.Context, id, workDir string) error {
 // IMPORTANT: the caller MUST NOT call Terminate/Kill on the returned worker
 // while holding ms.mu — doing so re-introduces the deadlock described in #655.
 func (m *Manager) transitionState(ctx context.Context, ms *managedSession, from, to events.SessionState, termReason string) (worker.Worker, error) {
+	if ms.deleting {
+		return nil, ErrSessionCleanupPending
+	}
 	// Build the candidate state as a value copy (never mutates ms.info in-place).
 	// NOTE: shallow copy — map fields (Context, PlatformKey) share headers.
 	// Safe here because only scalar fields (State, UpdatedAt, etc.) are mutated.
@@ -775,9 +782,13 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 	userID := ms.info.UserID
 	workspaceID := ms.info.WorkspaceID
 	alreadyAttached := ms.worker != nil
+	deleting := ms.deleting
 	ms.mu.RUnlock()
 	m.mu.RUnlock()
 
+	if deleting {
+		return ErrSessionCleanupPending
+	}
 	if alreadyAttached {
 		return ErrWorkerAttached
 	}
@@ -809,6 +820,13 @@ func (m *Manager) AttachWorker(ctx context.Context, id string, w worker.Worker) 
 		return ErrSessionNotFound
 	}
 	ms.mu.Lock()
+	if ms.deleting {
+		ms.mu.Unlock()
+		m.mu.Unlock()
+		m.pool.ReleaseForWorkspace(ctx, userID, workspaceID)
+		observability.PoolAcquire().Add(ctx, 1, metric.WithAttributes(attribute.String("result", "toctou_retry")))
+		return ErrSessionCleanupPending
+	}
 	if ms.worker != nil {
 		ms.mu.Unlock()
 		m.mu.Unlock()
@@ -914,21 +932,37 @@ func (m *Manager) detachWorkerUnchecked(id string, expected worker.Worker) bool 
 	return true
 }
 
-// Delete marks a session as DELETED and removes it from the in-memory cache.
+// Delete marks a session as DELETED, terminates any attached worker, and removes
+// it from the in-memory cache.
 // Lock ordering: m.mu → ms.mu (same as AttachWorker/DetachWorker to avoid deadlock).
 // DB write is performed outside locks to avoid holding mutexes during I/O.
 func (m *Manager) Delete(ctx context.Context, id string) error {
 	// Acquire m.mu first to maintain consistent lock order with AttachWorker.
+	var workerToTerminate worker.Worker
 	m.mu.Lock()
 	ms, ok := m.sessions[id]
 	if !ok {
 		m.mu.Unlock()
-		// Session not in memory — remove from database directly.
-		return m.store.DeletePhysical(ctx, id)
+		if cleanup, ok := m.store.(CleanupTaskStore); ok {
+			_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
+			return err
+		}
+		var deletedInfo *SessionInfo
+		if m.OnDelete != nil {
+			if info, err := m.store.Get(ctx, id); err == nil {
+				deletedInfo = info
+			}
+		}
+		if err := m.store.DeletePhysical(ctx, id); err != nil {
+			return err
+		}
+		if deletedInfo != nil {
+			m.notifyDelete(*deletedInfo)
+		}
+		return nil
 	}
 
 	ms.mu.Lock()
-	hadWorkerBefore := ms.worker != nil
 	workerType := ms.info.WorkerType
 	uid := ms.info.UserID
 	platform := ms.info.Platform
@@ -938,42 +972,36 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	candidate := ms.info
 	candidate.State = events.StateDeleted
 	candidate.UpdatedAt = time.Now()
+	ms.deleting = true
 	ms.mu.Unlock()
 	m.mu.Unlock()
 
-	if err := m.store.Upsert(ctx, &candidate); err != nil {
+	var persistErr error
+	if cleanup, ok := m.store.(CleanupTaskStore); ok {
+		persistErr = cleanup.MarkDeletedWithCleanup(ctx, &candidate)
+	} else {
+		persistErr = m.store.Upsert(ctx, &candidate)
+	}
+	if persistErr != nil {
+		m.mu.Lock()
+		if current, exists := m.sessions[id]; exists {
+			current.mu.Lock()
+			current.deleting = false
+			current.mu.Unlock()
+		}
+		m.mu.Unlock()
 		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure)
-		return err
+		return persistErr
 	}
 
-	// Persist succeeded — validate gap before committing in-memory.
-	// This must happen BEFORE setting ms.info = candidate to prevent
-	// leaving the session in DELETED state with a running worker when
-	// a concurrent AttachWorker slipped in during the DB write window.
+	// AttachWorker observes deleting under the same mutex, so no worker can be
+	// attached during the durable state-and-outbox transaction above.
 	m.mu.Lock()
 	if _, exists := m.sessions[id]; exists {
 		ms.mu.Lock()
-		hasWorkerAfter := ms.worker != nil
-		// If worker appeared during the gap (was nil before, now non-nil),
-		// a concurrent AttachWorker resurrected the session — abort deletion.
-		if !hadWorkerBefore && hasWorkerAfter {
-			ms.mu.Unlock()
-			m.mu.Unlock()
-			m.log.Warn("session: worker attached during delete gap, rolling back",
-				"session_id", id)
-			// Rollback DB: restore original state (ms.info hasn't been mutated yet).
-			ms.mu.RLock()
-			original := ms.info
-			ms.mu.RUnlock()
-			if rbErr := m.store.Upsert(ctx, &original); rbErr != nil {
-				m.log.Error("session: delete rollback failed", "session_id", id, "err", rbErr)
-			}
-			m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure)
-			return nil
-		}
-		// No gap worker — commit candidate and delete atomically under both locks.
 		ms.info = candidate
-		if hasWorkerAfter {
+		if ms.worker != nil {
+			workerToTerminate = ms.worker
 			workersRunningGauge(string(workerType)).Add(-1)
 			// Release against the workspace the quota was acquired on at attach
 			// time (review P2 quota-drift fix), not the live ms.info.WorkspaceID.
@@ -988,6 +1016,10 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Unlock()
 
 	m.notifyStateChange(ctx, id, events.StateDeleted, "session deleted")
+	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
+	if _, ok := m.store.(CleanupTaskStore); !ok {
+		m.notifyDelete(candidate)
+	}
 
 	m.log.Info("session: deleted", "session_id", id)
 	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess)
@@ -1001,8 +1033,12 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	ms, ok := m.sessions[id]
 	var workerToKill worker.Worker
 	var workerType string
+	var deletedInfo *SessionInfo
 	if ok {
 		ms.mu.Lock()
+		ms.deleting = true
+		info := ms.info
+		deletedInfo = &info
 		wasRunning := ms.info.State == events.StateRunning
 		if ms.worker != nil {
 			workerToKill = ms.worker
@@ -1017,7 +1053,6 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 	}
 	m.mu.Unlock()
-
 	if workerToKill != nil {
 		if err := workerToKill.Kill(); err != nil {
 			m.log.Warn("session: worker kill failed during physical delete",
@@ -1025,7 +1060,22 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 	}
 
-	return m.store.DeletePhysical(ctx, id)
+	if cleanup, ok := m.store.(CleanupTaskStore); ok {
+		_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
+		return err
+	}
+	if deletedInfo == nil && m.OnDelete != nil {
+		if info, err := m.store.Get(ctx, id); err == nil {
+			deletedInfo = info
+		}
+	}
+	if err := m.store.DeletePhysical(ctx, id); err != nil {
+		return err
+	}
+	if deletedInfo != nil {
+		m.notifyDelete(*deletedInfo)
+	}
+	return nil
 }
 
 // ValidateOwnership checks whether the given userID owns the session.
@@ -1463,8 +1513,15 @@ func (m *Manager) gc(ctx context.Context) {
 	}
 	cronCutoff := now.Add(-cfg.Session.CronTermRetention)
 	defaultCutoff := now.Add(-cfg.Session.TermRetention)
-	if err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff); err != nil {
+	deleted, err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff)
+	if err != nil {
 		m.log.Error("session: gc (delete_terminated) failed", "err", err)
+	} else {
+		if _, durable := m.store.(CleanupTaskStore); !durable {
+			for _, info := range deleted {
+				m.notifyDelete(*info)
+			}
+		}
 	}
 }
 
@@ -1492,6 +1549,15 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 	}
 	if (state == events.StateTerminated || state == events.StateDeleted) && m.OnTerminate != nil {
 		m.safeGo(func() { m.OnTerminate(sessionID) })
+	}
+}
+
+// notifyDelete runs the worker-runtime cleanup callback after an explicit
+// session deletion has been persisted. It intentionally does not run for
+// TERMINATED transitions: those sessions must remain resumable.
+func (m *Manager) notifyDelete(info SessionInfo) {
+	if m.OnDelete != nil {
+		m.safeGo(func() { m.OnDelete(context.Background(), info) })
 	}
 }
 

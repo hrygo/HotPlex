@@ -1,5 +1,14 @@
 package worker
 
+import "errors"
+
+var (
+	// ErrResumeCheckFailed means the worker could not determine whether its
+	// persisted runtime session still exists. Callers must not silently create a
+	// fresh session, because doing so discards conversation context.
+	ErrResumeCheckFailed = errors.New("worker: resume session check failed")
+)
+
 // WorkerErrorKind classifies worker errors for gateway-level handling.
 type WorkerErrorKind int
 

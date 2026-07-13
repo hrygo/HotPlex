@@ -1,6 +1,4 @@
--- delete_terminated atomically removes terminated sessions and returns their
--- metadata so worker-runtime cleanup runs only after local deletion succeeds.
-DELETE FROM sessions WHERE state = ? AND (
+DELETE FROM sessions WHERE id = ? AND state = ? AND (
     (source = 'cron' AND updated_at <= ?) OR
     (source != 'cron' AND updated_at <= ?)
 )

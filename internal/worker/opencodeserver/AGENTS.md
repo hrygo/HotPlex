@@ -39,7 +39,7 @@ commands.go       # ServerCommander: HTTP REST for Compact/Clear/Rewind + Contro
 
 **HTTP client**: Shared `http.Client` with 30s timeout; `doGet`/`doPost`/`doRequest` helpers with JSON marshaling
 
-**Server-side session cleanup**: `release()` calls `deleteOCSSession` (DELETE /session/{id}) to clean up OCS server state on worker detach. Best-effort — failures logged at Debug level, never block cleanup. Prevents resource accumulation across many session lifecycle cycles.
+**Server-side session cleanup**: `release()` only closes SSE and releases the singleton reference, preserving OCS state for resume. `DeletePersistedSession()` sends DELETE /session/{id} only after HotPlex explicitly deletes the owning session.
 
 ## ANTI-PATTERNS
 - ❌ Call `Terminate()`/`Kill()` to stop the singleton process — only releases ref + closes SSE

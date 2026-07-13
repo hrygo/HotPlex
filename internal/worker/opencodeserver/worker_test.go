@@ -123,6 +123,103 @@ func TestOpenCodeServerWorker_Terminate_CallsSSECancel(t *testing.T) {
 	}
 }
 
+func TestOpenCodeServerWorker_TerminatePreservesServerSession(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	mgr := NewSingletonProcessManager(slog.New(slog.NewTextHandler(io.Discard, nil)), config.OpenCodeServerConfig{IdleDrainPeriod: time.Hour})
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.refs = 1
+	mgr.mu.Unlock()
+
+	w := New()
+	w.singleton = mgr
+	w.httpAddr = server.URL
+	w.client = server.Client()
+	w.httpConn = &conn{sessionID: "ocs-session-1", recvCh: make(chan *events.Envelope)}
+
+	require.NoError(t, w.Terminate(context.Background()))
+	require.Zero(t, requests, "ordinary worker termination must preserve the resumable OCS session")
+}
+
+func TestDeleteOCSSession(t *testing.T) {
+	for _, status := range []int{http.StatusNoContent, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var deleted string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, http.MethodDelete, r.Method)
+				deleted = r.URL.Path
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			require.NoError(t, deleteOCSSession(context.Background(), "ocs-session-1", server.URL, server.Client()))
+			require.Equal(t, "/session/ocs-session-1", deleted)
+		})
+	}
+}
+
+func TestOCSSessionExists_OnlyNotFoundAllowsFreshStart(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		exists     bool
+		wantErr    bool
+	}{
+		{name: "exists", statusCode: http.StatusOK, exists: true},
+		{name: "not found", statusCode: http.StatusNotFound, exists: false},
+		{name: "server failure", statusCode: http.StatusServiceUnavailable, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, http.MethodGet, r.Method)
+				w.WriteHeader(tt.statusCode)
+			}))
+			defer server.Close()
+
+			w := New()
+			w.httpAddr = server.URL
+			w.client = server.Client()
+			exists, err := w.ocsSessionExists(context.Background(), "ocs-session-1")
+			require.Equal(t, tt.exists, exists)
+			if tt.wantErr {
+				require.ErrorIs(t, err, worker.ErrResumeCheckFailed)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestOpenCodeServerWorker_ResumeDoesNotFreshStartAfterCheckFailure(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	mgr := NewSingletonProcessManager(slog.New(slog.NewTextHandler(io.Discard, nil)), config.OpenCodeServerConfig{IdleDrainPeriod: time.Hour})
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.httpAddr = server.URL
+	mgr.client = server.Client()
+	mgr.mu.Unlock()
+
+	w := New()
+	w.singleton = mgr
+	err := w.Resume(context.Background(), worker.SessionInfo{SessionID: "hotplex-session-1", WorkerSessionID: "ocs-session-1"})
+	require.ErrorIs(t, err, worker.ErrResumeCheckFailed)
+	require.Equal(t, []string{"GET /session/ocs-session-1/message"}, requests)
+}
+
 func TestOpenCodeServerWorker_Kill_CallsSSECancel(t *testing.T) {
 	t.Parallel()
 

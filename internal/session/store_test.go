@@ -220,8 +220,9 @@ func TestSQLiteStore_DeleteTerminated(t *testing.T) {
 
 	cronCutoff := now.Add(-24 * time.Hour)
 	defaultCutoff := now.Add(-7 * 24 * time.Hour)
-	err := store.DeleteTerminated(ctx, cronCutoff, defaultCutoff)
+	deleted, err := store.DeleteTerminated(ctx, cronCutoff, defaultCutoff)
 	require.NoError(t, err)
+	require.Len(t, deleted, 2)
 
 	_, err = store.Get(ctx, "cron_old")
 	require.ErrorIs(t, err, ErrSessionNotFound, "old cron session should be deleted")

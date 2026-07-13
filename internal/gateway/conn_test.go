@@ -180,6 +180,66 @@ func TestBuildInitAckError(t *testing.T) {
 	require.Equal(t, "invalid token", ack.Event.Data.(InitAckData).Error)
 }
 
+type resumeCheckStarter struct {
+	startCalled bool
+}
+
+func (s *resumeCheckStarter) StartSession(context.Context, worker.SessionStartParams) error {
+	s.startCalled = true
+	return nil
+}
+
+func (*resumeCheckStarter) ResumeSession(context.Context, string, string) error {
+	return worker.ErrResumeCheckFailed
+}
+
+func (*resumeCheckStarter) SwitchWorkDir(context.Context, string, string) (*SwitchWorkDirResult, error) {
+	return nil, nil
+}
+
+func (*resumeCheckStarter) GetWorkspaceByID(context.Context, string) (*session.Workspace, error) {
+	return nil, session.ErrSessionNotFound
+}
+
+type resumeCheckSM struct {
+	info *session.SessionInfo
+}
+
+func (m *resumeCheckSM) Get(context.Context, string) (*session.SessionInfo, error) {
+	return m.info, nil
+}
+
+func (*resumeCheckSM) GetWorker(string) worker.Worker { return nil }
+
+func (*resumeCheckSM) Transition(context.Context, string, events.SessionState) error { return nil }
+
+func (*resumeCheckSM) CreateWithBot(context.Context, string, string, string, string, worker.WorkerType, []string, string, map[string]string, string, string, string) (*session.SessionInfo, error) {
+	return nil, errors.New("StartSession must not be called after an uncertain resume check")
+}
+
+func (*resumeCheckSM) DeletePhysical(context.Context, string) error { return nil }
+
+func TestConnHandleExistingSession_DoesNotFreshStartOnResumeCheckFailure(t *testing.T) {
+	hub := newTestHub(t)
+	client, server := newTestWSConnPair(t)
+	defer client.Close()
+	defer server.Close()
+
+	starter := &resumeCheckStarter{}
+	c := newConn(hub, client, "sess-resume-check", starter)
+	defer c.Close()
+	sm := &resumeCheckSM{info: &session.SessionInfo{
+		ID:         "sess-resume-check",
+		UserID:     "user1",
+		WorkerType: worker.TypeOpenCodeSrv,
+		State:      events.StateTerminated,
+	}}
+
+	_, err := c.handleExistingSession("sess-resume-check", "", sm, sm.info, InitData{}, "")
+	require.ErrorIs(t, err, worker.ErrResumeCheckFailed)
+	require.False(t, starter.startCalled, "uncertain OCS availability must not discard context with a fresh start")
+}
+
 func TestBackoffDuration(t *testing.T) {
 	t.Parallel()
 
@@ -526,9 +586,15 @@ func (m *mockSessionStoreForBotID) GetExpiredIdle(ctx context.Context, now time.
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *mockSessionStoreForBotID) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) error {
+func (m *mockSessionStoreForBotID) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*session.SessionInfo, error) {
 	args := m.Called(ctx, cronCutoff, defaultCutoff)
-	return args.Error(0)
+	if len(args) == 1 {
+		return nil, args.Error(0)
+	}
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*session.SessionInfo), args.Error(1)
 }
 
 func (m *mockSessionStoreForBotID) DeletePhysical(ctx context.Context, id string) error {

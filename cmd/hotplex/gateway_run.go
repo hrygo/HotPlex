@@ -41,6 +41,7 @@ import (
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/webchat"
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/acp"
 	"github.com/hrygo/hotplex/internal/worker/claudecode"
 	"github.com/hrygo/hotplex/internal/worker/codexcli"
@@ -334,9 +335,13 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			cronScheduler.CleanupForSession(sessionID)
 		}
 	}
-
 	// Wait for orphan process cleanup to finish before repairing sessions.
 	cleanupWG.Wait()
+	if cleanupStore, ok := stores.session.(session.CleanupTaskStore); ok {
+		go session.NewCleanupRunner(log, cleanupStore, worker.CleanupSession).Run(ctx)
+	} else {
+		log.Warn("gateway: durable session cleanup unavailable for session store")
+	}
 
 	repaired, repairErr := sm.RepairRunningSessions(ctx)
 	if repairErr != nil {
