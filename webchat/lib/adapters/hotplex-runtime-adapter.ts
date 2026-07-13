@@ -21,6 +21,7 @@ import type {
     QuestionResponseData,
     ElicitationRequestData,
     ElicitationResponseData,
+    InputAckData,
 } from "@/lib/ai-sdk-transport/client/types";
 import {
     WorkerStdioCommand,
@@ -39,6 +40,7 @@ import { useMetrics } from "@/lib/hooks/useMetrics";
 import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
 import { logger } from "@/lib/logger";
+import i18n from "@/lib/i18n/config";
 import type {
     Envelope,
     MessageDeltaData,
@@ -1126,9 +1128,38 @@ export function useHotPlexRuntime({
             setIsRunning(true);
         };
 
+        // input.ack surfaces delivery outcomes the error stream does not. The
+        // gateway sends NO error event for an `unknown` outcome (worker timeout
+        // / restart), so without this handler the UI would spin forever on a
+        // turn whose outcome is ambiguous.
+        const handleInputAck = (data: InputAckData) => {
+            if (data.status !== "unknown") {
+                return;
+            }
+            logger.warn("RuntimeAdapter", "Input outcome unknown", {
+                client_message_id: data.client_message_id,
+                execution_id: data.execution_id,
+                error_code: data.error_code,
+            });
+            setIsRunning(false);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: `input-unknown-${Date.now()}`,
+                    role: "assistant" as const,
+                    parts: [
+                        { type: "text" as const, text: i18n.t("chat:error.input_unknown") },
+                    ],
+                    createdAt: new Date(),
+                    status: "complete" as const,
+                },
+            ]);
+        };
+
         // Subscribe to events
         client.on("delta", handleDelta);
         client.on("message", handleMessage);
+        client.on("inputAck", handleInputAck);
         client.on("done", handleDone);
         client.on("error", handleError);
         client.on("disconnected", handleDisconnected);
@@ -1343,6 +1374,7 @@ export function useHotPlexRuntime({
             cancelled = true;
             client.off("delta", handleDelta);
             client.off("message", handleMessage);
+            client.off("inputAck", handleInputAck);
             client.off("done", handleDone);
             client.off("error", handleError);
             client.off("disconnected", handleDisconnected);
@@ -1503,14 +1535,19 @@ export function useHotPlexRuntime({
         try {
             client.sendInput(textContent);
         } catch (err) {
-            logger.error("RuntimeAdapter", "sendInput failed", {
-                error: String(err),
-            });
-            // Remove user message since send failed
+            const errMsg = err instanceof Error ? err.message : String(err);
+            // The optimistically-added user message did not go out — remove it.
             setMessages((prev) => prev.slice(0, -1));
-            throw new Error(
-                "Failed to send message. Please check your connection.",
-            );
+            if (errMsg === "Input already pending") {
+                // A previous turn is still in flight (often an unknown-outcome
+                // tombstone). This is not a connection fault.
+                logger.warn("RuntimeAdapter", "sendInput blocked: input already pending");
+                throw new Error(i18n.t("chat:error.input_still_processing"));
+            }
+            logger.error("RuntimeAdapter", "sendInput failed", {
+                error: errMsg,
+            });
+            throw new Error(i18n.t("chat:error.send_failed_connection"));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable send action; startTurn is a stable callback
     }, []);

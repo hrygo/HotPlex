@@ -259,7 +259,7 @@ describe("BrowserHotPlexClient input retry identity", () => {
         expect(() => client.sendInput("second")).not.toThrow();
     });
 
-    it("keeps an unknown acknowledgement as a tombstone until late Done", async () => {
+    it("tombstones an unknown acknowledgement but auto-clears after the grace window", async () => {
         vi.useFakeTimers();
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
@@ -286,12 +286,62 @@ describe("BrowserHotPlexClient input retry identity", () => {
         }));
 
         await expect(pending).rejects.toThrow("EXECUTION_TIMEOUT");
+        // Immediately after: tombstone blocks new sends (avoid double side-effects).
         expect(() => client.sendInput("second")).toThrow("Input already pending");
 
-        await vi.advanceTimersByTimeAsync(300_000);
-        expect(() => client.sendInput("second")).toThrow("Input already pending");
+        // After the grace window the tombstone is force-cleared so an ambiguous
+        // outcome can never permanently lock the chat.
+        await vi.advanceTimersByTimeAsync(130_000);
+        expect(() => client.sendInput("second")).not.toThrow();
+    });
 
-        route(client, envelope(EventKind.Done, { success: true }));
+    it("clears pendingInput on a delivered acknowledgement so a subsequent send works", () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            ws: { readyState: number };
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal.ws = { readyState: 1 };
+        const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        client.sendInput("first");
+        const clientMessageId = send.mock.calls[0][0].id;
+        route(client, envelope(EventKind.InputAck, {
+            client_message_id: clientMessageId,
+            execution_id: "exec-1",
+            status: "delivered",
+        }));
+
+        // delivered resolves the pending input — a new send must not throw.
+        expect(() => client.sendInput("second")).not.toThrow();
+    });
+
+    it("clears pendingInput on a non-SESSION_BUSY error so the client is not locked out", () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            ws: { readyState: number };
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal.ws = { readyState: 1 };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        client.sendInput("first");
+        // SESSION_NOT_FOUND arrives with no Done and no terminal InputAck — the
+        // error itself must release the pending slot.
+        route(client, envelope(EventKind.Error, { code: "SESSION_NOT_FOUND", message: "gone" }));
+
         expect(() => client.sendInput("second")).not.toThrow();
     });
 
@@ -343,5 +393,38 @@ describe("BrowserHotPlexClient input retry identity", () => {
 
         expect(internal.pendingInput).toBeNull();
         await expect(pending).rejects.toThrow("Reconnect failed");
+    });
+
+    it("rejects a pending async input when the socket closes without reconnect", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1, CONNECTING: 0 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+            reconnect: { enabled: false },
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            _reconnecting: boolean;
+            shouldReconnect: boolean;
+            pendingInput: unknown;
+            ws: { readyState: number; close: () => void } | null;
+            _send(value: Envelope): void;
+            _handleClose(code: number, reason: string): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal._reconnecting = false;
+        internal.shouldReconnect = false;
+        internal.ws = { readyState: 1, close: vi.fn() };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const pending = client.sendInputAsync("hello");
+        // shouldReconnect is false → the 'disconnected' branch must reject the
+        // pending input instead of leaving the promise hanging forever.
+        internal._handleClose(1000, "link lost");
+
+        expect(internal.pendingInput).toBeNull();
+        await expect(pending).rejects.toThrow("link lost");
     });
 });

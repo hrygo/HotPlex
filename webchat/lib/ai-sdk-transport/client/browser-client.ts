@@ -135,6 +135,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private missedPongs = 0;
   private lastPongTime = 0;
 
+  // Hard cap on how long a pending input may wait for a terminal outcome.
+  private static readonly INPUT_SETTLE_TIMEOUT_MS = 300_000;
+  // A tombstoned (unknown-outcome) input blocks new sends for at most this long
+  // before being force-cleared, so an ambiguous outcome can never lock the chat.
+  private static readonly TOMBSTONE_GRACE_MS = 120_000;
+
   private pendingInput: {
     content: string;
     clientMessageId: string;
@@ -144,6 +150,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     reject: (err: Error) => void;
   } | null = null;
   private inputRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private inputSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  private inputTombstoneTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingConnectReject: ((err: Error) => void) | null = null;
 
   private closed = false;
@@ -372,6 +380,15 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         this.emit('error', errData, env);
         if (errData.code === ErrorCode.SessionBusy) {
           this._handleSessionBusy();
+        } else {
+          // Any definitive error settles the pending input so the client can
+          // never be locked out of sending by a non-busy rejection (e.g.
+          // SESSION_NOT_FOUND, INTERNAL_ERROR) that arrives without a Done.
+          this._settlePending({
+            kind: 'reject',
+            error: new Error(errData.code || errData.message || 'Gateway error'),
+            force: true,
+          });
         }
         break;
       }
@@ -385,18 +402,29 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         const ackData = event.data as InputAckData;
         if (this.pendingInput?.clientMessageId === ackData.client_message_id &&
             ackData.status !== 'accepted') {
-          const pending = this.pendingInput;
-          pending.retryable = false;
-          this._clearInputRetry();
+          this.pendingInput.retryable = false;
           const isSessionBusy = ackData.status === 'failed' &&
             ackData.error_code === ErrorCode.SessionBusy;
-          if (ackData.status === 'unknown') {
-            pending.tombstone = true;
-            pending.reject(new Error(ackData.error_code || ackData.status.toUpperCase()));
+          if (ackData.status === 'delivered') {
+            // A delivered outcome resolves the pending input — including the
+            // duplicate-delivered replay on reconnect — so the client never
+            // waits for a Done that the deduplicated path will not send.
+            this._settlePending({ kind: 'resolve' });
+          } else if (ackData.status === 'unknown') {
+            this._settlePending({
+              kind: 'reject',
+              error: new Error(ackData.error_code || ackData.status.toUpperCase()),
+              tombstone: true,
+            });
           } else if (!isSessionBusy && ackData.status === 'failed') {
-            pending.reject(new Error(ackData.error_code || ackData.status.toUpperCase()));
-            this.pendingInput = null;
+            this._settlePending({
+              kind: 'reject',
+              error: new Error(ackData.error_code || ackData.status.toUpperCase()),
+              force: true,
+            });
           }
+          // SESSION_BUSY failed acks are handled by the Error event's
+          // _handleSessionBusy; intentionally not settled here.
         }
         this.emit('inputAck', ackData, env);
         break;
@@ -404,10 +432,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
       case EventKind.Done:
         this.emit('done', event.data as DoneData, env);
-        if (this.pendingInput) {
-          this.pendingInput.resolve();
-          this.pendingInput = null;
-        }
+        this._settlePending({ kind: 'resolve' });
         break;
 
       case EventKind.MessageDelta:
@@ -542,10 +567,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       reject: () => undefined,
     };
     this.pendingInput = pending;
+    this._armInputSettleTimer();
     try {
       this._sendInputWithID(content, pending.clientMessageId);
     } catch (err) {
       if (this.pendingInput === pending) {
+        this._clearInputTimers();
         this.pendingInput = null;
       }
       throw err;
@@ -561,22 +588,17 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       const clientMessageId = newEventId();
       const pending = { content, clientMessageId, retryable: true, tombstone: false, resolve, reject };
       this.pendingInput = pending;
+      this._armInputSettleTimer();
       try {
         this._sendInputWithID(content, clientMessageId);
       } catch (err) {
         if (this.pendingInput === pending) {
+          this._clearInputTimers();
           this.pendingInput = null;
         }
         reject(err instanceof Error ? err : new Error(String(err)));
         return;
       }
-
-      setTimeout(() => {
-        if (this.pendingInput === pending && !pending.tombstone) {
-          pending.reject(new Error('Input timeout'));
-          this.pendingInput = null;
-        }
-      }, 300000);
     });
   }
 
@@ -616,14 +638,14 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     this._stopHeartbeat();
     this._clearReconnectTimer();
-    this._clearInputRetry();
+    this._clearInputTimers();
 
     if (this.pendingConnectReject) {
       this.pendingConnectReject(new Error('Client disconnected'));
       this.pendingConnectReject = null;
     }
 
-    this._rejectPendingInput('Client disconnected');
+    this._settlePending({ kind: 'reject', error: new Error('Client disconnected'), force: true });
 
     if (this.ws) {
       const ws = this.ws;
@@ -760,10 +782,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       // singular to preserve observed event ordering; add a concurrent
       // 'disconnected' emit here if a future consumer listens only to that event.
       this._reconnecting = false;
-      this._clearInputRetry();
-      this._rejectPendingInput('Reconnect failed');
+      this._clearInputTimers();
+      this._settlePending({ kind: 'reject', error: new Error('Reconnect failed'), force: true });
       this.emit('reconnect_failed', this.reconnectAttempt);
     } else if (!this.shouldReconnect || this.closed) {
+      this._clearInputTimers();
+      this._settlePending({ kind: 'reject', error: new Error(reason || 'Disconnected'), force: true });
       this.emit('disconnected', reason);
     }
   }
@@ -800,11 +824,71 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
   }
 
-  private _rejectPendingInput(message: string): void {
-    if (!this.pendingInput) {
+  // ─── Pending-input lifecycle ───────────────────────────────────────────────
+  //
+  // _settlePending is the single point that clears or tombstones a pending
+  // input. Every terminal path (terminal InputAck, Done, non-busy Error,
+  // disconnect, reconnect failure, settle/grace timeout) routes through it, so
+  // the client can never be permanently locked out of sending.
+
+  private _clearInputTimers(): void {
+    this._clearInputRetry();
+    if (this.inputSettleTimer) {
+      clearTimeout(this.inputSettleTimer);
+      this.inputSettleTimer = null;
+    }
+    if (this.inputTombstoneTimer) {
+      clearTimeout(this.inputTombstoneTimer);
+      this.inputTombstoneTimer = null;
+    }
+  }
+
+  private _armInputSettleTimer(): void {
+    this.inputSettleTimer = setTimeout(() => {
+      this.inputSettleTimer = null;
+      // Hard cap: force-clear regardless of tombstone so a missing terminal
+      // event can never block the chat forever.
+      this._settlePending({ kind: 'reject', error: new Error('Input timeout'), force: true });
+    }, BrowserHotPlexClient.INPUT_SETTLE_TIMEOUT_MS);
+  }
+
+  private _settlePending(outcome:
+    | { kind: 'resolve' }
+    | { kind: 'reject'; error: Error; tombstone?: boolean; force?: boolean },
+  ): void {
+    const pending = this.pendingInput;
+    if (!pending) {
       return;
     }
-    this.pendingInput.reject(new Error(message));
+
+    // A tombstoned input (unknown outcome) stays sticky — it blocks new sends
+    // to avoid double side-effects while the worker may still be processing.
+    // Only Done (resolve), a definitive event (force), or the grace timer may
+    // clear it. Other rejects during the window still deliver the error to the
+    // already-settled promise (a no-op) without clearing pendingInput.
+    if (pending.tombstone && outcome.kind === 'reject' && !outcome.force) {
+      pending.reject(outcome.error);
+      return;
+    }
+
+    this._clearInputTimers();
+    if (outcome.kind === 'resolve') {
+      pending.resolve();
+    } else {
+      pending.reject(outcome.error);
+    }
+
+    if (outcome.kind === 'reject' && outcome.tombstone) {
+      pending.tombstone = true;
+      // Bounded escape: if no Done arrives within the grace window, force-clear
+      // so an ambiguous outcome can never lock the chat permanently.
+      this.inputTombstoneTimer = setTimeout(() => {
+        this.inputTombstoneTimer = null;
+        this._settlePending({ kind: 'reject', error: new Error('Input outcome timeout'), force: true });
+      }, BrowserHotPlexClient.TOMBSTONE_GRACE_MS);
+      return; // keep pendingInput as a sticky tombstone
+    }
+
     this.pendingInput = null;
   }
 }
