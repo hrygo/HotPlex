@@ -287,50 +287,16 @@ gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | {state, commit_
 
 ## 命令参考
 
-### 快速开始
+### 命令速查
 
 ```bash
-# 1. 环境配置
-cp configs/env.example .env
-# 编辑 .env 填入 API 密钥
+# 首次环境配置
+cp configs/env.example .env   # 编辑填入 API 密钥
+make quickstart               # check-tools + build + test-short
+make dev                      # 启动开发环境（gateway + webchat）
 
-# 2. 快速安装
-make quickstart  # check-tools + build + test-short
-
-# 3. 启动开发环境
-make dev  # gateway + webchat
-```
-
-验证：
-```bash
-make check       # 完整 CI: quality + build
-make dev-status  # 查看运行服务
-```
-
-### 构建与质量
-
-```bash
-make build          # 构建网关二进制
-make test           # 运行测试（含 -race）
-make test-short     # 快速测试（-short）
-make lint           # golangci-lint
-make coverage       # 覆盖率报告
-make check          # 完整 CI: quality + build
-make quality        # fmt + lint + test
-make fmt            # 格式化
-make clean          # 清理构建产物
-```
-
-### 开发
-
-```bash
-make quickstart      # 首次安装
-make run             # 构建并运行网关
-make dev             # 启动开发环境（gateway + webchat）
-make dev-stop        # 停止所有开发服务
-make dev-status      # 查看运行服务
-make dev-logs        # 查看网关日志
-make dev-reset       # 停止并重启
+# 所有 make 目标（build/test/lint/coverage/dev/gateway 等）的完整列表与说明
+make help
 ```
 
 ### 网关管理
@@ -369,52 +335,9 @@ hotplex update -y             # 跳过确认提示
 hotplex update --restart      # 更新后自动重启网关
 ```
 
-### Slack 操作
+### Slack / Cron CLI 示例
 
-```bash
-hotplex slack send-message --text "Hello" --channel <id>
-hotplex slack upload-file --file ./report.pdf --title "Report"
-hotplex slack update-message --channel <id> --ts <ts> --text "Updated"
-hotplex slack schedule-message --text "Reminder" --at "2026-05-04T09:00:00+08:00"
-hotplex slack download-file --file-id <id> --output ./save.pdf
-hotplex slack list-channels --types im,public_channel --json
-hotplex slack bookmark add --channel <id> --title "Link" --url <url>
-hotplex slack bookmark list --channel <id>
-hotplex slack bookmark remove --channel <id> --bookmark-id <id>
-hotplex slack react add --channel <id> --ts <ts> --emoji white_check_mark
-```
-
-### Cron 定时任务
-
-```bash
-# 创建周期任务（必填：name, schedule, message, bot-id, owner-id, max-runs, expires-at）
-hotplex cron create \
-  --name "daily-health" \
-  --schedule "cron:0 9 * * 1-5" \
-  -m "检查系统健康状态" \
-  --bot-id "$BOT_ID" --owner-id "$USER_ID" \
-  --max-runs 100 --expires-at "2027-01-01T00:00:00+08:00"
-
-# 带短生命周期的周期任务
-hotplex cron create \
-  --name "remind" \
-  --schedule "every:30m" \
-  -m "提醒喝水" \
-  --bot-id "$BOT_ID" --owner-id "$USER_ID" \
-  --max-runs 6 --expires-at "2026-05-11T00:00:00+08:00"
-
-# 列出 / 查看 / 更新 / 删除
-hotplex cron list [--json] [--enabled]
-hotplex cron get <id|name>
-hotplex cron update <id|name> --enabled=false
-hotplex cron delete <id|name>
-
-# 手动触发（需 gateway 运行中）
-hotplex cron trigger <id|name>
-
-# 查看执行历史
-hotplex cron history <id|name> [--json]
-```
+Slack（send-message / upload-file / bookmark / react 等）与 Cron（create / list / trigger / history 等）的详细命令示例见 skill `hotplex-cli`（`.claude/skills/hotplex-cli/SKILL.md`）——按需加载，不常驻上下文。
 
 ---
 
