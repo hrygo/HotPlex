@@ -205,8 +205,10 @@ func (s *SQLStore) SetStatus(ctx context.Context, executionID string, status Sta
 	}
 	if rows == 0 {
 		var current Status
-		err := s.db.QueryRowContext(ctx, s.rebind(`
+		readCtx, readCancel := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
+		err := s.db.QueryRowContext(readCtx, s.rebind(`
 			SELECT status FROM execution_inputs WHERE execution_id = ?`), executionID).Scan(&current)
+		readCancel()
 		if err == nil && current == status {
 			return nil
 		}
