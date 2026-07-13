@@ -55,6 +55,50 @@ func TestSQLiteStore_RetentionCleanupTombstoneBlocksStaleUpsert(t *testing.T) {
 	require.Equal(t, "ocs-old", tasks[0].WorkerSessionID)
 }
 
+func TestSQLiteStore_MarkDeletedEnqueuesCleanupTask(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	info := ocsTerminatedInfo("sess-logical-delete", "ocs-logical-delete", now)
+	info.State = events.StateRunning
+	require.NoError(t, store.Upsert(ctx, info))
+
+	deleted := *info
+	deleted.State = events.StateDeleted
+	deleted.UpdatedAt = now.Add(time.Second)
+	require.NoError(t, store.MarkDeletedWithCleanup(ctx, &deleted))
+
+	stored, err := store.Get(ctx, info.ID)
+	require.NoError(t, err)
+	require.Equal(t, events.StateDeleted, stored.State)
+
+	claimNow := time.Now().Add(time.Second)
+	tasks, err := store.ClaimCleanupTasks(ctx, claimNow, claimNow.Add(time.Minute), 1)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "ocs-logical-delete", tasks[0].WorkerSessionID)
+}
+
+func TestCleanupRunner_RunReturnsOnCancellation(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	runner := NewCleanupRunner(nil, store, func(context.Context, worker.WorkerType, string) error { return nil })
+	runner.Run(ctx)
+	require.True(t, isCleanupPendingError(ErrSessionCleanupPending))
+	require.True(t, containsCleanupPending("session cleanup pending"))
+}
+
+func TestSQLiteStore_DeletePhysicalWithCleanupNotFound(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	deleted, err := store.DeletePhysicalWithCleanup(context.Background(), "missing-session")
+	require.NoError(t, err)
+	require.Nil(t, deleted)
+}
+
 func TestCleanupRunner_RetriesAndCompletesDurably(t *testing.T) {
 	t.Parallel()
 	store, _ := helperDB(t)
