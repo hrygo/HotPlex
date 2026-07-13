@@ -130,8 +130,6 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) 
 }
 
 func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
-	h.cancelRetryIfNeeded(env.SessionID)
-
 	data, ok := env.Event.Data.(map[string]any)
 	if !ok {
 		h.log.Warn("gateway: handleInput malformed data", "session_id", env.SessionID)
@@ -168,6 +166,7 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 		md["elicitation_response"] == nil {
 		return false, nil
 	}
+	h.cancelRetryIfNeeded(env.SessionID)
 
 	respType := "unknown"
 	switch {
@@ -229,6 +228,7 @@ func (h *Handler) recordPermissionDenial(respType string, md map[string]any, env
 // Returns (true, err) if a command was handled, (false, nil) to fall through.
 func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, content string) (handled bool, err error) {
 	if messaging.IsHelpCommand(content) {
+		h.cancelRetryIfNeeded(env.SessionID)
 		helpEnv := events.NewEnvelope(
 			aep.NewID(), env.SessionID,
 			h.hub.NextSeq(env.SessionID),
@@ -238,6 +238,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 	}
 
 	if result := messaging.ParseControlCommand(content); result != nil {
+		h.cancelRetryIfNeeded(env.SessionID)
 		data := events.ControlData{Action: result.Action}
 		if result.Arg != "" {
 			data.Details = map[string]any{"path": result.Arg}
@@ -257,6 +258,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 	}
 
 	if cmdResult := messaging.ParseWorkerCommand(content); cmdResult != nil {
+		h.cancelRetryIfNeeded(env.SessionID)
 		wcmdEnv := &events.Envelope{
 			Version:   events.Version,
 			ID:        aep.NewID(),
@@ -286,35 +288,6 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
-	}
-
-	if !si.State.IsActive() {
-		// Auto-resume TERMINATED sessions so the user can continue on the
-		// same WebSocket connection after clicking stop (which sends terminate).
-		if si.State == events.StateTerminated && h.bridge != nil {
-			h.log.Info("gateway: auto-resuming terminated session", "session_id", env.SessionID)
-			resumeCtx, resumeCancel := context.WithTimeout(ctx, 30*time.Second)
-			resumeErr := h.bridge.ResumeSession(resumeCtx, env.SessionID, si.WorkDir)
-			resumeCancel()
-			if resumeErr != nil {
-				h.log.Warn("gateway: auto-resume failed", "session_id", env.SessionID, "err", resumeErr)
-				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
-				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "session resume failed: %v", resumeErr)
-			}
-			prevPlatform := si.Platform
-			si, err = h.sm.Get(ctx, env.SessionID)
-			if err != nil {
-				h.emitAudit(audit.OutcomeFailure, env.OwnerID, prevPlatform, env.SessionID, content)
-				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after resume")
-			}
-			if !si.State.IsActive() {
-				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
-				return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active after resume: %s", si.State)
-			}
-		} else {
-			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
-			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active: %s", si.State)
-		}
 	}
 
 	execRecord, duplicate, err := h.acceptInputExecution(ctx, env)
@@ -348,6 +321,50 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	// The first acknowledgement means the input is durably recorded. A second
 	// acknowledgement below reports the worker-delivery outcome.
 	h.sendInputAck(ctx, env, execRecord, false)
+	h.cancelRetryIfNeeded(env.SessionID)
+
+	finishRejected := func(code events.ErrorCode) {
+		if statusErr := h.finishInputExecution(ctx, execRecord, execution.StatusFailed, code); statusErr != nil {
+			h.log.Error("gateway: persist rejected input status failed", "err", statusErr,
+				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+		} else {
+			finalized = true
+		}
+		h.sendInputAck(ctx, env, execRecord, false)
+	}
+
+	if !si.State.IsActive() {
+		// Auto-resume TERMINATED sessions so the user can continue on the
+		// same WebSocket connection after clicking stop (which sends terminate).
+		if si.State == events.StateTerminated && h.bridge != nil {
+			h.log.Info("gateway: auto-resuming terminated session", "session_id", env.SessionID)
+			resumeCtx, resumeCancel := context.WithTimeout(ctx, 30*time.Second)
+			resumeErr := h.bridge.ResumeSession(resumeCtx, env.SessionID, si.WorkDir)
+			resumeCancel()
+			if resumeErr != nil {
+				h.log.Warn("gateway: auto-resume failed", "session_id", env.SessionID, "err", resumeErr)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				finishRejected(events.ErrCodeInternalError)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "session resume failed: %v", resumeErr)
+			}
+			prevPlatform := si.Platform
+			si, err = h.sm.Get(ctx, env.SessionID)
+			if err != nil {
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, prevPlatform, env.SessionID, content)
+				finishRejected(events.ErrCodeSessionNotFound)
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after resume")
+			}
+			if !si.State.IsActive() {
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				finishRejected(events.ErrCodeSessionBusy)
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active after resume: %s", si.State)
+			}
+		} else {
+			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+			finishRejected(events.ErrCodeSessionBusy)
+			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session not active: %s", si.State)
+		}
+	}
 
 	w := h.sm.GetWorker(env.SessionID)
 	if w == nil {

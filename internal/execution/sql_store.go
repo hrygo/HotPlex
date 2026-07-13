@@ -192,8 +192,8 @@ func (s *SQLStore) SetStatus(ctx context.Context, executionID string, status Sta
 		result, err := s.db.ExecContext(ctx, s.rebind(`
 			UPDATE execution_inputs
 			SET status = ?, error_code = ?, updated_at = ?, delivered_at = ?
-			WHERE execution_id = ? AND (status = ? OR status = ?)`),
-			status, errorCode, now, deliveredAt, executionID, StatusAccepted, status)
+			WHERE execution_id = ? AND status = ?`),
+			status, errorCode, now, deliveredAt, executionID, StatusAccepted)
 		if err != nil {
 			return fmt.Errorf("execution: set status: %w", err)
 		}
@@ -204,6 +204,15 @@ func (s *SQLStore) SetStatus(ctx context.Context, executionID string, status Sta
 		return err
 	}
 	if rows == 0 {
+		var current Status
+		err := s.db.QueryRowContext(ctx, s.rebind(`
+			SELECT status FROM execution_inputs WHERE execution_id = ?`), executionID).Scan(&current)
+		if err == nil && current == status {
+			return nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("execution: get current status: %w", err)
+		}
 		return ErrNotFound
 	}
 	return nil

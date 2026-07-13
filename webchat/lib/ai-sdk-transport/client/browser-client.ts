@@ -55,6 +55,7 @@ import {
   serializeEnvelope,
   deserializeEnvelope,
   isInitAck,
+  newEventId,
 } from './envelope';
 
 // ============================================================================
@@ -134,7 +135,14 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private missedPongs = 0;
   private lastPongTime = 0;
 
-  private pendingInput: { content: string; resolve: () => void; reject: (err: Error) => void } | null = null;
+  private pendingInput: {
+    content: string;
+    clientMessageId: string;
+    retryable: boolean;
+    tombstone: boolean;
+    resolve: () => void;
+    reject: (err: Error) => void;
+  } | null = null;
   private inputRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingConnectReject: ((err: Error) => void) | null = null;
 
@@ -280,6 +288,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     if (isInitAck(env)) {
       const ackData = event.data as unknown as InitAckData;
+      const wasReconnecting = this._reconnecting;
 
       // Handle handshake-level errors
       if (ackData.error || ackData.code) {
@@ -332,6 +341,11 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         this.reconnectTimer = null;
       }
 
+      if (wasReconnecting && this.pendingInput?.retryable) {
+        this._clearInputRetry();
+        this._sendInputWithID(this.pendingInput.content, this.pendingInput.clientMessageId);
+      }
+
       this.emit('connected', ackData);
       resolve(ackData);
       return;
@@ -367,7 +381,23 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         break;
 
       case EventKind.InputAck:
-        this.emit('inputAck', event.data as InputAckData, env);
+        const ackData = event.data as InputAckData;
+        if (this.pendingInput?.clientMessageId === ackData.client_message_id &&
+            ackData.status !== 'accepted') {
+          const pending = this.pendingInput;
+          pending.retryable = false;
+          this._clearInputRetry();
+          const isSessionBusy = ackData.status === 'failed' &&
+            ackData.error_code === ErrorCode.SessionBusy;
+          if (ackData.status === 'unknown') {
+            pending.tombstone = true;
+            pending.reject(new Error(ackData.error_code || ackData.status.toUpperCase()));
+          } else if (!isSessionBusy && ackData.status === 'failed') {
+            pending.reject(new Error(ackData.error_code || ackData.status.toUpperCase()));
+            this.pendingInput = null;
+          }
+        }
+        this.emit('inputAck', ackData, env);
         break;
 
       case EventKind.Done:
@@ -498,8 +528,26 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   }
 
   sendInput(content: string): void {
-    const env = createInputEnvelope(this._sessionId!, content);
-    this._send(env);
+    if (this.pendingInput) {
+      throw new Error('Input already pending');
+    }
+    const pending = {
+      content,
+      clientMessageId: newEventId(),
+      retryable: true,
+      tombstone: false,
+      resolve: () => undefined,
+      reject: () => undefined,
+    };
+    this.pendingInput = pending;
+    try {
+      this._sendInputWithID(content, pending.clientMessageId);
+    } catch (err) {
+      if (this.pendingInput === pending) {
+        this.pendingInput = null;
+      }
+      throw err;
+    }
   }
 
   async sendInputAsync(content: string): Promise<void> {
@@ -508,16 +556,31 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
 
     return new Promise((resolve, reject) => {
-      this.pendingInput = { content, resolve, reject };
-      this.sendInput(content);
+      const clientMessageId = newEventId();
+      const pending = { content, clientMessageId, retryable: true, tombstone: false, resolve, reject };
+      this.pendingInput = pending;
+      try {
+        this._sendInputWithID(content, clientMessageId);
+      } catch (err) {
+        if (this.pendingInput === pending) {
+          this.pendingInput = null;
+        }
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
 
       setTimeout(() => {
-        if (this.pendingInput) {
-          this.pendingInput.reject(new Error('Input timeout'));
+        if (this.pendingInput === pending && !pending.tombstone) {
+          pending.reject(new Error('Input timeout'));
           this.pendingInput = null;
         }
       }, 300000);
     });
+  }
+
+  private _sendInputWithID(content: string, clientMessageId: string): void {
+    const env = createInputEnvelope(this._sessionId!, content, undefined, clientMessageId);
+    this._send(env);
   }
 
   sendPermissionResponse(permissionId: string, allowed: boolean, reason?: string): void {
@@ -557,6 +620,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       this.pendingConnectReject(new Error('Client disconnected'));
       this.pendingConnectReject = null;
     }
+
+    this._rejectPendingInput('Client disconnected');
 
     if (this.ws) {
       const ws = this.ws;
@@ -693,6 +758,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       // singular to preserve observed event ordering; add a concurrent
       // 'disconnected' emit here if a future consumer listens only to that event.
       this._reconnecting = false;
+      this._clearInputRetry();
+      this._rejectPendingInput('Reconnect failed');
       this.emit('reconnect_failed', this.reconnectAttempt);
     } else if (!this.shouldReconnect || this.closed) {
       this.emit('disconnected', reason);
@@ -708,6 +775,10 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       return;
     }
 
+    this.pendingInput.clientMessageId = newEventId();
+    this.pendingInput.retryable = true;
+    this.pendingInput.tombstone = false;
+
     this.inputRetryTimer = setTimeout(() => {
       this.inputRetryTimer = null;
 
@@ -715,7 +786,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         // SESSION_BUSY is a definitive rejection, so a later attempt gets a
         // fresh client message ID. Only ambiguous transport retries should
         // reuse an ID and rely on the gateway's idempotency ledger.
-        this.sendInput(this.pendingInput.content);
+        this._sendInputWithID(this.pendingInput.content, this.pendingInput.clientMessageId);
       }
     }, ProtocolConstants.SessionBusyRetryDelayMs);
   }
@@ -725,5 +796,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       clearTimeout(this.inputRetryTimer);
       this.inputRetryTimer = null;
     }
+  }
+
+  private _rejectPendingInput(message: string): void {
+    if (!this.pendingInput) {
+      return;
+    }
+    this.pendingInput.reject(new Error(message));
+    this.pendingInput = null;
   }
 }

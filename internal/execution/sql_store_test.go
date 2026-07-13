@@ -124,6 +124,11 @@ func TestSQLStore_SetStatusIsIdempotentAndTerminal(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, store.SetStatus(context.Background(), record.ExecutionID, StatusDelivered, ""))
+	first, err := store.getByClientMessage(context.Background(), "session-1", "message-2")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return time.Now().UnixMilli() > first.UpdatedAt
+	}, time.Second, time.Millisecond)
 	require.NoError(t, store.SetStatus(context.Background(), record.ExecutionID, StatusDelivered, ""))
 	require.ErrorIs(t, store.SetStatus(context.Background(), record.ExecutionID, StatusFailed, "LATE_FAILURE"), ErrNotFound)
 
@@ -131,6 +136,8 @@ func TestSQLStore_SetStatusIsIdempotentAndTerminal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusDelivered, stored.Status)
 	require.NotNil(t, stored.DeliveredAt)
+	require.Equal(t, first.UpdatedAt, stored.UpdatedAt)
+	require.Equal(t, first.DeliveredAt, stored.DeliveredAt)
 }
 
 func TestSQLStore_RestartMarksAcceptedUnknown(t *testing.T) {

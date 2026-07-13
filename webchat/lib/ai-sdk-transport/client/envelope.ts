@@ -152,10 +152,11 @@ export function createInitEnvelope(
 export function createInputEnvelope(
   sessionId: string,
   content: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  clientMessageId?: string
 ): Envelope<InputData> {
   return createEnvelope(
-    newEventId(),
+    clientMessageId ?? newEventId(),
     sessionId,
     1,
     EventKind.Input,
