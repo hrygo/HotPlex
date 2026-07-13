@@ -49,6 +49,12 @@ Add matching SQLite and PostgreSQL migrations for `session_cleanup_tasks`.
 | `last_error` | Most recent bounded diagnostic error. |
 | `created_at` / `updated_at` | Audit and scheduling timestamps. |
 
+PostgreSQL takes a transaction-scoped advisory lock derived from the HotPlex
+session ID before a session write or retention deletion. The lock disappears on
+commit/rollback, so it serializes lifecycle writes without retaining data after
+session GC; a waiting writer rechecks the committed tombstone instead of using
+an earlier read-committed snapshot. SQLite uses its existing single-writer lock.
+
 Only sessions with a non-empty `worker_session_id` create a task. Cleanup for
 workers without a registered cleaner is a successful no-op, preserving the
 current behavior for non-persistent workers.
@@ -91,8 +97,9 @@ orphan-process cleanup. It:
 
 1. Drains due tasks once during gateway startup, then polls on a bounded
    interval until the gateway context is cancelled.
-2. Atomically leases a small batch. Leases prevent duplicate deletion when two
-   gateway processes share PostgreSQL or a process is slow to exit.
+2. Atomically leases a small batch. Each lease has an opaque token; completion
+   and retry operations must match that token, so an expired worker cannot
+   complete or reschedule a task claimed by a newer runner.
 3. Calls `worker.CleanupSession` with a per-attempt timeout.
 4. Deletes the task on success, including the OCS cleaner's `404` success
    result. On failure it records the error and schedules exponential backoff
@@ -136,6 +143,9 @@ Add SQLite unit/integration coverage for:
 4. A leased-but-unfinished task is recovered and run after runner restart.
 5. A task targets the old remote ID even if a new local session is later
    created with the same HotPlex session ID.
+6. An expired lease cannot complete or reschedule a task after another runner
+   has claimed it, and PostgreSQL lifecycle locking prevents a stale write from
+   crossing a committed retention tombstone.
 
 Run the existing session, gateway, worker, OCS, migration, race, and repository
 quality gates. PR #873 is complete only when the new tests pass and review

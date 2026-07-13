@@ -51,16 +51,29 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		return err
 	}
 
-	_, err = s.db.ExecContext(ctx, s.queries["sessions.upsert_session"],
-		info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
-		info.Platform, string(pkJSON), info.WorkDir, info.Title,
-		info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,
-		string(ctxJSON), info.Source, info.ClientKey, nullableString(info.WorkspaceID),
-	)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := ensurePGLifecycleLock(ctx, tx, s.dialect.Rebind, info.ID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, s.queries["sessions.upsert_session"], upsertSessionArgs(info, ctxJSON, pkJSON)...)
+	if err != nil {
+		if isCleanupPendingError(err) {
+			return ErrSessionCleanupPending
+		}
 		return fmt.Errorf("session store: upsert: %w", err)
 	}
-	return nil
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("session store: upsert rows affected: %w", err)
+	}
+	if updated == 0 {
+		return ErrSessionCleanupPending
+	}
+	return tx.Commit()
 }
 
 // UpdateWorkerSessionIDSQL performs a targeted UPDATE on the worker_session_id
@@ -70,9 +83,22 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 func (s *pgStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error {
 	ctx, cancel := upsertTimeout(ctx)
 	defer cancel()
-	_, err := s.db.ExecContext(ctx, s.queries["sessions.update_worker_session_id"], workerSessionID, id)
+	result, err := s.db.ExecContext(ctx, s.queries["sessions.update_worker_session_id"], workerSessionID, id)
 	if err != nil {
 		return fmt.Errorf("session store: update worker session id: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("session store: worker session id rows affected: %w", err)
+	}
+	if updated == 0 {
+		pending, err := s.HasPendingCleanup(ctx, id)
+		if err != nil {
+			return fmt.Errorf("session store: check cleanup task: %w", err)
+		}
+		if pending {
+			return ErrSessionCleanupPending
+		}
 	}
 	return nil
 }
@@ -81,6 +107,13 @@ func (s *pgStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessio
 func (s *pgStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	info, err := scanSession(s.db.QueryRowContext(ctx, s.queries["store.get_session"], id))
 	if errors.Is(err, sql.ErrNoRows) {
+		pending, pendingErr := s.HasPendingCleanup(ctx, id)
+		if pendingErr != nil {
+			return nil, fmt.Errorf("session store: check cleanup task: %w", pendingErr)
+		}
+		if pending {
+			return nil, ErrSessionCleanupPending
+		}
 		return nil, ErrSessionNotFound
 	}
 	if err != nil {
@@ -137,20 +170,57 @@ func (s *pgStore) GetExpiredIdle(ctx context.Context, now time.Time) ([]string, 
 
 // DeleteTerminated removes terminated sessions older than the respective cutoffs.
 func (s *pgStore) DeleteTerminated(ctx context.Context, cronCutoff, defaultCutoff time.Time) ([]*SessionInfo, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["store.delete_terminated"], events.StateTerminated, cronCutoff, defaultCutoff)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("session store: delete terminated: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-	deleted := make([]*SessionInfo, 0)
-	for rows.Next() {
-		info, err := scanSession(rows)
-		if err != nil {
-			return nil, fmt.Errorf("session store: scan deleted session: %w", err)
-		}
-		deleted = append(deleted, info)
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, s.queries["store.select_terminated_ids"], events.StateTerminated, cronCutoff, defaultCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("session store: select terminated: %w", err)
 	}
-	return deleted, rows.Err()
+	ids, err := collectIDs(rows)
+	if err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	deleted := make([]*SessionInfo, 0, len(ids))
+	now := time.Now()
+	for _, id := range ids {
+		if err := ensurePGLifecycleLock(ctx, tx, s.dialect.Rebind, id); err != nil {
+			return nil, err
+		}
+		deletedRows, err := tx.QueryContext(ctx, s.queries["store.delete_terminated_by_id"], id, events.StateTerminated, cronCutoff, defaultCutoff)
+		if err != nil {
+			return nil, fmt.Errorf("session store: delete terminated: %w", err)
+		}
+		if deletedRows.Next() {
+			info, err := scanSession(deletedRows)
+			if err != nil {
+				_ = deletedRows.Close()
+				return nil, fmt.Errorf("session store: scan deleted session: %w", err)
+			}
+			deleted = append(deleted, info)
+			if err := insertCleanupTask(ctx, pgExec{tx: tx, rebind: s.dialect.Rebind}, info, now); err != nil {
+				_ = deletedRows.Close()
+				return nil, err
+			}
+		}
+		if err := deletedRows.Err(); err != nil {
+			_ = deletedRows.Close()
+			return nil, err
+		}
+		if err := deletedRows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }
 
 // DeletePhysical deletes a session by ID, bypassing the state machine.

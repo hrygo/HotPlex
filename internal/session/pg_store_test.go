@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/dbutil"
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -26,8 +27,10 @@ func newPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	q := make(map[string]string)
 	q["store.get_session"] = dbutil.DialectPostgres.Rebind(
 		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''), COALESCE(workspace_id, '') FROM sessions WHERE id = ?")
-	q["store.delete_terminated"] = dbutil.DialectPostgres.Rebind(
-		"DELETE FROM sessions WHERE state = ? AND ((source = 'cron' AND updated_at <= ?) OR (source != 'cron' AND updated_at <= ?))")
+	q["store.select_terminated_ids"] = dbutil.DialectPostgres.Rebind(
+		"SELECT id FROM sessions WHERE state = ? AND ((source = 'cron' AND updated_at <= ?) OR (source != 'cron' AND updated_at <= ?))")
+	q["store.delete_terminated_by_id"] = dbutil.DialectPostgres.Rebind(
+		"DELETE FROM sessions WHERE id = ? AND state = ? AND ((source = 'cron' AND updated_at <= ?) OR (source != 'cron' AND updated_at <= ?)) RETURNING id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''), COALESCE(workspace_id, '')")
 	q["store.get_sessions_by_state"] = dbutil.DialectPostgres.Rebind(
 		"SELECT id FROM sessions WHERE state = ?")
 	q["store.delete_physical"] = dbutil.DialectPostgres.Rebind(
@@ -88,6 +91,8 @@ func TestPGStore_Get_NotFound(t *testing.T) {
 		"SELECT id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_type, state, bot_id, COALESCE(bot_name, ''), platform, platform_key_json, COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at, expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''), COALESCE(workspace_id, '') FROM sessions WHERE id = ?")
 
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs("nonexistent").WillReturnError(sql.ErrNoRows)
+	pendingQuery := dbutil.DialectPostgres.Rebind(`SELECT EXISTS(SELECT 1 FROM session_cleanup_tasks WHERE session_id = ?)`)
+	mock.ExpectQuery(regexp.QuoteMeta(pendingQuery)).WithArgs("nonexistent").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
 	info, err := store.Get(context.Background(), "nonexistent")
 	require.ErrorIs(t, err, ErrSessionNotFound)
@@ -102,16 +107,26 @@ func TestPGStore_DeleteTerminated(t *testing.T) {
 	cronCutoff := time.UnixMilli(1000)
 	defaultCutoff := time.UnixMilli(2000)
 
-	q := store.queries["store.delete_terminated"]
+	selectQuery := store.queries["store.select_terminated_ids"]
+	deleteQuery := store.queries["store.delete_terminated_by_id"]
 	rows := sqlmock.NewRows([]string{
 		"id", "user_id", "owner_id", "worker_session_id", "worker_type", "state", "bot_id", "bot_name",
 		"platform", "platform_key_json", "work_dir", "title", "created_at", "updated_at",
 		"expires_at", "idle_expires_at", "context_json", "source", "client_key", "workspace_id",
 	}).AddRow("sess-old", "u1", "u1", "ocs-old", "opencode_server", string(events.StateTerminated), "", "",
 		"webchat", "", "", "", time.Now(), time.Now(), nil, nil, nil, "", "", "")
-	mock.ExpectQuery(regexp.QuoteMeta(q)).
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(selectQuery)).
 		WithArgs(string(events.StateTerminated), cronCutoff, defaultCutoff).
-		WillReturnRows(rows)
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("sess-old"))
+	mock.ExpectExec(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`)).
+		WithArgs("sess-old").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta(deleteQuery)).
+		WithArgs("sess-old", string(events.StateTerminated), cronCutoff, defaultCutoff).WillReturnRows(rows)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO session_cleanup_tasks (id, session_id, worker_type, worker_session_id, attempts, next_attempt_at, lease_until, lease_token, last_error, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9) ON CONFLICT(session_id) DO NOTHING`)).
+		WithArgs(sqlmock.AnyArg(), "sess-old", worker.TypeOpenCodeSrv, "ocs-old", 0, sqlmock.AnyArg(), "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 
 	deleted, err := store.DeleteTerminated(context.Background(), cronCutoff, defaultCutoff)
 	require.NoError(t, err)

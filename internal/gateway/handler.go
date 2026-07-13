@@ -428,6 +428,9 @@ func (h *Handler) validateOwner(ctx context.Context, env *events.Envelope) (*ses
 func (h *Handler) requireActiveOwner(ctx context.Context, env *events.Envelope) (*session.SessionInfo, error) {
 	si, err := h.validateOwner(ctx, env)
 	if err != nil {
+		if errors.Is(err, session.ErrSessionCleanupPending) {
+			return nil, h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session cleanup in progress; retry later")
+		}
 		if errors.Is(err, session.ErrSessionNotFound) {
 			return nil, h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 		}

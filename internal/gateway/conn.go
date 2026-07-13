@@ -528,6 +528,11 @@ func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir 
 }
 
 func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDir string, sm connSM, lookupErr error, clientKey string) (*session.SessionInfo, error) {
+	if errors.Is(lookupErr, session.ErrSessionCleanupPending) {
+		c.hub.InitThrottle.RecordFailure(sessionID)
+		c.sendInitError(events.ErrCodeSessionBusy, "session cleanup in progress; retry later")
+		return nil, fmt.Errorf("get session: %w", lookupErr)
+	}
 	if !errors.Is(lookupErr, session.ErrSessionNotFound) {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, lookupErr.Error())

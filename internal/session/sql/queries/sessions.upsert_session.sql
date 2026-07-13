@@ -8,7 +8,8 @@
 --     two-layer persistence design.
 --   See also: manager.go transitionState guard (WorkerSessionID empty→nonempty).
 INSERT INTO sessions (id, user_id, owner_id, bot_id, bot_name, worker_session_id, worker_type, state, platform, platform_key_json, work_dir, title, created_at, updated_at, expires_at, idle_expires_at, context_json, source, client_key, workspace_id)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+ WHERE NOT EXISTS (SELECT 1 FROM session_cleanup_tasks WHERE session_id = ?)
  ON CONFLICT(id) DO UPDATE SET
   state=excluded.state,
   owner_id=CASE WHEN excluded.owner_id != '' THEN excluded.owner_id ELSE sessions.owner_id END,
@@ -21,4 +22,5 @@ INSERT INTO sessions (id, user_id, owner_id, bot_id, bot_name, worker_session_id
   source=CASE WHEN excluded.source != '' THEN excluded.source ELSE sessions.source END,
   client_key=CASE WHEN excluded.client_key != '' THEN excluded.client_key ELSE sessions.client_key END,
   -- workspace_id 创建后不可变：仅当原值为 NULL 或空串（未绑定）时接受，防后续 upsert 覆盖。
-  workspace_id=CASE WHEN sessions.workspace_id IS NULL OR sessions.workspace_id = '' THEN excluded.workspace_id ELSE sessions.workspace_id END;
+  workspace_id=CASE WHEN sessions.workspace_id IS NULL OR sessions.workspace_id = '' THEN excluded.workspace_id ELSE sessions.workspace_id END
+ WHERE NOT EXISTS (SELECT 1 FROM session_cleanup_tasks WHERE session_id = excluded.id);
