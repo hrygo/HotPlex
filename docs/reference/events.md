@@ -226,6 +226,7 @@ type QuestionRequestData struct {
 }
 
 type Question struct {
+    ID          string           `json:"id,omitempty"` // 问题标识符（可选），用于关联单个问题与其回答
     Question    string           `json:"question"`
     Header      string           `json:"header"`
     Options     []QuestionOption `json:"options"`
