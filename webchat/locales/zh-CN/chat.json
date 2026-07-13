@@ -93,7 +93,10 @@
   },
   "error": {
     "resend_hint": "出错了 — 请检查后重新发送你的问题",
-    "no_workers": "所有 Worker 引擎均不可用。请在服务器上安装至少一个 Worker 命令行工具。"
+    "no_workers": "所有 Worker 引擎均不可用。请在服务器上安装至少一个 Worker 命令行工具。",
+    "input_unknown": "该消息的处理结果未知（可能仍在执行）。请在短暂等待后重试。",
+    "input_still_processing": "上一条消息仍在处理中，请稍候后再试。",
+    "send_failed_connection": "发送失败，请检查网络连接后重试。"
   },
   "worker": {
     "name": {

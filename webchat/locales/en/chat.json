@@ -93,7 +93,10 @@
   },
   "error": {
     "no_workers": "All worker engines are unavailable. Please install at least one worker CLI on the server.",
-    "resend_hint": "Something went wrong — please review and resend your message"
+    "resend_hint": "Something went wrong — please review and resend your message",
+    "input_unknown": "The outcome of this message is unknown (it may still be processing). Please retry after a short wait.",
+    "input_still_processing": "A previous message is still processing. Please wait a moment and try again.",
+    "send_failed_connection": "Failed to send. Please check your connection and try again."
   },
   "worker": {
     "name": {

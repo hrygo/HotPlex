@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -20,12 +21,17 @@ type fakeExecutionStore struct {
 	record      *execution.Record
 	duplicate   bool
 	acceptErr   error
+	statusErr   error
+	lastAccept  execution.AcceptRequest
 	status      execution.Status
 	errorCode   string
 	statusCalls int
 }
 
-func (s *fakeExecutionStore) Accept(_ context.Context, _ execution.AcceptRequest) (*execution.Record, bool, error) {
+func (s *fakeExecutionStore) Accept(_ context.Context, req execution.AcceptRequest) (*execution.Record, bool, error) {
+	s.mu.Lock()
+	s.lastAccept = req
+	s.mu.Unlock()
 	return s.record, s.duplicate, s.acceptErr
 }
 
@@ -35,7 +41,7 @@ func (s *fakeExecutionStore) SetStatus(_ context.Context, _ string, status execu
 	s.status = status
 	s.errorCode = errorCode
 	s.statusCalls++
-	return nil
+	return s.statusErr
 }
 
 func (s *fakeExecutionStore) snapshot() (execution.Status, string, int) {
@@ -82,6 +88,7 @@ func requireInputAcks(t *testing.T, conn *mockPlatformConn, statuses ...events.E
 }
 
 func TestInputExecution_DeliveredAckAfterWorkerAccepts(t *testing.T) {
+	t.Parallel()
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
 	h, sm, w, conn := newExecutionHandler(t, store, nil)
 	env := inputEnvelope("s-exec", "hello")
@@ -99,6 +106,7 @@ func TestInputExecution_DeliveredAckAfterWorkerAccepts(t *testing.T) {
 }
 
 func TestInputExecution_DuplicateReplaysAckWithoutWorkerCall(t *testing.T) {
+	t.Parallel()
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusDelivered), duplicate: true}
 	h, sm, w, conn := newExecutionHandler(t, store, nil)
 	retryCancel := make(chan struct{})
@@ -124,6 +132,7 @@ func TestInputExecution_DuplicateReplaysAckWithoutWorkerCall(t *testing.T) {
 }
 
 func TestInputExecution_DuplicateDoesNotResumeTerminatedSession(t *testing.T) {
+	t.Parallel()
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusDelivered), duplicate: true}
 	sm := new(mockInputSM)
 	sm.On("Get", "s-exec").Return(&session.SessionInfo{
@@ -151,6 +160,7 @@ func TestInputExecution_DuplicateDoesNotResumeTerminatedSession(t *testing.T) {
 }
 
 func TestInputExecution_TimeoutBecomesUnknown(t *testing.T) {
+	t.Parallel()
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
 	timeoutErr := &worker.WorkerError{Kind: worker.ErrKindTimeout, Message: "worker response timed out"}
 	h, sm, w, conn := newExecutionHandler(t, store, timeoutErr)
@@ -162,6 +172,29 @@ func TestInputExecution_TimeoutBecomesUnknown(t *testing.T) {
 	status, code, calls := store.snapshot()
 	require.Equal(t, execution.StatusUnknown, status)
 	require.Equal(t, string(events.ErrCodeExecutionTimeout), code)
+	require.Equal(t, 1, calls)
+	sm.AssertExpectations(t)
+	w.AssertExpectations(t)
+}
+
+// TestInputExecution_AckReflectsIntendedStatusWhenSetStatusFails guards the
+// C1 fix: when the durable SetStatus write fails, the terminal input.ack must
+// still carry the intended outcome (unknown) rather than a stale 'accepted'.
+// Otherwise the client would wait for a terminal ack that never arrives.
+func TestInputExecution_AckReflectsIntendedStatusWhenSetStatusFails(t *testing.T) {
+	t.Parallel()
+	store := &fakeExecutionStore{
+		record:    testExecutionRecord(execution.StatusAccepted),
+		statusErr: errors.New("db unavailable"),
+	}
+	timeoutErr := &worker.WorkerError{Kind: worker.ErrKindTimeout, Message: "worker response timed out"}
+	h, sm, w, conn := newExecutionHandler(t, store, timeoutErr)
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.NoError(t, h.handleInput(context.Background(), env))
+	requireInputAcks(t, conn, events.ExecutionStatusAccepted, events.ExecutionStatusUnknown)
+	_, _, calls := store.snapshot()
 	require.Equal(t, 1, calls)
 	sm.AssertExpectations(t)
 	w.AssertExpectations(t)
