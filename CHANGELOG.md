@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.34.0] - 2026-07-13
+
+### Summary
+
+v1.34.0 是一次 minor 版本更新，聚焦于 **跨平台交互投递的端到端可靠性** 与 **飞书交互卡片的 UX 重设计**。引入 Claim/CompleteClaimed/Release 状态机与 WebChat ACK 协议，覆盖 Feishu/Slack/WebChat × 4 个 Worker × permission/question/elicitation 三类交互，消除"用户点击与超时竞态""投递失败静默丢失""按钮点击后消失"等长期问题。同时新增用户拒绝后抑制重复权限卡（permission deny dedup）、Claude Code 平台 session 的 operator permission_mode 默认值，以及 OpenCode Server session 跨 worker 重启持久化。
+
+### Added
+
+- **Messaging**: Deliver interactions reliably across Feishu, Slack, and WebChat for permission, question, and elicitation flows via a Claim/CompleteClaimed/Release state machine — user clicks and timeouts no longer race, and failed deliveries stay retryable instead of being silently dropped. (#863)
+- **Messaging**: Redesign Feishu interactive cards — collapse raw command/arguments behind collapsible panels, render multi-question and multi-select prompts as single-callback forms, and adopt semantic button copy with explanatory cards for non-owner clicks. (#863)
+- **Gateway Core**: Suppress repeated permission cards after a user denial via a session-scoped, owner-scoped denial cache (`worker.permission_deny_dedup`, default 60s) so agent retries of the same tool don't re-prompt; `/reset` clears the cache. (#863)
+- **Worker**: Add operator-configured default `permission_mode` for Claude Code platform sessions (`HOTPLEX_WORKER_CLAUDE_CODE_PERMISSION_MODE`), with the session tier clamped to the operator ceiling; hot-reloadable without restart. (#863)
+
+### Changed
+
+- **WebChat UI**: Gateway now echoes the same-type response event as an authoritative ACK after the worker accepts it; the runtime adapter transitions submitting → resolved/rejected only on ACK, making delivery failures visible. (#863)
+- **Worker**: Drain OpenCode Server stderr into the gateway log instead of discarding it, improving operator diagnostics. (#863)
+- **Configuration**: Slim AGENTS.md by ~86 lines — move Slack/Cron CLI command examples into an on-demand `hotplex-cli` skill, saving ~512 tokens per session load. (#873)
+
+### Fixed
+
+- **Worker**: Preserve OpenCode Server sessions across worker restarts via a durable cleanup outbox table (`session_cleanup_tasks`, migration 025) with lease-based concurrency and retry tracking. (#873)
+- **Worker**: Ensure singleton workers (OpenCode Server, Codex CLI) create the working directory before binding a session — fixes Windows HTTP 500 "Unexpected server error" and Codex thread failures on non-existent paths. (#863)
+- **Worker**: Resolve empty `request_id` for Codex CLI `item/commandExecution/requestApproval` via an `approvalId → itemId → requestId` priority chain — fixes Feishu callback error 200672 and "no pending server request" failures. (#863)
+- **Worker**: Support legacy Codex CLI approval methods (`execCommandApproval`/`applyPatchApproval`) and route server-requests for id=0 and string IDs. (#863)
+
 ## [1.33.2] - 2026-07-09
 
 ### Summary
