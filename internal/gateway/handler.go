@@ -26,6 +26,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// LevelTrace is one step below slog.LevelDebug, for high-volume protocol
+// chatter (ping/pong) that should not appear even at debug level.
+const LevelTrace = slog.Level(-8)
+
 // ─── Message Handler ─────────────────────────────────────────────────────────
 
 // Handler processes incoming messages from a client connection.
@@ -544,8 +548,8 @@ func (h *Handler) handlePing(ctx context.Context, env *events.Envelope) error {
 		events.Pong,
 		map[string]any{"state": state},
 	)
-	if h.log.Enabled(ctx, slog.LevelDebug) {
-		h.log.Debug("gateway: ping received, sending pong", "session_id", env.SessionID, "state", state)
+	if h.log.Enabled(ctx, LevelTrace) {
+		h.log.Log(ctx, LevelTrace, "gateway: ping received, sending pong", "session_id", env.SessionID, "state", state)
 	}
 	err = h.hub.SendToSession(ctx, reply)
 	if err != nil {
