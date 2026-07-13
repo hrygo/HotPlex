@@ -871,6 +871,10 @@ export function useHotPlexRuntime({
             );
             const isTerminated =
                 (data?.code as string) === "SESSION_TERMINATED";
+            // CONFIG_INVALID is a user-command rejection (e.g. /cd on a
+            // workspace-bound session), not a runtime fault — warn, don't error.
+            const isConfigInvalid =
+                (data?.code as string) === "CONFIG_INVALID";
 
             // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
             if (isBusy) {
@@ -950,6 +954,12 @@ export function useHotPlexRuntime({
                         code: data.code,
                         message: data.message,
                         details: data.details,
+                        eventId: env?.id,
+                    });
+                } else if (isConfigInvalid) {
+                    logger.warn("RuntimeAdapter", "Command rejected", {
+                        code: data.code,
+                        message: data.message,
                         eventId: env?.id,
                     });
                 } else {

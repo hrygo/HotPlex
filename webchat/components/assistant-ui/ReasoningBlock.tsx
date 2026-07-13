@@ -11,8 +11,8 @@ export function ReasoningBlock({ text, isStreaming }: { text: string; isStreamin
   const [hasInteracted, setHasInteracted] = useState(false);
 
   useEffect(() => {
-    if (isStreaming && !hasInteracted) {
-      setExpanded(true);
+    if (!hasInteracted) {
+      setExpanded(!!isStreaming);
     }
   }, [isStreaming, hasInteracted]);
 
