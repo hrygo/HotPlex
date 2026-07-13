@@ -42,154 +42,164 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
 
       <div className="flex flex-col flex-1 min-w-0">
         <div className="msg-assistant-body relative space-y-4">
-          <MessagePrimitive.Parts>
-            {({ part }) => {
-               
-              const p = part as Record<string, any>;
-              if (!p || !p.type) return null;
-              const isStreaming = ext.status?.type === "running";
+          {ext.content?.map((part, partIndex) => {
+            const p = part as Record<string, any>;
+            if (!p || !p.type) return null;
+            const isStreaming = ext.status?.type === "running";
 
-              if (p.type === "reasoning") return <ReasoningBlock text={p.text || p.reasoning || ""} isStreaming={isStreaming} />;
-              if (p.type === "text") return <div className={`prose-hotplex ${isStreaming ? "streaming-cursor" : ""}`}><MarkdownText text={p.text} /></div>;
+            if (p.type === "reasoning") return <ReasoningBlock key={partIndex} text={p.text || p.reasoning || ""} isStreaming={isStreaming} />;
+            if (p.type === "text") return <div key={partIndex} className={`prose-hotplex ${isStreaming ? "streaming-cursor" : ""}`}><MarkdownText text={p.text} /></div>;
 
-              if (p.type === "tool-call") {
-                const parts = ext.content || [];
-                const partIndex = parts.indexOf(p);
-                const isLastPart = partIndex === parts.length - 1;
-                const isComplete = p.status?.type === "complete" || p.status?.type === "error";
-                const isExpanded = expandedTools[p.toolCallId || partIndex] !== undefined
-                  ? expandedTools[p.toolCallId || partIndex]
-                  : isLastPart;
+            if (p.type === "tool-call") {
+              const parts = ext.content || [];
+              const isLastPart = partIndex === parts.length - 1;
+              const isComplete = p.status?.type === "complete" || p.status?.type === "error";
+              const isExpanded = expandedTools[p.toolCallId || partIndex] !== undefined
+                ? expandedTools[p.toolCallId || partIndex]
+                : isLastPart;
 
-                const isCompacted = isComplete && !isExpanded;
-                const toggle = () => setExpandedTools(prev => {
-                  const key = p.toolCallId || partIndex;
-                  const currentVal = prev[key] !== undefined ? prev[key] : isLastPart;
-                  return { ...prev, [key]: !currentVal };
-                });
+              const isCompacted = isComplete && !isExpanded;
+              const toggle = () => setExpandedTools(prev => {
+                const key = p.toolCallId || partIndex;
+                const currentVal = prev[key] !== undefined ? prev[key] : isLastPart;
+                return { ...prev, [key]: !currentVal };
+              });
 
-                const category = getToolCategory(p.toolName);
-                const args = p.args ?? {};
-                const status = isComplete ? (p.status?.type === "error" ? "error" : "complete") : "running";
+              const category = getToolCategory(p.toolName);
+              const args = p.args ?? {};
+              const status = isComplete ? (p.status?.type === "error" ? "error" : "complete") : "running";
 
-                if (isCompacted) {
-                  return (
-                    <CompactToolTab
-                      toolName={p.toolName}
-                      summary={extractCommand(args) || extractFilePath(args) || t('text.action_default')}
-                      status={status === "running" ? "complete" : status as "complete" | "error"}
-                      onClick={toggle}
-                    />
-                  );
-                }
-
+              if (isCompacted) {
                 return (
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="relative mt-3 first:mt-0"
-                  >
-                    {(() => {
-                      switch (category) {
-                        case "terminal": return <TerminalTool command={extractCommand(args)} stdout={p.result?.stdout || (typeof p.result === 'string' ? p.result : '')} stderr={p.result?.stderr} status={status} onToggle={toggle} />;
-                        case "file": return <FileDiffTool toolName={p.toolName} filePath={extractFilePath(args)} content={extractFileContent(args, p.result)} status={status} onToggle={toggle} />;
-                        case "search": return <SearchTool toolName={p.toolName} query={args.query || args.pattern} results={p.result} status={status} onToggle={toggle} />;
-                        case "list": return <ListTool toolName={p.toolName} path={extractFilePath(args)} items={p.result} status={status} onToggle={toggle} />;
-                        case "todo": return <TodoTool todo={args.todo} todos={args.todos} status={status === "running" ? "running" : "complete"} onToggle={toggle} />;
-                        case "ai": return <AgentTool description={args.description} prompt={args.prompt} subagent_type={args.subagent_type} run_in_background={args.run_in_background} status={status === "running" ? "running" : "complete"} onToggle={toggle} />;
-                        case "permission": {
-                          const interaction = p.args?.interaction;
-                          const resolvedStatus = interaction?.status || (status === "error" ? "failed" : status === "complete" ? "resolved" : "pending");
+                  <CompactToolTab
+                    key={p.toolCallId || partIndex}
+                    toolName={p.toolName}
+                    summary={extractCommand(args) || extractFilePath(args) || t('text.action_default')}
+                    status={status === "running" ? "complete" : status as "complete" | "error"}
+                    onClick={toggle}
+                  />
+                );
+              }
 
-                          if (p.toolName === "question_request") {
-                            const onRespondQuestion = p.toolCallId && onInteractionRespond
-                              ? (answers: Record<string, string | string[]>) => onInteractionRespond(p.toolCallId, { type: "question", answers })
-                              : undefined;
-                            return (
-                              <QuestionResponseCard
-                                toolName={p.toolName}
-                                questions={args.questions}
-                                status={resolvedStatus}
-                                interactionState={interaction}
-                                onRespond={onRespondQuestion}
-                                onToggle={toggle}
-                              />
-                            );
-                          } else if (p.toolName === "elicitation") {
-                            const onRespondElicitation = p.toolCallId && onInteractionRespond
-                              ? (action: "accept" | "decline" | "cancel", content?: Record<string, any>) => onInteractionRespond(p.toolCallId, { type: "elicitation", action, content })
-                              : undefined;
-                            return (
-                              <ElicitationFormCard
-                                toolName={p.toolName}
-                                message={args.message}
-                                mcpServerName={args.mcp_server_name}
-                                url={args.url}
-                                status={resolvedStatus}
-                                interactionState={interaction}
-                                onRespond={onRespondElicitation}
-                                onToggle={toggle}
-                              />
-                            );
-                          } else {
-                            const onRespondPerm = p.toolCallId && onInteractionRespond
-                              ? (allowed: boolean, reason?: string) => onInteractionRespond(p.toolCallId, { type: "permission", allowed, reason })
-                              : undefined;
-                            return (
-                              <PermissionApprovalCard
-                                toolName={p.toolName}
-                                args={args.args}
-                                description={args.description}
-                                status={resolvedStatus}
-                                interactionState={interaction}
-                                onRespond={onRespondPerm}
-                                onToggle={toggle}
-                              />
-                            );
-                          }
-                        }
-                        default: {
-                          const content = p.result || args;
-                          const summary = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+              return (
+                <motion.div
+                  key={p.toolCallId || partIndex}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="relative mt-3 first:mt-0"
+                >
+                  {(() => {
+                    switch (category) {
+                      case "terminal": return <TerminalTool command={extractCommand(args)} stdout={p.result?.stdout || (typeof p.result === 'string' ? p.result : '')} stderr={p.result?.stderr} status={status} onToggle={toggle} />;
+                      case "file": return <FileDiffTool toolName={p.toolName} filePath={extractFilePath(args)} content={extractFileContent(args, p.result)} status={status} onToggle={toggle} />;
+                      case "search": return <SearchTool toolName={p.toolName} query={args.query || args.pattern} results={p.result} status={status} onToggle={toggle} />;
+                      case "list": return <ListTool toolName={p.toolName} path={extractFilePath(args)} items={p.result} status={status} onToggle={toggle} />;
+                      case "todo": return <TodoTool todo={args.todo} todos={args.todos} status={status === "running" ? "running" : "complete"} onToggle={toggle} />;
+                      case "ai": return <AgentTool description={args.description} prompt={args.prompt} subagent_type={args.subagent_type} run_in_background={args.run_in_background} status={status === "running" ? "running" : "complete"} onToggle={toggle} />;
+                      case "permission": {
+                        const interaction = p.args?.interaction;
+                        const resolvedStatus = interaction?.status || (status === "error" ? "failed" : status === "complete" ? "resolved" : "pending");
+
+                        if (p.toolName === "question_request") {
+                          const onRespondQuestion = p.toolCallId && onInteractionRespond
+                            ? (answers: Record<string, string | string[]>) => onInteractionRespond(p.toolCallId, { type: "question", answers })
+                            : undefined;
                           return (
-                            <div className="group/tool border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--bg-elevated)] shadow-sm">
-                              <div className="flex items-center justify-between px-3 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)]">
-                                <span className="text-[10px] font-bold text-[var(--accent-gold)] uppercase tracking-wider">{p.toolName}</span>
-                                {status === "running" && <div className="w-2 h-2 rounded-full bg-[var(--accent-gold)] animate-pulse" />}
-                              </div>
-                              <div className="p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto custom-scrollbar">
-                                {summary}
-                              </div>
-                            </div>
+                            <QuestionResponseCard
+                              toolName={p.toolName}
+                              questions={args.questions}
+                              status={resolvedStatus}
+                              interactionState={interaction}
+                              onRespond={onRespondQuestion}
+                              onToggle={toggle}
+                            />
+                          );
+                        } else if (p.toolName === "elicitation") {
+                          const onRespondElicitation = p.toolCallId && onInteractionRespond
+                            ? (action: "accept" | "decline" | "cancel", content?: Record<string, any>) => onInteractionRespond(p.toolCallId, { type: "elicitation", action, content })
+                            : undefined;
+                          return (
+                            <ElicitationFormCard
+                              toolName={p.toolName}
+                              message={args.message}
+                              mcpServerName={args.mcp_server_name}
+                              url={args.url}
+                              status={resolvedStatus}
+                              interactionState={interaction}
+                              onRespond={onRespondElicitation}
+                              onToggle={toggle}
+                            />
+                          );
+                        } else {
+                          const onRespondPerm = p.toolCallId && onInteractionRespond
+                            ? (allowed: boolean, reason?: string) => onInteractionRespond(p.toolCallId, { type: "permission", allowed, reason })
+                            : undefined;
+                          return (
+                            <PermissionApprovalCard
+                              toolName={p.toolName}
+                              args={args.args}
+                              description={args.description}
+                              status={resolvedStatus}
+                              interactionState={interaction}
+                              onRespond={onRespondPerm}
+                              onToggle={toggle}
+                            />
                           );
                         }
                       }
-                    })()}
-                  </motion.div>
-                );
-              }
-              if (p.type === "tool-summary") {
-                const names = p.toolNames || [];
-                return (
-                  <div className="flex items-center gap-2 px-3 py-1.5 mt-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-bold text-[var(--text-secondary)] w-fit shadow-sm">
-                    <span className="text-[var(--accent-gold)] animate-pulse-subtle">🔧</span>
-                    <span className="tracking-wide">{names.join(', ').toUpperCase()}</span>
-                    {p.count > 1 && <span className="text-[var(--text-faint)] ml-1">×{p.count}</span>}
-                  </div>
-                );
-              }
+                      default: {
+                        const content = p.result || args;
+                        const summary = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+                        return (
+                          <div className="group/tool border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--bg-elevated)] shadow-sm">
+                            <div 
+                              className="flex items-center justify-between px-3 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] cursor-pointer hover:bg-[var(--bg-hover)] transition-colors"
+                              onClick={toggle}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-[var(--accent-gold)] uppercase tracking-wider">{p.toolName}</span>
+                                {status === "running" && <div className="w-2 h-2 rounded-full bg-[var(--accent-gold)] animate-pulse" />}
+                              </div>
+                              {status !== "running" && (
+                                <div className="text-[var(--text-faint)] transform group-hover/tool:scale-110 transition-transform">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <div className="p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto custom-scrollbar">
+                              {summary}
+                            </div>
+                          </div>
+                        );
+                      }
+                    }
+                  })()}
+                </motion.div>
+              );
+            }
+            if (p.type === "tool-summary") {
+              const names = p.toolNames || [];
+              return (
+                <div key={partIndex} className="flex items-center gap-2 px-3 py-1.5 mt-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-bold text-[var(--text-secondary)] w-fit shadow-sm">
+                  <span className="text-[var(--accent-gold)] animate-pulse-subtle">🔧</span>
+                  <span className="tracking-wide">{names.join(', ').toUpperCase()}</span>
+                  {p.count > 1 && <span className="text-[var(--text-faint)] ml-1">×{p.count}</span>}
+                </div>
+              );
+            }
 
-              // Fallback for unknown parts that might have text (like custom reasoning types)
-              if (p.text || p.reasoning || p.content) {
-                const fallbackText = p.text || p.reasoning || (typeof p.content === 'string' ? p.content : JSON.stringify(p.content));
-                if (fallbackText) {
-                  return <div className="mt-3"><MarkdownText text={fallbackText} /></div>;
-                }
+            // Fallback for unknown parts that might have text (like custom reasoning types)
+            if (p.text || p.reasoning || p.content) {
+              const fallbackText = p.text || p.reasoning || (typeof p.content === 'string' ? p.content : JSON.stringify(p.content));
+              if (fallbackText) {
+                return <div key={partIndex} className="mt-3"><MarkdownText text={fallbackText} /></div>;
               }
+            }
 
-              return null;
-            }}
-          </MessagePrimitive.Parts>
+            return null;
+          })}
           {ext.metadata?.contextUsage && (
             <ContextUsageCard data={ext.metadata.contextUsage} />
           )}
