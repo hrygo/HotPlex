@@ -208,11 +208,25 @@ func (c *Collector) flushBoth(sessionID string) {
 	delete(c.reasoningAccum, sessionID)
 	c.accumMu.Unlock()
 
-	if dAcc != nil && dAcc.count > 0 {
-		c.send(dAcc.toRequest(sessionID))
-	}
-	if rAcc != nil && rAcc.count > 0 {
+	// Send in firstSeq order so insertion order (id) matches the logical seq
+	// order. Without this, a message delta flushed ahead of the reasoning that
+	// produced it gets a smaller id, making ORDER BY id DESC disagree with
+	// ORDER BY seq DESC and mis-ordering concurrently-flushed deltas in
+	// query_latest (issue #879). reasoning typically precedes its message, but
+	// compare firstSeq so workers that emit message deltas first stay correct.
+	switch {
+	case dAcc != nil && dAcc.count > 0 && rAcc != nil && rAcc.count > 0:
+		if rAcc.firstSeq <= dAcc.firstSeq {
+			c.send(rAcc.toRequest(sessionID))
+			c.send(dAcc.toRequest(sessionID))
+		} else {
+			c.send(dAcc.toRequest(sessionID))
+			c.send(rAcc.toRequest(sessionID))
+		}
+	case rAcc != nil && rAcc.count > 0:
 		c.send(rAcc.toRequest(sessionID))
+	case dAcc != nil && dAcc.count > 0:
+		c.send(dAcc.toRequest(sessionID))
 	}
 }
 

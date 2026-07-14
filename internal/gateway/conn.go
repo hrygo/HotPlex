@@ -488,6 +488,13 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 
 	c.hub.LeaveSession("", c)
 	c.hub.JoinSession(sessionID, c)
+	// Hydrate SeqGen from persisted events so the upcoming init_ack and worker
+	// events continue monotonically instead of restarting from 1 (issue #879:
+	// WS disconnect deleted the counter → reconnect collided with persisted seq
+	// segments and buried new events under ORDER BY seq DESC). Runs after
+	// JoinSession and before resolveSessionState starts the worker (which assigns
+	// seqs in a goroutine) and before finalizeInit's init_ack NextSeq.
+	c.hub.EnsureSeqHydrated(sessionID)
 
 	return c.resolveSessionState(sessionID, initData, workDir, sm, preResolved, env.SessionID)
 }

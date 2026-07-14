@@ -111,6 +111,44 @@ func TestSQLiteStore_DeleteBySession(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+func TestSQLiteStore_LatestSeq(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Empty session → 0.
+	seq, err := store.LatestSeq(ctx, "empty")
+	require.NoError(t, err)
+	require.Equal(t, int64(0), seq)
+
+	// Append events with seq 1,2,3 → MAX=3.
+	for i := int64(1); i <= 3; i++ {
+		require.NoError(t, store.Append(ctx, &StoredEvent{
+			SessionID: "sess1", Seq: i, Type: "message",
+			Data: json.RawMessage(`{}`), Direction: "outbound",
+			Source: SourceNormal, CreatedAt: time.Now().UnixMilli(),
+		}))
+	}
+	seq, err = store.LatestSeq(ctx, "sess1")
+	require.NoError(t, err)
+	require.Equal(t, int64(3), seq)
+
+	// Different session is isolated; high seq does not leak across sessions.
+	require.NoError(t, store.Append(ctx, &StoredEvent{
+		SessionID: "sess2", Seq: 99, Type: "message",
+		Data: json.RawMessage(`{}`), Direction: "outbound",
+		Source: SourceNormal, CreatedAt: time.Now().UnixMilli(),
+	}))
+	seq, err = store.LatestSeq(ctx, "sess2")
+	require.NoError(t, err)
+	require.Equal(t, int64(99), seq)
+
+	// sess1 still 3 (unaffected by sess2).
+	seq, err = store.LatestSeq(ctx, "sess1")
+	require.NoError(t, err)
+	require.Equal(t, int64(3), seq)
+}
+
 func TestSQLiteStore_DeleteExpired(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

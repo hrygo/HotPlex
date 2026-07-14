@@ -109,6 +109,9 @@ type Hub struct {
 
 	// Sequence generation per session
 	seqGen *SeqGen
+	// seqHydrator reads persisted event seqs to seed SeqGen on reconnect
+	// (issue #879). nil when eventstore is disabled — SeqGen then restarts at 1.
+	seqHydrator SeqHydrator
 
 	// Shutdown signals.
 	ctx    context.Context
@@ -632,6 +635,38 @@ func (h *Hub) NextSeq(sessionID string) int64 {
 // NextSeqPeek returns the current sequence number for a session without incrementing.
 func (h *Hub) NextSeqPeek(sessionID string) int64 {
 	return h.seqGen.Peek(sessionID)
+}
+
+// SetSeqHydrator injects the persisted-seq reader used to hydrate SeqGen on
+// reconnect (issue #879). Optional; when nil (eventstore disabled), SeqGen
+// restarts from 1 as before. Called once during gateway startup after the
+// eventstore is constructed.
+func (h *Hub) SetSeqHydrator(sh SeqHydrator) {
+	h.seqHydrator = sh
+}
+
+// EnsureSeqHydrated seeds the SeqGen counter for sessionID from persisted
+// events so the next NextSeq continues monotonically instead of restarting
+// from 1 (issue #879: WS disconnect deleted the counter → reconnect collided
+// with persisted seq segments and buried new events under ORDER BY seq DESC).
+// Best-effort: a DB error is logged and does not block the handshake (SeqGen
+// simply starts from 1). MUST be called after JoinSession and before the first
+// NextSeq (e.g. before starting the worker or sending init_ack).
+func (h *Hub) EnsureSeqHydrated(sessionID string) {
+	if h.seqHydrator == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, 3*time.Second)
+	defer cancel()
+	latest, err := h.seqHydrator.LatestSeq(ctx, sessionID)
+	if err != nil {
+		h.log.Warn("gateway: hydrate seq from db failed; starting from 1",
+			"session_id", sessionID, "err", err)
+		return
+	}
+	if latest > 0 {
+		h.seqGen.Init(sessionID, latest)
+	}
 }
 
 // ConnectionsOpen returns the number of currently open WebSocket connections.

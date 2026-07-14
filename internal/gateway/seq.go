@@ -1,9 +1,17 @@
 package gateway
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 )
+
+// SeqHydrator reads the latest persisted event seq for a session, so the Hub
+// can seed the in-memory SeqGen on reconnect (issue #879). Both
+// *eventstore.SQLiteStore and *eventstore.pgStore satisfy it.
+type SeqHydrator interface {
+	LatestSeq(ctx context.Context, sessionID string) (int64, error)
+}
 
 // SeqGen generates monotonically increasing sequence numbers per session.
 // Uses sync.Map + per-session atomic.Int64 to eliminate cross-session contention.
@@ -34,4 +42,24 @@ func (g *SeqGen) Next(sessionID string) int64 {
 // Remove deletes the sequence counter for a session.
 func (g *SeqGen) Remove(sessionID string) {
 	g.seq.Delete(sessionID)
+}
+
+// Init seeds the sequence counter for a session to start, but only if start is
+// greater than the current value. This lets the gateway hydrate the counter
+// from persisted events on reconnect so seq continues monotonically instead of
+// restarting from 1 (issue #879: WS disconnect deleted the counter, reconnect
+// collided with persisted seq segments). CAS-based — safe against concurrent
+// Next/Init; never regresses an already-higher counter.
+func (g *SeqGen) Init(sessionID string, start int64) {
+	val, _ := g.seq.LoadOrStore(sessionID, new(atomic.Int64))
+	cur := val.(*atomic.Int64) //nolint:errcheck // LoadOrStore guarantees *atomic.Int64
+	for {
+		old := cur.Load()
+		if start <= old {
+			return
+		}
+		if cur.CompareAndSwap(old, start) {
+			return
+		}
+	}
 }
