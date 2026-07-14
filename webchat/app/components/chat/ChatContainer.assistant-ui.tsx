@@ -217,6 +217,15 @@ export default function ChatContainer() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [showNewWsModal, setShowNewWsModal] = useState(false);
 
+    // Cooldown timestamp for workspace-handshake errors (issue #879 problem 3).
+    // Without it, a workspace whose handshake keeps failing (access denied /
+    // disabled / not found) drives a feedback loop: onWorkspaceError →
+    // loadWorkspaces → workspaceId change → useSessions refetch → activeSessionId
+    // change → ChatInterface remount (key={activeSessionId}) → reconnect → fail
+    // again, oscillating across sessions 6+ times in 8s. The cooldown collapses
+    // rapid retries into one recovery attempt per 5s window.
+    const lastWsErrorRef = useRef(0);
+
     // Fetch workspaces list
     const loadWorkspaces = useCallback(async (selectId?: string) => {
         try {
@@ -308,7 +317,14 @@ export default function ChatContainer() {
     // active workspace as list[0] (only owned workspaces are returned), which
     // changes the workspaceId prop → useSessions refetches → activeSessionId
     // changes → ChatInterface remounts and reconnects with a valid workspace.
+    // A 5s cooldown breaks the remount→reconnect→fail feedback loop (issue #879
+    // problem 3): once a workspace handshake fails, repeated identical failures
+    // within the window are ignored instead of re-triggering loadWorkspaces and
+    // bouncing across sessions.
     const handleWorkspaceError = useCallback(() => {
+        const now = Date.now();
+        if (now - lastWsErrorRef.current < 5000) return;
+        lastWsErrorRef.current = now;
         localStorage.removeItem("hotplex_active_workspace_id");
         loadWorkspaces();
     }, [loadWorkspaces]);
