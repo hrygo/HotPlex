@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 )
@@ -19,19 +20,23 @@ import (
 type OAuthHandlers struct {
 	oauthManager *security.OAuthManager
 	cookieAuth   *security.CookieAuth
+	auth         *security.Authenticator
 	store        session.UserWorkspaceStore
 	log          *slog.Logger
 	now          func() time.Time
 }
 
-// NewOAuthHandlers constructs OAuth SSO handlers.
-func NewOAuthHandlers(oauthManager *security.OAuthManager, cookieAuth *security.CookieAuth, store session.UserWorkspaceStore, log *slog.Logger) *OAuthHandlers {
+// NewOAuthHandlers constructs OAuth SSO handlers. auth is the Authenticator
+// whose audit collector receives the auth.login row at the SSO credential-
+// exchange boundary (mirrors the password Login handler).
+func NewOAuthHandlers(oauthManager *security.OAuthManager, cookieAuth *security.CookieAuth, auth *security.Authenticator, store session.UserWorkspaceStore, log *slog.Logger) *OAuthHandlers {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &OAuthHandlers{
 		oauthManager: oauthManager,
 		cookieAuth:   cookieAuth,
+		auth:         auth,
 		store:        store,
 		log:          log.With("component", "oauth_handler"),
 		now:          time.Now,
@@ -152,9 +157,18 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 		var idErr *security.IdentityError
 		if errors.As(err, &idErr) && idErr.Code == security.ErrCodeUserDisabled {
 			h.log.Warn("oauth callback: user disabled", "provider", providerName, "subject", claims.Subject)
+			// Identity resolved but rejected (disabled) — credential-boundary failure.
+			if h.auth != nil {
+				h.auth.EmitAuthEvent(audit.ActionAuthLogin, audit.OutcomeFailure, audit.AnonymousUserID,
+					audit.PlatformWebChat, audit.UserIDTypeAnonymous, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
+			}
 			redirectAuthError(w, r, "USER_DISABLED")
 		} else {
 			h.log.Error("oauth callback: user creation failed", "provider", providerName, "subject", claims.Subject, "err", err)
+			if h.auth != nil {
+				h.auth.EmitAuthEvent(audit.ActionAuthLogin, audit.OutcomeFailure, audit.AnonymousUserID,
+					audit.PlatformWebChat, audit.UserIDTypeAnonymous, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
+			}
 			redirectAuthError(w, r, "USER_CREATE_FAILED")
 		}
 		return
@@ -165,6 +179,13 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 		h.log.Error("oauth callback: cookie issuance failed", "provider", providerName, "err", err)
 		redirectAuthError(w, r, "INTERNAL")
 		return
+	}
+
+	// Authoritative SSO login row: a registered user completed credential
+	// exchange via an IdP (spec §5.4: webchat → PlatformWebChat + registered).
+	if h.auth != nil {
+		h.auth.EmitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, userID,
+			audit.PlatformWebChat, audit.UserIDTypeRegistered, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
 	}
 
 	// Clear the OAuth state cookie (one-time use).

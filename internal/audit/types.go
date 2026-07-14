@@ -11,6 +11,7 @@ import (
 // Action constants for audit events. See spec §5.2.
 const (
 	ActionAuthLogin                = "auth.login"
+	ActionAuthLogout               = "auth.logout"
 	ActionAuthTokenValidated       = "auth.token_validated"
 	ActionAuthAPIKeyUsed           = "auth.apikey_used"
 	ActionAuthDenied               = "auth.denied"

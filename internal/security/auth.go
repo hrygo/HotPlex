@@ -93,9 +93,12 @@ func (a *Authenticator) SetAuditCollector(c *audit.Collector) {
 	a.auditCollector = c
 }
 
-// emitAuthEvent enqueues a non-blocking audit event for an authentication
+// EmitAuthEvent enqueues a non-blocking audit event for an authentication
 // outcome. No-op when auditCollector is nil. Errors are silently ignored to
-// keep the auth path fast and non-blocking.
+// keep the auth path fast and non-blocking. Exported so the login/logout/OAuth
+// handlers — which run at the credential-exchange boundary — can emit the
+// authoritative auth.login / auth.logout rows; per-request re-validation in
+// AuthenticateRequest no longer emits (attribution rides on domain actions).
 //
 // platform and userIDType are passed by the caller because the attribution
 // depends on which auth path succeeded (review I2): cookie/webchat →
@@ -104,7 +107,7 @@ func (a *Authenticator) SetAuditCollector(c *audit.Collector) {
 // Hardcoding PlatformAPI for every path mis-tagged webchat UUIDs as opaque
 // platform handles, corrupting the by-user-type analytics the audit table
 // exists to support (spec §5.4).
-func (a *Authenticator) emitAuthEvent(action, outcome, userID, platform, userIDType, ip, userAgent, path, method string) {
+func (a *Authenticator) EmitAuthEvent(action, outcome, userID, platform, userIDType, ip, userAgent, path, method string) {
 	c := a.auditCollector
 	if c == nil {
 		return
@@ -133,7 +136,10 @@ func (a *Authenticator) emitAuthEvent(action, outcome, userID, platform, userIDT
 	_ = c.Enqueue(context.Background(), ua)
 }
 
-func extractClientIP(r *http.Request) string {
+// ExtractClientIP strips the port from r.RemoteAddr, returning the bare IP.
+// Shared by the per-request Authenticator and the login/logout handlers so
+// audit rows record a consistent IP shape.
+func ExtractClientIP(r *http.Request) string {
 	ip := r.RemoteAddr
 	if idx := strings.LastIndex(ip, ":"); idx > 0 {
 		ip = ip[:idx]
@@ -147,7 +153,7 @@ var ErrUnauthorized = errors.New("security: unauthorized")
 // AuthenticateRequest validates the request's API key.
 // Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
 func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, error) {
-	ip := extractClientIP(r)
+	ip := ExtractClientIP(r)
 	ua := r.UserAgent()
 	path := r.URL.Path
 	method := r.Method
@@ -163,14 +169,16 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		if a.cookieAuth != nil {
 			if uid, ok := a.AuthenticateActiveCookie(r); ok {
 				botID := BotIDFromRequest(r)
-				// Cookie auth is the webchat path; uid is a registered users.id
-				// UUID → spec §5.4 requires PlatformWebChat + registered.
-				a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, uid,
-					audit.PlatformWebChat, audit.UserIDTypeRegistered, ip, ua, path, method)
+				// Per-request cookie re-validation emits NO audit row: it would
+				// flood the log once per SPA request and the action name lies
+				// (this is not a login). Attribution rides on the domain action
+				// the request performs (message/session/tool/admin). The actual
+				// login is audited at the credential-exchange boundary in the
+				// Login/OAuth handlers (auth.login).
 				return uid, botID, nil
 			}
 		}
-		a.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, audit.AnonymousUserID,
+		a.EmitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, audit.AnonymousUserID,
 			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
@@ -180,8 +188,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if a.numValidKeys == 0 && a.numDBKeys == 0 && !a.devModeLocked {
 		a.mu.RUnlock()
 		botID := BotIDFromRequest(r)
-		a.emitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, audit.AnonymousUserID,
-			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
+		// No credentials were exchanged (auth is disabled), so no auth.* row.
 		return "anonymous", botID, nil
 	}
 
@@ -190,7 +197,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	idp := a.idp
 	if !a.authenticateKey(key) {
 		a.mu.RUnlock()
-		a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
+		a.EmitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
 			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 		return "", "", ErrUnauthorized
 	}
@@ -200,7 +207,9 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if idp != nil && uid != "anonymous" && uid != "api_user" {
 		u, err := idp.Lookup(r.Context(), uid)
 		if err != nil || u.Status == "disabled" {
-			a.emitAuthEvent(audit.ActionAuthTokenValidated, audit.OutcomeFailure, audit.AnonymousUserID,
+			// Key was validly presented but the mapped user is gone/disabled —
+			// a presented-credential rejection, not a missing-credential denial.
+			a.EmitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
 				audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
 			return "", "", ErrUnauthorized
 		}
@@ -214,7 +223,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	if uid != "api_user" && uid != "anonymous" {
 		successIDType = audit.UserIDTypeRegistered
 	}
-	a.emitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeSuccess, uid,
+	a.EmitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeSuccess, uid,
 		audit.PlatformAPI, successIDType, ip, ua, path, method)
 	return uid, botID, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/web"
@@ -62,8 +63,15 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &ie) {
 			switch ie.Code {
 			case security.ErrCodeUserDisabled:
+				// Credential exchange failed at the boundary → auth.login failure.
+				// userID stays anonymous: logging the attempted username would
+				// leak account existence (anti-enumeration, matching Authenticate).
+				h.auth.EmitAuthEvent(audit.ActionAuthLogin, audit.OutcomeFailure, audit.AnonymousUserID,
+					audit.PlatformWebChat, audit.UserIDTypeAnonymous, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
 				writeAppError(w, http.StatusForbidden, "USER_DISABLED", "user disabled")
 			default:
+				h.auth.EmitAuthEvent(audit.ActionAuthLogin, audit.OutcomeFailure, audit.AnonymousUserID,
+					audit.PlatformWebChat, audit.UserIDTypeAnonymous, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
 				writeAppError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials")
 			}
 			return
@@ -75,6 +83,10 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "cookie error")
 		return
 	}
+	// The authoritative login row: a registered user exchanged credentials for
+	// a session cookie (spec §5.4: webchat → PlatformWebChat + registered).
+	h.auth.EmitAuthEvent(audit.ActionAuthLogin, audit.OutcomeSuccess, uid,
+		audit.PlatformWebChat, audit.UserIDTypeRegistered, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
 	// 在 touch 前读原 last_login_at,判定是否首次登录(供前端 onboarding)。
 	firstLogin := false
 	if u, lerr := h.idp.Lookup(r.Context(), uid); lerr == nil && u.LastLoginAt == 0 {
@@ -86,6 +98,12 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 
 // Logout: POST /api/auth/logout — clears the cookie.
 func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
+	// Best-effort attribution: resolve the user before clearing the cookie so
+	// the auth.logout row carries a real user_id (falls back to anonymous when
+	// the cookie was already absent/invalid — still a valid logout attempt).
+	uid, _ := h.currentUserID(r)
+	h.auth.EmitAuthEvent(audit.ActionAuthLogout, audit.OutcomeSuccess, uid,
+		audit.PlatformWebChat, audit.UserIDTypeRegistered, security.ExtractClientIP(r), r.UserAgent(), r.URL.Path, r.Method)
 	h.cookieAuth.Clear(w, r)
 	w.WriteHeader(http.StatusOK)
 }

@@ -380,12 +380,16 @@ func (c *Conn) authenticateInit(auth connAuth, initData InitData) error {
 		uid, ok := auth.AuthenticateKey(context.Background(), initData.Auth.Token)
 		if !ok {
 			c.sendInitError(events.ErrCodeUnauthorized, "invalid token")
-			c.emitAudit(audit.ActionAuthTokenValidated, audit.OutcomeFailure, "", platformWebChat, c.sessionID, c.RemoteAddr())
+			// Invalid token = no valid credential presented → denied (not a
+			// presented-then-rejected case, which would be apikey_used failure).
+			c.emitAudit(audit.ActionAuthDenied, audit.OutcomeDenied, "", platformWebChat, c.sessionID, c.RemoteAddr())
 			return fmt.Errorf("deferred auth: invalid token")
 		}
 		c.userID = uid
 		c.pendingAuth = false
-		c.emitAudit(audit.ActionAuthTokenValidated, audit.OutcomeSuccess, c.userID, platformWebChat, c.sessionID, c.RemoteAddr())
+		// Per-connection cookie/token re-validation emits no success row; the
+		// session.create + message.inbound rows carry attribution. Mirrors the
+		// HTTP path (security/auth.go AuthenticateRequest).
 	}
 
 	if c.botID == "" && initData.Auth.BotID != "" {

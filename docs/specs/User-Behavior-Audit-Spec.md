@@ -102,15 +102,21 @@ CREATE INDEX idx_ua_action_ts ON user_activity(action, ts);
 
 ### 5.2 审计事件分类与记录点
 
+**设计原则**:审计只记录"凭据边界事件 + 拒绝 + 状态变化",**不记录每请求的重复校验**。webchat SPA 每个请求都带 cookie,若每请求都发 auth 事件会洪水淹没法审计表;用户的归因由它触发的领域动作(`message.inbound`/`session.*`/`tool.call`/`admin.*`)携带。`auth.login` 仅在凭据交换边界(Login handler / OAuth 回调)发射。
+
 | 类别 | action | 记录点(代码) | outcome |
 |---|---|---|---|
-| 认证 | `auth.login` / `auth.token_validated` / `auth.apikey_used` | `internal/security/auth.go` AuthenticateRequest;`gateway/conn.go` authenticateInit | success/failure |
+| 认证(凭据交换) | `auth.login` | `gateway/auth_handlers.go` Login;`gateway/oauth_handlers.go` Callback(成功/凭据失败) | success / failure |
+| 认证(登出) | `auth.logout` | `gateway/auth_handlers.go` Logout | success |
+| 认证(API key) | `auth.apikey_used` | `internal/security/auth.go` AuthenticateRequest(成功/失败/禁用) | success / failure |
+| 授权(拒绝) | `auth.denied` | `internal/security/auth.go` AuthenticateRequest;`gateway/conn.go` authenticateInit(无/无效凭证) | denied |
 | 会话 | `session.create` / `session.terminate` / `session.delete` | `session/manager.go` CreateWithBot/DeleteTerminated;`gateway/api.go` DeleteSession | success |
 | 消息 | `message.inbound` | `gateway/bridge_forward.go` CaptureInbound | success |
 | 工具调用 | `tool.call` | bridge 解析 tool_call(worker_cmds);敏感名(Bash/Write/Edit/网络) | success/failure |
 | 管理 | `admin.<action>` | 复用 `internal/admin/audit.go` AdminAudit,迁移写入本表 | success/failure |
-| 授权 | `auth.denied` | middleware(`admin/AdminAPI.Middleware`;`requireAdmin`) | denied |
 | 配置变更 | `system.audit_config_changed` | audit 配置加载 / reload 点 | success |
+
+> **注**:每请求的 cookie 重新校验(`AuthenticateRequest` cookie 成功分支、WS 升级成功分支)**不发审计行**——归因交给领域动作。`auth.token_validated` 常量保留未用(预留)。
 
 ### 5.3 内容策略(摘要 + 引用复用全量)
 

@@ -338,7 +338,7 @@ func setupRoutes(
 		// OAuthManager exists so runtime config reload can add or remove
 		// providers without requiring a gateway restart.
 		if deps.OAuthManager != nil {
-			oauthHandlers := gateway.NewOAuthHandlers(deps.OAuthManager, deps.CookieAuth, deps.WorkspaceStore, log)
+			oauthHandlers := gateway.NewOAuthHandlers(deps.OAuthManager, deps.CookieAuth, auth, deps.WorkspaceStore, log)
 			mux.Handle("GET /api/auth/oauth/providers", corsMw(http.HandlerFunc(oauthHandlers.Providers)))
 			mux.Handle("GET /api/auth/oauth/{provider}/login", http.HandlerFunc(oauthHandlers.Login))
 			mux.Handle("GET /api/auth/oauth/{provider}/callback", http.HandlerFunc(oauthHandlers.Callback))

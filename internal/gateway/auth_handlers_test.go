@@ -190,6 +190,60 @@ func TestAcceptInvite_ExpiredInvitation(t *testing.T) {
 	require.Contains(t, w.Body.String(), "INVITATION_EXPIRED")
 }
 
+// TestLoginLogout_AuthAuditSemantics locks in the redesigned auth.* taxonomy:
+// the credential-exchange boundary (Login/OAuth/Logout) is the ONLY place
+// auth.login / auth.logout fire — per-request cookie re-validation stays
+// silent. A successful login tags PlatformWebChat + registered (spec §5.4); a
+// failed login stays anonymous (anti-enumeration, matching Authenticate).
+func TestLoginLogout_AuthAuditSemantics(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	collector, query := gwTestCollector(t)
+	env.auth.SetAuditCollector(collector)
+
+	// 1. Successful credential login.
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	require.NotEmpty(t, cookie)
+
+	// 2. Failed credential login (bad password).
+	env.loginAs(t, "admin", "wrongpass", http.StatusUnauthorized)
+
+	// 3. Explicit logout.
+	logoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	logoutReq.Header.Set("Cookie", cookie)
+	logoutW := httptest.NewRecorder()
+	env.handlers.Logout(logoutW, logoutReq)
+	require.Equal(t, http.StatusOK, logoutW.Code)
+
+	count := func(action, outcome string) int {
+		var n int
+		for _, r := range query(t) {
+			if r.Action == action && r.Outcome == outcome {
+				n++
+			}
+		}
+		return n
+	}
+	require.Eventually(t, func() bool {
+		return count(audit.ActionAuthLogin, audit.OutcomeSuccess) == 1 &&
+			count(audit.ActionAuthLogin, audit.OutcomeFailure) == 1 &&
+			count(audit.ActionAuthLogout, audit.OutcomeSuccess) == 1
+	}, 2*time.Second, 10*time.Millisecond,
+		"expected exactly one auth.login success, one failure, one logout")
+
+	// Success row attribution: real user_id, webchat, registered.
+	var got audit.UserActivity
+	for _, r := range query(t) {
+		if r.Action == audit.ActionAuthLogin && r.Outcome == audit.OutcomeSuccess {
+			got = r
+			break
+		}
+	}
+	require.Equal(t, "u-admin", got.UserID)
+	require.Equal(t, audit.PlatformWebChat, got.Platform)
+	require.Equal(t, audit.UserIDTypeRegistered, got.UserIDType)
+}
+
 func TestAdminEndpoint_RequiresAdmin(t *testing.T) {
 	t.Parallel()
 	env := newTestAuthEnv(t)

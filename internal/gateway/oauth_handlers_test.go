@@ -19,7 +19,7 @@ func TestOAuthHandlers_ProvidersReturnsStableEnvelopeWhenEmpty(t *testing.T) {
 
 	ca, err := security.NewCookieAuth("")
 	require.NoError(t, err)
-	h := NewOAuthHandlers(security.NewOAuthManager(ca), ca, nil, nil)
+	h := NewOAuthHandlers(security.NewOAuthManager(ca), ca, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/providers", nil)
 	w := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestOAuthHandlers_LoginDerivesCallbackURLFromForwardedHeaders(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 1, loaded)
 
-	h := NewOAuthHandlers(mgr, ca, nil, nil)
+	h := NewOAuthHandlers(mgr, ca, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/keycloak/login", nil)
 	req.SetPathValue("provider", "keycloak")
 	req.Header.Set("X-Forwarded-Proto", "https")

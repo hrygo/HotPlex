@@ -1004,14 +1004,14 @@ func newCapturingCollector(t *testing.T, store *capturingAuditStore) *audit.Coll
 func TestEmitAuthEvent_NilCollector(t *testing.T) {
 	t.Parallel()
 	auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{"k"}})
-	auth.emitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, "anonymous",
+	auth.EmitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, "anonymous",
 		audit.PlatformAPI, audit.UserIDTypeAnonymous, "1.2.3.4", "test-agent", "/api/test", "GET")
 }
 
 func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 	t.Parallel()
 
-	t.Run("dev mode emits auth.login success", func(t *testing.T) {
+	t.Run("dev mode emits no auth event", func(t *testing.T) {
 		t.Parallel()
 		ac := newTestAuditCollector(t)
 		auth := NewAuthenticator(&config.SecurityConfig{APIKeys: []string{}})
@@ -1024,7 +1024,8 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		uid, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "anonymous", uid)
-		require.Equal(t, int64(1), ac.Enqueued())
+		// Dev mode = auth disabled, no credential exchange → no auth.* row.
+		require.Equal(t, int64(0), ac.Enqueued())
 	})
 
 	t.Run("denied emits auth.denied", func(t *testing.T) {
@@ -1080,8 +1081,8 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		require.Equal(t, "api_user", uid)
 	})
 
-	// ─── I2: webchat cookie path must tag PlatformWebChat + registered ───
-	t.Run("cookie auth tags webchat + registered (I2)", func(t *testing.T) {
+	// ─── per-request cookie re-validation is silent (no flood) ───
+	t.Run("cookie re-validation emits no event", func(t *testing.T) {
 		t.Parallel()
 		store := &capturingAuditStore{}
 		ac := newCapturingCollector(t, store)
@@ -1103,20 +1104,14 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "user-uuid-123", uid)
 
-		// The audit row MUST be tagged webchat + registered (spec §5.4),
-		// NOT api + platform (the pre-I2 behavior that mis-tagged every
-		// webchat UUID as an opaque platform handle).
+		// Per-request cookie re-validation MUST NOT emit an audit row — it would
+		// flood once per SPA request. The authoritative auth.login is emitted at
+		// the Login handler credential-exchange boundary (covered in gateway
+		// tests). Attribution for this request rides on its domain action.
 		require.Eventually(t, func() bool {
-			for _, ua := range store.snapshot() {
-				if ua.Action == audit.ActionAuthLogin && ua.Outcome == audit.OutcomeSuccess {
-					return ua.Platform == audit.PlatformWebChat &&
-						ua.UserIDType == audit.UserIDTypeRegistered &&
-						ua.UserID == "user-uuid-123"
-				}
-			}
-			return false
-		}, 2*time.Second, 5*time.Millisecond,
-			"cookie/webchat auth must be tagged PlatformWebChat + UserIDTypeRegistered (I2)")
+			return len(store.snapshot()) == 0
+		}, time.Second, 5*time.Millisecond,
+			"cookie re-validation must be silent (no per-request auth row)")
 	})
 
 	// ─── I2: API-key path with resolver must tag registered ───
