@@ -5,7 +5,7 @@ status: draft
 
 # Spec: 停止按钮无条件打断当前 AI 任务（StopCurrentTurn）
 
-**Issue**: 待创建
+**Issue**: #880
 **Severity**: P1（用户高频功能失效：停止按钮对单例 worker 完全无效，对进程型 worker 延迟最长 5 秒）
 **Scope**: `internal/gateway/commands.go`, `pkg/events/events.go`, `internal/worker/{base,claudecode,acp,codexcli,opencodeserver}/*.go`, `webchat/lib/adapters/hotplex-runtime-adapter.ts`, `webchat/lib/ai-sdk-transport/client/{browser-client,envelope}.ts`
 **Prerequisite**: 熟悉四种 Worker 的进程模型（per-session vs singleton）、AEP control 消息分发链路、bridge `forwardEvents` 生命周期
