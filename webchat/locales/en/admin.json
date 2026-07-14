@@ -470,12 +470,17 @@
       "action": "Action",
       "outcome": "Outcome",
       "detail": "Detail",
-      "session": "Session"
+      "session": "Session",
+      "msg_badge": "MSG"
     },
     "outcomes": {
       "success": "Success",
       "failure": "Failure",
       "denied": "Denied"
+    },
+    "summary": {
+      "worker_prefix": "worker: {{type}}",
+      "rows": "{{count}} rows"
     },
     "drawer": {
       "title": "Activity Detail",
@@ -492,7 +497,17 @@
       "copied": "Copied",
       "open_session": "Open session",
       "ip_masked": "masked unless include_pii",
-      "message_content": "Message Content"
+      "message_content": "Message Content",
+      "field": {
+        "name": "Name",
+        "email": "Email",
+        "principal": "Principal",
+        "type": "Type",
+        "resource": "Resource",
+        "event_ref": "Event Ref",
+        "ip": "IP Address",
+        "user_agent": "User-Agent"
+      }
     },
     "action": {
       "export_json": "Export JSON",

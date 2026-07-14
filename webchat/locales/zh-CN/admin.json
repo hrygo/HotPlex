@@ -470,12 +470,17 @@
       "action": "动作",
       "outcome": "结果",
       "detail": "详情",
-      "session": "会话"
+      "session": "会话",
+      "msg_badge": "消息"
     },
     "outcomes": {
       "success": "成功",
       "failure": "失败",
       "denied": "拒绝"
+    },
+    "summary": {
+      "worker_prefix": "工作进程: {{type}}",
+      "rows": "{{count}} 行"
     },
     "drawer": {
       "title": "行为详情",
@@ -492,7 +497,17 @@
       "copied": "已复制",
       "open_session": "打开会话",
       "ip_masked": "未开启 include_pii 时已脱敏",
-      "message_content": "消息内容"
+      "message_content": "消息内容",
+      "field": {
+        "name": "名称",
+        "email": "邮箱",
+        "principal": "主账号",
+        "type": "类型",
+        "resource": "资源",
+        "event_ref": "事件引用",
+        "ip": "IP 地址",
+        "user_agent": "User-Agent"
+      }
     },
     "action": {
       "export_json": "导出 JSON",

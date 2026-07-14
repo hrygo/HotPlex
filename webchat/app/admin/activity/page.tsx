@@ -14,6 +14,7 @@ import { downloadActivity, listActivity, listActivityStats, type ActivityFilters
 import type { ActivityStats, AuditActivity } from '@/lib/types/admin';
 import { formatDateTime, formatRelative } from '@/lib/utils/format-time';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 type OutcomeFilter = '' | 'success' | 'failure' | 'denied';
 
@@ -40,7 +41,7 @@ function truncate(value: string, size = 18): string {
 // detailSummary renders a single-line, action-aware digest for the table cell.
 // Each action has a differently-shaped detail_json (see backend builders), so
 // we pull the most informative field per category rather than dumping keys.
-function detailSummary(row: AuditActivity): string {
+function detailSummary(row: AuditActivity, t: TFunction<'admin'>): string {
   if (!row.detail_json) return '';
   let parsed: Record<string, unknown>;
   try {
@@ -64,14 +65,16 @@ function detailSummary(row: AuditActivity): string {
     }
     case 'auth':
       return `${get('method') || ''} ${get('path') || ''}`.trim();
-    case 'session':
-      return get('worker_type') ? `worker: ${get('worker_type')}` : '';
+    case 'session': {
+      const wt = get('worker_type');
+      return wt ? t('activity.summary.worker_prefix', { type: wt }) : '';
+    }
     case 'admin':
       return `${get('method') || ''} ${get('path') || ''} → ${get('status') || ''}`.trim();
     case 'system': {
       const fmt = get('format');
       const rows = parsed.rows as number | undefined;
-      if (fmt) return rows !== undefined ? `${fmt} · ${rows} rows` : fmt;
+      if (fmt) return rows !== undefined ? `${fmt} · ${t('activity.summary.rows', { count: rows })}` : fmt;
       return '';
     }
     default:
@@ -509,16 +512,16 @@ export default function AdminActivityPage() {
                   <div>
                     <StatusBadge status={row.outcome} map={OUTCOME_STATUS_MAP} />
                   </div>
-                  <div className="text-[11px] text-[var(--text-muted)] truncate flex items-center gap-1.5" title={detailSummary(row)}>
+                  <div className="text-[11px] text-[var(--text-muted)] truncate flex items-center gap-1.5" title={detailSummary(row, t)}>
                     {actionCategory(row.action) === 'message' ? (
                       <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] border border-[var(--accent-gold)]/20 text-[9px] font-medium leading-none">
                         <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        MSG
+                        {t('activity.table.msg_badge')}
                       </span>
                     ) : null}
-                    <span className="truncate">{detailSummary(row)}</span>
+                    <span className="truncate">{detailSummary(row, t)}</span>
                   </div>
                 </button>
               );
@@ -648,15 +651,15 @@ export default function AdminActivityPage() {
                     <DrawerSection title={t('activity.drawer.identity')}>
                       {identityLinks[drawerRow.user_id] && (
                         <>
-                          <KV label="name" value={identityLinks[drawerRow.user_id].display_name || identityLinks[drawerRow.user_id].DisplayName || '—'} />
+                          <KV label={t('activity.drawer.field.name')} value={identityLinks[drawerRow.user_id].display_name || identityLinks[drawerRow.user_id].DisplayName || '—'} />
                           {(identityLinks[drawerRow.user_id].email || identityLinks[drawerRow.user_id].Email) && (
-                            <KV label="email" value={identityLinks[drawerRow.user_id].email || identityLinks[drawerRow.user_id].Email || ''} />
+                            <KV label={t('activity.drawer.field.email')} value={identityLinks[drawerRow.user_id].email || identityLinks[drawerRow.user_id].Email || ''} />
                           )}
-                          <KV label="principal" value={identityLinks[drawerRow.user_id].principal_user_id || identityLinks[drawerRow.user_id].PrincipalUserID || '—'} mono />
+                          <KV label={t('activity.drawer.field.principal')} value={identityLinks[drawerRow.user_id].principal_user_id || identityLinks[drawerRow.user_id].PrincipalUserID || '—'} mono />
                         </>
                       )}
                       <KV label={t('activity.table.user')} value={drawerRow.user_id} mono copyable onCopy={() => copyJson(drawerRow)} />
-                      <KV label="type" value={drawerRow.user_id_type} />
+                      <KV label={t('activity.drawer.field.type')} value={drawerRow.user_id_type} />
                       <KV label={t('activity.table.platform')} value={drawerRow.platform} />
                     </DrawerSection>
 
@@ -674,19 +677,19 @@ export default function AdminActivityPage() {
                       )}
                       {(drawerRow.resource_type || drawerRow.resource_id) && (
                         <KV
-                          label="resource"
+                          label={t('activity.drawer.field.resource')}
                           value={`${drawerRow.resource_type || ''}${drawerRow.resource_id ? ':' + drawerRow.resource_id : ''}`}
                           mono
                         />
                       )}
-                      {drawerRow.event_ref && <KV label="event_ref" value={drawerRow.event_ref} mono />}
+                      {drawerRow.event_ref && <KV label={t('activity.drawer.field.event_ref')} value={drawerRow.event_ref} mono />}
                       <KV label={t('activity.table.time')} value={formatDateTime(drawerRow.ts)} />
                     </DrawerSection>
 
                     {/* Network */}
                     <DrawerSection title={t('activity.drawer.network')}>
-                      <KV label="ip" value={drawerRow.ip || '—'} mono hint={drawerRow.ip ? t('activity.drawer.ip_masked') : undefined} />
-                      {drawerRow.user_agent && <KV label="user_agent" value={drawerRow.user_agent} mono />}
+                      <KV label={t('activity.drawer.field.ip')} value={drawerRow.ip || '—'} mono hint={drawerRow.ip ? t('activity.drawer.ip_masked') : undefined} />
+                      {drawerRow.user_agent && <KV label={t('activity.drawer.field.user_agent')} value={drawerRow.user_agent} mono />}
                     </DrawerSection>
 
                     {/* Detail JSON */}
@@ -874,6 +877,7 @@ function KV({
   onCopy?: () => void;
   hint?: string;
 }) {
+  const { t } = useTranslation('common');
   return (
     <div className="flex items-center justify-between gap-4 py-1 border-b border-[var(--border-subtle)]/30 last:border-b-0 transition-all hover:bg-[var(--bg-hover)]/[0.04] -mx-2 px-2 rounded-[var(--radius-sm)]">
       <span className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-wider shrink-0 min-w-[95px] text-left">{label}</span>
@@ -891,7 +895,7 @@ function KV({
           {hint && <span className="text-[9px] text-[var(--text-faint)] italic shrink-0">({hint})</span>}
           {copyable && (
             <button type="button" onClick={onCopy} className="shrink-0 text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:underline ml-1">
-              copy
+              {t('action.copy')}
             </button>
           )}
         </div>
