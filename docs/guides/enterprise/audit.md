@@ -52,7 +52,7 @@ HotPlex 内建**用户行为审计子系统**（`user_activity`），对所有�
 
 | 类别 | Action 前缀 | 说明 |
 |------|------------|------|
-| 认证 | `auth.login` / `auth.token_validated` / `auth.apikey_used` / `auth.denied` | 用户登录、Token 校验、API Key 使用、认证拒绝 |
+| 认证 | `auth.login` / `auth.logout` / `auth.apikey_used` / `auth.denied` | 凭证登录/登出、API Key 使用、认证拒绝（`auth.token_validated` 常量保留但不再触发） |
 | Session | `session.create` / `session.delete` | 会话创建与删除 |
 | 消息 | `message.inbound` | 入站消息（含消息文本内容） |
 | Tool | `tool.call` | Worker 工具调用（敏感工具全量记录，非敏感工具记录摘要） |
@@ -185,10 +185,10 @@ audit:
 
 | Action | 触发场景 | Outcome | 说明 |
 |--------|----------|---------|------|
-| `auth.login` | WebChat cookie 认证 | success / failure | 登录成功或失败 |
-| `auth.token_validated` | API Key 解析到已禁用用户 | failure | Token 关联用户被禁用 |
-| `auth.apikey_used` | Bearer Token 认证 | success / failure | API Key 认证成功或失败 |
-| `auth.denied` | 无有效认证方式 | denied | 匿名拒绝（含 IP + UA） |
+| `auth.login` | 凭证交换（密码登录 / OAuth 回调） | success / failure | 仅在凭证交换边界记录；失败保持匿名（防用户枚举） |
+| `auth.logout` | 显式登出（清除 cookie） | success | 携带真实 user_id，cookie 缺失/无效时回退匿名 |
+| `auth.apikey_used` | API Key 请求（含禁用用户拒绝） | success / failure | API Key 认证成功或失败 |
+| `auth.denied` | 无 / 无效凭证（HTTP 请求 + WS upgrade） | denied | 匿名拒绝（含 IP + UA） |
 | `session.create` | 创建新会话 | success | 会话建立 |
 | `session.delete` | 删除会话 | success | 会话清理 |
 | `message.inbound` | 入站消息 | success | 消息接收（含文本内容） |
@@ -199,15 +199,17 @@ audit:
 
 ### 4.2 认证事件
 
-认证事件覆盖 4 种路径，正确区分不同来源的用户身份：
+`auth.*` 事件**只在凭证交换边界**记录：密码登录与 OAuth 回调（`auth.login`）、显式登出（`auth.logout`）、API Key 请求（`auth.apikey_used`）、无/无效凭证（`auth.denied`）。**后续每请求的 cookie 重新校验不再产生审计行**——用户归属由领域动作（`message` / `session` / `tool` / `admin.*`）携带的 `user_id` 完成，避免审计日志被高频 cookie 校验刷屏。各路径的身份标记如下：
 
-| 路径 | Platform | UserIDType | UserID 来源 |
-|------|----------|------------|-------------|
-| WebChat cookie | `webchat` | `registered` | `users.id`（数据库用户） |
-| API Key | `api` | `registered` 或 `platform` | `api_key_users` 映射或 `api_user` |
-| 认证失败 | — | `anonymous` | `"anonymous"` 哨兵值 |
+| 路径 | Action | Platform | UserIDType | UserID 来源 |
+|------|--------|----------|------------|-------------|
+| 密码登录 / OAuth（成功） | `auth.login` | `webchat` | `registered` | `users.id`（数据库用户） |
+| 登录失败 | `auth.login` | `webchat` | `anonymous` | `"anonymous"` 哨兵值（防枚举） |
+| 显式登出 | `auth.logout` | `webchat` | `registered` | `users.id`（cookie 缺失时回退匿名） |
+| API Key | `auth.apikey_used` | `api` | `registered` 或 `platform` | `api_key_users` 映射或 `api_user` |
+| 无 / 无效凭证 | `auth.denied` | — | `anonymous` | `"anonymous"`（含 IP + UA） |
 
-> 匿名/失败认证**必须包含 IP + User-Agent**，用于追溯未授权访问尝试。
+> 匿名/失败认证**必须包含 IP + User-Agent**，用于追溯未授权访问尝试。`auth.token_validated` 常量保留但不再主动触发——WS upgrade 的无效 token 现统一记为 `auth.denied`，原"API Key 命中禁用用户"的 failure 路径已合并进 `auth.apikey_used`。
 
 ### 4.3 Session 事件
 
