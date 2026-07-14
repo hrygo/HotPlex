@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -361,6 +362,20 @@ func (c *Collector) DroppedEvents() int64 {
 
 func (c *Collector) runWriter() {
 	defer c.closeWg.Done()
+	// Recover from panics in flushBatch (e.g. a buggy driver call) so a single
+	// panic does not permanently kill the writer and silently drop ALL subsequent
+	// events + turns. The in-flight batch is lost (already the case on any
+	// flushBatch error), but the channel keeps draining under a fresh goroutine.
+	// The Add(1) here balances the new goroutine's deferred Done() (issue #879
+	// problem 1, reliability defense).
+	defer func() {
+		if r := recover(); r != nil {
+			c.log.Error("eventstore: runWriter panic, restarting goroutine",
+				"panic", r, "stack", string(debug.Stack()))
+			c.closeWg.Add(1)
+			go c.runWriter()
+		}
+	}()
 
 	ticker := time.NewTicker(c.flushInterval)
 	defer ticker.Stop()

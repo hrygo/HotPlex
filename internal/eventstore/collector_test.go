@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,53 @@ import (
 
 	"github.com/hrygo/hotplex/pkg/events"
 )
+
+// panicFirstTxStore wraps an EventStore and panics on the first BeginTx call,
+// to exercise runWriter's panic-recovery restart (issue #879 problem 1).
+type panicFirstTxStore struct {
+	EventStore
+	failed atomic.Bool
+}
+
+func (s *panicFirstTxStore) BeginTx(ctx context.Context) (EventTx, error) {
+	if !s.failed.Swap(true) {
+		panic("simulated runWriter panic during flushBatch")
+	}
+	return s.EventStore.BeginTx(ctx)
+}
+
+func TestCollector_RunWriterPanicRecovery(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ps := &panicFirstTxStore{EventStore: store}
+	// Short flush interval so the first batch flushes (and panics) quickly.
+	c := NewCollectorWithIntervals(ps, slog.Default(), 50*time.Millisecond, 3*time.Second)
+	t.Cleanup(func() { _ = c.Close() })
+
+	// seq 1 lands in a batch; the next ticker flush calls BeginTx → panic.
+	c.Capture("s1", 1, events.Message, json.RawMessage(`{}`), "outbound", SourceNormal)
+
+	// Wait until the panic has fired (BeginTx was reached → failed flipped).
+	require.Eventually(t, func() bool { return ps.failed.Load() },
+		2*time.Second, 20*time.Millisecond, "flush never ran (BeginTx not called)")
+
+	// After the goroutine restarts, a NEW event must still persist — proving the
+	// writer survived instead of permanently dying. (seq 1 was in the panicked
+	// batch and is lost, the pre-existing behavior on any flush error.)
+	c.Capture("s1", 2, events.Done, json.RawMessage(`{}`), "outbound", SourceNormal)
+	require.Eventually(t, func() bool {
+		page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+		if err != nil || len(page.Events) == 0 {
+			return false
+		}
+		for _, e := range page.Events {
+			if e.Seq == 2 {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 50*time.Millisecond, "runWriter did not recover from panic")
+}
 
 func TestCollector_CaptureDeltaString(t *testing.T) {
 	store := newTestStore(t)
