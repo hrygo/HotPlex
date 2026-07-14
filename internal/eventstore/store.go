@@ -212,6 +212,10 @@ type TurnQuerier interface {
 	LatestGeneration(ctx context.Context, sessionID string) (int64, error)
 	LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error)
 	DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error)
+	// LatestSeq returns the maximum event seq persisted for a session, or 0 if
+	// none. Used to hydrate the in-memory SeqGen on resume/reconnect so new
+	// events do not collide with the prior seq range (issue #879).
+	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 }
 
 // SQLiteStore implements EventStore using a shared SQLite database connection.

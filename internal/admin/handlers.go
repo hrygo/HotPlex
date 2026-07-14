@@ -375,15 +375,31 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 	// design: this is an admin-only debug endpoint gated by ScopeAdminRead above, and these
 	// fields are required for session troubleshooting. Do not JSON-whitelist them without an
 	// admin-visible alternative; track field-level redaction as a separate concern if ever needed.
+	//
+	// Augment the in-memory snapshot with DB-backed counts (issue #879 #5).
+	// snap.TurnCount (managedSession.TurnCount) and last_seq_sent (SeqGen) are
+	// volatile: both reset to 0 on resume/restart, so the endpoint would
+	// otherwise report a freshly-resumed session as "0 turns" while the turns
+	// and events tables still hold the durable history.
+	debug := map[string]any{
+		"available":     dbgOK,
+		"has_worker":    snap.HasWorker,
+		"turn_count":    snap.TurnCount,
+		"last_seq_sent": a.hub.NextSeqPeek(id),
+		"worker_health": snap.WorkerHealth,
+		"runtime_only":  true, // turn_count/last_seq_sent are ephemeral; see db_* below.
+	}
+	if a.turnStore != nil {
+		if stats, err := a.turnStore.TurnStats(r.Context(), id); err == nil && stats != nil {
+			debug["db_turn_count"] = stats.TotalTurns
+		}
+		if seq, err := a.turnStore.LatestSeq(r.Context(), id); err == nil {
+			debug["db_last_seq"] = seq
+		}
+	}
 	respondJSON(w, map[string]any{
 		"session": si,
-		"debug": map[string]any{
-			"available":     dbgOK,
-			"has_worker":    snap.HasWorker,
-			"turn_count":    snap.TurnCount,
-			"last_seq_sent": a.hub.NextSeqPeek(id),
-			"worker_health": snap.WorkerHealth,
-		},
+		"debug":   debug,
 	})
 }
 

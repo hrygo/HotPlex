@@ -54,13 +54,12 @@ import (
 )
 
 // eventStoreProvider combines the query and event-store interfaces needed by all consumers.
-// Both *eventstore.SQLiteStore and the internal pgEventStore satisfy it.
+// Both *eventstore.SQLiteStore and the internal pgEventStore satisfy it. LatestSeq is
+// inherited from TurnQuerier (promoted there in issue #879).
 type eventStoreProvider interface {
 	eventstore.TurnQuerier
 	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir eventstore.CursorDirection, limit int) (*eventstore.EventPage, error)
 	DeleteExpired(ctx context.Context, cutoff time.Time) (int64, error)
-	// LatestSeq reads the max persisted event seq for SeqGen hydration (issue #879).
-	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 	Close() error
 }
 
