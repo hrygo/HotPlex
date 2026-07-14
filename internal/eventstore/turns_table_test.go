@@ -3,6 +3,7 @@ package eventstore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -759,6 +760,61 @@ func TestTurnsTable_Pagination(t *testing.T) {
 
 	t.Run("offset beyond data", func(t *testing.T) {
 		_, err := store.QueryTurns(ctx, "s1", 10, 100)
+		require.ErrorIs(t, err, ErrNotFound)
+	})
+}
+
+// ─── QueryLatestTurns: returns newest N turns (regression: ASC+LIMIT bug) ────
+//
+// Regression guard: GetHistory's default path previously used QueryTurns
+// (ORDER BY id ASC LIMIT), which returned the OLDEST N turns once a session
+// exceeded `limit` rows. After a refresh, the user saw stale history and lost
+// the most recent exchange. QueryLatestTurns must return the NEWEST N, in ASC
+// display order.
+func TestTurnsTable_QueryLatestTurns(t *testing.T) {
+	store := newTestStoreWithTurnsTable(t)
+	ctx := testCtx(t)
+
+	// Seed 4 turns (user+assistant = 8 rows), generation 1, auto-increment id.
+	// id order: u1,a1,u2,a2,u3,a3,u4,a4
+	for tn := 1; tn <= 4; tn++ {
+		tx, err := store.BeginTx(ctx)
+		require.NoError(t, err)
+		now := time.Now().UnixMilli()
+		require.NoError(t, tx.AppendTurn(ctx, &TurnWriteRequest{
+			SessionID: "s1", Generation: 1, TurnNum: tn, Role: RoleUser,
+			Content: fmt.Sprintf("u%d", tn), CreatedAt: now,
+		}))
+		success := true
+		require.NoError(t, tx.AppendTurn(ctx, &TurnWriteRequest{
+			SessionID: "s1", Generation: 1, TurnNum: tn, Role: RoleAssistant,
+			Content: fmt.Sprintf("a%d", tn), Success: &success, CreatedAt: now,
+		}))
+		require.NoError(t, tx.Commit())
+	}
+
+	t.Run("returns newest N in ASC order", func(t *testing.T) {
+		// 8 rows, limit 3 → newest 3 by id DESC, reversed to ASC:
+		// id6(a3), id7(u4), id8(a4)
+		records, err := store.QueryLatestTurns(ctx, "s1", 3)
+		require.NoError(t, err)
+		require.Len(t, records, 3)
+		require.Equal(t, "a3", records[0].Content)
+		require.Equal(t, "u4", records[1].Content)
+		require.Equal(t, "a4", records[2].Content)
+		require.Equal(t, 4, records[2].TurnNum, "must include the newest turn_num")
+	})
+
+	t.Run("limit >= total returns all in ASC", func(t *testing.T) {
+		records, err := store.QueryLatestTurns(ctx, "s1", 100)
+		require.NoError(t, err)
+		require.Len(t, records, 8)
+		require.Equal(t, 1, records[0].TurnNum, "oldest first")
+		require.Equal(t, 4, records[7].TurnNum, "newest last")
+	})
+
+	t.Run("empty session returns ErrNotFound", func(t *testing.T) {
+		_, err := store.QueryLatestTurns(ctx, "nope", 10)
 		require.ErrorIs(t, err, ErrNotFound)
 	})
 }

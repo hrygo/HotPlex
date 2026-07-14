@@ -207,6 +207,7 @@ type EventTx interface {
 type TurnQuerier interface {
 	QueryTurns(ctx context.Context, sessionID string, limit, offset int) ([]*TurnRecord, error)
 	QueryTurnsBefore(ctx context.Context, sessionID string, beforeID int64, limit int) ([]*TurnRecord, error)
+	QueryLatestTurns(ctx context.Context, sessionID string, limit int) ([]*TurnRecord, error)
 	QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error)
 	LatestGeneration(ctx context.Context, sessionID string) (int64, error)
 	LatestTurnNum(ctx context.Context, sessionID string, generation int64) (int, error)
@@ -387,6 +388,29 @@ func (s *SQLiteStore) QueryTurnsBefore(ctx context.Context, sessionID string, be
 	rows, err := s.db.QueryContext(ctx, queries["turns.query_before"], sessionID, beforeID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("eventstore: query turns before: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	records, err := scanTurns(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Reverse to ASC order (SQL returns DESC).
+	slices.Reverse(records)
+	return records, nil
+}
+
+// QueryLatestTurns fetches the newest N turns of the latest generation.
+// SQL returns DESC (newest first); the slice is reversed to ASC for display.
+//
+// Use this instead of QueryTurns when the caller wants the most recent turns:
+// QueryTurns uses ORDER BY id ASC + LIMIT, which returns the OLDEST N once a
+// session exceeds `limit` rows — silently dropping recent history (refresh bug).
+func (s *SQLiteStore) QueryLatestTurns(ctx context.Context, sessionID string, limit int) ([]*TurnRecord, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, queries["turns.query_latest"], sessionID, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("eventstore: query latest turns: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	records, err := scanTurns(rows)

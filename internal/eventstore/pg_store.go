@@ -180,6 +180,23 @@ func (s *pgStore) QueryTurnsBefore(ctx context.Context, sessionID string, before
 	return records, nil
 }
 
+func (s *pgStore) QueryLatestTurns(ctx context.Context, sessionID string, limit int) ([]*TurnRecord, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, s.sql["turns.query_latest"], sessionID, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("eventstore: query latest turns: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	records, err := scanTurnsPG(rows)
+	if err != nil {
+		return nil, fmt.Errorf("eventstore: scan turns: %w", err)
+	}
+	// Reverse to ASC order (SQL returns DESC).
+	slices.Reverse(records)
+	return records, nil
+}
+
 func (s *pgStore) QueryTurnStats(ctx context.Context, sessionID string) (*TurnStats, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()

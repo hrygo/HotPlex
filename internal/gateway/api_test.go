@@ -165,6 +165,14 @@ func (m *mockTurnsStore) QueryTurnsBefore(ctx context.Context, sessionID string,
 	return args.Get(0).([]*eventstore.TurnRecord), args.Error(1)
 }
 
+func (m *mockTurnsStore) QueryLatestTurns(ctx context.Context, sessionID string, limit int) ([]*eventstore.TurnRecord, error) {
+	args := m.Called(ctx, sessionID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*eventstore.TurnRecord), args.Error(1)
+}
+
 func (m *mockTurnsStore) QueryTurnStats(ctx context.Context, sessionID string) (*eventstore.TurnStats, error) {
 	args := m.Called(ctx, sessionID)
 	if args.Get(0) == nil {
@@ -741,7 +749,7 @@ func TestGetHistory_Success(t *testing.T) {
 	records := []*eventstore.TurnRecord{
 		{SessionID: "sess-1", Seq: 1, Role: "user", Content: "hello"},
 	}
-	ts.On("QueryTurns", mock.Anything, "sess-1", 51, 0).Return(records, nil)
+	ts.On("QueryLatestTurns", mock.Anything, "sess-1", 51).Return(records, nil)
 
 	mux := setupMux(api)
 	w := httptest.NewRecorder()
@@ -771,7 +779,7 @@ func TestGetHistory_HasMore(t *testing.T) {
 		{Seq: 2},
 		{Seq: 3},
 	}
-	ts.On("QueryTurns", mock.Anything, "sess-1", 3, 0).Return(records, nil)
+	ts.On("QueryLatestTurns", mock.Anything, "sess-1", 3).Return(records, nil)
 
 	mux := setupMux(api)
 	w := httptest.NewRecorder()
@@ -796,7 +804,7 @@ func TestGetHistory_NoRecords(t *testing.T) {
 	api := newTestAPIWithTurns(t, sm, bridge, ts)
 
 	sm.On("Get", "sess-1").Return(&session.SessionInfo{ID: "sess-1", UserID: "anonymous"}, nil)
-	ts.On("QueryTurns", mock.Anything, "sess-1", 51, 0).Return(nil, eventstore.ErrNotFound)
+	ts.On("QueryLatestTurns", mock.Anything, "sess-1", 51).Return(nil, eventstore.ErrNotFound)
 
 	mux := setupMux(api)
 	w := httptest.NewRecorder()

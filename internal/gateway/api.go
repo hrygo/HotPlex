@@ -586,7 +586,7 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 	if beforeID > 0 {
 		records, err = g.turnsStore.QueryTurnsBefore(r.Context(), id, beforeID, fetchLimit)
 	} else {
-		records, err = g.turnsStore.QueryTurns(r.Context(), id, fetchLimit, 0)
+		records, err = g.turnsStore.QueryLatestTurns(r.Context(), id, fetchLimit)
 	}
 
 	if err != nil {
