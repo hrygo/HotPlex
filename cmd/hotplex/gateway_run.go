@@ -59,6 +59,8 @@ type eventStoreProvider interface {
 	eventstore.TurnQuerier
 	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir eventstore.CursorDirection, limit int) (*eventstore.EventPage, error)
 	DeleteExpired(ctx context.Context, cutoff time.Time) (int64, error)
+	// LatestSeq reads the max persisted event seq for SeqGen hydration (issue #879).
+	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 	Close() error
 }
 
@@ -363,6 +365,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	hub.LogHandler = func(level, msg, sessionID string) {
 		admin.AddLog(level, msg, sessionID)
 	}
+	// Hydrate SeqGen from persisted events on reconnect so seq continues
+	// monotonically instead of restarting from 1 (issue #879).
+	hub.SetSeqHydrator(stores.event)
 
 	var configWatcher *config.Watcher
 	if configPath != "" {

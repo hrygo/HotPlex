@@ -231,6 +231,19 @@ func (s *pgStore) LatestTurnNum(ctx context.Context, sessionID string, generatio
 	return tn, nil
 }
 
+// LatestSeq returns the maximum event seq for a session, or 0 if no events
+// exist. Used to hydrate the in-memory SeqGen on reconnect (issue #879).
+func (s *pgStore) LatestSeq(ctx context.Context, sessionID string) (int64, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	var seq int64
+	err := s.db.QueryRowContext(ctx, s.sql["latest_seq"], sessionID).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("eventstore: latest seq: %w", err)
+	}
+	return seq, nil
+}
+
 func (s *pgStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Time) (int64, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
