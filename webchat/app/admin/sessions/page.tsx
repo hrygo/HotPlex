@@ -6,7 +6,7 @@ import { listSessions, terminateSession, deleteSession } from '@/lib/api/admin-s
 import { MetricCard } from '@/components/admin/metric-card';
 import { SessionStatusBadge } from '@/components/admin/session-status-badge';
 import { useAdminUI } from '@/context/admin-ui-context';
-import type { AdminSessionInfo } from '@/lib/types/admin';
+import type { AdminSessionInfo, AuditIdentityLink } from '@/lib/types/admin';
 import { formatRelative as formatTime, formatDateTime } from '@/lib/utils/format-time';
 import { useTranslation } from 'react-i18next';
 
@@ -40,6 +40,7 @@ export default function SessionsPage() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [drawerSession, setDrawerSession] = useState<AdminSessionInfo | null>(null);
   const [copyIdFeedback, setCopyIdFeedback] = useState<string | null>(null);
+  const [identityLinks, setIdentityLinks] = useState<Record<string, AuditIdentityLink>>({});
 
   const loadSessions = useCallback(async () => {
     try {
@@ -48,6 +49,7 @@ export default function SessionsPage() {
       setConfirmId(null);
       const data = await listSessions(100, 0);
       setSessions(data.sessions);
+      setIdentityLinks(data.identity_links ?? {});
 
       // If drawer is open, update its session details in case of state changes
       if (drawerSession) {
@@ -563,13 +565,33 @@ export default function SessionsPage() {
                     </div>
 
                     {/* User */}
-                    <div className="flex items-center gap-1.5 truncate">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5 text-[var(--text-faint)]">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5 text-[var(--text-faint)] shrink-0">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
                       </svg>
-                      <span className="text-xs text-[var(--text-muted)] truncate font-medium" title={session.user_id}>
-                        {session.user_id ? truncateId(session.user_id) : '--'}
-                      </span>
+                      <div className="min-w-0 flex flex-col">
+                        {(() => {
+                          const link = identityLinks[session.user_id];
+                          const name = link?.display_name || link?.DisplayName;
+                          if (name) {
+                            return (
+                              <>
+                                <span className="text-xs text-[var(--text-primary)] truncate font-medium" title={name}>
+                                  {name}
+                                </span>
+                                <span className="text-[10px] font-mono text-[var(--text-faint)] truncate" title={session.user_id}>
+                                  {truncateId(session.user_id)}
+                                </span>
+                              </>
+                            );
+                          }
+                          return (
+                            <span className="text-xs text-[var(--text-muted)] truncate font-medium" title={session.user_id}>
+                              {session.user_id ? truncateId(session.user_id) : '--'}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     {/* Status */}
@@ -750,9 +772,22 @@ export default function SessionsPage() {
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
                       {t('admin:sessions.drawer.user_id', { defaultValue: 'Executing User ID' })}
                     </span>
-                    <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
-                      {drawerSession.user_id || '—'}
-                    </span>
+                    {(() => {
+                      const link = identityLinks[drawerSession.user_id];
+                      const name = link?.display_name || link?.DisplayName;
+                      return (
+                        <div className="min-w-0">
+                          {name && (
+                            <div className="text-xs font-medium text-[var(--text-primary)] truncate" title={name}>
+                              {name}
+                            </div>
+                          )}
+                          <div className="text-xs font-mono font-medium text-[var(--text-secondary)] break-all" title={drawerSession.user_id}>
+                            {drawerSession.user_id || '—'}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">

@@ -35,6 +35,19 @@ func (s *stubUserStore) GetUserByUsername(_ context.Context, username string) (*
 	return u, nil
 }
 
+func (s *stubUserStore) ListByIDs(_ context.Context, ids []string) (map[string]*User, error) {
+	out := make(map[string]*User)
+	if s.byID == nil {
+		return out, nil
+	}
+	for _, id := range ids {
+		if u, ok := s.byID[id]; ok {
+			out[id] = u
+		}
+	}
+	return out, nil
+}
+
 // testBcryptCost is lower than production (12) to keep tests fast.
 const testBcryptCost = 10
 

@@ -52,6 +52,43 @@ func TestUsersStore_ListAndUpdateStatus(t *testing.T) {
 	require.Equal(t, "disabled", disabled.Status)
 }
 
+func TestUsersStore_ListByIDs(t *testing.T) {
+	t.Parallel()
+	store, _ := helperDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-1", Username: "alice", DisplayName: "Alice Lee", Role: "user", Status: "active"}, 1700000000))
+	require.NoError(t, store.CreateUser(ctx, &security.User{ID: "u-2", Username: "bob", DisplayName: "Bob", Role: "user", Status: "active"}, 1700000000))
+
+	cases := []struct {
+		name    string
+		ids     []string
+		wantIDs []string
+	}{
+		{name: "empty input", ids: nil, wantIDs: nil},
+		{name: "all found", ids: []string{"u-1", "u-2"}, wantIDs: []string{"u-1", "u-2"}},
+		{name: "partial found", ids: []string{"u-1", "missing"}, wantIDs: []string{"u-1"}},
+		{name: "dedupes duplicates", ids: []string{"u-1", "u-1", "u-2"}, wantIDs: []string{"u-1", "u-2"}},
+		{name: "filters empty", ids: []string{"", "u-2"}, wantIDs: []string{"u-2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := store.ListByIDs(ctx, tc.ids)
+			require.NoError(t, err)
+			require.Len(t, got, len(tc.wantIDs))
+			for _, id := range tc.wantIDs {
+				require.Contains(t, got, id)
+			}
+		})
+	}
+
+	// Display name round-trips so admin views can render it.
+	got, err := store.ListByIDs(ctx, []string{"u-1"})
+	require.NoError(t, err)
+	require.Equal(t, "Alice Lee", got["u-1"].DisplayName)
+}
+
 func TestUsersStore_HasAdmin(t *testing.T) {
 	t.Parallel()
 	store, _ := helperDB(t)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hrygo/hotplex/internal/security"
 )
@@ -142,6 +143,36 @@ func nullableString(s string) any {
 
 // --- scanners ---
 
+// distinctNonEmptyIDs returns de-duplicated, non-empty ids, preserving order.
+// Empty strings are skipped so an IN (...) clause never matches the empty row.
+func distinctNonEmptyIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// usersByIDSQL builds `SELECT ... FROM users WHERE id IN (...)` with `?`
+// placeholders plus its args. SQLite uses it verbatim; PG rebinds via
+// dialect.Rebind. Column order mirrors users.list.sql so scanUser applies.
+func usersByIDSQL(ids []string) (string, []any) {
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return "SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users WHERE id IN (" + placeholders + ")", args
+}
+
 func scanUser(sc rowScanner) (*security.User, error) {
 	var u security.User
 	var lastLogin sql.NullInt64 // last_login_at 可空（用户从未登录时为 NULL）
@@ -263,6 +294,28 @@ func (s *SQLiteStore) ListUsers(ctx context.Context, limit, offset int) ([]*secu
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ListByIDs(ctx context.Context, ids []string) (map[string]*security.User, error) {
+	out := make(map[string]*security.User)
+	distinct := distinctNonEmptyIDs(ids)
+	if len(distinct) == 0 {
+		return out, nil
+	}
+	query, args := usersByIDSQL(distinct)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[u.ID] = u
 	}
 	return out, rows.Err()
 }

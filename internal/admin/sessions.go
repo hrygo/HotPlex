@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 
+	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/web"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -88,10 +89,22 @@ func (a *AdminAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve readable display names for the page's user IDs so the admin view
+	// shows names instead of raw IDs. Entries are absent for IDs with no users
+	// row (e.g. platform-native subjects); the frontend falls back to the ID.
+	userIDs := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		if si, ok := s.(*session.SessionInfo); ok && si.UserID != "" {
+			userIDs = append(userIDs, si.UserID)
+		}
+	}
+	identityLinks := a.buildIdentityLinks(r.Context(), userIDs)
+
 	respondJSON(w, map[string]any{
-		"sessions": sessions,
-		"limit":    limit,
-		"offset":   offset,
+		"sessions":       sessions,
+		"identity_links": identityLinks,
+		"limit":          limit,
+		"offset":         offset,
 	})
 }
 

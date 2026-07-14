@@ -33,6 +33,11 @@ type UserStore interface {
 	CreateUser(ctx context.Context, u *User, now int64) error
 	GetUserByID(ctx context.Context, id string) (*User, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	// ListByIDs batch-resolves users by ID. Used by admin views (sessions /
+	// activity) to render readable display names instead of raw IDs. Returns a
+	// map keyed by user ID; IDs with no row are absent (not an error). An empty
+	// or nil input returns an empty map without hitting the DB.
+	ListByIDs(ctx context.Context, ids []string) (map[string]*User, error)
 }
 
 // Credentials is a marker interface for credential payloads.

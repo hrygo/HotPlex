@@ -56,6 +56,28 @@ func (s *pgStore) ListUsers(ctx context.Context, limit, offset int) ([]*security
 	return out, rows.Err()
 }
 
+func (s *pgStore) ListByIDs(ctx context.Context, ids []string) (map[string]*security.User, error) {
+	out := make(map[string]*security.User)
+	distinct := distinctNonEmptyIDs(ids)
+	if len(distinct) == 0 {
+		return out, nil
+	}
+	query, args := usersByIDSQL(distinct)
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[u.ID] = u
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) UpdateUserStatus(ctx context.Context, id, status string, now int64) error {
 	_, err := s.db.ExecContext(ctx, s.queries["users.update_status"], status, now, id)
 	return err

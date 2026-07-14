@@ -382,6 +382,45 @@ func (a *AdminAPI) SetActivityService(s *ActivityService) { a.activityService = 
 // SetAuditCollector injects the audit.Collector for emitting system.audit_export meta-audit rows (issue #833).
 func (a *AdminAPI) SetAuditCollector(c *audit.Collector) { a.auditCollector = c }
 
+// buildIdentityLinks resolves a set of user IDs to readable identity via the
+// local users table (display_name, falling back to username). The result is
+// keyed by user ID and shaped as audit.IdentityLink so the sessions/activity
+// admin views can share the same frontend rendering path. Nil-safe: when no
+// identity provider is configured (idp == nil) it returns nil and callers fall
+// back to showing the raw ID — matching pre-existing behavior. Resolution
+// errors are logged and swallowed so the view still renders.
+func (a *AdminAPI) buildIdentityLinks(ctx context.Context, userIDs []string) map[string]audit.IdentityLink {
+	if a.idp == nil || len(userIDs) == 0 {
+		return nil
+	}
+	users, err := a.idp.LookupMany(ctx, userIDs)
+	if err != nil {
+		a.log.Warn("admin: identity resolution", "err", err)
+		return nil
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	links := make(map[string]audit.IdentityLink, len(users))
+	for id, u := range users {
+		display := u.DisplayName
+		if display == "" {
+			display = u.Username
+		}
+		if display == "" {
+			continue // nothing readable to show; leave the row on its raw ID
+		}
+		links[id] = audit.IdentityLink{
+			Subject:         id,
+			PrincipalUserID: id,
+			Provider:        "local",
+			SubjectType:     audit.UserIDTypeRegistered,
+			DisplayName:     display,
+		}
+	}
+	return links
+}
+
 // sameOriginRequest reports whether the request originated from the gateway's
 // own origin (Sec-Fetch-Site) or an explicitly allowed origin (Origin header).
 // Gates cookie-authenticated writes against CSRF — a cross-site form POST

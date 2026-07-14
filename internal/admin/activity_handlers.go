@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,10 +40,11 @@ func (api *AdminAPI) HandleUserActivity(w http.ResponseWriter, r *http.Request) 
 			linksMap[link.Subject] = link
 		}
 	}
+	identityLinks := api.mergedActivityIdentityLinks(r.Context(), rows, linksMap)
 	respondJSON(w, map[string]any{
 		"user_id":        userID,
 		"rows":           rows,
-		"identity_links": linksMap,
+		"identity_links": identityLinks,
 		"limit":          q.Limit,
 		"offset":         q.Offset,
 	})
@@ -83,7 +85,7 @@ func (api *AdminAPI) HandleAdminActivity(w http.ResponseWriter, r *http.Request)
 			"principal_user_id": principalUserID,
 			"resolved_user_ids": resolved,
 			"rows":              rows,
-			"identity_links":    linksMap,
+			"identity_links":    api.mergedActivityIdentityLinks(r.Context(), rows, linksMap),
 			"limit":             q.Limit,
 			"offset":            q.Offset,
 		})
@@ -100,7 +102,7 @@ func (api *AdminAPI) HandleAdminActivity(w http.ResponseWriter, r *http.Request)
 	}
 	respondJSON(w, map[string]any{
 		"rows":           rows,
-		"identity_links": linksMap,
+		"identity_links": api.mergedActivityIdentityLinks(r.Context(), rows, linksMap),
 		"limit":          q.Limit,
 		"offset":         q.Offset,
 	})
@@ -324,6 +326,35 @@ func (api *AdminAPI) ensureActivityService(w http.ResponseWriter) bool {
 	}
 	web.WriteAppError(w, http.StatusServiceUnavailable, "AUDIT_DISABLED", "audit activity service is not available")
 	return false
+}
+
+// mergedActivityIdentityLinks combines explicit admin-curated cross-channel
+// links with auto-resolved display names from the local users table. Explicit
+// links win on key collision (they are admin-authored and authoritative). The
+// users-table pass fills the common gap: a registered webchat user has no
+// explicit link row, so without this their audit rows would render as raw IDs.
+// Always returns a non-nil map (possibly empty) to match the existing response
+// shape that the frontend expects.
+func (api *AdminAPI) mergedActivityIdentityLinks(ctx context.Context, rows []audit.UserActivity, explicit map[string]audit.IdentityLink) map[string]audit.IdentityLink {
+	out := make(map[string]audit.IdentityLink, len(explicit))
+	for k, v := range explicit {
+		out[k] = v
+	}
+	if len(rows) == 0 {
+		return out
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.UserID != "" {
+			ids = append(ids, r.UserID)
+		}
+	}
+	for k, v := range api.buildIdentityLinks(ctx, ids) {
+		if _, ok := out[k]; !ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func hasConflictingActivityUserFilters(r *http.Request, userID string) bool {

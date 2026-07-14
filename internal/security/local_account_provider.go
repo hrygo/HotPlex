@@ -95,6 +95,14 @@ func (p *LocalAccountProvider) Lookup(ctx context.Context, userID string) (*User
 	return p.store.GetUserByID(ctx, userID)
 }
 
+// LookupMany batch-resolves users by ID. Used by admin views to render display
+// names for a page of sessions/activity without N single-row queries. IDs with
+// no row are absent from the result (not an error). A nil/empty input returns
+// an empty map without hitting the DB.
+func (p *LocalAccountProvider) LookupMany(ctx context.Context, userIDs []string) (map[string]*User, error) {
+	return p.store.ListByIDs(ctx, userIDs)
+}
+
 // HashPassword hashes a plaintext password at the provider's cost.
 func (p *LocalAccountProvider) HashPassword(plaintext string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(plaintext), p.cost)
