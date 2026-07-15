@@ -1059,11 +1059,23 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	m.mu.Lock()
 	ms, ok := m.sessions[id]
+	if !ok {
+		// Keep an in-memory deleting tombstone until the store operation
+		// completes. Without it, IsSeqActive falls back to the still-live DB row
+		// and admits late durable producers during physical deletion.
+		ms = &managedSession{info: SessionInfo{ID: id}, deleting: true}
+		m.sessions[id] = ms
+	}
 	var workerToKill worker.Worker
 	var workerType string
 	var deletedInfo *SessionInfo
 	if ok {
 		ms.mu.Lock()
+		if ms.deleting {
+			ms.mu.Unlock()
+			m.mu.Unlock()
+			return ErrSessionCleanupPending
+		}
 		ms.deleting = true
 		info := ms.info
 		deletedInfo = &info
@@ -1075,7 +1087,6 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 			m.releaseWorkerQuota(ctx, ms)
 		}
 		ms.mu.Unlock()
-		delete(m.sessions, id)
 		if wasRunning {
 			m.removeFromRunningIndex(id)
 		}
@@ -1088,23 +1099,32 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 	}
 
-	if cleanup, ok := m.store.(CleanupTaskStore); ok {
-		_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
-		if err == nil {
-			m.notifyRuntimeRelease(ctx, id)
+	var deleteErr error
+	cleanup, hasCleanup := m.store.(CleanupTaskStore)
+	if hasCleanup {
+		_, deleteErr = cleanup.DeletePhysicalWithCleanup(ctx, id)
+	} else {
+		if deletedInfo == nil && m.OnDelete != nil {
+			if info, err := m.store.Get(ctx, id); err == nil {
+				deletedInfo = info
+			}
 		}
-		return err
+		deleteErr = m.store.DeletePhysical(ctx, id)
 	}
-	if deletedInfo == nil && m.OnDelete != nil {
-		if info, err := m.store.Get(ctx, id); err == nil {
-			deletedInfo = info
-		}
+
+	// Remove only our tombstone, and only after the durable delete attempt.
+	// On failure, the next access may safely reload the still-existing DB row.
+	m.mu.Lock()
+	if current, exists := m.sessions[id]; exists && current == ms {
+		delete(m.sessions, id)
 	}
-	if err := m.store.DeletePhysical(ctx, id); err != nil {
-		return err
+	m.mu.Unlock()
+	if deleteErr != nil {
+		return deleteErr
 	}
+
 	m.notifyRuntimeRelease(ctx, id)
-	if deletedInfo != nil {
+	if !hasCleanup && deletedInfo != nil {
 		m.notifyDelete(*deletedInfo)
 	}
 	return nil

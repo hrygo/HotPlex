@@ -555,6 +555,32 @@ func TestManager_DeletePhysicalNotifiesRuntimeCleanup(t *testing.T) {
 	require.True(t, notified.Load())
 }
 
+func TestManager_DeletePhysicalKeepsDeletingTombstone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+
+	deleteStarted := make(chan struct{})
+	allowDelete := make(chan struct{})
+	store.On("DeletePhysical", ctx, "sess_delete_window").Run(func(mock.Arguments) {
+		close(deleteStarted)
+		<-allowDelete
+	}).Return(nil)
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- m.DeletePhysical(ctx, "sess_delete_window") }()
+	<-deleteStarted
+	require.False(t, m.IsSeqActive(ctx, "sess_delete_window"))
+	close(allowDelete)
+	require.NoError(t, <-deleteDone)
+}
+
 func TestManager_DeleteNotifiesRuntimeCleanup(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
