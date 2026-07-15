@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.35.0] - 2026-07-15
+
+### Summary
+
+v1.35.0 是一次 minor 版本更新，聚焦于 **消息投递（ingress）与轮次完整性（turn integrity）的可靠性闭环**，以及 **用户主动中断（Stop Current Turn）等交互控制的落地**。Stop Current Turn 能力让用户可随时取消正在运行的 Worker 轮次而不终止会话，消除了"只能等或强杀"的痛点。EventStore 持久化在重连后不再因 seq 重置损坏事件历史（#879），不可变 Worker-Run 绑定 + 冻结 Forwarder 的设计从根源杜绝了旧事件投递到新连接上的分裂问题（#892/#890）。Admin 后台新增用户显示名称解析与 Activity 面板完整国际化，WebChat 获得推理块自动折叠与连接稳定性的多重修复。
+
+### Added
+
+- **Gateway Core**: Stop Current Turn capability — send `control.stop` to interrupt a running worker turn without terminating the session; the worker detaches, session transitions to Idle, and the user can immediately send a new input. (#893)
+- **Gateway Core**: Durable ingress reliability closure — execution owner lease with expiry recovery and repairer, immutable worker-run binding (sync.Map with CAS-guarded lifecycle), fenced session detection with auto-clear on next input, and `StartFreshWorker` path for stale-worker recovery. (#890)
+- **Gateway Core**: Enforce single WebSocket per session — session ownership tied to one WS connection; duplicate connections are rejected with a conflict dialog. (#896)
+- **WebChat UI**: Auto-collapse reasoning thought block when reasoning completes — no more expanded empty grey box after reasoning finishes.
+- **WebChat UI**: Input lifecycle centralized into `_settlePending()` — prevents permanent send lockout after disconnect/reconnect across all error scenarios. (input lifecycle fixes)
+- **Admin**: Resolve user display names in sessions and activity views — real usernames replacing raw user IDs throughout the admin UI.
+
+### Changed
+
+- **Session**: EventStore persistence resilience — SeqGen hydrates from DB on reconnect (CAS raise-only, never regresses), unique `(session_id, seq)` index prevents silent seq collision corruption, runWriter goroutine auto-restarts on panic. (#886)
+- **Gateway Core**: Turn integrity closure across all platforms — frozen forwarder binding (`launchForwarderLocked`) prevents stale forwarders from splitting event streams; turn-scoped assistant message dedup with bounded `sentTexts`; empty-success terminal classification for webchat/Feishu; per-turn duration clock that excludes inter-turn idle time; OTel spans on `forwardEvents` with trace_id propagation through 16 helper sites. (#892)
+- **Gateway Core**: Idempotent input acknowledgements now reflect the intended terminal status (`delivered`/`unknown`/`failed`) independent of DB write success — the client never blocks permanently on a DB transient error.
+- **Messaging**: Verbose Debug logs gated behind `Enabled` checks across feishu/slack/yuanxin adapters, session GC, and gateway API — reduces argument allocation on high-frequency paths.
+- **Gateway Core**: Ping/pong demoted from debug to trace log level — reduces protocol chatter in debug output.
+- **Worker**: Cross-worker `/reset` single-consumer contract — `ConnReplaced` path now launches exactly one new forwarder with frozen binding, eliminating duplicate event consumption. (#892)
+
+### Fixed
+
+- **EventStore**: Session event persistence break on reconnect — SeqGen in-memory reset on WS disconnect caused seq collisions that buried new events under `ORDER BY seq DESC`; hydrated from DB with CAS raise-only counter to restore history visibility. (#886)
+- **Gateway Core**: `GetHistory hasMore` truncation kept the oldest turns, discarding the latest exchange — user saw their last input but no response after session refresh. (#892)
+- **WebChat UI**: Workspace-handshake error loop — repeated failed handshakes no longer drive a feedback loop of session remount → reconnect → fail again (5s debounce window). (#886)
+- **WebChat UI**: Restore expand/collapse toggle for all tool components — regression in tool rendering that broke per-card collapse interaction.
+- **Admin**: Complete i18n for activity detail drawer — all hardcoded English labels extracted into zh-CN/en locale files (identity/context/network KV fields, copy button, MSG badge, worker prefix, rows suffix).
+- **Audit**: auth.* events now fire at credential boundary only — no more flooded `auth.login` on every webchat cookie-authed request; added `auth.logout` constant. (#888)
+
 ## [1.34.0] - 2026-07-13
 
 ### Summary
