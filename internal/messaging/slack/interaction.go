@@ -60,7 +60,7 @@ func (a *Adapter) handleInteractionEvent(ctx context.Context, evt socketmode.Eve
 		// a non-owner from consuming the interaction and blocking the real owner.
 		pi, ok := a.Interactions.Get(requestID)
 		if !ok {
-			a.Log.Warn("slack: interaction not found or expired", "request_id", requestID)
+			a.Log.Debug("slack: interaction not found or expired", "request_id", requestID)
 			continue
 		}
 		if pi.OwnerID != "" && pi.OwnerID != userID {

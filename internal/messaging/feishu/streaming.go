@@ -517,17 +517,21 @@ func (c *StreamingCardController) Flush(ctx context.Context) error {
 	content = SanitizeForCard(content)
 
 	if content == c.lastFlushed {
-		c.log.Debug("feishu: streaming flush skipped, content unchanged")
+		if c.log.Enabled(ctx, slog.LevelDebug) {
+			c.log.Debug("feishu: streaming flush skipped, content unchanged")
+		}
 		return nil
 	}
 
 	seq := int(c.sequence.Add(1))
-	c.log.Debug("feishu: streaming flush",
-		"card_kit_ok", c.cardKitOK,
-		"card_id", c.cardID,
-		"msg_id", c.msgID,
-		"content_len", len(content),
-		"seq", seq)
+	if c.log.Enabled(ctx, slog.LevelDebug) {
+		c.log.Debug("feishu: streaming flush",
+			"card_kit_ok", c.cardKitOK,
+			"card_id", c.cardID,
+			"msg_id", c.msgID,
+			"content_len", len(content),
+			"seq", seq)
+	}
 
 	if c.cardKitOK && c.cardID != "" && c.limiter.AllowCardKit(c.cardID) {
 		if err := c.flushCardKitWithRetry(ctx, content, seq); err != nil {
@@ -1093,8 +1097,10 @@ func (c *StreamingCardController) flushCardKitElement(ctx context.Context, eleme
 	if !resp.Success() {
 		return fmt.Errorf("cardkit element content failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	c.log.Debug("feishu: cardkit element content flushed",
-		"card_id", c.cardID, "seq", seq, "content_len", len(content))
+	if c.log.Enabled(ctx, slog.LevelDebug) {
+		c.log.Debug("feishu: cardkit element content flushed",
+			"card_id", c.cardID, "seq", seq, "content_len", len(content))
+	}
 	return nil
 }
 

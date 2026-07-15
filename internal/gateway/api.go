@@ -318,7 +318,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 			if err := worker.ValidateType(pref); err == nil {
 				wt = pref
 			} else {
-				g.log.Warn("workspace worker_preference invalid, falling back to default",
+				g.log.Info("workspace worker_preference invalid, falling back to default",
 					"workspace_id", ws.ID, "worker_preference", pref, "err", err)
 			}
 		}
