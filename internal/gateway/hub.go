@@ -112,6 +112,9 @@ type Hub struct {
 	// Sequence generation per session
 	seqGen      *SeqGen
 	seqBarriers [seqBarrierShards]sync.RWMutex
+	// seqSessionExists rejects late producers after durable session deletion.
+	// It is configured once at startup; nil keeps standalone/test hubs permissive.
+	seqSessionExists func(sessionID string) bool
 	// seqHydrator reads persisted event seqs to seed SeqGen on reconnect
 	// (issue #879). nil when eventstore is disabled — SeqGen then restarts at 1.
 	seqHydrator SeqHydrator
@@ -379,7 +382,10 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 	// Assign sequence number before sending to broadcast queue or clients.
 	// We skip assignment if seq is already set (eg. by Handler for direct replies).
 	if env.Seq == 0 {
-		env.Seq = h.seqGen.Next(env.SessionID)
+		env.Seq = h.NextSeq(env.SessionID)
+		if env.Seq == 0 {
+			return fmt.Errorf("gateway: session released: %s", env.SessionID)
+		}
 	}
 	// afterDrainCallback is called by Run after the item is routed; nil if not supplied.
 	var afterDrainCallback func()
@@ -630,6 +636,27 @@ func (h *Hub) drainBroadcast() {
 
 // NextSeq returns the next sequence number for a session from the central generator.
 func (h *Hub) NextSeq(sessionID string) int64 {
+	release, ok := h.BeginSeqOperation(sessionID)
+	if !ok {
+		return 0
+	}
+	defer release()
+	return h.NextSeqHeld(sessionID)
+}
+
+// NextSeqHeld allocates while the caller already holds a sequence operation
+// lease. It avoids recursively acquiring an RWMutex when a release is queued.
+func (h *Hub) NextSeqHeld(sessionID string) int64 {
+	return h.seqGen.Next(sessionID)
+}
+
+// NextSeqBeforeRelease is reserved for the synchronous deleted-state notice:
+// the durable session has already been removed, but runtime release has not yet
+// started. It participates in the barrier without consulting session existence.
+func (h *Hub) NextSeqBeforeRelease(sessionID string) int64 {
+	barrier := h.seqBarrier(sessionID)
+	barrier.RLock()
+	defer barrier.RUnlock()
 	return h.seqGen.Next(sessionID)
 }
 
@@ -637,10 +664,14 @@ func (h *Hub) NextSeq(sessionID string) int64 {
 // release function is called. Durable producers acquire this before NextSeq
 // and hold it through collector capture, so physical deletion cannot reset the
 // counter while an old-generation event is still in flight.
-func (h *Hub) BeginSeqOperation(sessionID string) func() {
+func (h *Hub) BeginSeqOperation(sessionID string) (func(), bool) {
 	barrier := h.seqBarrier(sessionID)
 	barrier.RLock()
-	return barrier.RUnlock
+	if h.seqSessionExists != nil && !h.seqSessionExists(sessionID) {
+		barrier.RUnlock()
+		return func() {}, false
+	}
+	return barrier.RUnlock, true
 }
 
 // NextSeqPeek returns the current sequence number for a session without incrementing.
@@ -689,12 +720,21 @@ func (h *Hub) SetSeqHydrator(sh SeqHydrator) {
 	h.seqHydrator = sh
 }
 
+// SetSeqSessionExists injects the durable session existence check used to
+// reject producers that arrive after physical deletion. Called once at startup.
+func (h *Hub) SetSeqSessionExists(check func(sessionID string) bool) {
+	h.seqSessionExists = check
+}
+
 // EnsureSeqHydrated seeds the SeqGen counter for sessionID from persisted
 // events on first use. A database error is fatal to the handshake: falling
 // back to 1 could collide with durable history and make the collector reject
 // the entire batch. MUST run before the first NextSeq for a session.
 func (h *Hub) EnsureSeqHydrated(sessionID string) error {
-	releaseSeq := h.BeginSeqOperation(sessionID)
+	releaseSeq, ok := h.BeginSeqOperation(sessionID)
+	if !ok {
+		return fmt.Errorf("gateway: session released: %s", sessionID)
+	}
 	defer releaseSeq()
 
 	if h.seqHydrator == nil {

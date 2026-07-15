@@ -247,9 +247,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		env.SessionID = c.sessionID
 		env.OwnerID = c.userID
 		// P2: ping/pong are heartbeat control messages — don't consume seq.
-		var releaseSeq func()
 		if env.Event.Type != events.Ping {
-			releaseSeq = c.hub.BeginSeqOperation(c.sessionID)
 			env.Seq = c.hub.NextSeq(c.sessionID)
 		}
 
@@ -285,8 +283,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		}
 
 		if isInteraction {
-			go func(e *events.Envelope, s trace.Span, release func()) {
-				defer release()
+			go func(e *events.Envelope, s trace.Span) {
 				defer s.End()
 				if err := handler.Handle(context.Background(), e); err != nil {
 					s.RecordError(err)
@@ -295,7 +292,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 				} else {
 					s.SetStatus(codes.Ok, "")
 				}
-			}(env, span, releaseSeq)
+			}(env, span)
 		} else {
 			if err := handler.Handle(context.Background(), env); err != nil {
 				span.RecordError(err)
@@ -305,7 +302,6 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 				span.SetStatus(codes.Ok, "")
 			}
 			span.End()
-			releaseSeq()
 		}
 	}
 }

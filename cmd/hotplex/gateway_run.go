@@ -367,6 +367,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// Hydrate SeqGen from persisted events on reconnect so seq continues
 	// monotonically instead of restarting from 1 (issue #879).
 	hub.SetSeqHydrator(stores.event)
+	hub.SetSeqSessionExists(func(sessionID string) bool {
+		_, err := sm.Get(context.Background(), sessionID)
+		return err == nil
+	})
 	sm.OnRuntimeRelease = func(ctx context.Context, sessionID string) {
 		err := hub.ReleaseSeq(sessionID, func() error {
 			// A zero value means no durable sequence was allocated; remove a
@@ -432,7 +436,21 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	sm.StateNotifier = func(ctx context.Context, sessionID string, state events.SessionState, message string) {
-		env := events.NewEnvelope(aep.NewID(), sessionID, hub.NextSeq(sessionID), events.State, events.StateData{
+		var seq int64
+		if state == events.StateDeleted {
+			seq = hub.NextSeqBeforeRelease(sessionID)
+		} else {
+			releaseSeq, ok := hub.BeginSeqOperation(sessionID)
+			if !ok {
+				return
+			}
+			defer releaseSeq()
+			seq = hub.NextSeqHeld(sessionID)
+		}
+		if seq == 0 {
+			return
+		}
+		env := events.NewEnvelope(aep.NewID(), sessionID, seq, events.State, events.StateData{
 			State:   state,
 			Message: message,
 		})

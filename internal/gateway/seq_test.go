@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,7 +150,8 @@ func TestHub_ForgetSeqAllowsFreshHydration(t *testing.T) {
 func TestHub_ReleaseSeqWaitsForDurableProducer(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
-	releaseProducer := h.BeginSeqOperation("s1")
+	releaseProducer, ok := h.BeginSeqOperation("s1")
+	require.True(t, ok)
 	require.Equal(t, int64(1), h.NextSeq("s1"))
 
 	drainEntered := make(chan struct{})
@@ -172,5 +174,29 @@ func TestHub_ReleaseSeqWaitsForDurableProducer(t *testing.T) {
 
 	releaseProducer()
 	require.NoError(t, <-releaseDone)
+	require.Equal(t, int64(0), h.NextSeqPeek("s1"))
+}
+
+func TestHub_RejectsProducerAfterDurableSessionDeletion(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	var exists atomic.Bool
+	exists.Store(true)
+	h.SetSeqSessionExists(func(string) bool { return exists.Load() })
+
+	require.Equal(t, int64(1), h.NextSeq("s1"))
+	exists.Store(false)
+	require.NoError(t, h.ReleaseSeq("s1", nil))
+
+	require.Equal(t, int64(0), h.NextSeq("s1"))
+	require.Equal(t, int64(0), h.NextSeqPeek("s1"))
+	release, ok := h.BeginSeqOperation("s1")
+	require.False(t, ok)
+	release()
+
+	// The synchronous deleted-state notification is the sole lifecycle bypass
+	// and still participates in the release barrier.
+	require.Equal(t, int64(1), h.NextSeqBeforeRelease("s1"))
+	require.NoError(t, h.ReleaseSeq("s1", nil))
 	require.Equal(t, int64(0), h.NextSeqPeek("s1"))
 }
