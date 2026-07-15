@@ -76,20 +76,6 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       <ThreadPrimitive.Viewport className="thread-viewport relative px-4 py-8">
         <div className="max-w-4xl mx-auto w-full">
           {isEmpty && <WelcomeScreen suggestions={suggestions} onSuggestionClick={handleSuggestionClick} />}
-          {conn === 'already_connected' && (
-            <section className="max-w-3xl mx-auto mb-6 rounded-2xl border border-[var(--accent-coral)]/35 bg-[var(--accent-coral)]/10 px-5 py-4 text-center">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">{t('status.session_already_connected_title')}</h2>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">{t('status.session_already_connected_description')}</p>
-              <button
-                type="button"
-                onClick={onRetryConnection}
-                disabled={!onRetryConnection}
-                className="mt-4 rounded-lg bg-[var(--accent-coral)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t('action.retry_connection')}
-              </button>
-            </section>
-          )}
           {historyHasMore && (
             <div className="flex justify-center py-4 mb-4">
               <button
@@ -122,6 +108,26 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
           <PreAssistantIndicator />
         </div>
       </ThreadPrimitive.Viewport>
+
+      {conn === 'already_connected' && (
+        <div className="pointer-events-none absolute inset-x-4 top-4 z-30 flex justify-center">
+          <section
+            role="alert"
+            className="pointer-events-auto w-full max-w-3xl rounded-2xl border border-[var(--accent-coral)]/35 bg-[var(--bg-elevated)]/95 px-5 py-4 text-center shadow-xl backdrop-blur"
+          >
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">{t('status.session_already_connected_title')}</h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">{t('status.session_already_connected_description')}</p>
+            <button
+              type="button"
+              onClick={onRetryConnection}
+              disabled={!onRetryConnection}
+              className="mt-4 rounded-lg bg-[var(--accent-coral)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t('action.retry_connection')}
+            </button>
+          </section>
+        </div>
+      )}
 
       <div className="composer-wrapper px-4 pb-12">
         {(conn === 'disconnected' || conn === 'reconnecting') && (
