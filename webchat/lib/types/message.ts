@@ -14,4 +14,9 @@ export interface HotPlexMessage<P extends MessagePart = MessagePart> {
   parts: P[];
   createdAt: Date;
   status?: 'streaming' | 'complete' | 'error';
+  /**
+   * Local-only staged feedback shown before the worker emits visible output.
+   * It is deliberately not persisted or sent over AEP.
+   */
+  progress?: 'thinking' | 'accepted';
 }

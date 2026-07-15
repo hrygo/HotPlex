@@ -196,6 +196,9 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	for env := range recvCh {
 		b.processForwardedEvent(env, w, opts, fc)
 	}
+	if !fc.doneReceived {
+		b.finishTurnTTFT(sessionID, "worker_exit")
+	}
 
 	// Flush buffered error that never reached a retry decision point.
 	if fc.pendingError != nil {
@@ -335,6 +338,12 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	deltaContent, reasoningContent := b.extractTurnContent(env, fc)
+	if env.Event.Type == events.Reasoning && reasoningContent != "" {
+		b.recordTurnFirstOutput(sessionID, false)
+	}
+	if (env.Event.Type == events.MessageDelta || env.Event.Type == events.Message) && extractMessageContent(env) != "" {
+		b.recordTurnFirstOutput(sessionID, true)
+	}
 
 	// Stats accumulation.
 	b.accumulateStats(env, w, opts, fc)
@@ -345,6 +354,11 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		b.resetCrashLoop(sessionID)
 		b.maybeTransitionIdleAfterDone(sessionID, fc)
 		b.finishRuntimeOnDone(sessionID, fc, env)
+		terminalStatus := "completed"
+		if done, ok := asDoneData(env.Event.Data); ok && !done.Success {
+			terminalStatus = "failed"
+		}
+		b.finishTurnTTFT(sessionID, terminalStatus)
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {

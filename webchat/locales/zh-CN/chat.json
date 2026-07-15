@@ -67,6 +67,8 @@
     "preparing": "准备中",
     "error": "错误",
     "active": "激活",
+    "thinking": "正在思考",
+    "accepted": "Agent 已接单",
     "session_expired_settings": "会话已过期 — 请重新登录以访问设置",
     "starting_session": "正在开启新会话...",
     "loading_workers": "正在加载 Worker 引擎...",

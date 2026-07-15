@@ -67,6 +67,13 @@ import {
     appendReasoningDelta,
     concatTextParts,
 } from "@/lib/adapters/merge-parts";
+import {
+    completeStreamingAssistant,
+    createPendingAssistantMessage,
+    matchesActiveInput,
+    removePendingAssistant,
+    updatePendingAssistant,
+} from "@/lib/adapters/pending-assistant";
 
 // Re-export for consumers
 export type { HotPlexMessage };
@@ -179,6 +186,7 @@ function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
                 ? { contextUsage: contextUsagePart.data }
                 : {}),
             ...(turnSummaryPart ? { turnSummary: turnSummaryPart.data } : {}),
+            ...(message.progress ? { progress: message.progress } : {}),
         } satisfies Record<string, unknown>,
     } as ThreadMessageLike & {
         status?: { type: "running" } | { type: "complete"; reason: string };
@@ -289,6 +297,9 @@ export function useHotPlexRuntime({
         }
     }, []);
     const clientRef = useRef<BrowserHotPlexClient | null>(null);
+    const pendingAssistantIdRef = useRef<string | null>(null);
+    const activeAssistantIdRef = useRef<string | null>(null);
+    const activeInputMessageIdRef = useRef<string | null>(null);
     const historyLoadingRef = useRef(false);
     const sessionIdRef = useRef(sessionId);
     const sessionAlreadyConnectedRef = useRef(false);
@@ -469,6 +480,19 @@ export function useHotPlexRuntime({
         // Append delta content to the last text part of the last assistant message
         const appendDelta = (content: string) => {
             setMessages((prev) => {
+                const pending = updatePendingAssistant(
+                    prev,
+                    pendingAssistantIdRef.current,
+                    (message) => ({
+                        ...message,
+                        progress: undefined,
+                        parts: appendTextDelta(message.parts, content),
+                    }),
+                );
+                if (pending !== prev) {
+                    pendingAssistantIdRef.current = null;
+                    return pending;
+                }
                 const lastMessage = prev[prev.length - 1];
                 if (
                     lastMessage?.role === "assistant" &&
@@ -507,6 +531,19 @@ export function useHotPlexRuntime({
             if (!data) return;
 
             setMessages((prev) => {
+                const pending = updatePendingAssistant(
+                    prev,
+                    pendingAssistantIdRef.current,
+                    (message) => ({
+                        ...message,
+                        progress: undefined,
+                        parts: appendReasoningDelta(message.parts, data.content || ""),
+                    }),
+                );
+                if (pending !== prev) {
+                    pendingAssistantIdRef.current = null;
+                    return pending;
+                }
                 const lastMessage = prev[prev.length - 1];
                 if (
                     lastMessage?.role === "assistant" &&
@@ -553,6 +590,21 @@ export function useHotPlexRuntime({
             // Always use env.id for consistency with handleMessageStart
             const msgId = env.id;
             setMessages((prev) => {
+                const pending = updatePendingAssistant(
+                    prev,
+                    pendingAssistantIdRef.current,
+                    (message) => ({
+                        ...message,
+                        role,
+                        progress: undefined,
+                        parts: [{ type: "text", text: data?.content || "" }],
+                        status: "complete",
+                    }),
+                );
+                if (pending !== prev) {
+                    pendingAssistantIdRef.current = null;
+                    return pending;
+                }
                 let existingIdx = prev.findIndex((m) => m.id === msgId);
 
                 // Fallback: adopt streaming message with fallback ID instead of creating duplicate (#331).
@@ -657,6 +709,10 @@ export function useHotPlexRuntime({
 
         const handleDone = (data: DoneData, _env: Envelope) => {
             streamingFallbackId = null;
+            const pendingAssistantID = pendingAssistantIdRef.current;
+            pendingAssistantIdRef.current = null;
+            activeAssistantIdRef.current = null;
+            activeInputMessageIdRef.current = null;
 
             if (data?.stats) {
                 recordTurn(data.stats);
@@ -665,6 +721,10 @@ export function useHotPlexRuntime({
             }
 
             setMessages((prev) => {
+                const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                if (withoutPending !== prev) {
+                    return withoutPending;
+                }
                 const lastMessage = prev[prev.length - 1];
                 if (lastMessage?.role === "assistant") {
                     const parts = [...lastMessage.parts];
@@ -905,7 +965,20 @@ export function useHotPlexRuntime({
             // Don't pollute the chat with error messages; just mark the run as stopped.
             if (isTerminated) {
                 setIsRunning(false);
+                const pendingAssistantID = pendingAssistantIdRef.current;
+                const activeAssistantID = activeAssistantIdRef.current;
+                pendingAssistantIdRef.current = null;
+                activeAssistantIdRef.current = null;
+                activeInputMessageIdRef.current = null;
                 setMessages((prev) => {
+                    const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                    if (withoutPending !== prev) {
+                        return withoutPending;
+                    }
+                    const completed = completeStreamingAssistant(prev, activeAssistantID);
+                    if (completed !== prev) {
+                        return completed;
+                    }
                     const lastMessage = prev[prev.length - 1];
                     if (
                         lastMessage?.role === "assistant" &&
@@ -999,8 +1072,21 @@ export function useHotPlexRuntime({
             // If it's a fatal error, stop the run and complete the streaming message
             if (!isResumeRetry) {
                 setIsRunning(false);
+                const pendingAssistantID = pendingAssistantIdRef.current;
+                const activeAssistantID = activeAssistantIdRef.current;
+                pendingAssistantIdRef.current = null;
+                activeAssistantIdRef.current = null;
+                activeInputMessageIdRef.current = null;
 
                 setMessages((prev) => {
+                    const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                    if (withoutPending !== prev) {
+                        return withoutPending;
+                    }
+                    const completed = completeStreamingAssistant(prev, activeAssistantID);
+                    if (completed !== prev) {
+                        return completed;
+                    }
                     const lastMessage = prev[prev.length - 1];
                     if (
                         lastMessage?.role === "assistant" &&
@@ -1093,6 +1179,17 @@ export function useHotPlexRuntime({
                 );
             }
             setIsRunning(false);
+            const pendingAssistantID = pendingAssistantIdRef.current;
+            const activeAssistantID = activeAssistantIdRef.current;
+            pendingAssistantIdRef.current = null;
+            activeAssistantIdRef.current = null;
+            activeInputMessageIdRef.current = null;
+            setMessages((prev) => {
+                const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                return withoutPending !== prev
+                    ? withoutPending
+                    : completeStreamingAssistant(prev, activeAssistantID);
+            });
             if (!sessionAlreadyConnectedRef.current) {
                 setConnectionState("disconnected");
             }
@@ -1112,6 +1209,17 @@ export function useHotPlexRuntime({
         const handleReconnectFailed = (attempt: number) => {
             logger.warn("RuntimeAdapter", "Reconnect attempts exhausted", { attempt });
             setIsRunning(false);
+            const pendingAssistantID = pendingAssistantIdRef.current;
+            const activeAssistantID = activeAssistantIdRef.current;
+            pendingAssistantIdRef.current = null;
+            activeAssistantIdRef.current = null;
+            activeInputMessageIdRef.current = null;
+            setMessages((prev) => {
+                const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                return withoutPending !== prev
+                    ? withoutPending
+                    : completeStreamingAssistant(prev, activeAssistantID);
+            });
             setConnectionState("disconnected");
         };
 
@@ -1121,6 +1229,19 @@ export function useHotPlexRuntime({
         const handleMessageStart = (data: MessageStartData, env: Envelope) => {
             if (!data) return;
             setMessages((prev) => {
+                const pending = updatePendingAssistant(
+                    prev,
+                    pendingAssistantIdRef.current,
+                    (message) => ({
+                        ...message,
+                        progress: undefined,
+                        status: "streaming",
+                    }),
+                );
+                if (pending !== prev) {
+                    pendingAssistantIdRef.current = null;
+                    return pending;
+                }
                 // Reasoning events may arrive before messageStart, creating env.id early.
                 const existingIdx = prev.findIndex((m) => m.id === env.id);
                 if (existingIdx !== -1) {
@@ -1159,27 +1280,51 @@ export function useHotPlexRuntime({
         // / restart), so without this handler the UI would spin forever on a
         // turn whose outcome is ambiguous.
         const handleInputAck = (data: InputAckData) => {
-            if (data.status !== "unknown") {
+            if (!matchesActiveInput(activeInputMessageIdRef.current, data.client_message_id)) {
                 return;
             }
+            if (data.status === "delivered") {
+                setMessages((prev) =>
+                    updatePendingAssistant(
+                        prev,
+                        pendingAssistantIdRef.current,
+                        (message) => ({ ...message, progress: "accepted" }),
+                    ),
+                );
+                return;
+            }
+            if (data.status !== "unknown") return;
             logger.warn("RuntimeAdapter", "Input outcome unknown", {
                 client_message_id: data.client_message_id,
                 execution_id: data.execution_id,
                 error_code: data.error_code,
             });
             setIsRunning(false);
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: `input-unknown-${Date.now()}`,
-                    role: "assistant" as const,
-                    parts: [
-                        { type: "text" as const, text: i18n.t("chat:error.input_unknown") },
-                    ],
-                    createdAt: new Date(),
-                    status: "complete" as const,
-                },
-            ]);
+            const pendingAssistantID = pendingAssistantIdRef.current;
+            const activeAssistantID = activeAssistantIdRef.current;
+            pendingAssistantIdRef.current = null;
+            activeAssistantIdRef.current = null;
+            activeInputMessageIdRef.current = null;
+            setMessages((prev) => {
+                const pending = updatePendingAssistant(
+                    prev,
+                    pendingAssistantID,
+                    (message) => ({
+                        ...message,
+                        progress: undefined,
+                        parts: [
+                            {
+                                type: "text" as const,
+                                text: i18n.t("chat:error.input_unknown"),
+                            },
+                        ],
+                        status: "complete",
+                    }),
+                );
+                return pending !== prev
+                    ? pending
+                    : completeStreamingAssistant(prev, activeAssistantID);
+            });
         };
 
         // Subscribe to events
@@ -1561,18 +1706,37 @@ export function useHotPlexRuntime({
             createdAt: new Date(),
             status: "complete",
         };
+        const assistantID = `assistant-local-${Date.now()}`;
+        const pendingAssistant = createPendingAssistantMessage(
+            assistantID,
+            new Date(),
+        );
 
-        setMessages((prev) => [...prev, userMessage]);
+        // The user message and local assistant placeholder must enter state in
+        // one update so the first frame always shows that the turn is pending.
+        pendingAssistantIdRef.current = assistantID;
+        activeAssistantIdRef.current = assistantID;
+        activeInputMessageIdRef.current = null;
+        setMessages((prev) => [...prev, userMessage, pendingAssistant]);
         setIsRunning(true);
         startTurn(); // Begin timing for metrics
 
         // Send to HotPlex gateway with error handling
         try {
-            client.sendInput(textContent);
+            activeInputMessageIdRef.current = client.sendInput(textContent);
         } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             // The optimistically-added user message did not go out — remove it.
-            setMessages((prev) => prev.slice(0, -1));
+            pendingAssistantIdRef.current = null;
+            activeAssistantIdRef.current = null;
+            activeInputMessageIdRef.current = null;
+            setMessages((prev) =>
+                prev.filter(
+                    (message) =>
+                        message.id !== userMessage.id &&
+                        message.id !== assistantID,
+                ),
+            );
             if (errMsg === "Input already pending") {
                 // A previous turn is still in flight (often an unknown-outcome
                 // tombstone). This is not a connection fault.

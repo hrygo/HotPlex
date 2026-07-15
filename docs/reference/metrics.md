@@ -88,6 +88,40 @@ histogram_quantile(0.95, rate(hotplex_worker_execution_duration_bucket[5m]))
 sum by (worker_type) (hotplex_worker_memory_bytes)
 ```
 
+## Turn TTFT 指标
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.turn.ttft` | Histogram | Gateway 收到输入至首个可见 Worker 输出的耗时，label: `worker_type`, `first_output`（`reasoning` / `text`） |
+| `hotplex.turn.first_text_latency` | Histogram | Gateway 收到输入至首个文本 delta 的耗时，label: `worker_type` |
+| `hotplex.turn.stage_duration` | Histogram | admission、dispatch、first_output 三个阶段耗时，label: `worker_type`, `stage` |
+| `hotplex.turn.without_output` | Counter | 未产生可见输出即终止的 turn，label: `worker_type`, `terminal_status` |
+
+TTFT 仅使用 Gateway 侧时间戳；浏览器绘制时间属于独立客户端遥测，不能与本指标混合。所有标签均为有限枚举，严禁添加 session、execution、user、workspace、提示词或原始错误等高基数字段。Worker 尚未绑定即终止的 turn 使用固定的 `worker_type="unknown"`。
+
+阶段边界依次为 Gateway 收到输入、持久化接受完成、`Worker.Input` 成功（包括 Worker 的 `turn/start` 接受）以及首个可见输出；`first_output` 仅统计最后一段至首输出的耗时。
+
+### 常用查询与评审阈值
+
+```promql
+# 按 Worker 类型查看 p50 / p95 / p99 TTFT
+histogram_quantile(0.50, sum by (le, worker_type) (rate(hotplex_turn_ttft_bucket[15m])))
+histogram_quantile(0.95, sum by (le, worker_type) (rate(hotplex_turn_ttft_bucket[15m])))
+histogram_quantile(0.99, sum by (le, worker_type) (rate(hotplex_turn_ttft_bucket[15m])))
+
+# p95 的首个输出前阶段拆分
+histogram_quantile(0.95, sum by (le, stage, worker_type) (
+  rate(hotplex_turn_stage_duration_bucket{stage=~"admission|dispatch|first_output"}[15m])
+))
+
+# 无输出终止占比
+sum(rate(hotplex_turn_without_output_total[15m])) by (terminal_status, worker_type)
+/
+sum(rate(hotplex_turn_ttft_count[15m])) by (worker_type)
+```
+
+以同一 Worker 类型、相同流量窗口的基线为准：p95 TTFT 连续 30 分钟高于基线 20%，或 p99 连续 15 分钟超过 30 秒时必须评审；先用阶段指标定位 admission、dispatch 或 provider/Worker 首输出，再决定是否投入冷路径优化。
+
 ## Gateway 指标
 
 ### 连接与消息

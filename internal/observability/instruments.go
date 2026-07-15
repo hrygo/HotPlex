@@ -1027,6 +1027,18 @@ var (
 	executionRuntimeDuration     metric.Float64Histogram
 	executionRuntimeDurationInit sync.Once
 
+	turnTTFT     metric.Float64Histogram
+	turnTTFTInit sync.Once
+
+	turnFirstTextLatency     metric.Float64Histogram
+	turnFirstTextLatencyInit sync.Once
+
+	turnStageDuration     metric.Float64Histogram
+	turnStageDurationInit sync.Once
+
+	turnWithoutOutput     metric.Int64Counter
+	turnWithoutOutputInit sync.Once
+
 	leaseRenewFailure     metric.Int64Counter
 	leaseRenewFailureInit sync.Once
 
@@ -1160,6 +1172,74 @@ func ExecutionRuntimeDuration() metric.Float64Histogram {
 		}
 	})
 	return executionRuntimeDuration
+}
+
+// TurnTTFT records gateway input receipt to first user-visible worker output.
+// Labels are bounded to worker_type and first_output (reasoning/text).
+func TurnTTFT() metric.Float64Histogram {
+	turnTTFTInit.Do(func() {
+		var err error
+		turnTTFT, err = Meter().Float64Histogram(
+			"hotplex.turn.ttft",
+			metric.WithDescription("Gateway receipt to first user-visible worker output in seconds. Labels: worker_type, first_output"),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60),
+		)
+		if err != nil {
+			warnInstrument("hotplex.turn.ttft", err)
+		}
+	})
+	return turnTTFT
+}
+
+// TurnFirstTextLatency records gateway input receipt to the first text delta.
+// It remains distinct from TTFT when a reasoning event is visible first.
+func TurnFirstTextLatency() metric.Float64Histogram {
+	turnFirstTextLatencyInit.Do(func() {
+		var err error
+		turnFirstTextLatency, err = Meter().Float64Histogram(
+			"hotplex.turn.first_text_latency",
+			metric.WithDescription("Gateway receipt to first text delta in seconds. Labels: worker_type"),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60),
+		)
+		if err != nil {
+			warnInstrument("hotplex.turn.first_text_latency", err)
+		}
+	})
+	return turnFirstTextLatency
+}
+
+// TurnStageDuration records bounded admission, dispatch, and first-output stages.
+func TurnStageDuration() metric.Float64Histogram {
+	turnStageDurationInit.Do(func() {
+		var err error
+		turnStageDuration, err = Meter().Float64Histogram(
+			"hotplex.turn.stage_duration",
+			metric.WithDescription("Turn stage duration in seconds. Labels: worker_type, stage"),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60),
+		)
+		if err != nil {
+			warnInstrument("hotplex.turn.stage_duration", err)
+		}
+	})
+	return turnStageDuration
+}
+
+// TurnWithoutOutput counts terminal turns that did not emit user-visible output.
+func TurnWithoutOutput() metric.Int64Counter {
+	turnWithoutOutputInit.Do(func() {
+		var err error
+		turnWithoutOutput, err = Meter().Int64Counter(
+			"hotplex.turn.without_output",
+			metric.WithDescription("Completed worker turns without visible output. Labels: worker_type, terminal_status"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.turn.without_output", err)
+		}
+	})
+	return turnWithoutOutput
 }
 
 func LeaseRenewFailure() metric.Int64Counter {
