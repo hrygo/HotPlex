@@ -65,11 +65,11 @@ func TestLeaseManager_NoActiveExecutionsNoop(t *testing.T) {
 	mgr := NewLeaseManager(store, testOwner, fastLeaseConfig(), nil)
 	mgr.Start(ctx)
 
-	time.Sleep(100 * time.Millisecond)
-
-	renewed, err := store.RenewLeases(context.Background(), testOwner, 60)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), renewed, "no active executions should produce no renew writes")
+	// Confirm the renew loop stays a no-op while there are no active executions.
+	require.Eventually(t, func() bool {
+		renewed, err := store.RenewLeases(context.Background(), testOwner, 60)
+		return err == nil && renewed == 0
+	}, 2*time.Second, 10*time.Millisecond, "no active executions should produce no renew writes")
 
 	_ = mgr.Shutdown(context.Background())
 }

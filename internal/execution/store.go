@@ -120,6 +120,12 @@ type Store interface {
 	// session, or ErrNotFound if none exists. Used by the active gate check.
 	ActiveBySession(ctx context.Context, sessionID string) (*Record, error)
 
+	// OpenBySession returns the most recent non-terminal execution (pending,
+	// running, or unknown) for the session, or ErrNotFound if none exists.
+	// Used by the Done-event convergence path to finish a runtime that lease
+	// recovery may have already marked unknown (unknown -> completed/failed).
+	OpenBySession(ctx context.Context, sessionID string) (*Record, error)
+
 	// FenceBySession returns the fenced execution for the session (if any), or
 	// ErrNotFound. A fenced session requires fresh Worker before new input.
 	FenceBySession(ctx context.Context, sessionID string) (*Record, error)

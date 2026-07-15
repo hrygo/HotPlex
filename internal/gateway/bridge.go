@@ -94,7 +94,8 @@ type Bridge struct {
 	// Deny-Dedup-Spec). Nil when the feature is disabled. Methods are nil-safe,
 	// so call sites can invoke b.dedup.* unconditionally.
 	dedup          *PermissionDenyDedup
-	executionStore execution.Store // durable ingress runtime correlation; nil = disabled
+	executionStore execution.Store     // durable ingress runtime correlation; nil = disabled
+	repairer       *execution.Repairer // terminal-state repair retry; nil-safe
 }
 
 type crashHistory struct {
@@ -131,6 +132,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		shutdownCtx:        shutdownCtx,
 		shutdownCancel:     shutdownCancel,
 		executionStore:     deps.ExecutionStore,
+		repairer:           deps.Repairer,
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))

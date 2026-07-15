@@ -44,6 +44,7 @@ type Handler struct {
 	skillsLocator   SkillsLocator
 	auditCollector  *audit.Collector
 	executionStore  execution.Store
+	repairer        *execution.Repairer
 	ownerInstanceID string
 }
 
@@ -63,6 +64,7 @@ func NewHandler(deps HandlerDeps) *Handler {
 		bridge:          deps.Bridge,
 		skillsLocator:   deps.SkillsLocator,
 		executionStore:  deps.ExecutionStore,
+		repairer:        deps.Repairer,
 		ownerInstanceID: deps.OwnerInstanceID,
 	}
 }
@@ -301,10 +303,12 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	execRecord, duplicate, err := h.acceptInputExecution(ctx, env)
 	if err != nil {
 		if errors.Is(err, execution.ErrPayloadConflict) {
+			observability.ExecutionConflict().Add(ctx, 1)
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage,
 				"client message id %q was already used with different input", clientMessageID(env))
 		}
 		if errors.Is(err, execution.ErrSessionBusy) {
+			observability.ExecutionSessionBusy().Add(ctx, 1)
 			h.cancelRetryIfNeeded(env.SessionID)
 			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
 		}
@@ -315,6 +319,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "input acceptance failed")
 	}
 	if duplicate {
+		observability.ExecutionDuplicate().Add(ctx, 1)
 		h.log.Info("gateway: duplicate input suppressed",
 			"session_id", env.SessionID,
 			"client_message_id", execRecord.ClientMessageID,
@@ -324,6 +329,9 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		return nil
 	}
 	finalized := execRecord == nil
+	if !finalized {
+		observability.ExecutionAccept().Add(ctx, 1)
+	}
 	defer func() {
 		if finalized {
 			return
@@ -521,7 +529,21 @@ func (h *Handler) finishInputExecution(ctx context.Context, record *execution.Re
 	record.Status = status
 	record.ErrorCode = string(code)
 	if err := h.executionStore.SetDelivery(context.WithoutCancel(ctx), record.ExecutionID, h.ownerInstanceID, status, string(code)); err != nil {
+		if h.repairer != nil {
+			h.repairer.Enqueue(execution.RepairIntent{
+				ExecutionID: record.ExecutionID,
+				OwnerID:     h.ownerInstanceID,
+				Kind:        execution.RepairDelivery,
+				Status:      string(status),
+				ErrorCode:   string(code),
+			})
+		}
 		return err
+	}
+	observability.ExecutionDeliveryOutcome().Add(ctx, 1,
+		metric.WithAttributes(attribute.String("delivery_status", string(status))))
+	if record.CreatedAt > 0 {
+		observability.ExecutionDeliveryLatency().Record(ctx, time.Since(time.UnixMilli(record.CreatedAt)).Seconds())
 	}
 	return nil
 }

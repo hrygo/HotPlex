@@ -271,7 +271,7 @@ func (s *SQLStore) SetDelivery(ctx context.Context, executionID, ownerID string,
 		if r.OwnerInstanceID != ownerID {
 			return ErrOwnerMismatch
 		}
-		return nil
+		return ErrNotFound
 	}
 	return nil
 }
@@ -394,6 +394,28 @@ func (s *SQLStore) ActiveBySession(ctx context.Context, sessionID string) (*Reco
 	}
 	if err != nil {
 		return nil, fmt.Errorf("execution: active by session: %w", err)
+	}
+	return r, nil
+}
+
+func (s *SQLStore) OpenBySession(ctx context.Context, sessionID string) (*Record, error) {
+	if sessionID == "" {
+		return nil, errors.New("execution: session id is required")
+	}
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	row := s.db.QueryRowContext(ctx, s.rebind(`
+		SELECT `+executionColumns+`
+		FROM execution_inputs
+		WHERE session_id = ? AND runtime_status IN ('pending', 'running', 'unknown')
+		ORDER BY created_at DESC LIMIT 1`), sessionID)
+	r, err := s.scanRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("execution: open by session: %w", err)
 	}
 	return r, nil
 }

@@ -205,6 +205,7 @@ type GatewayDeps struct {
 	// Durable ingress reliability closure (spec 2026-07-14).
 	OwnerInstanceID string
 	LeaseManager    *execution.LeaseManager
+	Repairer        *execution.Repairer
 }
 
 const defaultConfigPath = config.DefaultConfigPath
@@ -460,6 +461,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	retryCtrl := gateway.NewLLMRetryController(cfg.Worker.AutoRetry, log)
 
+	// Durable ingress: terminal-state repair retry. Capacity scales with the
+	// session pool so busier deployments buffer more in-flight repairs. Handlers
+	// and bridge enqueue best-effort; the repairer is nil-safe to call.
+	repairer := execution.NewRepairer(stores.execution, execution.DefaultRepairConfig(cfg.Pool.MaxSize), log)
+
 	agentConfigDir := ""
 	if cfg.AgentConfig.Enabled {
 		agentConfigDir = cfg.AgentConfig.ConfigDir
@@ -486,6 +492,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		PermissionDedupEnabled: cfg.Worker.PermissionDenyDedup.Enabled,
 		PermissionDedupWindow:  cfg.Worker.PermissionDenyDedup.Window,
 		ExecutionStore:         stores.execution,
+		Repairer:               repairer,
 	})
 
 	// One-time validation sweep: surface stale/invalid agent_config_overrides
@@ -502,6 +509,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		Bridge:          bridge,
 		SkillsLocator:   skillsLocator,
 		ExecutionStore:  stores.execution,
+		Repairer:        repairer,
 		OwnerInstanceID: ownerInstanceID,
 	})
 	handler.SetAuditCollector(auditCollector)
@@ -733,6 +741,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		AuditStore:      auditStore,
 		OwnerInstanceID: ownerInstanceID,
 		LeaseManager:    leaseMgr,
+		Repairer:        repairer,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
@@ -754,6 +763,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	leaseMgr.Start(ctx)
 	log.Info("gateway: lease manager started", "owner_instance_id", ownerInstanceID)
+
+	repairer.Start(ctx)
+	log.Info("gateway: repairer started")
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 
@@ -1325,6 +1337,9 @@ func shutdownGateway(
 
 	// Durable ingress: shut down lease manager BEFORE Bridge.MarkClosed so
 	// owned active executions are marked unknown before workers are killed.
+	if deps.Repairer != nil {
+		deps.Repairer.Shutdown(shutdownCtx)
+	}
 	if deps.LeaseManager != nil {
 		if err := deps.LeaseManager.Shutdown(shutdownCtx); err != nil {
 			log.Warn("gateway: lease manager shutdown", "err", err)

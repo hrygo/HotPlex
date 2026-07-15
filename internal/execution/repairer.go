@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/observability"
 )
 
 type RepairKind int
@@ -115,6 +117,14 @@ func (r *Repairer) Enqueue(intent RepairIntent) {
 			r.mu.Unlock()
 			return
 		}
+	} else if len(r.intents) >= r.cfg.QueueCapacity {
+		atomic.AddInt64(&r.dropped, 1)
+		r.mu.Unlock()
+		observability.RepairDropped().Add(context.Background(), 1)
+		r.log.Warn("repair intent dropped, queue full",
+			"execution_id", intent.ExecutionID, "kind", intent.Kind.String(),
+			"capacity", r.cfg.QueueCapacity)
+		return
 	}
 	r.intents[key] = &intent
 	count := len(r.intents)
@@ -180,6 +190,7 @@ func (r *Repairer) processDue(ctx context.Context) {
 		if now.Sub(intent.enqueuedAt) > r.cfg.MaxLifetime {
 			delete(r.intents, key)
 			atomic.AddInt64(&r.timedOut, 1)
+			observability.RepairTimeout().Add(ctx, 1)
 			r.log.Warn("repair intent timed out",
 				"execution_id", intent.ExecutionID, "kind", intent.Kind.String(),
 				"attempts", intent.attempts)
@@ -198,6 +209,7 @@ func (r *Repairer) processDue(ctx context.Context) {
 
 func (r *Repairer) tryProcess(ctx context.Context, intent *RepairIntent) {
 	intent.attempts++
+	observability.RepairAttempts().Add(ctx, 1)
 
 	err := r.processIntent(ctx, intent)
 	if err == nil {
@@ -207,6 +219,7 @@ func (r *Repairer) tryProcess(ctx context.Context, intent *RepairIntent) {
 		count := len(r.intents)
 		r.mu.Unlock()
 		atomic.AddInt64(&r.succeeded, 1)
+		observability.RepairSuccess().Add(ctx, 1)
 		r.log.Debug("repair intent succeeded",
 			"execution_id", intent.ExecutionID, "attempts", intent.attempts,
 			"backlog", count)

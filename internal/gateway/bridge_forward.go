@@ -324,11 +324,13 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 // FinishRuntime to persist the terminal state. Runtime events are emitted to
 // the client for execution_id correlation. Spec 2026-07-14 lines 259-275.
 func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *events.Envelope) {
-	if b.executionStore == nil || fc.workerRunID == "" {
+	if b.executionStore == nil {
 		return
 	}
 
-	rec, err := b.executionStore.ActiveBySession(context.Background(), sessionID)
+	// OpenBySession covers pending/running/unknown so a late Done can still
+	// converge an execution that lease recovery already marked unknown.
+	rec, err := b.executionStore.OpenBySession(context.Background(), sessionID)
 	if err != nil {
 		return
 	}
@@ -352,9 +354,31 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 		eventKind = events.RuntimeExecutionFailed
 	}
 
-	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, fc.workerRunID, rtStatus, ""); err != nil {
+	// Use the record's worker_run_id (stored at Accept/MarkRunning) rather than
+	// fc.workerRunID, which is a bridge-generated per-session id that never
+	// matches the DB and would make every FinishRuntime return ErrRunMismatch.
+	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, rec.WorkerRunID, rtStatus, ""); err != nil {
 		b.log.Debug("bridge: finish runtime on done", "err", err,
 			"session_id", sessionID, "execution_id", rec.ExecutionID, "status", rtStatus)
+		if b.repairer != nil {
+			b.repairer.Enqueue(execution.RepairIntent{
+				ExecutionID: rec.ExecutionID,
+				WorkerRunID: rec.WorkerRunID,
+				Kind:        execution.RepairRuntime,
+				Status:      string(rtStatus),
+			})
+		}
+		// Do not emit a terminal runtime event when the durable write failed:
+		// the client must not be told the execution completed while the record
+		// is still in a non-terminal state.
+		return
+	}
+
+	observability.ExecutionRuntimeOutcome().Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("runtime_status", string(rtStatus))))
+	if rec.StartedAt != nil {
+		observability.ExecutionRuntimeDuration().Record(context.Background(),
+			time.Since(time.UnixMilli(*rec.StartedAt)).Seconds())
 	}
 
 	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, 0, eventKind, events.RuntimeExecutionData{

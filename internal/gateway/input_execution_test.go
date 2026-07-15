@@ -60,6 +60,9 @@ func (s *fakeExecutionStore) FinishRuntime(context.Context, string, string, exec
 func (s *fakeExecutionStore) ActiveBySession(context.Context, string) (*execution.Record, error) {
 	return nil, execution.ErrNotFound
 }
+func (s *fakeExecutionStore) OpenBySession(context.Context, string) (*execution.Record, error) {
+	return nil, execution.ErrNotFound
+}
 func (s *fakeExecutionStore) FenceBySession(context.Context, string) (*execution.Record, error) {
 	return nil, execution.ErrNotFound
 }

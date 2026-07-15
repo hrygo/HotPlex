@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/observability"
 )
 
 type LeaseConfig struct {
@@ -72,6 +74,7 @@ func (m *LeaseManager) renewLoop(ctx context.Context) {
 		case <-ticker.C:
 			renewed, err := m.store.RenewLeases(ctx, m.ownerID, int64(LeaseTTL))
 			if err != nil {
+				observability.LeaseRenewFailure().Add(ctx, 1)
 				m.log.Warn("lease renew failed", "error", err)
 				continue
 			}
@@ -84,6 +87,12 @@ func (m *LeaseManager) renewLoop(ctx context.Context) {
 
 func (m *LeaseManager) recoverLoop(ctx context.Context) {
 	defer m.wg.Done()
+
+	// Startup sweep: recover expired leases immediately instead of waiting for
+	// the first ticker, so a restarting gateway unblocks sessions whose leases
+	// expired during the outage without the extra RecoverInterval of latency.
+	m.recoverOnce(ctx)
+
 	ticker := time.NewTicker(m.cfg.RecoverInterval)
 	defer ticker.Stop()
 	for {
@@ -93,15 +102,20 @@ func (m *LeaseManager) recoverLoop(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			recovered, err := m.store.RecoverExpiredLeases(ctx, time.Now().UnixMilli())
-			if err != nil {
-				m.log.Warn("expired lease recovery failed", "error", err)
-				continue
-			}
-			if recovered > 0 {
-				m.log.Warn("recovered expired leases", "recovered", recovered)
-			}
+			m.recoverOnce(ctx)
 		}
+	}
+}
+
+func (m *LeaseManager) recoverOnce(ctx context.Context) {
+	recovered, err := m.store.RecoverExpiredLeases(ctx, time.Now().UnixMilli())
+	if err != nil {
+		m.log.Warn("expired lease recovery failed", "error", err)
+		return
+	}
+	if recovered > 0 {
+		observability.LeaseExpiredRecovery().Add(ctx, recovered)
+		m.log.Warn("recovered expired leases", "recovered", recovered)
 	}
 }
 

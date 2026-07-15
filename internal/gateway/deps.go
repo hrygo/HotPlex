@@ -20,6 +20,7 @@ type HandlerDeps struct {
 	Bridge          *Bridge
 	SkillsLocator   SkillsLocator
 	ExecutionStore  execution.Store
+	Repairer        *execution.Repairer
 	OwnerInstanceID string
 }
 
@@ -52,4 +53,5 @@ type BridgeDeps struct {
 	PermissionDedupEnabled bool                     // suppress repeated permission cards after a user denial (Permission-Deny-Dedup-Spec)
 	PermissionDedupWindow  time.Duration            // denial cache TTL; only honored when PermissionDedupEnabled
 	ExecutionStore         execution.Store          // durable ingress reliability closure (spec 2026-07-14); nil = disabled
+	Repairer               *execution.Repairer      // terminal-state repair retry; nil = disabled
 }
