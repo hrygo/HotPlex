@@ -1375,9 +1375,13 @@ export function useHotPlexRuntime({
                 setConnectionState("connected");
             })
             .catch((err) => {
-                if (!sessionAlreadyConnectedRef.current) {
-                    setConnectionState("disconnected");
+                if (sessionAlreadyConnectedRef.current) {
+                    logger.info("RuntimeAdapter", "Session already connected", {
+                        error: String(err),
+                    });
+                    return;
                 }
+                setConnectionState("disconnected");
                 const msg = String(err);
                 // 'Client disconnected' and 'Client is closed' are normal during
                 // session switching (React cleanup calls disconnect() which rejects

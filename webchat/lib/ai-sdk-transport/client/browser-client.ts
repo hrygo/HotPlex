@@ -301,7 +301,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       // Handle handshake-level errors
       if (ackData.error || ackData.code) {
         const errorMsg = ackData.error || `Handshake failed with code: ${ackData.code}`;
-        logger.error('BrowserClient', 'Handshake error', { message: errorMsg });
 
         if (ackData.code === ErrorCode.SessionNotFound) {
           // Session was deleted on server — retry with the original session ID.
@@ -327,15 +326,16 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
             code: ErrorCode.SessionAlreadyConnected,
             message: errorMsg,
           } as ErrorData;
+          logger.info('BrowserClient', 'Session already connected', { message: errorMsg });
           this._stopHeartbeat();
           this._clearReconnectTimer();
           this.emit('sessionAlreadyConnected', errorData, env);
-          this.emit('error', errorData, env);
           this.disconnect();
           reject(new Error(errorMsg));
           return;
         }
 
+        logger.error('BrowserClient', 'Handshake error', { message: errorMsg });
         this.emit('error', {
           code: ackData.code || ErrorCode.InternalError,
           message: errorMsg

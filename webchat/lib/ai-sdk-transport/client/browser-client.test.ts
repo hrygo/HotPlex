@@ -81,8 +81,11 @@ describe("BrowserHotPlexClient duplicate session rejection", () => {
             ): void;
         };
         const duplicate = vi.fn();
+        const genericError = vi.fn();
         const rejected = vi.fn();
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
         client.on("sessionAlreadyConnected", duplicate);
+        client.on("error", genericError);
 
         internal._handleMessage(
             envelope(EventKind.InitAck, {
@@ -94,6 +97,8 @@ describe("BrowserHotPlexClient duplicate session rejection", () => {
         );
 
         expect(duplicate).toHaveBeenCalledOnce();
+        expect(genericError).not.toHaveBeenCalled();
+        expect(consoleError).not.toHaveBeenCalled();
         expect(internal.shouldReconnect).toBe(false);
         expect(rejected).toHaveBeenCalledOnce();
     });
