@@ -915,10 +915,18 @@ func initLogging(cfg *config.Config) (*slog.Logger, *config.ConfigStore, *slog.L
 	}
 
 	opts := &slog.HandlerOptions{
-		Level: levelVar,
+		Level:     levelVar,
+		AddSource: true,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) == 0 && a.Key == slog.TimeKey {
 				return slog.String(slog.TimeKey, a.Value.Time().Format("2006-01-02T15:04:05.0000"))
+			}
+			// Compact source attribution to "file.go:42 function" so Warn/Error
+			// records are locatable without bloating every log line with full paths.
+			if len(groups) == 0 && a.Key == slog.SourceKey {
+				if s, ok := a.Value.Any().(*slog.Source); ok && s != nil {
+					return slog.String(slog.SourceKey, fmt.Sprintf("%s:%d %s", filepath.Base(s.File), s.Line, s.Function))
+				}
 			}
 			return a
 		},

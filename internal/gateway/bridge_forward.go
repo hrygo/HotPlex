@@ -66,15 +66,18 @@ func (b *Bridge) bgCtx() context.Context {
 }
 
 func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwardOpts) {
+	ctx, span := observability.Tracer().Start(opts.ctx, "bridge.forward_events")
+	defer span.End()
+	flog := b.log.With("trace_id", observability.TraceID(ctx))
 	defer func() {
 		if r := recover(); r != nil {
-			b.log.Error("bridge: panic in forwardEvents", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
+			flog.Error("bridge: panic in forwardEvents", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
 
 	w := fb.worker
 	workerType := w.Type()
-	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID,
+	flog.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID,
 		"worker_type", workerType, "resumed", opts.resumed,
 		"has_frozen_conn", fb.conn != nil, "forwarder_reset_gen", fb.resetGen,
 		"worker_run_id", opts.workerRunID)
@@ -88,7 +91,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		workerType:    workerType,
 		workerRunID:   opts.workerRunID,
 		workDir:       opts.workDir,
-		ctx:           opts.ctx,
+		ctx:           ctx,
 		startTime:     time.Now(),
 		turnStartTime: time.Now(),
 		firstEvent:    true,
@@ -127,7 +130,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {
-			b.log.Warn("turns: restore turn num", "err", err)
+			flog.Warn("turns: restore turn num", "err", err)
 		}
 		if tn > 0 {
 			acc.TurnCount.Store(int32(tn))
@@ -139,7 +142,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 			if !fc.turnTimerFired.CompareAndSwap(false, true) {
 				return
 			}
-			b.log.Warn("bridge: turn timeout exceeded, terminating worker",
+			flog.Warn("bridge: turn timeout exceeded, terminating worker",
 				"session_id", sessionID, "worker_type", workerType, "turn_timeout", b.turnTimeout)
 			b.sendError(sessionID, events.ErrCodeTurnTimeout, "Turn exceeded %v time limit and was terminated.", b.turnTimeout)
 			acc := b.getOrInitAccum(sessionID, fc.workDir, fc.startTime)
@@ -167,7 +170,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	// already captured the best value available at that instant.
 	recvSource := fb.conn
 	if recvSource == nil {
-		b.log.Error("bridge: frozen conn is nil at forwardEvents start, falling back to live Conn()",
+		flog.Error("bridge: frozen conn is nil at forwardEvents start, falling back to live Conn()",
 			"session_id", sessionID, "worker_type", workerType)
 		recvSource = w.Conn()
 	}
@@ -179,7 +182,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	// Flush buffered error that never reached a retry decision point.
 	if fc.pendingError != nil {
 		if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
-			b.log.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
+			flog.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
 		}
 		b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data)
 		fc.pendingError = nil

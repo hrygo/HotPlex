@@ -125,6 +125,19 @@ func Tracer() trace.Tracer {
 	return globalTracer
 }
 
+// TraceID returns the OpenTelemetry trace ID carried in ctx, or "" when ctx
+// holds no valid span. Use it to correlate slog records with distributed
+// traces when a context-aware slog handler is not wired up.
+func TraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		return sc.TraceID().String()
+	}
+	return ""
+}
+
 func Shutdown(ctx context.Context) error {
 	var errs []error
 	if tp != nil {
