@@ -75,6 +75,7 @@ export const ErrorCode = {
   SessionTerminated: 'SESSION_TERMINATED',
   SessionInvalidated: 'SESSION_INVALIDATED',
   SessionBusy: 'SESSION_BUSY',
+  SessionAlreadyConnected: 'SESSION_ALREADY_CONNECTED',
   Unauthorized: 'UNAUTHORIZED',
   AuthRequired: 'AUTH_REQUIRED',
   InternalError: 'INTERNAL_ERROR',

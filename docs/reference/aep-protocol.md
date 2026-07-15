@@ -445,6 +445,7 @@ Worker 请求人类介入的结构化交互事件。默认 5 分钟超时自动�
 | `SESSION_NOT_FOUND` | Session 不存在 |
 | `SESSION_EXPIRED` | Session 已过期 |
 | `SESSION_BUSY` | 正在执行，拒绝新 input |
+| `SESSION_ALREADY_CONNECTED` | 此 session 已有 WebChat WebSocket owner；当前连接不可用，等待原 owner 关闭后由用户显式重试 |
 | `SESSION_TERMINATED` | Session 已终止 |
 | `SESSION_INVALIDATED` | Session 被失效 |
 

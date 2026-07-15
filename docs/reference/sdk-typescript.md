@@ -268,6 +268,9 @@ client.on('reconnecting', (attempt) => {
 
 Gateway 返回 `SESSION_BUSY` 错误时，SDK 自动延迟 500ms 重发 `input`，无需手动处理。此行为仅在 `sendInput` 发出的消息中生效。
 
+`SESSION_ALREADY_CONNECTED` 与 `SESSION_BUSY` 不同：它拒绝整个 WebSocket
+连接，客户端必须停止自动重连，待原 owner 关闭后由用户显式重试连接。
+
 ## 错误处理
 
 ### 错误类层级
@@ -289,6 +292,9 @@ client.on('error', (data) => {
   switch (data.code) {
     case ErrorCode.SessionBusy:
       // Session 忙，SDK 自动重试
+      break
+    case ErrorCode.SessionAlreadyConnected:
+      // 当前连接不可用；等待原连接关闭后由用户显式重试
       break
     case ErrorCode.Unauthorized:
       // Token 过期

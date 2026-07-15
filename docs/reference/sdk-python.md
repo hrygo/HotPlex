@@ -263,6 +263,9 @@ from hotplex_client.protocol import (
 
 ## 错误处理
 
+`ErrorCode.SESSION_ALREADY_CONNECTED` 表示该 session 已有 WebChat WebSocket
+owner。当前连接不可用；关闭原连接后再由用户显式发起一次连接，客户端不应自动重连。
+
 ### 异常层级
 
 ```

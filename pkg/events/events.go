@@ -79,20 +79,24 @@ const (
 	ErrCodeSessionTerminated  ErrorCode = "SESSION_TERMINATED"
 	ErrCodeSessionInvalidated ErrorCode = "SESSION_INVALIDATED"
 	ErrCodeSessionBusy        ErrorCode = "SESSION_BUSY"
-	ErrCodeUnauthorized       ErrorCode = "UNAUTHORIZED"
-	ErrCodeAuthRequired       ErrorCode = "AUTH_REQUIRED"
-	ErrCodeInternalError      ErrorCode = "INTERNAL_ERROR"
-	ErrCodeProtocolViolation  ErrorCode = "PROTOCOL_VIOLATION"
-	ErrCodeVersionMismatch    ErrorCode = "VERSION_MISMATCH"
-	ErrCodeConfigInvalid      ErrorCode = "CONFIG_INVALID"
-	ErrCodeRateLimited        ErrorCode = "RATE_LIMITED"
-	ErrCodeGatewayOverload    ErrorCode = "GATEWAY_OVERLOAD"
-	ErrCodeExecutionTimeout   ErrorCode = "EXECUTION_TIMEOUT"
-	ErrCodeReconnectRequired  ErrorCode = "RECONNECT_REQUIRED"
-	ErrCodeWorkerOutputLimit  ErrorCode = "WORKER_OUTPUT_LIMIT"
-	ErrCodeResumeRetry        ErrorCode = "RESUME_RETRY"
-	ErrCodeNotSupported       ErrorCode = "NOT_SUPPORTED"
-	ErrCodeTurnTimeout        ErrorCode = "TURN_TIMEOUT"
+	// ErrCodeSessionAlreadyConnected rejects a second WebChat WebSocket owner
+	// for the same session. Unlike SESSION_BUSY, the connection is unusable and
+	// clients must wait for the existing owner to release it before retrying.
+	ErrCodeSessionAlreadyConnected ErrorCode = "SESSION_ALREADY_CONNECTED"
+	ErrCodeUnauthorized            ErrorCode = "UNAUTHORIZED"
+	ErrCodeAuthRequired            ErrorCode = "AUTH_REQUIRED"
+	ErrCodeInternalError           ErrorCode = "INTERNAL_ERROR"
+	ErrCodeProtocolViolation       ErrorCode = "PROTOCOL_VIOLATION"
+	ErrCodeVersionMismatch         ErrorCode = "VERSION_MISMATCH"
+	ErrCodeConfigInvalid           ErrorCode = "CONFIG_INVALID"
+	ErrCodeRateLimited             ErrorCode = "RATE_LIMITED"
+	ErrCodeGatewayOverload         ErrorCode = "GATEWAY_OVERLOAD"
+	ErrCodeExecutionTimeout        ErrorCode = "EXECUTION_TIMEOUT"
+	ErrCodeReconnectRequired       ErrorCode = "RECONNECT_REQUIRED"
+	ErrCodeWorkerOutputLimit       ErrorCode = "WORKER_OUTPUT_LIMIT"
+	ErrCodeResumeRetry             ErrorCode = "RESUME_RETRY"
+	ErrCodeNotSupported            ErrorCode = "NOT_SUPPORTED"
+	ErrCodeTurnTimeout             ErrorCode = "TURN_TIMEOUT"
 )
 
 // Envelope is the unified AEP v1 message envelope, shared by both client→gateway and gateway→client.

@@ -25,6 +25,7 @@ interface ThreadProps {
   onInteractionRespond?: (toolCallId: string, allowed: boolean) => void;
   suggestions?: readonly { title: string; label: string; prompt: string }[];
   isStopping?: boolean;
+  onRetryConnection?: () => void;
 }
 
 const connLabelKey = {
@@ -32,6 +33,7 @@ const connLabelKey = {
   connecting: 'status.connection.connecting',
   reconnecting: 'status.connection.reconnecting',
   disconnected: 'status.connection.disconnected',
+  already_connected: 'status.connection.already_connected',
 } as const satisfies Record<ConnectionState, string>;
 
 const connDot: Record<ConnectionState, string> = {
@@ -39,9 +41,10 @@ const connDot: Record<ConnectionState, string> = {
   connecting: 'bg-amber-400 animate-pulse',
   reconnecting: 'bg-amber-400 animate-pulse',
   disconnected: 'bg-red-400',
+  already_connected: 'bg-[var(--accent-coral)]',
 };
 
-export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, onInteractionRespond, suggestions, isStopping: isStoppingProp }: ThreadProps) {
+export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, onInteractionRespond, suggestions, isStopping: isStoppingProp, onRetryConnection }: ThreadProps) {
   const { t } = useTranslation('chat');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(hasMore);
@@ -73,6 +76,20 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       <ThreadPrimitive.Viewport className="thread-viewport relative px-4 py-8">
         <div className="max-w-4xl mx-auto w-full">
           {isEmpty && <WelcomeScreen suggestions={suggestions} onSuggestionClick={handleSuggestionClick} />}
+          {conn === 'already_connected' && (
+            <section className="max-w-3xl mx-auto mb-6 rounded-2xl border border-[var(--accent-coral)]/35 bg-[var(--accent-coral)]/10 px-5 py-4 text-center">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">{t('status.session_already_connected_title')}</h2>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">{t('status.session_already_connected_description')}</p>
+              <button
+                type="button"
+                onClick={onRetryConnection}
+                disabled={!onRetryConnection}
+                className="mt-4 rounded-lg bg-[var(--accent-coral)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t('action.retry_connection')}
+              </button>
+            </section>
+          )}
           {historyHasMore && (
             <div className="flex justify-center py-4 mb-4">
               <button
@@ -117,6 +134,7 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
           skills={skills}
           isRunning={isRunning}
           isStoppingProp={isStoppingProp}
+          disabled={conn === 'already_connected'}
         />
         <div className="mt-2 flex justify-between items-center max-w-3xl mx-auto px-2">
           <div className="flex gap-4">
@@ -146,9 +164,10 @@ interface ThreadComposerProps {
   skills?: SkillEntry[];
   isRunning: boolean;
   isStoppingProp?: boolean;
+  disabled?: boolean;
 }
 
-const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp }: ThreadComposerProps) {
+const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp, disabled }: ThreadComposerProps) {
   const { t } = useTranslation('chat');
   const [localText, setLocalText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -229,6 +248,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
               autoFocus
               submitMode="enter"
               placeholder={t('placeholder.composer')}
+              disabled={disabled}
               value={localText}
               onChange={handleChange}
               onCompositionStart={handleCompositionStart}
@@ -236,7 +256,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
             />
             <div className="flex items-center gap-2">
               {(isRunning || isStoppingProp) && (
-                <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={isStoppingProp} aria-label={t(isStoppingProp ? 'aria.stopping' : 'aria.stop')}>
+                <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={disabled || isStoppingProp} aria-label={t(isStoppingProp ? 'aria.stopping' : 'aria.stop')}>
                   {isStoppingProp ? (
                     <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx={12} cy={12} r="10" stroke="currentColor" strokeWidth="4" />
@@ -247,7 +267,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   )}
                 </ComposerPrimitive.Cancel>
               )}
-              <ComposerPrimitive.Send className="btn-icon btn-primary" aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+              <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
             </div>
           </div>
         </ComposerPrimitive.Root>

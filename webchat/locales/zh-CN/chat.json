@@ -14,6 +14,7 @@
     "start_session": "开始会话",
     "load_earlier": "加载更早的消息",
     "new_messages": "新消息",
+    "retry_connection": "重试连接",
     "copy": "复制",
     "copied": "已复制",
     "show_more": "展开更多"
@@ -81,10 +82,13 @@
       "connected": "已连接",
       "connecting": "连接中...",
       "reconnecting": "正在重连...",
-      "disconnected": "已断开"
+      "disconnected": "已断开",
+      "already_connected": "已在其他位置打开"
     },
     "disconnected_banner": "连接已断开，请刷新页面重试",
-    "reconnecting_banner": "连接已断开，正在尝试重连…"
+    "reconnecting_banner": "连接已断开，正在尝试重连…",
+    "session_already_connected_title": "该会话已在其他标签页或设备打开",
+    "session_already_connected_description": "关闭原页面后，再重试连接。"
   },
   "welcome": {
     "title": "设计、重构并维护你的项目",

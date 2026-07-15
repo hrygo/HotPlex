@@ -311,6 +311,9 @@ var (
 	gatewayConnections     metric.Int64ObservableGauge
 	gatewayConnectionsInit sync.Once
 
+	gatewayWebChatSessionOwnerConnections     metric.Int64ObservableGauge
+	gatewayWebChatSessionOwnerConnectionsInit sync.Once
+
 	gatewayMessages     metric.Int64Counter
 	gatewayMessagesInit sync.Once
 
@@ -337,6 +340,15 @@ var (
 
 	gatewayInitHandshakeDuration     metric.Float64Histogram
 	gatewayInitHandshakeDurationInit sync.Once
+
+	gatewayWebChatDuplicateConnectionRejected     metric.Int64Counter
+	gatewayWebChatDuplicateConnectionRejectedInit sync.Once
+
+	gatewayWebChatNonOwnerIngressRejected     metric.Int64Counter
+	gatewayWebChatNonOwnerIngressRejectedInit sync.Once
+
+	gatewayWebChatOwnerReleaseNotCurrent     metric.Int64Counter
+	gatewayWebChatOwnerReleaseNotCurrentInit sync.Once
 )
 
 func GatewayConnections() metric.Int64ObservableGauge {
@@ -351,6 +363,22 @@ func GatewayConnections() metric.Int64ObservableGauge {
 		}
 	})
 	return gatewayConnections
+}
+
+// GatewayWebChatSessionOwnerConnections reports the number of sessions with a
+// currently acquired WebChat WebSocket owner.
+func GatewayWebChatSessionOwnerConnections() metric.Int64ObservableGauge {
+	gatewayWebChatSessionOwnerConnectionsInit.Do(func() {
+		var err error
+		gatewayWebChatSessionOwnerConnections, err = Meter().Int64ObservableGauge(
+			"hotplex.gateway.webchat.session_owner_connections",
+			metric.WithDescription("Current sessions with an initialized WebChat WebSocket owner"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.webchat.session_owner_connections", err)
+		}
+	})
+	return gatewayWebChatSessionOwnerConnections
 }
 
 func GatewayMessages() metric.Int64Counter {
@@ -501,6 +529,54 @@ func GatewayInitHandshakeDuration() metric.Float64Histogram {
 		}
 	})
 	return gatewayInitHandshakeDuration
+}
+
+// GatewayWebChatDuplicateConnectionRejected counts init handshakes rejected
+// because their session already has a WebChat owner.
+func GatewayWebChatDuplicateConnectionRejected() metric.Int64Counter {
+	gatewayWebChatDuplicateConnectionRejectedInit.Do(func() {
+		var err error
+		gatewayWebChatDuplicateConnectionRejected, err = Meter().Int64Counter(
+			"hotplex.gateway.webchat.duplicate_connection_rejected",
+			metric.WithDescription("WebChat init attempts rejected because a session already has an owner"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.webchat.duplicate_connection_rejected", err)
+		}
+	})
+	return gatewayWebChatDuplicateConnectionRejected
+}
+
+// GatewayWebChatNonOwnerIngressRejected counts owner-sensitive messages
+// rejected after the sender lost or never acquired WebChat ownership.
+func GatewayWebChatNonOwnerIngressRejected() metric.Int64Counter {
+	gatewayWebChatNonOwnerIngressRejectedInit.Do(func() {
+		var err error
+		gatewayWebChatNonOwnerIngressRejected, err = Meter().Int64Counter(
+			"hotplex.gateway.webchat.non_owner_ingress_rejected",
+			metric.WithDescription("Owner-sensitive WebChat ingress rejected for a non-owner connection"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.webchat.non_owner_ingress_rejected", err)
+		}
+	})
+	return gatewayWebChatNonOwnerIngressRejected
+}
+
+// GatewayWebChatOwnerReleaseNotCurrent counts close paths that attempted to
+// release a session owner after ownership had already changed or was absent.
+func GatewayWebChatOwnerReleaseNotCurrent() metric.Int64Counter {
+	gatewayWebChatOwnerReleaseNotCurrentInit.Do(func() {
+		var err error
+		gatewayWebChatOwnerReleaseNotCurrent, err = Meter().Int64Counter(
+			"hotplex.gateway.webchat.owner_release_not_current",
+			metric.WithDescription("WebChat owner release attempts made by a non-current connection"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.webchat.owner_release_not_current", err)
+		}
+	})
+	return gatewayWebChatOwnerReleaseNotCurrent
 }
 
 // ─── Pool Instruments ───────────────────────────────────────────────

@@ -71,13 +71,14 @@ type ErrorCode = events.ErrorCode
 
 // ErrorCode values.
 const (
-	ErrCodeSessionBusy     = events.ErrCodeSessionBusy
-	ErrCodeInternalError   = events.ErrCodeInternalError
-	ErrCodeUnauthorized    = events.ErrCodeUnauthorized
-	ErrCodeSessionNotFound = events.ErrCodeSessionNotFound
-	ErrCodeResumeRetry     = events.ErrCodeResumeRetry
-	ErrCodeNotSupported    = events.ErrCodeNotSupported
-	ErrCodeTurnTimeout     = events.ErrCodeTurnTimeout
+	ErrCodeSessionBusy             = events.ErrCodeSessionBusy
+	ErrCodeSessionAlreadyConnected = events.ErrCodeSessionAlreadyConnected
+	ErrCodeInternalError           = events.ErrCodeInternalError
+	ErrCodeUnauthorized            = events.ErrCodeUnauthorized
+	ErrCodeSessionNotFound         = events.ErrCodeSessionNotFound
+	ErrCodeResumeRetry             = events.ErrCodeResumeRetry
+	ErrCodeNotSupported            = events.ErrCodeNotSupported
+	ErrCodeTurnTimeout             = events.ErrCodeTurnTimeout
 )
 
 // Event data types re-exported from pkg/events for type-safe access.

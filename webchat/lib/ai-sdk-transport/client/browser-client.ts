@@ -67,6 +67,7 @@ export interface BrowserClientEvents {
   disconnected: (reason: string) => void;
   reconnecting: (attempt: number) => void;
   reconnect_failed: (attempt: number) => void;
+  sessionAlreadyConnected: (data: ErrorData, env: Envelope) => void;
   delta: (data: MessageDeltaData, env: Envelope) => void;
   message: (data: MessageData, env: Envelope) => void;
   messageStart: (data: MessageStartData, env: Envelope) => void;
@@ -316,8 +317,23 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
         // Fatal errors shouldn't trigger reconnect
         if (ackData.code === ErrorCode.Unauthorized ||
-            ackData.code === ErrorCode.AuthRequired) {
+            ackData.code === ErrorCode.AuthRequired ||
+            ackData.code === ErrorCode.SessionAlreadyConnected) {
           this.shouldReconnect = false;
+        }
+
+        if (ackData.code === ErrorCode.SessionAlreadyConnected) {
+          const errorData = {
+            code: ErrorCode.SessionAlreadyConnected,
+            message: errorMsg,
+          } as ErrorData;
+          this._stopHeartbeat();
+          this._clearReconnectTimer();
+          this.emit('sessionAlreadyConnected', errorData, env);
+          this.emit('error', errorData, env);
+          this.disconnect();
+          reject(new Error(errorMsg));
+          return;
         }
 
         this.emit('error', {
@@ -370,6 +386,16 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           logger.warn('BrowserClient', 'Received empty error data', { envId: env?.id });
         }
         
+        if (errData.code === ErrorCode.SessionAlreadyConnected) {
+          this.shouldReconnect = false;
+          this._stopHeartbeat();
+          this._clearReconnectTimer();
+          this.emit('sessionAlreadyConnected', errData, env);
+          this.emit('error', errData, env);
+          this.disconnect();
+          break;
+        }
+
         // Fatal errors shouldn't trigger reconnect
         if (errData.code === ErrorCode.SessionNotFound) {
           this.shouldReconnect = false;

@@ -90,6 +90,7 @@ function ChatInterface({
         onLoadHistory?: () => Promise<{ hasMore: boolean }>;
         onInteractionRespond?: (toolCallId: string, allowed: boolean) => void;
         isStopping?: boolean;
+        onRetryConnection?: () => void;
     };
     const extras = adapter.extras as AdapterExtras | undefined;
     const hasMore = extras?.hasMore ?? false;
@@ -97,6 +98,7 @@ function ChatInterface({
     const onLoadHistory = extras?.onLoadHistory;
     const onInteractionRespond = extras?.onInteractionRespond;
     const isStopping = extras?.isStopping ?? false;
+    const onRetryConnection = extras?.onRetryConnection;
     const suggestions = adapter.suggestions as
         readonly { title: string; label: string; prompt: string }[] | undefined;
 
@@ -110,6 +112,7 @@ function ChatInterface({
                 onInteractionRespond={onInteractionRespond}
                 suggestions={suggestions}
                 isStopping={isStopping}
+                onRetryConnection={onRetryConnection}
             />
         </AssistantRuntimeProvider>
     );

@@ -14,6 +14,7 @@
     "start_session": "Start Session",
     "load_earlier": "Load earlier messages",
     "new_messages": "New",
+    "retry_connection": "Retry connection",
     "copy": "COPY",
     "copied": "COPIED",
     "show_more": "SHOW MORE"
@@ -81,10 +82,13 @@
       "connected": "Connected",
       "connecting": "Connecting...",
       "reconnecting": "Reconnecting...",
-      "disconnected": "Disconnected"
+      "disconnected": "Disconnected",
+      "already_connected": "Open elsewhere"
     },
     "disconnected_banner": "Connection lost. Please refresh the page.",
-    "reconnecting_banner": "Connection lost, reconnecting…"
+    "reconnecting_banner": "Connection lost, reconnecting…",
+    "session_already_connected_title": "This session is already open elsewhere",
+    "session_already_connected_description": "Close it in the other tab or device, then retry this connection."
   },
   "welcome": {
     "title": "Empower Your Coding",

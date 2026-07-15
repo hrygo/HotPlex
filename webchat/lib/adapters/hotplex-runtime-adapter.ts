@@ -291,6 +291,7 @@ export function useHotPlexRuntime({
     const clientRef = useRef<BrowserHotPlexClient | null>(null);
     const historyLoadingRef = useRef(false);
     const sessionIdRef = useRef(sessionId);
+    const sessionAlreadyConnectedRef = useRef(false);
 
     // Welcome suggestions — shown when thread is empty (use prop or default list)
     const suggestions: readonly ThreadSuggestion[] =
@@ -432,6 +433,7 @@ export function useHotPlexRuntime({
         }
 
         skillsFetchedRef.current = false;
+        sessionAlreadyConnectedRef.current = false;
 
         const initConfig: InitConfig = {};
         // work_dir is omitted: the server derives it from the bound workspace
@@ -858,6 +860,15 @@ export function useHotPlexRuntime({
 
         const handleError = (data: ErrorData, env: Envelope) => {
             const isBusy = (data?.code as string) === "SESSION_BUSY";
+            const isSessionAlreadyConnected =
+                (data?.code as string) === "SESSION_ALREADY_CONNECTED";
+
+            if (isSessionAlreadyConnected) {
+                sessionAlreadyConnectedRef.current = true;
+                setIsRunning(false);
+                setConnectionState("already_connected");
+                return;
+            }
 
             // Mark any submitting interaction as failed if this is an interaction error
             const isInteractionError = (data?.message || "").includes("worker response failed") || 
@@ -1082,7 +1093,15 @@ export function useHotPlexRuntime({
                 );
             }
             setIsRunning(false);
-            setConnectionState("disconnected");
+            if (!sessionAlreadyConnectedRef.current) {
+                setConnectionState("disconnected");
+            }
+        };
+
+        const handleSessionAlreadyConnected = () => {
+            sessionAlreadyConnectedRef.current = true;
+            setIsRunning(false);
+            setConnectionState("already_connected");
         };
 
         const handleReconnecting = (attempt: number) => {
@@ -1169,6 +1188,7 @@ export function useHotPlexRuntime({
         client.on("inputAck", handleInputAck);
         client.on("done", handleDone);
         client.on("error", handleError);
+        client.on("sessionAlreadyConnected", handleSessionAlreadyConnected);
         client.on("disconnected", handleDisconnected);
         client.on("reconnecting", handleReconnecting);
         client.on("reconnect_failed", handleReconnectFailed);
@@ -1351,10 +1371,13 @@ export function useHotPlexRuntime({
         client
             .connect(sessionId)
             .then(() => {
+                sessionAlreadyConnectedRef.current = false;
                 setConnectionState("connected");
             })
             .catch((err) => {
-                setConnectionState("disconnected");
+                if (!sessionAlreadyConnectedRef.current) {
+                    setConnectionState("disconnected");
+                }
                 const msg = String(err);
                 // 'Client disconnected' and 'Client is closed' are normal during
                 // session switching (React cleanup calls disconnect() which rejects
@@ -1384,6 +1407,7 @@ export function useHotPlexRuntime({
             client.off("inputAck", handleInputAck);
             client.off("done", handleDone);
             client.off("error", handleError);
+            client.off("sessionAlreadyConnected", handleSessionAlreadyConnected);
             client.off("disconnected", handleDisconnected);
             client.off("reconnecting", handleReconnecting);
             client.off("reconnect_failed", handleReconnectFailed);
@@ -1581,6 +1605,28 @@ export function useHotPlexRuntime({
                 stoppingRef.current = false;
             }
         }, 2000);
+    }, []);
+
+    // This is deliberately an explicit one-shot action. A duplicate-session
+    // rejection never schedules reconnects; after the user closes the other
+    // owner they may choose to try this connection again.
+    const retrySessionConnection = useCallback(async () => {
+        const client = clientRef.current;
+        if (!client || !sessionIdRef.current) {
+            return;
+        }
+        setConnectionState("connecting");
+        try {
+            await client.connect(sessionIdRef.current);
+            sessionAlreadyConnectedRef.current = false;
+            setConnectionState("connected");
+        } catch (err) {
+            sessionAlreadyConnectedRef.current = true;
+            setConnectionState("already_connected");
+            logger.info("RuntimeAdapter", "Explicit duplicate-session retry failed", {
+                error: String(err),
+            });
+        }
     }, []);
 
     // Handler for loading earlier messages (cursor-based pagination)
@@ -1837,6 +1883,8 @@ export function useHotPlexRuntime({
             onLoadHistory: handleLoadHistory,
             onInteractionRespond: handleInteractionRespond,
             isStopping,
+            connectionState,
+            onRetryConnection: retrySessionConnection,
         }),
         [
             sessionMetrics,
@@ -1844,6 +1892,8 @@ export function useHotPlexRuntime({
             handleLoadHistory,
             handleInteractionRespond,
             isStopping,
+            connectionState,
+            retrySessionConnection,
         ],
     );
 
