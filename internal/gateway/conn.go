@@ -488,6 +488,14 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 
 	c.hub.LeaveSession("", c)
 	c.hub.JoinSession(sessionID, c)
+	// Hydrate SeqGen before resolveSessionState can start a worker or finalizeInit
+	// can allocate init_ack. Never fall back to 1 on a database error because a
+	// duplicate could roll back an entire collector batch.
+	if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
+		c.sendInitError(events.ErrCodeInternalError, "unable to restore session event sequence; retry later")
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+		return "", nil, err
+	}
 
 	return c.resolveSessionState(sessionID, initData, workDir, sm, preResolved, env.SessionID)
 }
@@ -761,7 +769,9 @@ func (c *Conn) writeSync(data []byte) error {
 
 func (c *Conn) sendInitError(code events.ErrorCode, msg string) {
 	ack := BuildInitAckError(c.sessionID, &InitError{Code: code, Message: msg})
-	ack.Seq = c.hub.NextSeq(c.sessionID)
+	// Init failures happen before durable sequence hydration is guaranteed.
+	// Keep the builder's seq=0 so reporting an error cannot initialize a session
+	// counter at 1 and make a later retry skip fail-closed hydration.
 	data, err := aep.EncodeJSON(ack)
 	if err != nil {
 		return

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -86,6 +87,20 @@ func (m *mockBridge) StartSession(context.Context, worker.SessionStartParams) er
 	return m.err
 }
 
+type mockTurnStats struct {
+	stats *eventstore.TurnStats
+	seq   int64
+	err   error
+}
+
+func (m *mockTurnStats) TurnStats(context.Context, string) (*eventstore.TurnStats, error) {
+	return m.stats, m.err
+}
+
+func (m *mockTurnStats) LatestSeq(context.Context, string) (int64, error) {
+	return m.seq, m.err
+}
+
 type mockConfig struct {
 	cfg *config.Config
 }
@@ -139,6 +154,57 @@ func TestCreateSession_Success(t *testing.T) {
 	var resp map[string]string
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.Equal(t, "sid-123", resp["session_id"])
+}
+
+func TestHandleDebugSession_DurableFields(t *testing.T) {
+	t.Parallel()
+	api := newTestAPI(func(d *Deps) {
+		d.SessionMgr = &mockSessionManager{
+			getFn: func(string) (any, error) { return map[string]any{"id": "s1"}, nil },
+		}
+		d.TurnStats = &mockTurnStats{
+			stats: &eventstore.TurnStats{TotalTurns: 7},
+			seq:   42,
+		}
+	})
+	w := httptest.NewRecorder()
+	r := withScope(httptest.NewRequest(http.MethodGet, "/admin/debug/sessions/s1", nil), ScopeAdminRead)
+	r.SetPathValue("id", "s1")
+
+	api.HandleDebugSession(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response struct {
+		Debug map[string]any `json:"debug"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
+	require.Equal(t, float64(7), response.Debug["db_turn_count"])
+	require.Equal(t, float64(42), response.Debug["db_last_seq"])
+}
+
+func TestHandleDebugSession_DurableErrorsReturnNull(t *testing.T) {
+	t.Parallel()
+	api := newTestAPI(func(d *Deps) {
+		d.SessionMgr = &mockSessionManager{
+			getFn: func(string) (any, error) { return map[string]any{"id": "s1"}, nil },
+		}
+		d.TurnStats = &mockTurnStats{err: errors.New("db unavailable")}
+	})
+	w := httptest.NewRecorder()
+	r := withScope(httptest.NewRequest(http.MethodGet, "/admin/debug/sessions/s1", nil), ScopeAdminRead)
+	r.SetPathValue("id", "s1")
+
+	api.HandleDebugSession(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response struct {
+		Debug map[string]any `json:"debug"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
+	require.Contains(t, response.Debug, "db_turn_count")
+	require.Contains(t, response.Debug, "db_last_seq")
+	require.Nil(t, response.Debug["db_turn_count"])
+	require.Nil(t, response.Debug["db_last_seq"])
 }
 
 func TestCreateSession_Forbidden(t *testing.T) {

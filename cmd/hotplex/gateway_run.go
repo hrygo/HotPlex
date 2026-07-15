@@ -54,7 +54,8 @@ import (
 )
 
 // eventStoreProvider combines the query and event-store interfaces needed by all consumers.
-// Both *eventstore.SQLiteStore and the internal pgEventStore satisfy it.
+// Both *eventstore.SQLiteStore and the internal pgEventStore satisfy it. LatestSeq is
+// inherited from TurnQuerier (promoted there in issue #879).
 type eventStoreProvider interface {
 	eventstore.TurnQuerier
 	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir eventstore.CursorDirection, limit int) (*eventstore.EventPage, error)
@@ -363,6 +364,26 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	hub.LogHandler = func(level, msg, sessionID string) {
 		admin.AddLog(level, msg, sessionID)
 	}
+	// Hydrate SeqGen from persisted events on reconnect so seq continues
+	// monotonically instead of restarting from 1 (issue #879).
+	hub.SetSeqHydrator(stores.event)
+	hub.SetSeqSessionExists(func(sessionID string) bool {
+		return sm.IsSeqActive(context.Background(), sessionID)
+	})
+	sm.OnRuntimeRelease = func(ctx context.Context, sessionID string) {
+		err := hub.ReleaseSeq(sessionID, func() error {
+			// A zero value means no durable sequence was allocated; remove a
+			// possible hydrated-empty entry without forcing a collector flush.
+			if hub.NextSeqPeek(sessionID) == 0 || stores.collector == nil {
+				return nil
+			}
+			return stores.collector.FlushSession(sessionID)
+		})
+		if err != nil {
+			log.Warn("gateway: retain seq after session flush failure",
+				"session_id", sessionID, "err", err)
+		}
+	}
 
 	var configWatcher *config.Watcher
 	if configPath != "" {
@@ -414,7 +435,21 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	sm.StateNotifier = func(ctx context.Context, sessionID string, state events.SessionState, message string) {
-		env := events.NewEnvelope(aep.NewID(), sessionID, hub.NextSeq(sessionID), events.State, events.StateData{
+		var seq int64
+		if state == events.StateDeleted {
+			seq = hub.NextSeqBeforeRelease(sessionID)
+		} else {
+			releaseSeq, ok := hub.BeginSeqOperation(sessionID)
+			if !ok {
+				return
+			}
+			defer releaseSeq()
+			seq = hub.NextSeqHeld(sessionID)
+		}
+		if seq == 0 {
+			return
+		}
+		env := events.NewEnvelope(aep.NewID(), sessionID, seq, events.State, events.StateData{
 			State:   state,
 			Message: message,
 		})

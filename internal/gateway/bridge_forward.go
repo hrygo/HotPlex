@@ -198,10 +198,22 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 
 	// Flush buffered error that never reached a retry decision point.
 	if fc.pendingError != nil {
-		if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
-			flog.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
+		releaseSeq := func() {}
+		canFlush := true
+		if b.collector != nil {
+			var ok bool
+			releaseSeq, ok = b.hub.BeginSeqOperation(sessionID)
+			if !ok {
+				canFlush = false
+			}
 		}
-		b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data, flog)
+		if canFlush {
+			if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
+				flog.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
+			}
+			b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data, flog)
+			releaseSeq()
+		}
 		fc.pendingError = nil
 	}
 
@@ -244,6 +256,29 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		return
 	}
 
+	// Pin sequence generation for the complete durable forwarding operation,
+	// including turn writes performed before SendToSession assigns a seq.
+	releaseSeq := func() {}
+	if b.collector != nil && b.hub != nil {
+		var ok bool
+		releaseSeq, ok = b.hub.BeginSeqOperation(sessionID)
+		if !ok {
+			return
+		}
+	}
+	defer releaseSeq()
+
+	env = events.Clone(env)
+	env.SessionID = sessionID
+	env.OwnerID = fc.sessOwner
+	if env.Seq == 0 {
+		if b.collector != nil {
+			env.Seq = b.hub.NextSeqHeld(sessionID)
+		} else {
+			env.Seq = b.hub.NextSeq(sessionID)
+		}
+	}
+
 	// Buffer error events for potential LLM retry.
 	if env.Event.Type == events.Error {
 		b.flogOf(fc).Warn("bridge: received error from worker", "session_id", sessionID, "worker_type", workerType, "data", env.Event.Data)
@@ -283,10 +318,6 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if fc.turnTimerFired.Load() {
 		return
 	}
-
-	env = events.Clone(env)
-	env.SessionID = sessionID
-	env.OwnerID = fc.sessOwner
 
 	// Permission dedup: suppress repeated cards for a recently denied
 	// owner+fingerprint. On hit, deliver a local denial to the worker instead
@@ -422,7 +453,19 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 			time.Since(time.UnixMilli(*rec.StartedAt)).Seconds())
 	}
 
-	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, 0, eventKind, events.RuntimeExecutionData{
+	var seq int64
+	if b.collector != nil {
+		// processForwardedEvent already holds the session's sequence lease.
+		// Re-entering BeginSeqOperation through SendToSession can self-deadlock
+		// when a ReleaseSeq writer is queued behind the outer read lock.
+		seq = b.hub.NextSeqHeld(sessionID)
+	} else {
+		seq = b.hub.NextSeq(sessionID)
+	}
+	if seq == 0 {
+		return
+	}
+	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, seq, eventKind, events.RuntimeExecutionData{
 		ExecutionID: rec.ExecutionID,
 		Status:      string(rtStatus),
 	})
@@ -595,10 +638,17 @@ func (b *Bridge) maybeSendDoneFallback(sessionID string, acc *sessionAccumulator
 // emptySuccess flags the message for the empty-success metric path.
 func (b *Bridge) emitDoneFallbackMessage(sessionID string, fc *forwardContext, text string, emptySuccess bool) {
 	fc.turnText.WriteString(text)
+	messageData := events.MessageData{Content: text}
+	var seq int64
+	if b.collector != nil && b.hub != nil {
+		seq = b.nextSeqAndCaptureHeld(sessionID, events.Message, messageData, eventstore.SourceNormal, nil)
+	} else {
+		seq = b.nextSeqAndCapture(sessionID, events.Message, messageData, eventstore.SourceNormal, nil)
+	}
 	env := events.NewEnvelope(
-		aep.NewID(), sessionID, b.hub.NextSeq(sessionID),
+		aep.NewID(), sessionID, seq,
 		events.Message,
-		events.MessageData{Content: text},
+		messageData,
 	)
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
 		tag := "done_fallback"
@@ -607,8 +657,6 @@ func (b *Bridge) emitDoneFallbackMessage(sessionID string, fc *forwardContext, t
 		}
 		b.flogOf(fc).Warn("bridge: done fallback send failed", "session_id", sessionID, "kind", tag, "err", err)
 	}
-	// Persist to the events table so WS event replay also surfaces the fallback.
-	b.captureEvent(sessionID, env.Seq, events.Message, env.Event.Data, b.flogOf(fc))
 }
 
 // maybeTransitionIdleAfterDone transitions a messaging session to IDLE after
@@ -844,15 +892,63 @@ func (b *Bridge) captureEvent(sessionID string, seq int64, eventType events.Kind
 	b.captureDirected(sessionID, seq, eventType, data, "outbound", flog...)
 }
 
+// nextSeqAndCapture keeps central sequence allocation and durable capture in
+// the collector's session barrier. The optional callback is for associated
+// writes (for example, a synthetic turn) that must finish before release.
+func (b *Bridge) nextSeqAndCapture(sessionID string, eventType events.Kind, data any, source string, afterCapture func(seq int64)) int64 {
+	releaseSeq, ok := b.hub.BeginSeqOperation(sessionID)
+	if !ok {
+		return 0
+	}
+	defer releaseSeq()
+	return b.nextSeqAndCaptureHeld(sessionID, eventType, data, source, afterCapture)
+}
+
+// nextSeqAndCaptureHeld is the allocation/capture half used when the caller
+// already pins the Hub sequence barrier for the surrounding durable operation.
+func (b *Bridge) nextSeqAndCaptureHeld(sessionID string, eventType events.Kind, data any, source string, afterCapture func(seq int64)) int64 {
+	if b.collector == nil {
+		return b.hub.NextSeqHeld(sessionID)
+	}
+	ed, err := json.Marshal(data)
+	if err != nil {
+		b.log.Warn("bridge: capture marshal failed", "session_id", sessionID, "type", eventType, "direction", "outbound", "err", err)
+		return b.hub.NextSeqHeld(sessionID)
+	}
+	return b.collector.CaptureWithSeq(
+		sessionID,
+		func() int64 { return b.hub.NextSeqHeld(sessionID) },
+		eventType,
+		ed,
+		"outbound",
+		source,
+		afterCapture,
+	)
+}
+
 // CaptureInboundEvent persists an inbound event for replay only (no turn write).
 // Used for interaction responses (permission/question/elicitation) which are not user turns.
 func (b *Bridge) CaptureInboundEvent(sessionID string, seq int64, eventType events.Kind, data any) {
+	if b.collector != nil && b.hub != nil {
+		releaseSeq, ok := b.hub.BeginSeqOperation(sessionID)
+		if !ok {
+			return
+		}
+		defer releaseSeq()
+	}
 	b.captureDirected(sessionID, seq, eventType, data, "inbound")
 }
 
 // CaptureInbound persists an inbound (user→worker) event for replay.
 // Also writes a user turn record when eventType is Input.
 func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
+	if b.collector != nil && b.hub != nil {
+		releaseSeq, ok := b.hub.BeginSeqOperation(sessionID)
+		if !ok {
+			return
+		}
+		defer releaseSeq()
+	}
 	b.captureDirected(sessionID, seq, eventType, data, "inbound")
 
 	// Write user turn record for Input events.
@@ -970,25 +1066,29 @@ func (b *Bridge) captureSyntheticEvent(p syntheticTurnParams) {
 	if err != nil {
 		return
 	}
-	seq := b.hub.NextSeq(p.SessionID)
-	b.collector.Capture(p.SessionID, seq, events.Done, data, "outbound", p.Source)
-
-	sFalse := false
-	turn := &eventstore.TurnWriteRequest{
-		SessionID:  p.SessionID,
-		Generation: p.Generation,
-		TurnNum:    p.TurnNum,
-		Seq:        seq,
-		Role:       eventstore.RoleAssistant,
-		Content:    p.Message,
-		Platform:   p.Platform,
-		UserID:     p.Owner,
-		Model:      p.Model,
-		Source:     p.Source,
-		Success:    &sFalse,
-		CreatedAt:  time.Now().UnixMilli(),
-	}
-	b.collector.CaptureTurn(turn)
+	b.nextSeqAndCapture(
+		p.SessionID,
+		events.Done,
+		data,
+		p.Source,
+		func(seq int64) {
+			sFalse := false
+			b.collector.CaptureTurn(&eventstore.TurnWriteRequest{
+				SessionID:  p.SessionID,
+				Generation: p.Generation,
+				TurnNum:    p.TurnNum,
+				Seq:        seq,
+				Role:       eventstore.RoleAssistant,
+				Content:    p.Message,
+				Platform:   p.Platform,
+				UserID:     p.Owner,
+				Model:      p.Model,
+				Source:     p.Source,
+				Success:    &sFalse,
+				CreatedAt:  time.Now().UnixMilli(),
+			})
+		},
+	)
 }
 
 // captureAssistantTurn writes an assistant turn record from the done event path.

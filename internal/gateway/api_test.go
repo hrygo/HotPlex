@@ -196,6 +196,11 @@ func (m *mockTurnsStore) DeleteExpiredTurns(ctx context.Context, cutoff time.Tim
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *mockTurnsStore) LatestSeq(ctx context.Context, sessionID string) (int64, error) {
+	args := m.Called(ctx, sessionID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 // ─── Test helpers ───────────────────────────────────────────────────────────────
 
 func newTestAuth(t *testing.T) *security.Authenticator {

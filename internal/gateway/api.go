@@ -618,7 +618,7 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 // @Security     ApiKeyAuth
 // @Param        id         path      string  true   "Session ID"
 // @Param        limit      query     int     false  "Max events (1-1000)"                              default(200)
-// @Param        cursor     query     int     false  "Cursor sequence number"
+// @Param        cursor     query     int     false  "Persisted event row ID cursor"
 // @Param        direction  query     string  false  "Cursor direction (after/before/latest)"  default(latest)
 // @Success      200  {object}  admin.EventsResponse
 // @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
@@ -627,7 +627,7 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 // @Router       /api/sessions/{id}/events [get]
 func (g *GatewayAPI) GetEvents(w http.ResponseWriter, r *http.Request) {
 	if g.eventStore == nil {
-		respondJSON(w, map[string]any{"events": []any{}, "oldest_seq": 0, "newest_seq": 0, "has_older": false})
+		respondJSON(w, map[string]any{"events": []any{}, "oldest_id": 0, "newest_id": 0, "oldest_seq": 0, "newest_seq": 0, "has_older": false})
 		return
 	}
 
@@ -663,7 +663,7 @@ func (g *GatewayAPI) GetEvents(w http.ResponseWriter, r *http.Request) {
 	page, err := g.eventStore.QueryBySession(r.Context(), id, cursor, dir, limit)
 	if err != nil {
 		if errors.Is(err, eventstore.ErrNotFound) {
-			respondJSON(w, map[string]any{"events": []any{}, "oldest_seq": 0, "newest_seq": 0, "has_older": false})
+			respondJSON(w, map[string]any{"events": []any{}, "oldest_id": 0, "newest_id": 0, "oldest_seq": 0, "newest_seq": 0, "has_older": false})
 			return
 		}
 		g.log.Error("gateway: get events failed", "session_id", id, "err", err)

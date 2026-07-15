@@ -137,6 +137,15 @@ func newCleanupTask(info *SessionInfo, now time.Time) *CleanupTask {
 	return &CleanupTask{ID: uuid.NewString(), SessionID: info.ID, WorkerType: info.WorkerType, WorkerSessionID: info.WorkerSessionID, NextAttemptAt: now, CreatedAt: now, UpdatedAt: now}
 }
 
+// upsertSessionArgs passes time.Time values to the driver unformatted. The
+// modernc/sqlite driver already serializes them to RFC3339Nano (verified in the
+// running DB, e.g. "2026-07-14T22:42:20.215036468+08:00") and binds both the
+// stored column and the get_expired_* comparison params in that same format,
+// keeping the lexicographic TEXT comparison correct. Manually UTC-formatting
+// only the write side (a prior attempt at issue #879 #4) broke that invariant:
+// GC expiry queries silently returned no rows. #879 #4's premise (driver uses
+// time.Time.String()) does not hold on modernc v1.51.0 — the format is already
+// canonical, so no write-side reformatting is applied here.
 func upsertSessionArgs(info *SessionInfo, ctxJSON, pkJSON []byte) []any {
 	return []any{info.ID, info.UserID, info.OwnerID, info.BotID, info.BotName, info.WorkerSessionID, info.WorkerType, string(info.State),
 		info.Platform, string(pkJSON), info.WorkDir, info.Title, info.CreatedAt, info.UpdatedAt, info.ExpiresAt, info.IdleExpiresAt,

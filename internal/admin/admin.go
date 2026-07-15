@@ -74,6 +74,8 @@ type ConfigWatcherProvider interface {
 
 type TurnStatsProvider interface {
 	TurnStats(ctx context.Context, sessionID string) (*eventstore.TurnStats, error)
+	// LatestSeq returns the max persisted event seq for a session (issue #879 #5).
+	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 }
 
 type DebugSessionSnapshot struct {

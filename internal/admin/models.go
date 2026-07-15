@@ -91,6 +91,8 @@ type HistoryResponse struct {
 // EventsResponse is returned by GET /api/sessions/{id}/events.
 type EventsResponse struct {
 	Events    []any `json:"events"`
+	OldestID  int64 `json:"oldest_id"`
+	NewestID  int64 `json:"newest_id"`
 	OldestSeq int64 `json:"oldest_seq"`
 	NewestSeq int64 `json:"newest_seq"`
 	HasOlder  bool  `json:"has_older"`

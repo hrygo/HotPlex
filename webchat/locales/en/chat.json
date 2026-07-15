@@ -96,7 +96,10 @@
     "resend_hint": "Something went wrong — please review and resend your message",
     "input_unknown": "The outcome of this message is unknown (it may still be processing). Please retry after a short wait.",
     "input_still_processing": "A previous message is still processing. Please wait a moment and try again.",
-    "send_failed_connection": "Failed to send. Please check your connection and try again."
+    "send_failed_connection": "Failed to send. Please check your connection and try again.",
+    "workspace_recovery_title": "Unable to connect to a workspace",
+    "workspace_recovery_description": "None of the available workspaces passed connection validation. Check permissions or service status, then retry.",
+    "workspace_recovery_retry": "Try again"
   },
   "worker": {
     "name": {

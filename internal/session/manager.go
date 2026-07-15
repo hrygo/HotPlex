@@ -124,9 +124,13 @@ type Manager struct {
 	gcDone  chan struct{}
 	gcReset chan time.Duration // signals GC ticker reset
 
-	OnTerminate   func(sessionID string)
-	OnDelete      func(ctx context.Context, info SessionInfo)
-	StateNotifier func(ctx context.Context, sessionID string, state events.SessionState, message string)
+	OnTerminate func(sessionID string)
+	OnDelete    func(ctx context.Context, info SessionInfo)
+	// OnRuntimeRelease runs synchronously after a durable delete makes a session
+	// non-resumable, or retention GC physically removes it. Consumers use it to
+	// release state that must survive disconnects and ordinary termination.
+	OnRuntimeRelease func(ctx context.Context, sessionID string)
+	StateNotifier    func(ctx context.Context, sessionID string, state events.SessionState, message string)
 
 	auditCollector *audit.Collector // issue #833 P1; nil = audit disabled
 }
@@ -428,6 +432,25 @@ func (m *Manager) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	m.mu.Unlock()
 
 	return info, nil
+}
+
+// IsSeqActive reports whether a session may still allocate or persist AEP
+// sequence events. It rejects the in-memory deleting phase before the durable
+// DELETED write completes, closing the gap where late producers could enter
+// between delete start and the runtime-release barrier.
+func (m *Manager) IsSeqActive(ctx context.Context, id string) bool {
+	m.mu.RLock()
+	ms, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if ok {
+		ms.mu.RLock()
+		active := !ms.deleting && ms.info.State != events.StateDeleted
+		ms.mu.RUnlock()
+		return active
+	}
+
+	info, err := m.store.Get(ctx, id)
+	return err == nil && info.State != events.StateDeleted
 }
 
 // updateSession applies a field mutation under ms.mu, persists to DB, and rolls back on error.
@@ -945,6 +968,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		m.mu.Unlock()
 		if cleanup, ok := m.store.(CleanupTaskStore); ok {
 			_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
+			if err == nil {
+				m.notifyRuntimeRelease(ctx, id)
+			}
 			return err
 		}
 		var deletedInfo *SessionInfo
@@ -956,6 +982,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		if err := m.store.DeletePhysical(ctx, id); err != nil {
 			return err
 		}
+		m.notifyRuntimeRelease(ctx, id)
 		if deletedInfo != nil {
 			m.notifyDelete(*deletedInfo)
 		}
@@ -1017,6 +1044,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 
 	m.notifyStateChange(ctx, id, events.StateDeleted, "session deleted")
 	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
+	m.notifyRuntimeRelease(ctx, id)
 	if _, ok := m.store.(CleanupTaskStore); !ok {
 		m.notifyDelete(candidate)
 	}
@@ -1031,11 +1059,23 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	m.mu.Lock()
 	ms, ok := m.sessions[id]
+	if !ok {
+		// Keep an in-memory deleting tombstone until the store operation
+		// completes. Without it, IsSeqActive falls back to the still-live DB row
+		// and admits late durable producers during physical deletion.
+		ms = &managedSession{info: SessionInfo{ID: id}, deleting: true}
+		m.sessions[id] = ms
+	}
 	var workerToKill worker.Worker
 	var workerType string
 	var deletedInfo *SessionInfo
 	if ok {
 		ms.mu.Lock()
+		if ms.deleting {
+			ms.mu.Unlock()
+			m.mu.Unlock()
+			return ErrSessionCleanupPending
+		}
 		ms.deleting = true
 		info := ms.info
 		deletedInfo = &info
@@ -1047,7 +1087,6 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 			m.releaseWorkerQuota(ctx, ms)
 		}
 		ms.mu.Unlock()
-		delete(m.sessions, id)
 		if wasRunning {
 			m.removeFromRunningIndex(id)
 		}
@@ -1060,19 +1099,32 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 		}
 	}
 
-	if cleanup, ok := m.store.(CleanupTaskStore); ok {
-		_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
-		return err
-	}
-	if deletedInfo == nil && m.OnDelete != nil {
-		if info, err := m.store.Get(ctx, id); err == nil {
-			deletedInfo = info
+	var deleteErr error
+	cleanup, hasCleanup := m.store.(CleanupTaskStore)
+	if hasCleanup {
+		_, deleteErr = cleanup.DeletePhysicalWithCleanup(ctx, id)
+	} else {
+		if deletedInfo == nil && m.OnDelete != nil {
+			if info, err := m.store.Get(ctx, id); err == nil {
+				deletedInfo = info
+			}
 		}
+		deleteErr = m.store.DeletePhysical(ctx, id)
 	}
-	if err := m.store.DeletePhysical(ctx, id); err != nil {
-		return err
+
+	// Remove only our tombstone, and only after the durable delete attempt.
+	// On failure, the next access may safely reload the still-existing DB row.
+	m.mu.Lock()
+	if current, exists := m.sessions[id]; exists && current == ms {
+		delete(m.sessions, id)
 	}
-	if deletedInfo != nil {
+	m.mu.Unlock()
+	if deleteErr != nil {
+		return deleteErr
+	}
+
+	m.notifyRuntimeRelease(ctx, id)
+	if !hasCleanup && deletedInfo != nil {
 		m.notifyDelete(*deletedInfo)
 	}
 	return nil
@@ -1517,6 +1569,9 @@ func (m *Manager) gc(ctx context.Context) {
 	if err != nil {
 		m.log.Error("session: gc (delete_terminated) failed", "cron_cutoff", cronCutoff, "default_cutoff", defaultCutoff, "err", err)
 	} else {
+		for _, info := range deleted {
+			m.notifyRuntimeRelease(ctx, info.ID)
+		}
 		if _, durable := m.store.(CleanupTaskStore); !durable {
 			for _, info := range deleted {
 				m.notifyDelete(*info)
@@ -1530,22 +1585,32 @@ func (m *Manager) gc(ctx context.Context) {
 // safeGo runs fn in a goroutine with panic recovery. Panics are logged with
 // stack trace instead of crashing the entire process.
 func (m *Manager) safeGo(fn func()) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				m.log.Error("session: callback panic",
-					"panic", r,
-					"stack", string(debug.Stack()))
-			}
-		}()
-		fn()
+	go m.safeCall(fn)
+}
+
+func (m *Manager) safeCall(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			m.log.Error("session: callback panic",
+				"panic", r,
+				"stack", string(debug.Stack()))
+		}
 	}()
+	fn()
 }
 
 // notifyStateChange sends state change and termination callbacks.
 func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state events.SessionState, message string) {
 	if m.StateNotifier != nil {
-		m.safeGo(func() { m.StateNotifier(ctx, sessionID, state, message) })
+		notify := func() { m.StateNotifier(ctx, sessionID, state, message) }
+		if state == events.StateDeleted {
+			// Deletion releases the session's sequence counter after this method.
+			// Complete state-event allocation/capture first so a delayed callback
+			// cannot recreate the counter at 1 after collector flushing.
+			m.safeCall(notify)
+		} else {
+			m.safeGo(notify)
+		}
 	}
 	if (state == events.StateTerminated || state == events.StateDeleted) && m.OnTerminate != nil {
 		m.safeGo(func() { m.OnTerminate(sessionID) })
@@ -1558,6 +1623,12 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 func (m *Manager) notifyDelete(info SessionInfo) {
 	if m.OnDelete != nil {
 		m.safeGo(func() { m.OnDelete(context.Background(), info) })
+	}
+}
+
+func (m *Manager) notifyRuntimeRelease(ctx context.Context, sessionID string) {
+	if m.OnRuntimeRelease != nil {
+		m.OnRuntimeRelease(ctx, sessionID)
 	}
 }
 

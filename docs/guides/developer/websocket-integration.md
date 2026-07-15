@@ -1233,7 +1233,9 @@ curl -H "X-API-Key: your-key" \
   "http://localhost:8888/api/sessions/{session_id}/events?limit=200&direction=latest"
 ```
 
-**参数**：`limit`（1-1000）、`cursor`（seq 值）、`direction`（`latest` / `before` / `after`）
+**参数**：`limit`（1-1000）、`cursor`（事件持久化行 `id`）、`direction`（`latest` / `before` / `after`）
+
+事件按持久化 `id` 翻页，而不是按 AEP `seq` 翻页。`seq` 仍用于展示协议顺序，但旧版本重连后可能出现重复或非单调值，不能作为可靠的数据库游标。
 
 **响应**：
 
@@ -1241,30 +1243,36 @@ curl -H "X-API-Key: your-key" \
 {
   "events": [
     {
+      "id": 101,
       "seq": 1,
       "type": "state",
       "data": { "state": "running" },
       "direction": "outbound"
     },
     {
+      "id": 102,
       "seq": 2,
       "type": "input",
       "data": { "content": "你好" },
       "direction": "inbound"
     },
     {
+      "id": 103,
       "seq": 3,
       "type": "message.delta",
       "data": { "content": "你好！" },
       "direction": "outbound"
     },
     {
+      "id": 142,
       "seq": 42,
       "type": "done",
       "data": { "success": true },
       "direction": "outbound"
     }
   ],
+  "oldest_id": 101,
+  "newest_id": 142,
   "oldest_seq": 1,
   "newest_seq": 42,
   "has_older": false
@@ -1275,8 +1283,8 @@ curl -H "X-API-Key: your-key" \
 
 ```bash
 direction=latest&cursor=0     # 初始加载：最新 N 条
-direction=before&cursor=5     # 向前翻页：seq < 5
-direction=after&cursor=42     # 向后追赶：seq > 42
+direction=before&cursor=101   # 向前翻页：id < 101
+direction=after&cursor=142    # 向后追赶：id > 142
 ```
 
 ### 11.4 如何选择

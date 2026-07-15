@@ -34,6 +34,7 @@ import { ApiError } from "@/lib/api/errors";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import type { WorkerType } from "@/lib/ai-sdk-transport/client/constants";
+import { selectRecoveryWorkspace } from "@/lib/workspace-recovery";
 
 // Clear all hotplex workspace/session selection state from localStorage.
 // Called on logout so a different account logging into the same browser does
@@ -65,7 +66,7 @@ function ChatInterface({
     onMetricsChange?: (metrics: SessionMetrics) => void;
     onSessionStateChange?: (state: string) => void;
     workspaceId?: string;
-    onWorkspaceError?: () => void;
+    onWorkspaceError?: (workspaceId?: string) => void;
 }) {
     const { skills, mergeSkills } = useSkillsCache(sessionId);
     const adapter = useHotPlexRuntime({
@@ -75,7 +76,10 @@ function ChatInterface({
         onSkillsChange: mergeSkills,
         onSessionStateChange,
         workspaceId,
-        onWorkspaceError,
+        onWorkspaceError:
+            onWorkspaceError && workspaceId
+                ? () => onWorkspaceError(workspaceId)
+                : undefined,
     });
 
     const runtime = useExternalStoreRuntime(adapter);
@@ -217,8 +221,16 @@ export default function ChatContainer() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [showNewWsModal, setShowNewWsModal] = useState(false);
 
+    const failedWorkspaceIdsRef = useRef(new Set<string>());
+    const workspaceRecoveryInFlightRef = useRef(false);
+    const [workspaceRecoveryFailed, setWorkspaceRecoveryFailed] = useState(false);
+    const [workspaceRecoveryEpoch, setWorkspaceRecoveryEpoch] = useState(0);
+
     // Fetch workspaces list
-    const loadWorkspaces = useCallback(async (selectId?: string) => {
+    const loadWorkspaces = useCallback(async (
+        selectId?: string,
+        excludedIds: ReadonlySet<string> = new Set(),
+    ): Promise<boolean> => {
         try {
             const res = await listWorkspaces();
             let list = res.workspaces || [];
@@ -242,15 +254,18 @@ export default function ChatContainer() {
             // Determine active workspace
             const targetId =
                 selectId || localStorage.getItem("hotplex_active_workspace_id");
-            const found = list.find((w) => w.id === targetId);
-            const active = found || list[0];
+            const active = selectRecoveryWorkspace(list, targetId, excludedIds);
 
             setActiveWorkspace(active);
             if (active) {
                 localStorage.setItem("hotplex_active_workspace_id", active.id);
+            } else {
+                localStorage.removeItem("hotplex_active_workspace_id");
             }
+            return active !== null;
         } catch (err) {
             console.error("Failed to load workspaces", err);
+            return false;
         }
     }, []);
 
@@ -287,6 +302,8 @@ export default function ChatContainer() {
     }, []);
 
     const handleSwitchWorkspace = (ws: Workspace) => {
+        failedWorkspaceIdsRef.current.delete(ws.id);
+        setWorkspaceRecoveryFailed(false);
         setActiveWorkspace(ws);
         localStorage.setItem("hotplex_active_workspace_id", ws.id);
         setSessionMetrics(null); // Reset metrics on workspace switch
@@ -303,19 +320,48 @@ export default function ChatContainer() {
         window.location.replace("/login");
     };
 
-    // Workspace handshake rejected (access denied / not found / disabled) —
-    // clear the stale selection and reload. loadWorkspaces() re-derives the
-    // active workspace as list[0] (only owned workspaces are returned), which
-    // changes the workspaceId prop → useSessions refetches → activeSessionId
-    // changes → ChatInterface remounts and reconnects with a valid workspace.
-    const handleWorkspaceError = useCallback(() => {
-        localStorage.removeItem("hotplex_active_workspace_id");
-        loadWorkspaces();
+    // Exclude each workspace rejected by the handshake. When every candidate is
+    // exhausted, stop remounting the transport and expose an explicit retry.
+    const handleWorkspaceError = useCallback(async (workspaceId?: string) => {
+        if (!workspaceId || workspaceId !== activeWorkspace?.id) return;
+        failedWorkspaceIdsRef.current.add(workspaceId);
+        if (workspaceRecoveryInFlightRef.current) return;
+
+        workspaceRecoveryInFlightRef.current = true;
+        try {
+            const recovered = await loadWorkspaces(
+                undefined,
+                failedWorkspaceIdsRef.current,
+            );
+            setWorkspaceRecoveryFailed(!recovered);
+            if (recovered) {
+                setWorkspaceRecoveryEpoch((value) => value + 1);
+            }
+        } finally {
+            workspaceRecoveryInFlightRef.current = false;
+        }
+    }, [activeWorkspace?.id, loadWorkspaces]);
+
+    const retryWorkspaceRecovery = useCallback(async () => {
+        if (workspaceRecoveryInFlightRef.current) return;
+        workspaceRecoveryInFlightRef.current = true;
+        failedWorkspaceIdsRef.current.clear();
+        setWorkspaceRecoveryFailed(false);
+        try {
+            const recovered = await loadWorkspaces();
+            setWorkspaceRecoveryFailed(!recovered);
+            if (recovered) {
+                setWorkspaceRecoveryEpoch((value) => value + 1);
+            }
+        } finally {
+            workspaceRecoveryInFlightRef.current = false;
+        }
     }, [loadWorkspaces]);
 
     // Sessions hook scoped to active workspace
     const {
         activeSession,
+        loadedWorkspaceId,
         isLoading: sessionsLoading,
         error: sessionError,
         selectSession,
@@ -328,7 +374,13 @@ export default function ChatContainer() {
         workspaceId: activeWorkspace?.id,
     });
 
-    const activeSessionId = activeSession?.id || null;
+    // useSessions clears stale sessions in an effect. Gate synchronously on the
+    // workspace whose list produced activeSession so a workspace switch cannot
+    // remount the transport with the previous workspace's session ID.
+    const activeSessionId =
+        loadedWorkspaceId === activeWorkspace?.id
+            ? activeSession?.id || null
+            : null;
 
     // Handle NewSessionModal confirm
     const handleModalConfirm = useCallback(
@@ -639,7 +691,25 @@ export default function ChatContainer() {
 
                 <main className="flex-1 flex flex-col min-w-0 relative">
                     <div className="flex-1 relative overflow-hidden">
-                        {!activeSessionId && sessionsLoading ? (
+                        {workspaceRecoveryFailed ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg-base)] p-8 text-center">
+                                <div className="w-20 h-20 rounded-3xl glass-dark flex items-center justify-center mb-8">
+                                    <BrandIcon size={60} />
+                                </div>
+                                <h2 className="text-xl font-display font-bold text-[var(--text-primary)] mb-3">
+                                    {t("chat:error.workspace_recovery_title")}
+                                </h2>
+                                <p className="text-sm text-[var(--text-muted)] max-w-md mb-8 leading-relaxed">
+                                    {t("chat:error.workspace_recovery_description")}
+                                </p>
+                                <button
+                                    onClick={retryWorkspaceRecovery}
+                                    className="px-8 py-3 rounded-full bg-[var(--accent-gold)] text-black text-sm font-bold hover:scale-105 active:scale-95 transition-all"
+                                >
+                                    {t("chat:error.workspace_recovery_retry")}
+                                </button>
+                            </div>
+                        ) : !activeSessionId && sessionsLoading ? (
                             <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--bg-base)] z-10 animate-fade-in">
                                 <div className="relative mb-6">
                                     <div className="absolute inset-0 bg-[var(--accent-gold)] opacity-15 blur-2xl rounded-full animate-pulse" />
@@ -674,7 +744,7 @@ export default function ChatContainer() {
                             </div>
                         ) : (
                             <ChatInterface
-                                key={activeSessionId}
+                                key={`${activeSessionId}:${workspaceRecoveryEpoch}`}
                                 sessionId={activeSessionId}
                                 workerType={
                                     activeSession?.worker_type as

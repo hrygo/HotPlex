@@ -90,6 +90,10 @@ func (a *turnsStoreAdapter) TurnStats(ctx context.Context, sessionID string) (*e
 	return a.es.QueryTurnStats(ctx, sessionID)
 }
 
+func (a *turnsStoreAdapter) LatestSeq(ctx context.Context, sessionID string) (int64, error) {
+	return a.es.LatestSeq(ctx, sessionID)
+}
+
 type bridgeAdapter struct {
 	bridge *gateway.Bridge
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,8 +19,9 @@ const (
 	collectorBatchMax      = 100
 	collectorFlushInterval = 1 * time.Second
 
-	deltaFlushSize     = 4096 // bytes — flush accumulator when content exceeds this
-	deltaFlushInterval = 3 * time.Second
+	deltaFlushSize             = 4096 // bytes — flush accumulator when content exceeds this
+	deltaFlushInterval         = 3 * time.Second
+	collectorSessionLockShards = 256
 )
 
 // StorableTypes is the set of AEP event types eligible for event storage replay.
@@ -101,7 +103,10 @@ type Collector struct {
 	accumMu        sync.Mutex
 	accum          map[string]*deltaAccumulator // sessionID → active delta accumulator
 	reasoningAccum map[string]*deltaAccumulator // sessionID → active reasoning accumulator
-	dropped        atomic.Int64
+	// captureLocks serialize producers with FlushSessionAndThen per session.
+	// Fixed sharding avoids an unbounded lock map under high session churn.
+	captureLocks [collectorSessionLockShards]sync.Mutex
+	dropped      atomic.Int64
 }
 
 // NewCollector creates a Collector that writes events to store.
@@ -134,6 +139,39 @@ func newCollector(store EventStore, log *slog.Logger, flush, deltaFlush time.Dur
 // MessageDelta and Reasoning events are accumulated in-memory and merged
 // on flush trigger (MessageEnd, next storable event, size/timer threshold).
 func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, data json.RawMessage, direction, source string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+	c.captureLocked(sessionID, seq, eventType, data, direction, source)
+}
+
+// CaptureWithSeq allocates a sequence number and captures its event under the
+// same per-session barrier used by FlushSessionAndThen. This prevents a
+// producer from reserving an old-generation seq immediately before session
+// release, then publishing it after SeqGen has been forgotten. afterCapture,
+// when non-nil, also runs under the barrier for associated non-event writes.
+func (c *Collector) CaptureWithSeq(
+	sessionID string,
+	nextSeq func() int64,
+	eventType events.Kind,
+	data json.RawMessage,
+	direction, source string,
+	afterCapture func(seq int64),
+) int64 {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	seq := nextSeq()
+	c.captureLocked(sessionID, seq, eventType, data, direction, source)
+	if afterCapture != nil {
+		afterCapture(seq)
+	}
+	return seq
+}
+
+func (c *Collector) captureLocked(sessionID string, seq int64, eventType events.Kind, data json.RawMessage, direction, source string) {
+
 	if eventType == events.MessageDelta {
 		c.flushAndAccumulate(sessionID, seq, false, data)
 		return
@@ -146,15 +184,13 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 
 	// MessageEnd triggers flush of both accumulators but is not stored itself.
 	if eventType == events.MessageEnd {
-		c.flushBoth(sessionID)
+		c.flushBothAndSend(sessionID, nil)
 		return
 	}
 
 	if !IsStorable(eventType) {
 		return
 	}
-
-	c.flushBoth(sessionID)
 
 	req := &captureRequest{event: &StoredEvent{
 		SessionID: sessionID,
@@ -165,7 +201,7 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 		Source:    source,
 		CreatedAt: time.Now().UnixMilli(),
 	}}
-	c.send(req)
+	c.flushBothAndSend(sessionID, req)
 }
 
 // flushAndAccumulate holds accumMu once to cross-flush the other accumulator and
@@ -195,27 +231,55 @@ func (c *Collector) flushAndAccumulate(sessionID string, seq int64, isReasoning 
 			c.log.Warn("eventstore: delta unmarshal failed", "session_id", sessionID, "err", err)
 		}
 	}
-	c.accumMu.Unlock()
-
-	if flushed != nil && flushed.count > 0 {
-		c.send(flushed.toRequest(sessionID))
+	var sizeFlushed *deltaAccumulator
+	if acc != nil && acc.content.Len() >= deltaFlushSize {
+		sizeFlushed = acc
+		if isReasoning {
+			delete(c.reasoningAccum, sessionID)
+		} else {
+			delete(c.accum, sessionID)
+		}
 	}
+	c.sendAccumulators(sessionID, flushed, sizeFlushed)
+	c.accumMu.Unlock()
 }
 
-// flushBoth flushes both delta and reasoning accumulators under a single lock.
-func (c *Collector) flushBoth(sessionID string) {
+// flushBothAndSend serializes accumulator detachment and capture-channel
+// submission. Releasing accumMu before enqueue would let a later concurrent
+// capture submit a higher sequence first and invert persisted ID order.
+func (c *Collector) flushBothAndSend(sessionID string, trailing *captureRequest) {
 	c.accumMu.Lock()
 	dAcc := c.accum[sessionID]
 	delete(c.accum, sessionID)
 	rAcc := c.reasoningAccum[sessionID]
 	delete(c.reasoningAccum, sessionID)
-	c.accumMu.Unlock()
-
-	if dAcc != nil && dAcc.count > 0 {
-		c.send(dAcc.toRequest(sessionID))
+	c.sendAccumulators(sessionID, dAcc, rAcc)
+	if trailing != nil {
+		c.send(trailing)
 	}
-	if rAcc != nil && rAcc.count > 0 {
-		c.send(rAcc.toRequest(sessionID))
+	c.accumMu.Unlock()
+}
+
+func orderedAccumulatorRequests(sessionID string, first, second *deltaAccumulator) []*captureRequest {
+	valid := func(acc *deltaAccumulator) bool { return acc != nil && acc.count > 0 }
+	switch {
+	case valid(first) && valid(second):
+		if second.firstSeq < first.firstSeq {
+			first, second = second, first
+		}
+		return []*captureRequest{first.toRequest(sessionID), second.toRequest(sessionID)}
+	case valid(first):
+		return []*captureRequest{first.toRequest(sessionID)}
+	case valid(second):
+		return []*captureRequest{second.toRequest(sessionID)}
+	default:
+		return nil
+	}
+}
+
+func (c *Collector) sendAccumulators(sessionID string, first, second *deltaAccumulator) {
+	for _, req := range orderedAccumulatorRequests(sessionID, first, second) {
+		c.send(req)
 	}
 }
 
@@ -251,20 +315,46 @@ func (c *Collector) getOrCreateReasoningAccum(sessionID string) *deltaAccumulato
 // skipping the json.Marshal/Unmarshal round-trip of Capture.
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureReasoningString(sessionID string, seq int64, content string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+	c.flushAndAccumulateRaw(sessionID, seq, true, content)
+}
+
+func (c *Collector) flushAndAccumulateRaw(sessionID string, seq int64, isReasoning bool, content string) {
 	c.accumMu.Lock()
-	acc := c.getOrCreateReasoningAccum(sessionID)
+	var other *deltaAccumulator
+	if isReasoning {
+		other = c.accum[sessionID]
+		delete(c.accum, sessionID)
+	} else {
+		other = c.reasoningAccum[sessionID]
+		delete(c.reasoningAccum, sessionID)
+	}
+
+	var acc *deltaAccumulator
+	if isReasoning {
+		acc = c.getOrCreateReasoningAccum(sessionID)
+	} else {
+		acc = c.getOrCreateAccum(sessionID)
+	}
 	if acc == nil {
+		c.sendAccumulators(sessionID, other, nil)
 		c.accumMu.Unlock()
 		return
 	}
 	acc.appendRaw(seq, content)
 
+	var sizeFlushed *deltaAccumulator
 	if acc.content.Len() >= deltaFlushSize {
-		delete(c.reasoningAccum, sessionID)
-		c.accumMu.Unlock()
-		c.send(acc.toRequest(sessionID))
-		return
+		sizeFlushed = acc
+		if isReasoning {
+			delete(c.reasoningAccum, sessionID)
+		} else {
+			delete(c.accum, sessionID)
+		}
 	}
+	c.sendAccumulators(sessionID, other, sizeFlushed)
 	c.accumMu.Unlock()
 }
 
@@ -317,6 +407,30 @@ func (c *Collector) Flush() error {
 	}
 }
 
+// FlushSession submits all accumulated deltas for sessionID and waits until
+// the writer commits everything queued before the flush marker. Callers use it
+// before releasing session-scoped sequence state on physical deletion.
+func (c *Collector) FlushSession(sessionID string) error {
+	return c.FlushSessionAndThen(sessionID, nil)
+}
+
+// FlushSessionAndThen serializes all event producers for sessionID while it
+// drains accumulated and queued writes, then runs after before producers may
+// resume. The gateway uses after to forget SeqGen without a capture gap.
+func (c *Collector) FlushSessionAndThen(sessionID string, after func()) error {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+	c.flushBothAndSend(sessionID, nil)
+	if err := c.Flush(); err != nil {
+		return err
+	}
+	if after != nil {
+		after()
+	}
+	return nil
+}
+
 // Close drains the capture channel and flushes remaining events.
 func (c *Collector) Close() error {
 	c.closeOnce.Do(func() {
@@ -329,25 +443,14 @@ func (c *Collector) Close() error {
 		c.accumMu.Unlock()
 
 		for sid, acc := range pending {
-			if acc.count > 0 {
-				req := acc.toRequest(sid)
-				select {
-				case c.captureC <- req:
-				case <-time.After(5 * time.Second):
-					c.log.Error("eventstore: accumulator flush dropped during close",
-						"session_id", sid, "kind", "turn")
-				}
+			for _, req := range orderedAccumulatorRequests(sid, acc, pendingReasoning[sid]) {
+				c.sendDuringClose(req)
 			}
+			delete(pendingReasoning, sid)
 		}
 		for sid, acc := range pendingReasoning {
-			if acc.count > 0 {
-				req := acc.toRequest(sid)
-				select {
-				case c.captureC <- req:
-				case <-time.After(5 * time.Second):
-					c.log.Error("eventstore: accumulator flush dropped during close",
-						"session_id", sid, "kind", "reasoning")
-				}
+			for _, req := range orderedAccumulatorRequests(sid, nil, acc) {
+				c.sendDuringClose(req)
 			}
 		}
 
@@ -357,6 +460,15 @@ func (c *Collector) Close() error {
 	return nil
 }
 
+func (c *Collector) sendDuringClose(req *captureRequest) {
+	select {
+	case c.captureC <- req:
+	case <-time.After(5 * time.Second):
+		c.log.Error("eventstore: accumulator flush dropped during close",
+			"session_id", req.sessionID(), "kind", kindOf(req))
+	}
+}
+
 // DroppedEvents returns the total number of events dropped due to a full channel.
 func (c *Collector) DroppedEvents() int64 {
 	return c.dropped.Load()
@@ -364,6 +476,20 @@ func (c *Collector) DroppedEvents() int64 {
 
 func (c *Collector) runWriter() {
 	defer c.closeWg.Done()
+	// Recover from panics in flushBatch (e.g. a buggy driver call) so a single
+	// panic does not permanently kill the writer and silently drop ALL subsequent
+	// events + turns. The in-flight batch is lost (already the case on any
+	// flushBatch error), but the channel keeps draining under a fresh goroutine.
+	// The Add(1) here balances the new goroutine's deferred Done() (issue #879
+	// problem 1, reliability defense).
+	defer func() {
+		if r := recover(); r != nil {
+			c.log.Error("eventstore: runWriter panic, restarting goroutine",
+				"panic", r, "stack", string(debug.Stack()))
+			c.closeWg.Add(1)
+			go c.runWriter()
+		}
+	}()
 
 	ticker := time.NewTicker(c.flushInterval)
 	defer ticker.Stop()
@@ -421,15 +547,18 @@ func (c *Collector) flushTimedOutAccumulators(batch *[]*captureRequest) {
 	now := time.Now()
 	c.accumMu.Lock()
 	for sid, acc := range c.accum {
-		if now.Sub(acc.firstSeenAt) >= c.deltaFlush {
+		rAcc := c.reasoningAccum[sid]
+		if now.Sub(acc.firstSeenAt) >= c.deltaFlush ||
+			(rAcc != nil && now.Sub(rAcc.firstSeenAt) >= c.deltaFlush) {
 			delete(c.accum, sid)
-			*batch = append(*batch, acc.toRequest(sid))
+			delete(c.reasoningAccum, sid)
+			*batch = append(*batch, orderedAccumulatorRequests(sid, acc, rAcc)...)
 		}
 	}
 	for sid, acc := range c.reasoningAccum {
 		if now.Sub(acc.firstSeenAt) >= c.deltaFlush {
 			delete(c.reasoningAccum, sid)
-			*batch = append(*batch, acc.toRequest(sid))
+			*batch = append(*batch, orderedAccumulatorRequests(sid, nil, acc)...)
 		}
 	}
 	c.accumMu.Unlock()
@@ -481,6 +610,41 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 			c.log.Error("eventstore: batch commit", "err", err)
 		}
 		done = true
+		return
+	}
+
+	if err := tx.Rollback(); err != nil {
+		c.log.Error("eventstore: batch rollback", "err", err)
+		return
+	}
+	done = true
+	c.flushIndividually(batch)
+}
+
+// flushIndividually isolates a bad request after a batch append failure so one
+// uniqueness violation does not discard unrelated events and turns.
+func (c *Collector) flushIndividually(batch []*captureRequest) {
+	for _, req := range batch {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tx, err := c.store.BeginTx(ctx)
+		if err == nil {
+			switch {
+			case req.turn != nil:
+				err = tx.AppendTurn(ctx, req.turn)
+			case req.event != nil:
+				err = tx.Append(ctx, req.event)
+			}
+		}
+		if err == nil {
+			err = tx.Commit()
+		} else if tx != nil {
+			_ = tx.Rollback()
+		}
+		cancel()
+		if err != nil {
+			c.log.Warn("eventstore: isolated append failed",
+				"session_id", req.sessionID(), "kind", kindOf(req), "err", err)
+		}
 	}
 }
 
@@ -488,29 +652,31 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 // skipping the json.Marshal/Unmarshal round-trip of Capture.
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureDeltaString(sessionID string, seq int64, content string) {
-	c.accumMu.Lock()
-	acc := c.getOrCreateAccum(sessionID)
-	if acc == nil {
-		c.accumMu.Unlock()
-		return
-	}
-	acc.appendRaw(seq, content)
-
-	if acc.content.Len() >= deltaFlushSize {
-		delete(c.accum, sessionID)
-		c.accumMu.Unlock()
-		c.send(acc.toRequest(sessionID))
-		return
-	}
-	c.accumMu.Unlock()
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+	c.flushAndAccumulateRaw(sessionID, seq, false, content)
 }
 
 // ResetSession discards any accumulated delta and reasoning content for the given session.
 func (c *Collector) ResetSession(sessionID string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	c.accumMu.Lock()
 	delete(c.accum, sessionID)
 	delete(c.reasoningAccum, sessionID)
 	c.accumMu.Unlock()
+}
+
+func (c *Collector) captureLock(sessionID string) *sync.Mutex {
+	// FNV-1a without allocating a hash.Hash on the capture hot path.
+	hash := uint32(2166136261)
+	for i := 0; i < len(sessionID); i++ {
+		hash ^= uint32(sessionID[i])
+		hash *= 16777619
+	}
+	return &c.captureLocks[hash%collectorSessionLockShards]
 }
 
 // deltaAccumulator merges streaming content (message.delta or reasoning) in-memory.
