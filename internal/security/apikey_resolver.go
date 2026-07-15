@@ -177,7 +177,7 @@ func (r *DBResolver) Resolve(ctx context.Context, key string) (string, bool) {
 				isNegative: true,
 			})
 		} else {
-			slog.Warn("security: DBResolver query failed", "error", err)
+			slog.Warn("security: DBResolver query failed", "err", err)
 		}
 		return "", false
 	}

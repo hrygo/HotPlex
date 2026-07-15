@@ -329,7 +329,7 @@ func (a *AdminAPI) HandleConfigRollback(w http.ResponseWriter, r *http.Request) 
 
 	_, idx, err := a.configWatcher.Rollback(body.Version)
 	if err != nil {
-		a.log.Error("admin: config rollback failed", "error", err)
+		a.log.Error("admin: config rollback failed", "err", err)
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "rollback failed")
 		return
 	}
@@ -435,6 +435,6 @@ func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err e
 		web.WriteAppError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
-	log.Error(op, "error", err)
+	log.Error(op, "err", err)
 	web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 }

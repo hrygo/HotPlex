@@ -92,7 +92,7 @@ func (m *ACPMapper) MapNotification(ctx context.Context, notif *JSONRPCNotificat
 		Update    json.RawMessage `json:"update"`
 	}
 	if err := json.Unmarshal(notif.Params, &params); err != nil {
-		m.log.Debug("acp mapper: failed to parse session/update params", "error", err)
+		m.log.Debug("acp mapper: failed to parse session/update params", "err", err)
 		return nil
 	}
 
@@ -549,7 +549,7 @@ func (m *ACPMapper) updateUsage(ctx context.Context, raw json.RawMessage) {
 		} `json:"cost"`
 	}
 	if err := json.Unmarshal(raw, &u); err != nil {
-		m.log.Debug("acp mapper: failed to parse usage_update", "error", err)
+		m.log.Debug("acp mapper: failed to parse usage_update", "err", err)
 		return
 	}
 

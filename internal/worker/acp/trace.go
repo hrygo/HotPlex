@@ -91,13 +91,13 @@ func (tw *TraceWriter) rotateLocked() {
 	rotated := tw.path + ".1"
 	_ = os.Remove(rotated)
 	if err := os.Rename(tw.path, rotated); err != nil {
-		slog.Warn("acp trace: rename failed, trace data lost", "error", err, "path", tw.path)
+		slog.Warn("acp trace: rename failed, trace data lost", "err", err, "path", tw.path)
 		tw.file = nil
 		return
 	}
 	f, err := os.OpenFile(tw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		slog.Warn("acp trace: reopen failed after rotation", "error", err, "path", tw.path)
+		slog.Warn("acp trace: reopen failed after rotation", "err", err, "path", tw.path)
 		tw.file = nil
 		return
 	}

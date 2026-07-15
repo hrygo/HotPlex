@@ -255,7 +255,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			phrasesDir := filepath.Join(homeDir, ".hotplex", "phrases")
 			phr, phrasesErr := phrases.Load(phrasesDir, string(entry.Platform), entry.Name)
 			if phrasesErr != nil {
-				log.Warn("phrases: load failed, using defaults", "error", phrasesErr)
+				log.Warn("phrases: load failed, using defaults", "err", phrasesErr)
 				phr = phrases.Defaults()
 			}
 			if setter, ok := adapter.(interface{ SetPhrases(*phrases.Phrases) }); ok {

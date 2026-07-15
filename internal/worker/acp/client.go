@@ -239,7 +239,7 @@ func (c *ACPClient) readLoop(ctx context.Context) {
 				c.log.Debug("acp client: agent stdout closed")
 				return
 			}
-			c.log.Error("acp client: read error", "error", err)
+			c.log.Error("acp client: read error", "err", err)
 			return
 		}
 		if msg == nil {

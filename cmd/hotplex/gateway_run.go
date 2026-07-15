@@ -444,7 +444,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	if stores.sqlDB != nil {
 		rows, err := stores.sqlDB.QueryContext(ctx, "SELECT api_key FROM api_key_users")
 		if err != nil {
-			log.Warn("gateway: preload DB API keys failed", "error", err)
+			log.Warn("gateway: preload DB API keys failed", "err", err)
 		} else {
 			defer func() { _ = rows.Close() }()
 			for rows.Next() {
@@ -454,7 +454,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 				}
 			}
 			if err := rows.Err(); err != nil {
-				log.Warn("gateway: preload DB API keys incomplete", "error", err)
+				log.Warn("gateway: preload DB API keys incomplete", "err", err)
 			}
 		}
 	}
@@ -616,7 +616,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		cronDelivery = cron.NewDelivery(log,
 			func(ctx context.Context, sessionID string) (string, error) {
 				if err := stores.collector.Flush(); err != nil {
-					log.Warn("cron: flush before query", "error", err)
+					log.Warn("cron: flush before query", "err", err)
 				}
 				turns, err := stores.event.QueryTurns(ctx, sessionID, 1, 0)
 				if err != nil || len(turns) == 0 {
@@ -685,11 +685,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	if cookieAuth != nil {
 		oauthManager = security.NewOAuthManager(cookieAuth)
 		if err := cfg.OAuth.Validate(); err != nil {
-			log.Warn("oauth config validation failed", "error", err)
+			log.Warn("oauth config validation failed", "err", err)
 		} else if len(cfg.OAuth.Providers) > 0 {
 			count, err := oauthManager.Reload(ctx, cfg.OAuth)
 			if err != nil {
-				log.Error("oauth manager init failed", "error", err)
+				log.Error("oauth manager init failed", "err", err)
 			}
 			log.Info("gateway: oauth SSO providers loaded", "count", count)
 		}
@@ -698,12 +698,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 				return
 			}
 			if err := next.OAuth.Validate(); err != nil {
-				log.Warn("oauth config reload skipped: validation failed", "error", err)
+				log.Warn("oauth config reload skipped: validation failed", "err", err)
 				return
 			}
 			count, err := oauthManager.Reload(ctx, next.OAuth)
 			if err != nil {
-				log.Error("oauth config reload completed with provider errors", "count", count, "error", err)
+				log.Error("oauth config reload completed with provider errors", "count", count, "err", err)
 				return
 			}
 			log.Info("oauth config reloaded", "count", count)
@@ -746,7 +746,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
 	if err := brain.Init(log); err != nil {
-		log.Warn("Brain initialization failed (fail-open)", "error", err)
+		log.Warn("Brain initialization failed (fail-open)", "err", err)
 	}
 
 	// Effective events/turns retention: when audit is enabled, extend the TTL
@@ -1298,7 +1298,7 @@ func shutdownGateway(
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer func() {
 		if err := observability.Shutdown(shutdownCtx); err != nil {
-			log.Warn("observability: shutdown", "error", err)
+			log.Warn("observability: shutdown", "err", err)
 		}
 		shutdownCancel()
 	}()

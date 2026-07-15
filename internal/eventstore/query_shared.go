@@ -145,7 +145,7 @@ func collectTurnStats(
 		var toolsJSON sql.NullString
 		var toolCount sql.NullInt64
 		if err := rows.Scan(turnStatScanDest(&gen, &ts, scanner.ScanPointer(), &toolsJSON, &toolCount)...); err != nil {
-			log.Warn("eventstore: scan turn stats row", "session_id", sessionID, "error", err)
+			log.Warn("eventstore: scan turn stats row", "session_id", sessionID, "err", err)
 			continue
 		}
 		if stats.Generation == 0 {

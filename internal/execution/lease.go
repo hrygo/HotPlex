@@ -90,7 +90,7 @@ func (m *LeaseManager) renewLoop(ctx context.Context) {
 			renewed, err := m.store.RenewLeases(ctx, m.ownerID, int64(LeaseTTL), excluded)
 			if err != nil {
 				observability.LeaseRenewFailure().Add(ctx, 1)
-				m.log.Warn("lease renew failed", "error", err)
+				m.log.Warn("lease renew failed", "err", err)
 				continue
 			}
 			if renewed > 0 {
@@ -129,7 +129,7 @@ func (m *LeaseManager) recoverOnce(ctx context.Context) {
 	}
 	result, err := m.store.RecoverExpiredLeases(ctx, tracked)
 	if err != nil {
-		m.log.Warn("expired lease recovery failed", "error", err)
+		m.log.Warn("expired lease recovery failed", "err", err)
 		return
 	}
 	if m.exclusions != nil && len(result.ConvergedExecutionIDs) > 0 {
@@ -151,7 +151,7 @@ func (m *LeaseManager) Shutdown(ctx context.Context) error {
 
 	terminated, err := m.store.TerminateOwnerLeases(ctx, m.ownerID, "GATEWAY_SHUTDOWN")
 	if err != nil {
-		m.log.Error("failed to terminate owner leases on shutdown", "error", err)
+		m.log.Error("failed to terminate owner leases on shutdown", "err", err)
 	} else if terminated > 0 {
 		m.log.Info("terminated active leases on shutdown", "terminated", terminated)
 	}

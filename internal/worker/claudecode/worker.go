@@ -402,7 +402,7 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 			slog.Warn("claudecode: model rejected by security policy",
 				"model", session.AllowedModels[0],
 				"session_id", session.SessionID,
-				"error", err,
+				"err", err,
 			)
 		} else {
 			args = append(args, "--model", session.AllowedModels[0])

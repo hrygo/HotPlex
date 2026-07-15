@@ -246,7 +246,7 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 		defer func() {
 			if rv := recover(); rv != nil {
 				a.log.Error("admin: panic recovered",
-					"error", rv,
+					"err", rv,
 					"path", r.URL.Path,
 					"method", r.Method,
 					"stack", string(debug.Stack()),

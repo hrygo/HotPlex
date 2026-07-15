@@ -243,7 +243,7 @@ func (r *Repairer) tryProcess(ctx context.Context, intent *RepairIntent) {
 	}
 
 	r.log.Debug("repair attempt failed",
-		"execution_id", intent.ExecutionID, "attempt", intent.attempts, "error", err)
+		"execution_id", intent.ExecutionID, "attempt", intent.attempts, "err", err)
 
 	backoff := r.cfg.InitialBackoff << uint(intent.attempts)
 	if backoff > r.cfg.MaxBackoff {

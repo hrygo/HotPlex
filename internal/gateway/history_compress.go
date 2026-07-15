@@ -207,7 +207,7 @@ func (c *HistoryCompressor) callBrain(
 	result, err := b.ChatWithOptions(compressCtx, userPrompt, opts)
 	if err != nil {
 		c.log.Warn("history: brain compression failed, falling back to truncation",
-			"session_id", sessionID, "error", err)
+			"session_id", sessionID, "err", err)
 		return "", false
 	}
 

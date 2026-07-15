@@ -150,7 +150,7 @@ func applyMessagingEnv(cfg *Config) {
 					"env", m.env,
 					"field", m.field,
 					"target", "config.Messaging",
-					"error", err,
+					"err", err,
 				)
 			}
 		}
@@ -200,7 +200,7 @@ func applyPlatformEnv(target any, strs, bools, slices []envMapping) {
 					"env", m.env,
 					"field", m.field,
 					"target", fmt.Sprintf("%T", target),
-					"error", err,
+					"err", err,
 				)
 			}
 		}
@@ -212,7 +212,7 @@ func applyPlatformEnv(target any, strs, bools, slices []envMapping) {
 					"env", m.env,
 					"field", m.field,
 					"target", fmt.Sprintf("%T", target),
-					"error", err,
+					"err", err,
 				)
 			}
 		}
@@ -224,7 +224,7 @@ func applyPlatformEnv(target any, strs, bools, slices []envMapping) {
 					"env", m.env,
 					"field", m.field,
 					"target", fmt.Sprintf("%T", target),
-					"error", err,
+					"err", err,
 				)
 			}
 		}

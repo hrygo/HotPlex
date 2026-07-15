@@ -267,7 +267,7 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		} `json:"turn"`
 	}
 	if err := json.Unmarshal(resp, &tr); err != nil {
-		w.Log.Debug("codexcli: turn/start response parse error", "error", err)
+		w.Log.Debug("codexcli: turn/start response parse error", "err", err)
 	} else if tr.Turn.ID == "" {
 		w.Log.Debug("codexcli: turn/start response missing turn.id")
 	} else {

@@ -65,12 +65,12 @@ func CloseJobHandle(handle uintptr) {
 func CreateAndAssignJob(pid int, log *slog.Logger) uintptr {
 	job, err := CreateJobObject()
 	if err != nil {
-		log.Warn("proc: failed to create job object, process tree cleanup disabled", "error", err)
+		log.Warn("proc: failed to create job object, process tree cleanup disabled", "err", err)
 		return 0
 	}
 	if err := AssignProcessToJob(job, pid); err != nil {
 		CloseJobHandle(job)
-		log.Warn("proc: failed to assign process to job object", "pid", pid, "error", err)
+		log.Warn("proc: failed to assign process to job object", "pid", pid, "err", err)
 		return 0
 	}
 	log.Info("proc: assigned process to job object", "pid", pid)
