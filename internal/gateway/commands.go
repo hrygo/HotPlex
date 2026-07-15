@@ -11,7 +11,7 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-// handleControl processes client-originated control messages (terminate, delete).
+// handleControl processes client-originated control messages (terminate, delete, stop).
 // Server-originated control messages (reconnect, session_invalid, throttle) are
 // sent via SendControlToSession.
 func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error {
@@ -66,6 +66,29 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 			h.bridge.clearWorkerRun(env.SessionID, attachedWorker, "")
 		}
 		return nil
+
+	case events.ControlActionStop:
+		// Ownership check: only the session owner can stop.
+		if err := h.sm.ValidateOwnership(ctx, env.SessionID, env.OwnerID, ""); err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeUnauthorized, "ownership required")
+		}
+		w := h.sm.GetWorker(env.SessionID)
+		if w == nil {
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop: no active worker")
+		}
+		if err := w.StopCurrentTurn(ctx); err != nil {
+			h.log.Warn("gateway: stop current turn failed", "session_id", env.SessionID, "err", err)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop failed: %v", err)
+		}
+		// Send done confirmation to the client.
+		doneEnv := events.NewEnvelope(
+			aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID),
+			events.Done, events.DoneData{Reason: "stopped_by_user"},
+		)
+		return h.hub.SendToSession(ctx, doneEnv)
 
 	case events.ControlActionReset:
 		return h.handleReset(ctx, env)

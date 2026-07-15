@@ -154,6 +154,10 @@ type Worker interface {
 	// Gateway reads ResetResult.ConnReplaced to decide whether to spawn a new forwardEvents goroutine.
 	// Note: Gateway layer has already called sm.ClearContext() to clear SessionInfo.Context.
 	ResetContext(ctx context.Context) (ResetResult, error)
+	// StopCurrentTurn 停止 worker 当前正在执行的 turn，session 保持活跃。
+	StopCurrentTurn(ctx context.Context) error
+	// IsStopped returns true if the worker was stopped by user via StopCurrentTurn.
+	IsStopped() bool
 }
 
 // ResetResult describes the outcome of a ResetContext call.

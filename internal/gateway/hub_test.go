@@ -1035,6 +1035,8 @@ func (f *fakeWorker) LastIO() time.Time                                   { retu
 func (f *fakeWorker) ResetContext(context.Context) (worker.ResetResult, error) {
 	return worker.ResetResult{}, nil
 }
+func (f *fakeWorker) StopCurrentTurn(context.Context) error { return nil }
+func (f *fakeWorker) IsStopped() bool                       { return false }
 
 var _ worker.Worker = (*fakeWorker)(nil)
 

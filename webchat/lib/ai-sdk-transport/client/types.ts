@@ -88,6 +88,7 @@ export interface DoneData {
   success: boolean;
   stats?: DoneStats;
   dropped?: boolean;
+  reason?: string;
 }
 
 export interface DoneStats {

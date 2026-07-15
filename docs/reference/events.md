@@ -112,7 +112,7 @@ type ElicitationResponseData struct {
 
 ```go
 type ControlData struct {
-    Action      ControlAction  `json:"action"` // terminate/delete/gc/reset/cd
+    Action      ControlAction  `json:"action"` // terminate/delete/gc/reset/cd/stop
     Reason      string         `json:"reason,omitempty"`
     DelayMs     int            `json:"delay_ms,omitempty"`
     Recoverable bool           `json:"recoverable,omitempty"`
@@ -423,6 +423,7 @@ type DoneData struct {
     Success bool           `json:"success"`
     Stats   map[string]any `json:"stats,omitempty"`
     Dropped bool           `json:"dropped,omitempty"` // 有 delta 被丢弃
+    Reason  string         `json:"reason,omitempty"`  // 如 stopped_by_user
 }
 ```
 

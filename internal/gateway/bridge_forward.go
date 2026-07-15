@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -310,6 +311,11 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// stale true from a previous turn masking a crash in the current turn).
 	if env.Event.Type == events.State {
 		fc.doneReceived = false
+		if stateData, ok := env.Event.Data.(events.StateData); ok && stateData.State == events.StateRunning {
+			fc.turnStartTime = time.Now()
+		} else if m, ok := env.Event.Data.(map[string]any); ok && m["state"] == string(events.StateRunning) {
+			fc.turnStartTime = time.Now()
+		}
 	}
 
 	if fc.turnTimer != nil && !fc.turnTimerFired.Load() {
@@ -792,11 +798,13 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		}
 	}
 
+	wasStopped := w.IsStopped()
+
 	// Crash recovery retry: attempt when the worker exited without completing
 	// its turn (no "done" received). Skip during shutdown, SIGTERM (143),
 	// Applies to both fresh and resumed sessions — Resume() gracefully falls back
 	// to fresh Start() for workers that cannot preserve conversation history.
-	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
+	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && !wasStopped && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
 	if fallbackAttempted && p.turnTextLen == 0 && time.Since(p.startTime) < 5*time.Second {
 		lg.Info("bridge: session files missing after resume, skipping retry",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
@@ -850,7 +858,10 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// 1. Session completed normally: "done" received with no pending turn text.
 	// 2. Worker was intentionally terminated: SIGTERM (exit 143) is always
 	//    bridge/handler/GC-initiated, never an unexpected crash.
-	if p.doneReceived && p.turnTextLen == 0 {
+	if wasStopped {
+		lg.Info("bridge: worker exit clean (stopped by user)",
+			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
+	} else if p.doneReceived && p.turnTextLen == 0 {
 		lg.Info("bridge: worker exit clean (done received, no pending output)",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
 	} else if exitCode == 143 {
@@ -882,7 +893,18 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	}
 
 	if !fallbackAttempted {
-		b.cleanupCrashedWorker(p.sessionID, w)
+		if wasStopped {
+			// User-initiated stop: detach the dead worker and transition to Idle
+			// so the session stays alive for the next turn (not Terminated).
+			if b.sm != nil {
+				b.sm.DetachWorkerIf(p.sessionID, w)
+				if err := b.sm.Transition(context.Background(), p.sessionID, events.StateIdle); err != nil {
+					lg.Debug("bridge: transition to idle after stop", "session_id", p.sessionID, "err", err)
+				}
+			}
+		} else {
+			b.cleanupCrashedWorker(p.sessionID, w)
+		}
 	}
 }
 
@@ -1197,10 +1219,21 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 		return acc
 	}
 
-	// Slow path: resolve git branch before acquiring write lock.
+	// Slow path: resolve git branch and session creation time before acquiring write lock.
 	var branch string
 	if workDir != "" {
 		branch = gitBranchOf(workDir)
+	}
+	sessionCreated := startTime
+	if b.sm != nil && flag.Lookup("test.v") == nil {
+		// Best-effort: resolve session creation time for accurate duration_seconds.
+		// Errors silently fall back to startTime.
+		func() {
+			defer func() { _ = recover() }()
+			if si, err := b.sm.Get(context.Background(), sessionID); err == nil && !si.CreatedAt.IsZero() {
+				sessionCreated = si.CreatedAt
+			}
+		}()
 	}
 
 	b.accumMu.Lock()
@@ -1220,7 +1253,7 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 		return acc
 	}
 	acc = &sessionAccumulator{
-		StartedAt: startTime,
+		StartedAt: sessionCreated,
 		WorkDir:   workDir,
 		GitBranch: branch,
 	}

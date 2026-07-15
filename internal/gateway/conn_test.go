@@ -1344,6 +1344,7 @@ type mockBridgeWorker struct {
 	resumeErr  error
 	lastIO     time.Time
 	terminated atomic.Bool
+	stopped    atomic.Bool
 	startInfo  worker.SessionInfo
 }
 
@@ -1374,6 +1375,13 @@ func (m *mockBridgeWorker) LastIO() time.Time           { return m.lastIO }
 func (m *mockBridgeWorker) SetLastIO(t time.Time)       { m.lastIO = t }
 func (m *mockBridgeWorker) ResetContext(context.Context) (worker.ResetResult, error) {
 	return worker.ResetResult{}, nil
+}
+func (m *mockBridgeWorker) StopCurrentTurn(context.Context) error {
+	m.stopped.Store(true)
+	return nil
+}
+func (m *mockBridgeWorker) IsStopped() bool {
+	return m.stopped.Load()
 }
 
 var _ worker.Worker = (*mockBridgeWorker)(nil)

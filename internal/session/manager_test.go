@@ -1026,6 +1026,12 @@ func (w *mockWorker) ResetContext(ctx context.Context) (worker.ResetResult, erro
 	args := w.Called(ctx)
 	return args.Get(0).(worker.ResetResult), args.Error(1)
 }
+func (w *mockWorker) StopCurrentTurn(_ context.Context) error {
+	return nil
+}
+func (w *mockWorker) IsStopped() bool {
+	return false
+}
 
 // ─── AttachWorker tests ───────────────────────────────────────────────────────
 

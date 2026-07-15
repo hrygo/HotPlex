@@ -693,10 +693,17 @@ export function useHotPlexRuntime({
                 return prev;
             });
 
+            if (cancelTimeoutRef.current) {
+                clearTimeout(cancelTimeoutRef.current);
+                cancelTimeoutRef.current = null;
+            }
             setIsRunning(false);
+            setIsStopping(false);
+            stoppingRef.current = false;
 
             // Fetch skills after the first turn completes (worker conversation is now active)
-            if (!skillsFetchedRef.current) {
+            // Skip if the turn was stopped by the user, since the worker is detached.
+            if (!skillsFetchedRef.current && data?.reason !== "stopped_by_user") {
                 skillsFetchedRef.current = true;
                 try {
                     client.sendWorkerCommand(WorkerStdioCommand.Skills);
@@ -1554,6 +1561,7 @@ export function useHotPlexRuntime({
 
     const [isStopping, setIsStopping] = useState(false);
     const stoppingRef = useRef(false);
+    const cancelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const handleCancel = useCallback(async () => {
         if (stoppingRef.current) return;
@@ -1561,13 +1569,18 @@ export function useHotPlexRuntime({
         setIsStopping(true);
         const client = clientRef.current;
         if (client?.connected) {
-            client.sendControl("terminate");
+            client.sendControl("stop");
         }
-        setTimeout(() => {
-            setIsRunning(false);
-            setIsStopping(false);
-            stoppingRef.current = false;
-        }, 600);
+        if (cancelTimeoutRef.current) {
+            clearTimeout(cancelTimeoutRef.current);
+        }
+        cancelTimeoutRef.current = setTimeout(() => {
+            if (stoppingRef.current) {
+                setIsRunning(false);
+                setIsStopping(false);
+                stoppingRef.current = false;
+            }
+        }, 2000);
     }, []);
 
     // Handler for loading earlier messages (cursor-based pagination)

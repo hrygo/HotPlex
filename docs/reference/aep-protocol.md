@@ -192,6 +192,29 @@ payload 会返回 `INVALID_MESSAGE`。消息平台适配器使用平台原生 me
 | `rewind` | 回退到指定对话快照 |
 | `commit` | 触发代码提交 |
 
+### control（会话控制）
+
+```json
+{
+  "type": "control",
+  "data": {
+    "action": "stop"
+  }
+}
+```
+
+`control` 改变 HotPlex 会话生命周期或当前 turn；它不同于在 Worker 内执行的
+`worker_command`。所有控制操作均要求调用方拥有该 session。
+
+| Action | 说明 |
+|--------|------|
+| `stop` | 中断当前 Worker turn，保留 session；成功时服务端返回 `done.reason="stopped_by_user"`，且不会进行崩溃恢复重试 |
+| `terminate` | 终止 session 及其 Worker |
+| `delete` | 删除 session |
+| `gc` | 归档 session，保留历史记录 |
+| `reset` | 清空上下文；Worker 可原地重置或重新启动 |
+| `cd` | 切换工作目录并创建新 session |
+
 ### ping（心跳）
 
 ```json
@@ -320,12 +343,14 @@ ACP 专用：映射 `CurrentModeUpdate`，Agent 执行模式切换通知。
       "model": "claude-sonnet-4-6",
       "context_used_percent": 45.2
     },
-    "dropped": false
+    "dropped": false,
+    "reason": "stopped_by_user"
   }
 }
 ```
 
 `dropped: true` 表示本轮有 `message.delta` 被丢弃，Client 应以最终完整载荷覆盖渲染。
+`reason` 是可选终止原因；用户停止当前 turn 时为 `"stopped_by_user"`。
 
 > **注意**：`stats` 字段类型为 `map[string]any`，无固定 schema。上表列出的是常见字段，实际返回的字段取决于 Worker 类型和执行结果，可能包含 `cost_usd`、`cache_read_tokens` 等额外信息。
 

@@ -125,3 +125,11 @@ func (w *Worker) LastIO() time.Time {
 func (w *Worker) ResetContext(_ context.Context) (worker.ResetResult, error) {
 	return worker.ResetResult{}, nil
 }
+
+func (w *Worker) StopCurrentTurn(_ context.Context) error {
+	return nil
+}
+
+func (w *Worker) IsStopped() bool {
+	return false
+}

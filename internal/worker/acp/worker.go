@@ -701,6 +701,21 @@ func (w *Worker) Terminate(ctx context.Context) error {
 	return w.BaseWorker.Terminate(ctx)
 }
 
+// StopCurrentTurn stops the current turn by calling client.Cancel RPC on the ACP agent.
+func (w *Worker) StopCurrentTurn(ctx context.Context) error {
+	w.Log.Info("acp: stopping current turn")
+	w.MarkStopped()
+	w.Mu.Lock()
+	client := w.client
+	w.Mu.Unlock()
+	if client == nil {
+		return nil
+	}
+	cancelCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return client.Cancel(cancelCtx, w.GetWorkerSessionID())
+}
+
 // ─── Conn ────────────────────────────────────────────────────────────────────
 
 // Conn returns the acpConn as a SessionConn (overrides base.BaseWorker.Conn).

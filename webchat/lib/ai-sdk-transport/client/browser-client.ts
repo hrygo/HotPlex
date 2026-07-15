@@ -149,7 +149,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     resolve: () => void;
     reject: (err: Error) => void;
   } | null = null;
-  private inputRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private inputSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private inputTombstoneTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingConnectReject: ((err: Error) => void) | null = null;
@@ -350,7 +349,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       }
 
       if (wasReconnecting && this.pendingInput?.retryable) {
-        this._clearInputRetry();
         this._sendInputWithID(this.pendingInput.content, this.pendingInput.clientMessageId);
       }
 
@@ -378,18 +376,14 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         }
 
         this.emit('error', errData, env);
-        if (errData.code === ErrorCode.SessionBusy) {
-          this._handleSessionBusy();
-        } else {
-          // Any definitive error settles the pending input so the client can
-          // never be locked out of sending by a non-busy rejection (e.g.
-          // SESSION_NOT_FOUND, INTERNAL_ERROR) that arrives without a Done.
-          this._settlePending({
-            kind: 'reject',
-            error: new Error(errData.code || errData.message || 'Gateway error'),
-            force: true,
-          });
-        }
+        // Every gateway error is a definitive outcome for the submitted input.
+        // In particular, retrying SESSION_BUSY at a fixed interval creates a
+        // request storm while another turn owns the session.
+        this._settlePending({
+          kind: 'reject',
+          error: new Error(errData.code || errData.message || 'Gateway error'),
+          force: true,
+        });
         break;
       }
 
@@ -403,8 +397,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         if (this.pendingInput?.clientMessageId === ackData.client_message_id &&
             ackData.status !== 'accepted') {
           this.pendingInput.retryable = false;
-          const isSessionBusy = ackData.status === 'failed' &&
-            ackData.error_code === ErrorCode.SessionBusy;
           if (ackData.status === 'delivered') {
             // A delivered outcome resolves the pending input — including the
             // duplicate-delivered replay on reconnect — so the client never
@@ -416,15 +408,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
               error: new Error(ackData.error_code || ackData.status.toUpperCase()),
               tombstone: true,
             });
-          } else if (!isSessionBusy && ackData.status === 'failed') {
+          } else if (ackData.status === 'failed') {
             this._settlePending({
               kind: 'reject',
               error: new Error(ackData.error_code || ackData.status.toUpperCase()),
               force: true,
             });
           }
-          // SESSION_BUSY failed acks are handled by the Error event's
-          // _handleSessionBusy; intentionally not settled here.
         }
         this.emit('inputAck', ackData, env);
         break;
@@ -622,9 +612,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this._send(env);
   }
 
-  sendControl(action: 'terminate' | 'delete'): void {
+  sendControl(action: 'terminate' | 'delete' | 'stop'): void {
     const env = createControlEnvelope(this._sessionId!, action);
     this._send(env);
+    if (action === 'stop') {
+      this._settlePending({ kind: 'resolve' });
+    }
   }
 
   sendWorkerCommand(command: typeof WorkerStdioCommand[keyof typeof WorkerStdioCommand], args?: string, extra?: Record<string, unknown>): void {
@@ -792,38 +785,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
   }
 
-  // ============================================================================
-  // SESSION_BUSY Auto-Retry
-  // ============================================================================
-
-  private _handleSessionBusy(): void {
-    if (!this.pendingInput || this.inputRetryTimer) {
-      return;
-    }
-
-    this.pendingInput.clientMessageId = newEventId();
-    this.pendingInput.retryable = true;
-    this.pendingInput.tombstone = false;
-
-    this.inputRetryTimer = setTimeout(() => {
-      this.inputRetryTimer = null;
-
-      if (this.ws && this.ws.readyState === WebSocket.OPEN && this.pendingInput) {
-        // SESSION_BUSY is a definitive rejection, so a later attempt gets a
-        // fresh client message ID. Only ambiguous transport retries should
-        // reuse an ID and rely on the gateway's idempotency ledger.
-        this._sendInputWithID(this.pendingInput.content, this.pendingInput.clientMessageId);
-      }
-    }, ProtocolConstants.SessionBusyRetryDelayMs);
-  }
-
-  private _clearInputRetry(): void {
-    if (this.inputRetryTimer) {
-      clearTimeout(this.inputRetryTimer);
-      this.inputRetryTimer = null;
-    }
-  }
-
   // ─── Pending-input lifecycle ───────────────────────────────────────────────
   //
   // _settlePending is the single point that clears or tombstones a pending
@@ -832,7 +793,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   // the client can never be permanently locked out of sending.
 
   private _clearInputTimers(): void {
-    this._clearInputRetry();
     if (this.inputSettleTimer) {
       clearTimeout(this.inputSettleTimer);
       this.inputSettleTimer = null;

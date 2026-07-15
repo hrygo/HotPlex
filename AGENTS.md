@@ -1,6 +1,6 @@
 # HotPlex 项目知识库
 
-**最后更新**: 2026-07-13 · **分支**: main · **版本**: v1.34.0 · **提交**: 42dde391
+**最后更新**: 2026-07-15 · **分支**: feat/issue-880 · **版本**: v1.34.0 · **提交**: ee01643f
 
 ---
 
@@ -24,6 +24,10 @@
 - **日志**: `log/slog` JSON handler
 - **测试**: `testify/require`、table-driven、`t.Parallel()`、单模块 ≤5s（`-count=1 -race`）、禁止 `time.Sleep` 等待异步结果（改用 `require.Eventually` 或 channel 信号）
 - **Worker 注册**: `init()` + `worker.Register()` 模式
+- **Worker 接口变更**: 同步更新全部 adapter、测试 mock、`internal/worker/noop` 与 `registry_test`；新增能力须明确其在 CLI、单例和 RPC Worker 上的语义
+- **AEP wire contract**: 修改 `pkg/events` 的 Kind、Data 或 JSON tag 时，同步更新 Go SDK、三种示例 SDK、`docs/reference/{aep-protocol,events}.md` 与双向协议测试；新增字段必须向后兼容
+- **持久化输入**: Gateway 负责 accept → ACK → Worker 投递，`execution` 只保存 SHA-256 payload 指纹，绝不保存 prompt、metadata 值、凭证或原始 Worker 错误
+- **数据库迁移**: SQLite 与 PostgreSQL migration 必须成对新增；同步补 migration 与跨实例/条件更新测试，禁止只修一套方言
 - **关闭顺序**: signal → cancel ctx → tracing → hub → bridge → sessionMgr → HTTP
 - **服务重启**: 必须使用 `hotplex service restart` 原子指令，禁止手动拆分 `stop && sleep && start`（仅二进制替换场景需手动 stop 等待）
 - **非 main 分支 push**: 非 main 分支本地验证通过后直接 commit + push，无需询问用户确认
@@ -50,6 +54,10 @@
 - **锁顺序**: `m.mu` → `ms.mu`（防止死锁）
 - **背压**: 丢弃 `message.delta`，保留 `state`/`done`/`error`
 - **Seq 分配**: Per-session 原子单调计数器
+- **Turn 完整性**: turn 计数和 generation 从 event store 恢复；转发器冻结 Worker Conn，避免 `/reset` 或跨平台重连把事件写入过期连接
+- **停止当前轮次**: AEP `control.stop` 只中断当前 Worker turn、保留 session；返回 `done.reason="stopped_by_user"`，且不得触发 crash fallback
+- **输入 owner lease**: `accepted` 仅能前进至 `delivered` / `unknown` / `failed`；lease 过期须置为 `unknown` 并 fence，晚到的同一 Worker run 完成事件可收敛状态，不能自动重投
+- **远端会话清理**: 删除会话时在同一持久化操作中写入 cleanup outbox；由 `CleanupRunner` 租约执行、指数退避，不能以同步远端删除阻塞或回滚本地生命周期
 - **进程终止**: 3 层（SIGTERM → 等待 5s → SIGKILL）
 - **Detached Restart**: `--detached` fork 独立 PGID helper，60s 冷却期防循环（`pid.go: restartMarker`）
 - **Agent 配置**: B/C 双通道注入（通道结构、加载方式、fallback 规则见 [配置参考](#配置参考)）
@@ -102,6 +110,8 @@
 - `handler.go` - `Handler` AEP 事件分发（`SessionManager` 子接口组合：SessionReader/Lifecycle/Transitioner/WorkerManager/Admin）
 - `bridge.go` - `Bridge` Session ↔ Worker 生命周期编排
 - `bridge_forward.go` - `forwardEvents` 事件转发循环（`forwardContext` 单 goroutine 所有权）
+- `commands.go` - AEP `control` 操作（含所有权校验的 `stop` / reset / GC / CD）
+- `deps.go` - Gateway 依赖边界（event store、execution lease/repairer、cleanup outbox 等可选组件）
 - `llm_retry.go` - `LLMRetryController` 自动重试
 - `api.go` - `GatewayAPI` HTTP session 端点
 - `worker_cmds.go` - Worker 命令分发（context usage/MCP status/set model 等）
@@ -111,6 +121,7 @@
 - `manager.go` - `Manager` 5 状态机、状态迁移、GC
 - `store.go` - SQLite 持久化
 - `pg_store.go` - PostgreSQL 持久化
+- `cleanup_outbox.go` - 删除后的 Worker 远端会话清理任务：持久化、租约、重试与去重
 - `key.go` - `DeriveSessionKey` UUIDv5 确定性 session ID
 - `pool.go` - `PoolManager` 全局 + 每用户配额
 
@@ -152,6 +163,10 @@
 - `proc/` - 跨平台进程生命周期管理 (PGID/Job Object)
 - `base/` - 共享 BaseWorker + Conn + MetadataHandler
 
+**Admin / Audit**：
+- `admin/` - 管理 API、用户/会话视图、Bot 配置与审计写入
+- `audit/` - 用户行为与凭证边界审计事件；新增审计事件从认证/凭证边界发出，避免按请求重复记录
+
 **Cron** (`internal/cron/`)：
 - `cron.go` - Scheduler 核心：内存索引、CreateJob/UpdateJob/DeleteJob、rebuildIndex
 - `timer.go` - timerLoop tick 引擎：collectDue → 并发槽 CAS → executeJob → 生命周期检查
@@ -169,10 +184,10 @@
 - `config/` - Viper 配置 + 热重载 + 继承 + 审计/回滚。消息层共享默认值（WorkerType, STT, TTS）通过 `FillFrom()` 传播到平台配置。三级优先级：platform > messaging > Default()。多 bot 支持：`SlackBotConfig`/`FeishuBotConfig` + `normalizeSlackBots`/`normalizeFeishuBots` 向后兼容归一化
 - `security/` - API Key 认证（`Authenticator`）、Bot ID 提取（`BotIDFromRequest`）、SSRF 防护、路径安全
 - `skills/` - Skills 发现
-- `observability/` - Prometheus 指标 + OpenTelemetry 分布式追踪（30+ 指标、W3C TraceContext 传播、`sync.Once` 懒注册 + noop 降级）
+- `observability/` - Prometheus 指标 + OpenTelemetry 分布式追踪（turn 完整性、lease/repair 等诊断指标；W3C TraceContext 传播、`sync.Once` 懒注册 + noop 降级）
 - `service/` - 跨平台系统服务管理（systemd/launchd/SCM）
-- `eventstore/` - 会话事件持久化 + delta 聚合
-- `execution/` - 普通输入持久化入口账本、幂等去重与投递状态
+- `eventstore/` - 会话事件持久化、delta 聚合及按 generation/turn 的历史恢复
+- `execution/` - 内容无关的输入入口账本、幂等去重、owner lease 恢复与有界终态修复；不持久化 prompt 或原始 Worker 错误
 - `updater/` - 自更新（GitHub API、sha256 校验、原子替换）
 - `dbutil/` - 数据库方言抽象（Dialect, Rebind, BoolValue）、DB 封装、跨 store 连接生命周期
 - `sqlutil/` - SQLite 驱动（modernc.org/sqlite，纯 Go）+ PostgreSQL 驱动（jackc/pgx/v5）+ `WriteMu` 跨 store 全局写序列化（消除 SQLITE_BUSY，PG 下为 no-op）
@@ -221,6 +236,9 @@ configs/   - 配置文件
 | 路由注册        | `cmd/hotplex/routes.go`          | HTTP 路由                                                  |
 | 多 bot 配置     | `internal/config/config_types.go` | `SlackBotConfig`/`FeishuBotConfig`（normalize/propagation 见 `config_defaults.go`） |
 | Bot 状态 API    | `internal/admin/bot_handlers.go` | `BotListerProvider` + HTTP handlers                        |
+| 输入投递可靠性  | `internal/gateway/handler.go` + `internal/execution/` | durable accept、active gate、owner lease、终态 repair       |
+| 远端会话清理    | `internal/session/cleanup_outbox.go` | 本地删除事务 + 异步 Worker 专属清理                         |
+| AEP 控制或事件  | `pkg/events/events.go` + `internal/gateway/commands.go` | 兼容性、所有权与客户端/文档同步                             |
 
 ### 跨平台兼容
 
@@ -234,13 +252,20 @@ configs/   - 配置文件
 - 使用 `*_unix.go` / `*_windows.go` build tags
 - CI 必须通过 Linux + macOS + Windows 三平台测试
 
+### 可靠性变更检查清单
+
+- **输入生命周期**：覆盖重复 ID、payload 冲突、active gate、Worker 投递失败、lease 过期与晚到 `done` 收敛；不能把 `unknown` 当作可安全重投。
+- **会话删除**：验证本地状态变更与 cleanup task 原子入队；远端清理失败只能重试，不能复活或阻塞已删除会话。
+- **事件顺序**：所有转发路径使用 per-session Seq；替换 Worker Conn 或 `/reset` 时旧 forwarder 不得处理新连接事件或触发 crash recovery。
+- **可观测性**：新计数器/直方图通过访问器以 `sync.Once` 注册，并在 `docs/reference/metrics.md` 记录用户可查询的指标。
+
 ### PR Review 修复循环
 
-push 后等待自动 review（CI 成功后由 GitHub 侧 webhook/Action 自动触发新一轮）。如需手动触发，走仓库配置的 GitHub Action `workflow_dispatch` 或 PR 评论指令。
+自动化 review CI 已取消。push 后由开发者自行审查或请求人工 review。
 
 ```
-push → 等 review（自动）→ 一次性修 P0/P1 + 值得的 P2 → push → 重复
-终止：最新 review 对当前 HEAD 为 APPROVED 且无新 P0/P1
+push → 自行审查 / 请求人工 review → 一次性修 P0/P1 + 值得的 P2 → push → 重复
+终止：review 对当前 HEAD 为 APPROVED 且无新 P0/P1
 ```
 
 **修复前先核实**（review 可能针对旧 commit 或含误报）：① 发现指向的代码位置在当前 HEAD 仍存在；② 该发现未被后续 commit 修过。一轮 review 的所有发现**一次性修、一次 push**，避免逐条触发新轮次。

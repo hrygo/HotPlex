@@ -81,6 +81,8 @@ func (m *mockWorker) LastIO() time.Time                                    { ret
 func (m *mockWorker) ResetContext(_ context.Context) (worker.ResetResult, error) {
 	return worker.ResetResult{}, nil
 }
+func (m *mockWorker) StopCurrentTurn(_ context.Context) error { return nil }
+func (m *mockWorker) IsStopped() bool                         { return false }
 
 var errTestNotFound = context.DeadlineExceeded
 

@@ -102,7 +102,7 @@ describe("BrowserHotPlexClient input retry identity", () => {
         expect(send.mock.calls[1][0].id).toBe(firstId);
     });
 
-    it("uses a new envelope ID after a definitive SESSION_BUSY rejection", async () => {
+    it("settles a SESSION_BUSY rejection without retrying the input", async () => {
         vi.useFakeTimers();
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
@@ -119,18 +119,16 @@ describe("BrowserHotPlexClient input retry identity", () => {
         const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
 
         const pending = client.sendInputAsync("hello");
-        const first = send.mock.calls[0][0];
+        const rejected = expect(pending).rejects.toThrow("SESSION_BUSY");
         route(client, envelope(EventKind.Error, { code: "SESSION_BUSY", message: "busy" }));
         await vi.advanceTimersByTimeAsync(1_000);
 
-        expect(send).toHaveBeenCalledTimes(2);
-        expect(send.mock.calls[1][0].id).not.toBe(first.id);
-
-        route(client, envelope(EventKind.Done, { success: true }));
-        await expect(pending).resolves.toBeUndefined();
+        expect(send).toHaveBeenCalledOnce();
+        await rejected;
+        expect(() => client.sendInput("second")).not.toThrow();
     });
 
-    it("uses the rotated SESSION_BUSY ID once when reconnect wins the retry race", async () => {
+    it("does not resend a SESSION_BUSY-rejected input after reconnect", async () => {
         vi.useFakeTimers();
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
@@ -153,7 +151,7 @@ describe("BrowserHotPlexClient input retry identity", () => {
         const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
 
         const pending = client.sendInputAsync("hello");
-        const rejectedId = send.mock.calls[0][0].id;
+        const rejected = expect(pending).rejects.toThrow("SESSION_BUSY");
         route(client, envelope(EventKind.Error, { code: "SESSION_BUSY", message: "busy" }));
         internal._reconnecting = true;
         internal._handleMessage(
@@ -161,14 +159,10 @@ describe("BrowserHotPlexClient input retry identity", () => {
             vi.fn(),
             vi.fn(),
         );
-        const retriedId = send.mock.calls[1][0].id;
         await vi.advanceTimersByTimeAsync(1_000);
 
-        expect(retriedId).not.toBe(rejectedId);
-        expect(send).toHaveBeenCalledTimes(2);
-
-        route(client, envelope(EventKind.Done, { success: true }));
-        await expect(pending).resolves.toBeUndefined();
+        expect(send).toHaveBeenCalledOnce();
+        await rejected;
     });
 
     it("does not resend after a terminal acknowledgement", () => {
@@ -426,5 +420,32 @@ describe("BrowserHotPlexClient input retry identity", () => {
 
         expect(internal.pendingInput).toBeNull();
         await expect(pending).rejects.toThrow("link lost");
+    });
+
+    it("clears and resolves pending input immediately when sendControl('stop') is called", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            pendingInput: unknown;
+            ws: { readyState: number } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1 };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const pending = client.sendInputAsync("hello");
+        expect(internal.pendingInput).not.toBeNull();
+
+        client.sendControl("stop");
+
+        expect(internal.pendingInput).toBeNull();
+        await expect(pending).resolves.toBeUndefined();
     });
 });

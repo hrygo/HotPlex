@@ -377,6 +377,14 @@ func (w *Worker) Terminate(_ context.Context) error {
 	return nil
 }
 
+// StopCurrentTurn stops the current turn by canceling the SSE stream and releasing the server reference.
+func (w *Worker) StopCurrentTurn(ctx context.Context) error {
+	w.Log.Info("opencodeserver: stopping current turn via release")
+	w.MarkStopped()
+	w.release()
+	return nil
+}
+
 // Kill closes the SSE connection and releases the singleton ref.
 // Does NOT kill the shared server process.
 func (w *Worker) Kill() error {
