@@ -462,7 +462,7 @@ type ErrorData struct {
 | `INVALID_MESSAGE` | 消息格式无效 |
 | `SESSION_NOT_FOUND` | Session 不存在 |
 | `SESSION_BUSY` | Session 正忙（硬拒绝） |
-| `SESSION_ALREADY_CONNECTED` | Session 已有 WebChat WebSocket owner；当前连接不可用，等待原 owner 关闭后由用户显式重试 |
+| `SESSION_ALREADY_CONNECTED` | Session 已有直接 `/ws` 连接；当前连接不可用，等待原连接关闭后再显式、串行重试（内置 WebChat 与企业 WS 集成都适用） |
 | `SESSION_EXPIRED` | Session 已过期 |
 | `SESSION_TERMINATED` | Session 已终止 |
 | `SESSION_INVALIDATED` | Session 被失效 |

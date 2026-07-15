@@ -83,6 +83,7 @@ HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API �
 | 指标 | 类型 | 标签 | 说明 |
 |------|------|------|------|
 | `hotplex.gateway.connections` | ObservableGauge | — | 当前 WebSocket 连接数 |
+| `hotplex.gateway.webchat.session_owner_connections` | ObservableGauge | — | 当前拥有直接 WebSocket owner 的 session 数 |
 | `hotplex.gateway.messages` | Counter | `direction`, `event_type` | WS 消息收发 |
 | `hotplex.gateway.events` | Counter | `event_type`, `direction` | AEP 事件透传 |
 | `hotplex.gateway.init.handshake.duration` | Histogram | — | WS 握手耗时 |
@@ -92,6 +93,9 @@ HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API �
 | `hotplex.gateway.delta.coalesced` | Counter | — | Delta 合并数 |
 | `hotplex.gateway.delta.flush` | Counter | — | 合并 delta 刷新数 |
 | `hotplex.gateway.errors` | Counter | `error_code` | 错误分类计数 |
+| `hotplex.gateway.webchat.duplicate_connection_rejected` | Counter | — | 因已有 session owner 被拒绝的 init 数 |
+| `hotplex.gateway.webchat.non_owner_ingress_rejected` | Counter | — | 非 owner 发起受保护入站事件的拒绝数 |
+| `hotplex.gateway.webchat.owner_release_not_current` | Counter | — | 非当前 owner 尝试释放 owner 的次数 |
 
 ### 2.4 Pool 指标
 
@@ -236,6 +240,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 | Delta 背压丢弃 | `rate(hotplex_gateway_deltas_dropped_total[5m])` | Time series | 流量压力 |
 | Cron 错误率 | `rate(hotplex_cron_errors_total[5m])` | Time series | 定时任务健康 |
 | 错误分类 | `hotplex_gateway_errors_total` | Stacked bar | 错误归因 |
+| 重复 WS 连接拒绝 | `rate(hotplex_gateway_webchat_duplicate_connection_rejected_total[5m])` | Time series | 发现同一 session 的并发连接或重连竞争 |
 | 重试耗尽 | `rate(hotplex_retry_exhaustion_total[5m])` | Time series | LLM 稳定性 |
 
 ### 布局建议
@@ -265,6 +270,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 | CronJobFailures | `rate(hotplex_cron_errors_total[10m])` | > 0 | P2 | 定时任务异常 |
 | PoolDoubleRelease | `increase(hotplex_pool_release_errors_total[1h])` | > 0 | P2 | 代码 Bug 信号 |
 | LLMRetryExhaustion | `rate(hotplex_retry_exhaustion_total[5m])` | > 0 | P1 | LLM 调用不可用 |
+| RepeatedSessionConnectionConflict | `rate(hotplex_gateway_webchat_duplicate_connection_rejected_total[10m])` | 持续 > 0 | P2 | 客户端并发重连或连接切换未排空 |
 
 ### SLO 参考
 

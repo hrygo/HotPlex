@@ -351,6 +351,7 @@ WebSocket 连接建立后，**必须在 30 秒内**发送 `init` 作为第一帧
 | `UNAUTHORIZED`       | 认证失败                        |
 | `RATE_LIMITED`       | 握手频率过高                    |
 | `CONFIG_INVALID`     | allowed_tools 或 model 校验失败 |
+| `SESSION_ALREADY_CONNECTED` | 同一 session 已有直接 WebSocket 连接；关闭原连接后再显式重试 |
 
 ---
 
@@ -553,7 +554,7 @@ Bob   (key: ak-bob,   resolver->userID: "bob")   -> "bob|claude_code|tab-1|/proj
 const tabId = `sess_${crypto.randomUUID()}`;
 ```
 
-如果两个 tab 用相同的 clientSessionID，后加入的 tab 接管会话，先前的不再收到消息。
+如果两个 tab 用相同的 clientSessionID，它们会解析到同一 Gateway Session；同一时刻只能有一个直接 WebSocket 连接完成该 session 的 init。后加入的连接会收到 `SESSION_ALREADY_CONNECTED`，不会接管原连接、创建 Worker 或改变会话状态。每个 tab 应生成独立的 clientSessionID。
 
 ---
 
@@ -763,7 +764,19 @@ Worker 执行过程中还可能产生：
 3. 发送 init，`session_id` 携带 init_ack 返回的服务端 UUID（推荐）或原始 clientSessionID
 4. Gateway 解析 session → 自动恢复（详见 §5.2 解析流程）
 
-### 8.3 完整重连示例
+### 8.3 同一 Session 的连接所有权
+
+Gateway 对**所有直接连接 `/ws` 的客户端**实行每个 session 单连接限制；这不仅适用于内置 WebChat，也适用于企业自建前端、SDK 和其他 WebSocket Gateway 集成。首个完成 `init` 的连接成为该 session 的 owner；在它关闭前，后续使用同一 session 的 `init` 会收到 `init_ack` 错误，`code` 为 `SESSION_ALREADY_CONNECTED`，随后连接关闭。
+
+这与 `SESSION_BUSY` 不同：`SESSION_BUSY` 表示同一已建立连接上的 session 正在执行，拒绝新的 `input`；`SESSION_ALREADY_CONNECTED` 表示握手阶段已有另一条直接 WebSocket 连接。
+
+企业客户端应按以下方式处理：
+
+1. 每个会话最多维护一条活动 `/ws` 连接；替换连接前先关闭旧连接并等待其关闭完成。
+2. 收到 `SESSION_ALREADY_CONNECTED` 时，不要并发自动重连；保留用户可见状态，待旧连接确认关闭后由用户或受控的串行重试流程显式重试。
+3. 需要并行对话时，为每个窗口、设备或业务流使用不同的 `clientSessionID`。
+
+### 8.4 完整重连示例
 
 ```javascript
 class HotPlexClient {
@@ -782,6 +795,7 @@ class HotPlexClient {
 
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
+    this.reconnectBlocked = false;
   }
 
   connect() {
@@ -790,13 +804,23 @@ class HotPlexClient {
     this.ws.onmessage = (e) => {
       const env = JSON.parse(e.data);
       if (env.event.type === 'init_ack') {
-        if (env.event.data.error) { console.error('Init failed:', env.event.data.code); return; }
+        if (env.event.data.error) {
+          if (env.event.data.code === 'SESSION_ALREADY_CONNECTED') {
+            this.reconnectBlocked = true;
+            this.onConnectionConflict?.(env);
+            return;
+          }
+          console.error('Init failed:', env.event.data.code);
+          return;
+        }
         this.gatewaySessionId = env.session_id;  // 保存用于 REST API
         this.reconnectAttempts = 0;
       }
       this.onMessage?.(env);
     };
-    this.ws.onclose = () => this.scheduleReconnect();
+    this.ws.onclose = () => {
+      if (!this.reconnectBlocked) this.scheduleReconnect();
+    };
   }
 
   sendInit() {
@@ -834,6 +858,12 @@ class HotPlexClient {
     const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 60000);
     this.reconnectAttempts++;
     setTimeout(() => this.connect(), delay);
+  }
+
+  // 确认原连接关闭后，由 UI 或调用方显式调用。
+  retryAfterOwnerClosed() {
+    this.reconnectBlocked = false;
+    this.connect();
   }
 }
 ```
