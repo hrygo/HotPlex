@@ -16,6 +16,11 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+const (
+	testOwner = "gw-test-instance"
+	testRun   = "run-test-001"
+)
+
 func newTestSQLStore(t *testing.T) (*SQLStore, *session.SQLiteStore) {
 	t.Helper()
 	ctx := context.Background()
@@ -42,11 +47,21 @@ func newTestSQLStore(t *testing.T) (*SQLStore, *session.SQLiteStore) {
 	return store, sessionStore
 }
 
+func testAcceptReq(sessionID, msgID, hash string) AcceptRequest {
+	return AcceptRequest{
+		SessionID:       sessionID,
+		ClientMessageID: msgID,
+		PayloadHash:     hash,
+		OwnerInstanceID: testOwner,
+		WorkerRunID:     testRun,
+	}
+}
+
 func TestSQLStore_AcceptIsIdempotentAndRejectsPayloadConflict(t *testing.T) {
 	t.Parallel()
 	store, _ := newTestSQLStore(t)
 	ctx := context.Background()
-	request := AcceptRequest{SessionID: "session-1", ClientMessageID: "message-1", PayloadHash: "hash-a"}
+	request := testAcceptReq("session-1", "message-1", "hash-a")
 
 	first, duplicate, err := store.Accept(ctx, request)
 	require.NoError(t, err)
@@ -59,11 +74,7 @@ func TestSQLStore_AcceptIsIdempotentAndRejectsPayloadConflict(t *testing.T) {
 	require.True(t, duplicate)
 	require.Equal(t, first.ExecutionID, second.ExecutionID)
 
-	_, duplicate, err = store.Accept(ctx, AcceptRequest{
-		SessionID:       request.SessionID,
-		ClientMessageID: request.ClientMessageID,
-		PayloadHash:     "hash-b",
-	})
+	_, duplicate, err = store.Accept(ctx, testAcceptReq("session-1", "message-1", "hash-b"))
 	require.ErrorIs(t, err, ErrPayloadConflict)
 	require.True(t, duplicate)
 }
@@ -71,7 +82,7 @@ func TestSQLStore_AcceptIsIdempotentAndRejectsPayloadConflict(t *testing.T) {
 func TestSQLStore_ConcurrentAcceptCreatesOneExecution(t *testing.T) {
 	t.Parallel()
 	store, _ := newTestSQLStore(t)
-	request := AcceptRequest{SessionID: "session-1", ClientMessageID: "message-race", PayloadHash: "hash"}
+	request := testAcceptReq("session-1", "message-race", "hash")
 
 	const callers = 16
 	var wg sync.WaitGroup
@@ -118,9 +129,7 @@ func TestSQLStore_ConcurrentAcceptCreatesOneExecution(t *testing.T) {
 func TestSQLStore_SetStatusIsIdempotentAndTerminal(t *testing.T) {
 	t.Parallel()
 	store, _ := newTestSQLStore(t)
-	record, _, err := store.Accept(context.Background(), AcceptRequest{
-		SessionID: "session-1", ClientMessageID: "message-2", PayloadHash: "hash",
-	})
+	record, _, err := store.Accept(context.Background(), testAcceptReq("session-1", "message-2", "hash"))
 	require.NoError(t, err)
 
 	require.NoError(t, store.SetStatus(context.Background(), record.ExecutionID, StatusDelivered, ""))
@@ -140,22 +149,32 @@ func TestSQLStore_SetStatusIsIdempotentAndTerminal(t *testing.T) {
 	require.Equal(t, first.DeliveredAt, stored.DeliveredAt)
 }
 
-func TestSQLStore_RestartMarksAcceptedUnknown(t *testing.T) {
+func TestSQLStore_RecoverExpiredLeases(t *testing.T) {
 	t.Parallel()
-	store, sessionStore := newTestSQLStore(t)
-	record, _, err := store.Accept(context.Background(), AcceptRequest{
-		SessionID: "session-1", ClientMessageID: "message-3", PayloadHash: "hash",
-	})
-	require.NoError(t, err)
-	require.Equal(t, StatusAccepted, record.Status)
+	store, _ := newTestSQLStore(t)
 
-	restarted, err := NewSQLStore(context.Background(), sessionStore.DB(), dbutil.DialectSQLite, store.writeMu, nil)
+	record, _, err := store.Accept(context.Background(), testAcceptReq("session-1", "message-3", "hash"))
 	require.NoError(t, err)
-	recovered, duplicate, err := restarted.Accept(context.Background(), AcceptRequest{
-		SessionID: "session-1", ClientMessageID: "message-3", PayloadHash: "hash",
-	})
+	require.Equal(t, RuntimePending, record.RuntimeStatus)
+	require.NotZero(t, record.LeaseUntil)
+
+	_, err = store.db.ExecContext(context.Background(),
+		`UPDATE execution_inputs SET lease_until = 0 WHERE execution_id = ?`, record.ExecutionID)
 	require.NoError(t, err)
-	require.True(t, duplicate)
-	require.Equal(t, StatusUnknown, recovered.Status)
-	require.Equal(t, "GATEWAY_RESTART", recovered.ErrorCode)
+	recovered, err := store.RecoverExpiredLeases(context.Background(), []string{record.ExecutionID})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recovered.Recovered)
+	require.Equal(t, []string{record.ExecutionID}, recovered.ConvergedExecutionIDs)
+
+	stored, err := store.getByClientMessage(context.Background(), "session-1", "message-3")
+	require.NoError(t, err)
+	require.Equal(t, RuntimeUnknown, stored.RuntimeStatus)
+	require.Equal(t, "GATEWAY_LEASE_EXPIRED", stored.FenceReason)
+	require.Equal(t, "GATEWAY_LEASE_EXPIRED", stored.RuntimeErrorCode)
+
+	recoveredAgain, err := store.RecoverExpiredLeases(context.Background(), []string{record.ExecutionID})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), recoveredAgain.Recovered, "already recovered — must not double-recover")
+	require.Equal(t, []string{record.ExecutionID}, recoveredAgain.ConvergedExecutionIDs,
+		"a tracker must clear exclusions even when another recovery already converged the row")
 }

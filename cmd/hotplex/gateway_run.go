@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -201,6 +202,10 @@ type GatewayDeps struct {
 	// Audit subsystem (issue #833 P1). Nil when audit.enabled=false.
 	AuditCollector *audit.Collector
 	AuditStore     audit.Store
+	// Durable ingress reliability closure (spec 2026-07-14).
+	OwnerInstanceID string
+	LeaseManager    *execution.LeaseManager
+	Repairer        *execution.Repairer
 }
 
 const defaultConfigPath = config.DefaultConfigPath
@@ -218,6 +223,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	ownerInstanceID := "gw-" + uuid.NewString()
 
 	cfg, err := loadConfig(configPath, devMode)
 	if err != nil {
@@ -454,6 +461,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	retryCtrl := gateway.NewLLMRetryController(cfg.Worker.AutoRetry, log)
 
+	// Durable ingress: terminal-state repair retry. Capacity scales with the
+	// session pool so busier deployments buffer more in-flight repairs. Handlers
+	// and bridge enqueue best-effort; the repairer is nil-safe to call.
+	repairer := execution.NewRepairer(stores.execution, execution.DefaultRepairConfig(cfg.Pool.MaxSize), log)
+
 	agentConfigDir := ""
 	if cfg.AgentConfig.Enabled {
 		agentConfigDir = cfg.AgentConfig.ConfigDir
@@ -479,6 +491,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		WSStore:                stores.wsStore,
 		PermissionDedupEnabled: cfg.Worker.PermissionDenyDedup.Enabled,
 		PermissionDedupWindow:  cfg.Worker.PermissionDenyDedup.Window,
+		ExecutionStore:         stores.execution,
+		Repairer:               repairer,
 	})
 
 	// One-time validation sweep: surface stale/invalid agent_config_overrides
@@ -488,13 +502,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
 
 	handler := gateway.NewHandler(gateway.HandlerDeps{
-		Log:            log,
-		Hub:            hub,
-		SM:             sm,
-		Auth:           auth,
-		Bridge:         bridge,
-		SkillsLocator:  skillsLocator,
-		ExecutionStore: stores.execution,
+		Log:             log,
+		Hub:             hub,
+		SM:              sm,
+		Auth:            auth,
+		Bridge:          bridge,
+		SkillsLocator:   skillsLocator,
+		ExecutionStore:  stores.execution,
+		Repairer:        repairer,
+		OwnerInstanceID: ownerInstanceID,
 	})
 	handler.SetAuditCollector(auditCollector)
 	hub.SetAuditCollector(auditCollector)
@@ -695,6 +711,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	mux := http.NewServeMux()
+	leaseMgr := execution.NewLeaseManager(stores.execution, ownerInstanceID, execution.DefaultLeaseConfig(), log, repairer)
 	deps := &GatewayDeps{
 		Log:             log,
 		Ctx:             ctx,
@@ -722,6 +739,9 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		DevMode:         devMode,
 		AuditCollector:  auditCollector,
 		AuditStore:      auditStore,
+		OwnerInstanceID: ownerInstanceID,
+		LeaseManager:    leaseMgr,
+		Repairer:        repairer,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
@@ -740,6 +760,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			"original", cfg.Events.Retention, "effective", eventsRetention)
 	}
 	go runEventsGC(ctx, stores, log, eventsRetention)
+
+	leaseMgr.Start(ctx)
+	log.Info("gateway: lease manager started", "owner_instance_id", ownerInstanceID)
+
+	repairer.Start(ctx)
+	log.Info("gateway: repairer started")
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
 
@@ -1308,6 +1334,17 @@ func shutdownGateway(
 
 	closeSTTCache(shutdownCtx, log)
 	closeTTSCache(shutdownCtx, log)
+
+	// Durable ingress: shut down lease manager BEFORE Bridge.MarkClosed so
+	// owned active executions are marked unknown before workers are killed.
+	if deps.Repairer != nil {
+		deps.Repairer.Shutdown(shutdownCtx)
+	}
+	if deps.LeaseManager != nil {
+		if err := deps.LeaseManager.Shutdown(shutdownCtx); err != nil {
+			log.Warn("gateway: lease manager shutdown", "err", err)
+		}
+	}
 
 	// Mark bridge closed FIRST to prevent in-flight message handlers from
 	// creating new sessions/workers during shutdown. Without this, a handler

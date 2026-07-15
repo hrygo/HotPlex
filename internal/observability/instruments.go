@@ -839,3 +839,249 @@ func AuditSinkFailures() metric.Int64Counter {
 	})
 	return auditSinkFailures
 }
+
+// ─── Durable Ingress Instruments (spec 2026-07-14) ──────────────────
+
+var (
+	executionAccept     metric.Int64Counter
+	executionAcceptInit sync.Once
+
+	executionDuplicate     metric.Int64Counter
+	executionDuplicateInit sync.Once
+
+	executionConflict     metric.Int64Counter
+	executionConflictInit sync.Once
+
+	executionSessionBusy     metric.Int64Counter
+	executionSessionBusyInit sync.Once
+
+	executionDeliveryOutcome     metric.Int64Counter
+	executionDeliveryOutcomeInit sync.Once
+
+	executionRuntimeOutcome     metric.Int64Counter
+	executionRuntimeOutcomeInit sync.Once
+
+	executionDeliveryLatency     metric.Float64Histogram
+	executionDeliveryLatencyInit sync.Once
+
+	executionRuntimeDuration     metric.Float64Histogram
+	executionRuntimeDurationInit sync.Once
+
+	leaseRenewFailure     metric.Int64Counter
+	leaseRenewFailureInit sync.Once
+
+	leaseExpiredRecovery     metric.Int64Counter
+	leaseExpiredRecoveryInit sync.Once
+
+	repairAttempts     metric.Int64Counter
+	repairAttemptsInit sync.Once
+
+	repairSuccess     metric.Int64Counter
+	repairSuccessInit sync.Once
+
+	repairTimeout     metric.Int64Counter
+	repairTimeoutInit sync.Once
+
+	repairDropped     metric.Int64Counter
+	repairDroppedInit sync.Once
+)
+
+func ExecutionAccept() metric.Int64Counter {
+	executionAcceptInit.Do(func() {
+		var err error
+		executionAccept, err = Meter().Int64Counter(
+			"hotplex.execution.accept",
+			metric.WithDescription("Execution accepts (new input durably recorded)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.accept", err)
+		}
+	})
+	return executionAccept
+}
+
+func ExecutionDuplicate() metric.Int64Counter {
+	executionDuplicateInit.Do(func() {
+		var err error
+		executionDuplicate, err = Meter().Int64Counter(
+			"hotplex.execution.duplicate",
+			metric.WithDescription("Execution duplicate suppressions"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.duplicate", err)
+		}
+	})
+	return executionDuplicate
+}
+
+func ExecutionConflict() metric.Int64Counter {
+	executionConflictInit.Do(func() {
+		var err error
+		executionConflict, err = Meter().Int64Counter(
+			"hotplex.execution.conflict",
+			metric.WithDescription("Execution payload conflicts (same client_message_id, different hash)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.conflict", err)
+		}
+	})
+	return executionConflict
+}
+
+func ExecutionSessionBusy() metric.Int64Counter {
+	executionSessionBusyInit.Do(func() {
+		var err error
+		executionSessionBusy, err = Meter().Int64Counter(
+			"hotplex.execution.session_busy",
+			metric.WithDescription("Execution active-gate rejections (session has pending/running execution)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.session_busy", err)
+		}
+	})
+	return executionSessionBusy
+}
+
+func ExecutionDeliveryOutcome() metric.Int64Counter {
+	executionDeliveryOutcomeInit.Do(func() {
+		var err error
+		executionDeliveryOutcome, err = Meter().Int64Counter(
+			"hotplex.execution.delivery_outcome",
+			metric.WithDescription("Delivery outcomes by status (delivered/unknown/failed). Labels: delivery_status"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.delivery_outcome", err)
+		}
+	})
+	return executionDeliveryOutcome
+}
+
+func ExecutionRuntimeOutcome() metric.Int64Counter {
+	executionRuntimeOutcomeInit.Do(func() {
+		var err error
+		executionRuntimeOutcome, err = Meter().Int64Counter(
+			"hotplex.execution.runtime_outcome",
+			metric.WithDescription("Runtime outcomes by status (completed/failed/unknown). Labels: runtime_status"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.runtime_outcome", err)
+		}
+	})
+	return executionRuntimeOutcome
+}
+
+func ExecutionDeliveryLatency() metric.Float64Histogram {
+	executionDeliveryLatencyInit.Do(func() {
+		var err error
+		executionDeliveryLatency, err = Meter().Float64Histogram(
+			"hotplex.execution.delivery_latency",
+			metric.WithDescription("Time from accept to delivery outcome in seconds"),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.delivery_latency", err)
+		}
+	})
+	return executionDeliveryLatency
+}
+
+func ExecutionRuntimeDuration() metric.Float64Histogram {
+	executionRuntimeDurationInit.Do(func() {
+		var err error
+		executionRuntimeDuration, err = Meter().Float64Histogram(
+			"hotplex.execution.runtime_duration",
+			metric.WithDescription("Worker turn duration in seconds"),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 30, 60, 120, 300),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.runtime_duration", err)
+		}
+	})
+	return executionRuntimeDuration
+}
+
+func LeaseRenewFailure() metric.Int64Counter {
+	leaseRenewFailureInit.Do(func() {
+		var err error
+		leaseRenewFailure, err = Meter().Int64Counter(
+			"hotplex.lease.renew_failure",
+			metric.WithDescription("Lease renewal failures"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.lease.renew_failure", err)
+		}
+	})
+	return leaseRenewFailure
+}
+
+func LeaseExpiredRecovery() metric.Int64Counter {
+	leaseExpiredRecoveryInit.Do(func() {
+		var err error
+		leaseExpiredRecovery, err = Meter().Int64Counter(
+			"hotplex.lease.expired_recovery",
+			metric.WithDescription("Expired lease recoveries (runtime set to unknown, fence set)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.lease.expired_recovery", err)
+		}
+	})
+	return leaseExpiredRecovery
+}
+
+func RepairAttempts() metric.Int64Counter {
+	repairAttemptsInit.Do(func() {
+		var err error
+		repairAttempts, err = Meter().Int64Counter(
+			"hotplex.repair.attempts",
+			metric.WithDescription("Terminal state repair attempts"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.repair.attempts", err)
+		}
+	})
+	return repairAttempts
+}
+
+func RepairSuccess() metric.Int64Counter {
+	repairSuccessInit.Do(func() {
+		var err error
+		repairSuccess, err = Meter().Int64Counter(
+			"hotplex.repair.success",
+			metric.WithDescription("Terminal state repair successes"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.repair.success", err)
+		}
+	})
+	return repairSuccess
+}
+
+func RepairTimeout() metric.Int64Counter {
+	repairTimeoutInit.Do(func() {
+		var err error
+		repairTimeout, err = Meter().Int64Counter(
+			"hotplex.repair.timeout",
+			metric.WithDescription("Terminal state repair timeouts (exceeded MaxLifetime)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.repair.timeout", err)
+		}
+	})
+	return repairTimeout
+}
+
+func RepairDropped() metric.Int64Counter {
+	repairDroppedInit.Do(func() {
+		var err error
+		repairDropped, err = Meter().Int64Counter(
+			"hotplex.repair.dropped",
+			metric.WithDescription("Terminal state repair drops (queue full, lease recovery fallback)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.repair.dropped", err)
+		}
+	})
+	return repairDropped
+}

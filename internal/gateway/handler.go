@@ -9,6 +9,8 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -34,14 +36,16 @@ const LevelTrace = slog.Level(-8)
 // Handler processes incoming messages from a client connection.
 // It coordinates between the hub, session manager, and pool.
 type Handler struct {
-	log            *slog.Logger
-	hub            *Hub
-	sm             SessionManager
-	auth           *security.Authenticator
-	bridge         *Bridge
-	skillsLocator  SkillsLocator
-	auditCollector *audit.Collector
-	executionStore execution.Store
+	log             *slog.Logger
+	hub             *Hub
+	sm              SessionManager
+	auth            *security.Authenticator
+	bridge          *Bridge
+	skillsLocator   SkillsLocator
+	auditCollector  *audit.Collector
+	executionStore  execution.Store
+	repairer        *execution.Repairer
+	ownerInstanceID string
 }
 
 // SkillsLocator discovers skills from the filesystem.
@@ -53,13 +57,15 @@ type SkillsLocator interface {
 // NewHandler creates a new message handler.
 func NewHandler(deps HandlerDeps) *Handler {
 	return &Handler{
-		log:            deps.Log.With("component", "handler"),
-		hub:            deps.Hub,
-		sm:             deps.SM,
-		auth:           deps.Auth,
-		bridge:         deps.Bridge,
-		skillsLocator:  deps.SkillsLocator,
-		executionStore: deps.ExecutionStore,
+		log:             deps.Log.With("component", "handler"),
+		hub:             deps.Hub,
+		sm:              deps.SM,
+		auth:            deps.Auth,
+		bridge:          deps.Bridge,
+		skillsLocator:   deps.SkillsLocator,
+		executionStore:  deps.ExecutionStore,
+		repairer:        deps.Repairer,
+		ownerInstanceID: deps.OwnerInstanceID,
 	}
 }
 
@@ -286,7 +292,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
-	si, err := h.sm.Get(ctx, env.SessionID)
+	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
@@ -294,11 +300,17 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	execRecord, duplicate, err := h.acceptInputExecution(ctx, env)
+	execRecord, duplicate, err := h.acceptInputExecutionWithRetry(ctx, env)
 	if err != nil {
 		if errors.Is(err, execution.ErrPayloadConflict) {
+			observability.ExecutionConflict().Add(ctx, 1)
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage,
 				"client message id %q was already used with different input", clientMessageID(env))
+		}
+		if errors.Is(err, execution.ErrSessionBusy) {
+			observability.ExecutionSessionBusy().Add(ctx, 1)
+			h.cancelRetryIfNeeded(env.SessionID)
+			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
 		// A genuine new input failed to durably register; cancel any in-flight
@@ -307,6 +319,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "input acceptance failed")
 	}
 	if duplicate {
+		observability.ExecutionDuplicate().Add(ctx, 1)
 		h.log.Info("gateway: duplicate input suppressed",
 			"session_id", env.SessionID,
 			"client_message_id", execRecord.ClientMessageID,
@@ -316,6 +329,9 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		return nil
 	}
 	finalized := execRecord == nil
+	if !finalized {
+		observability.ExecutionAccept().Add(ctx, 1)
+	}
 	defer func() {
 		if finalized {
 			return
@@ -341,6 +357,15 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		// not overwrite the intended outcome with a generic unknown.
 		finalized = true
 		h.sendInputAck(ctx, env, execRecord, false)
+	}
+	// Fence recovery may have replaced the Worker and transitioned a TERMINATED
+	// session back to RUNNING while accepting this input. Re-read state so the
+	// fresh Worker is not immediately replaced by the normal resume path below.
+	si, err := h.sm.Get(ctx, env.SessionID)
+	if err != nil {
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
+		finishOutcome(execution.StatusFailed, events.ErrCodeSessionNotFound)
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after input acceptance")
 	}
 
 	if !si.State.IsActive() {
@@ -376,7 +401,18 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 	}
 
-	w := h.sm.GetWorker(env.SessionID)
+	var w worker.Worker
+	workerRunID := ""
+	if h.bridge != nil && h.executionStore != nil {
+		var ok bool
+		w, workerRunID, ok = h.bridge.CurrentWorkerBinding(env.SessionID)
+		if !ok {
+			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker run identity unavailable")
+		}
+	} else {
+		w = h.sm.GetWorker(env.SessionID)
+	}
 	if w == nil {
 		h.log.Warn("gateway: handleInput no worker found", "session_id", env.SessionID)
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
@@ -391,6 +427,21 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 			finishOutcome(execution.StatusFailed, events.ErrCodeSessionBusy)
 			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session busy: %v", err)
 		}
+	}
+
+	if execRecord != nil && h.executionStore != nil {
+		persistedRunID := execRecord.WorkerRunID
+		if workerRunID == "" {
+			workerRunID = persistedRunID
+		}
+		if mrErr := h.executionStore.MarkRunning(ctx, execRecord.ExecutionID, h.ownerInstanceID, workerRunID); mrErr != nil {
+			h.log.Warn("gateway: mark execution running failed", "err", mrErr,
+				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+			h.finishRuntimeWithoutDispatch(ctx, execRecord, persistedRunID, events.ErrCodeInternalError)
+			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "execution dispatch registration failed")
+		}
+		execRecord.WorkerRunID = workerRunID
 	}
 
 	if h.log.Enabled(ctx, slog.LevelDebug) {
@@ -467,15 +518,62 @@ func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope
 	if err != nil {
 		return nil, false, fmt.Errorf("marshal input for idempotency: %w", err)
 	}
+	workerRunID := ""
+	if h.bridge != nil {
+		workerRunID, _ = h.bridge.CurrentWorkerRunID(env.SessionID)
+	}
+	if workerRunID == "" {
+		// Duplicate lookup must remain possible even when the session currently has
+		// no Worker. A newly accepted record is rebound to the actual attach run by
+		// MarkRunning after resume/fresh-start readiness.
+		workerRunID = "run_" + uuid.NewString()
+	}
 	record, duplicate, err := h.executionStore.Accept(ctx, execution.AcceptRequest{
 		SessionID:       env.SessionID,
 		ClientMessageID: clientMessageID(env),
 		PayloadHash:     sha256Hex(string(payload)),
+		OwnerInstanceID: h.ownerInstanceID,
+		WorkerRunID:     workerRunID,
 	})
 	if err != nil {
 		return nil, duplicate, err
 	}
 	return record, duplicate, nil
+}
+
+// acceptInputExecutionWithRetry accepts the input, and if the session is fenced
+// (previous runtime outcome unknown, which blocks Accept via the active gate's
+// partial unique index), clears the fence and retries once. Without this a
+// fenced session stays permanently blocked. Worker health is left to the
+// existing session/crash-recovery machinery, so clearing the fence only
+// re-opens Accept; the old record stays runtime_status=unknown in history.
+func (h *Handler) acceptInputExecutionWithRetry(ctx context.Context, env *events.Envelope) (*execution.Record, bool, error) {
+	rec, duplicate, err := h.acceptInputExecution(ctx, env)
+	if err == nil || !errors.Is(err, execution.ErrSessionBusy) || h.executionStore == nil {
+		return rec, duplicate, err
+	}
+	fenced, ferr := h.executionStore.FenceBySession(ctx, env.SessionID)
+	if ferr != nil || fenced == nil {
+		return rec, duplicate, err
+	}
+	if h.bridge == nil {
+		return rec, duplicate, err
+	}
+	freshRunID, startErr := h.bridge.StartFreshWorker(ctx, env.SessionID)
+	if startErr != nil {
+		h.log.Warn("gateway: fresh worker start for fenced execution failed",
+			"err", startErr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
+		return rec, duplicate, err
+	}
+	if cerr := h.executionStore.ClearFenceAfterFreshStart(ctx, fenced.ExecutionID, fenced.FenceReason, freshRunID); cerr != nil {
+		h.log.Warn("gateway: clear stale fence failed",
+			"err", cerr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
+		return rec, duplicate, err
+	}
+	h.log.Info("gateway: cleared stale fence, retrying accept",
+		"session_id", env.SessionID, "execution_id", fenced.ExecutionID,
+		"fence_reason", fenced.FenceReason)
+	return h.acceptInputExecution(ctx, env)
 }
 
 func clientMessageID(env *events.Envelope) string {
@@ -499,14 +597,47 @@ func (h *Handler) finishInputExecution(ctx context.Context, record *execution.Re
 	}
 	// Reflect the intended terminal status on the in-memory record before the
 	// durable write, so every subsequent input.ack carries the outcome the
-	// client should act on even when SetStatus fails. The defer safety-net and
+	// client should act on even when SetDelivery fails. The defer safety-net and
 	// gateway-restart recovery reconcile the durable record afterwards.
 	record.Status = status
 	record.ErrorCode = string(code)
-	if err := h.executionStore.SetStatus(context.WithoutCancel(ctx), record.ExecutionID, status, string(code)); err != nil {
+	if err := h.executionStore.SetDelivery(context.WithoutCancel(ctx), record.ExecutionID, h.ownerInstanceID, status, string(code)); err != nil {
+		if h.repairer != nil {
+			h.repairer.Enqueue(execution.RepairIntent{
+				ExecutionID: record.ExecutionID,
+				OwnerID:     h.ownerInstanceID,
+				Kind:        execution.RepairDelivery,
+				Status:      string(status),
+				ErrorCode:   string(code),
+			})
+		}
 		return err
 	}
+	observability.ExecutionDeliveryOutcome().Add(ctx, 1,
+		metric.WithAttributes(attribute.String("delivery_status", string(status))))
+	if record.CreatedAt > 0 {
+		observability.ExecutionDeliveryLatency().Record(ctx, time.Since(time.UnixMilli(record.CreatedAt)).Seconds())
+	}
 	return nil
+}
+
+func (h *Handler) finishRuntimeWithoutDispatch(ctx context.Context, record *execution.Record, workerRunID string, code events.ErrorCode) {
+	if h.executionStore == nil || record == nil || workerRunID == "" {
+		return
+	}
+	err := h.executionStore.FinishRuntime(
+		context.WithoutCancel(ctx), record.ExecutionID, workerRunID, execution.RuntimeFailed, string(code),
+	)
+	if err == nil || h.repairer == nil {
+		return
+	}
+	h.repairer.Enqueue(execution.RepairIntent{
+		ExecutionID: record.ExecutionID,
+		WorkerRunID: workerRunID,
+		Kind:        execution.RepairRuntime,
+		Status:      string(execution.RuntimeFailed),
+		ErrorCode:   string(code),
+	})
 }
 
 func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, record *execution.Record, duplicate bool) {

@@ -42,6 +42,62 @@ func TestBridge_SetWorkerFactory(t *testing.T) {
 	assert.Same(t, wf, b.wf)
 }
 
+func TestBridge_StartFreshWorker_IsolatesOldRunAndStartsWithoutResume(t *testing.T) {
+	t.Parallel()
+	const sessionID = "sess-fenced-fresh"
+	oldWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+	}
+	freshEvents := make(chan *events.Envelope)
+	freshWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: freshEvents},
+	}
+	sm := new(mockBridgeSM)
+	sm.On("Get", sessionID).Return(&session.SessionInfo{
+		ID: sessionID, UserID: "u1", WorkerType: worker.TypeClaudeCode,
+		State: events.StateRunning, WorkerSessionID: "provider-session-old",
+	}, nil).Once()
+	sm.On("GetWorker", sessionID).Return(oldWorker).Once()
+	sm.On("DetachWorkerIf", sessionID, oldWorker).Return(true).Once()
+	sm.On("AttachWorker", sessionID, freshWorker).Return(nil).Once()
+	sm.On("GetWorker", sessionID).Return(freshWorker).Once()
+
+	b := NewBridge(BridgeDeps{Log: testLogger(t), Hub: newTestHub(t), SM: sm})
+	b.SetWorkerFactory(&mockBridgeWorkerFactory{workers: []*mockBridgeWorker{freshWorker}})
+	runID, err := b.StartFreshWorker(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.NotEmpty(t, runID)
+	require.True(t, oldWorker.terminated.Load(), "old fenced worker must be terminated before fresh start")
+	currentRunID, ok := b.CurrentWorkerRunID(sessionID)
+	require.True(t, ok)
+	require.Equal(t, runID, currentRunID)
+	require.False(t, freshWorker.terminated.Load())
+	require.Empty(t, freshWorker.startInfo.WorkerSessionID, "fresh start must not load the fenced provider session")
+	sm.AssertExpectations(t)
+
+	b.closed.Store(true)
+	close(freshEvents)
+	b.WaitForwarders(context.Background())
+}
+
+func TestBridge_ClearWorkerRunDoesNotDeleteReplacement(t *testing.T) {
+	t.Parallel()
+	b := &Bridge{}
+	w := &mockBridgeWorker{}
+	b.workerRuns.Store("session-binding", workerRunBinding{worker: w, id: "run-new"})
+
+	b.clearWorkerRun("session-binding", w, "run-old")
+	value, loaded := b.workerRuns.Load("session-binding")
+	require.True(t, loaded)
+	require.Equal(t, "run-new", value.(workerRunBinding).id)
+
+	b.clearWorkerRun("session-binding", w, "run-new")
+	_, loaded = b.workerRuns.Load("session-binding")
+	require.False(t, loaded)
+}
+
 // ─── Test Shutdown ────────────────────────────────────────────────────────────
 
 func TestBridge_Shutdown(t *testing.T) {
@@ -822,6 +878,49 @@ func (m *mockPromptUpdater) UpdateSystemPrompt(prompt string) {
 }
 
 var _ worker.SystemPromptUpdater = (*mockPromptUpdater)(nil)
+
+type blockingResetWorker struct {
+	mockBridgeWorker
+	started chan struct{}
+	release chan struct{}
+	result  worker.ResetResult
+}
+
+func (w *blockingResetWorker) ResetContext(context.Context) (worker.ResetResult, error) {
+	close(w.started)
+	<-w.release
+	return w.result, nil
+}
+
+func TestResetSession_SuspendsRunBindingDuringConnectionReset(t *testing.T) {
+	t.Parallel()
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	w := &blockingResetWorker{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	sid := "session-reset-binding"
+	sm.On("GetWorker", sid).Return(w)
+	sm.On("Get", sid).Return(&session.SessionInfo{ID: sid, Platform: "webchat"}, nil)
+	b := NewBridge(BridgeDeps{Log: testLogger(t), Hub: hub, SM: sm})
+	b.workerRuns.Store(sid, workerRunBinding{worker: w, id: "run-before-reset"})
+
+	done := make(chan error, 1)
+	go func() { done <- b.ResetSession(context.Background(), sid) }()
+	select {
+	case <-w.started:
+	case <-time.After(time.Second):
+		t.Fatal("reset did not start")
+	}
+	_, ok := b.CurrentWorkerRunID(sid)
+	require.False(t, ok, "input must fail closed while ResetContext may replace the connection")
+	close(w.release)
+	require.NoError(t, <-done)
+	runID, ok := b.CurrentWorkerRunID(sid)
+	require.True(t, ok)
+	require.Equal(t, "run-before-reset", runID, "in-place reset must restore the original run binding")
+}
 
 func TestResetSession_ReloadsAgentConfig(t *testing.T) {
 	t.Parallel()

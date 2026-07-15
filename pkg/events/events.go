@@ -50,6 +50,10 @@ const (
 	ToolUpdate Kind = "tool_update" // intermediate tool call status (ACP tool_call_update)
 	Plan       Kind = "plan"        // plan/todo update (ACP AgentPlanUpdate)
 	ModeUpdate Kind = "mode_update" // agent mode switch (ACP CurrentModeUpdate)
+
+	RuntimeExecutionStarted   Kind = "runtime.execution.started"   // execution dispatch started (S→C additive)
+	RuntimeExecutionCompleted Kind = "runtime.execution.completed" // execution completed (S→C additive)
+	RuntimeExecutionFailed    Kind = "runtime.execution.failed"    // execution failed (S→C additive)
 )
 
 // Priority levels for message delivery.
@@ -279,6 +283,17 @@ type DoneData struct {
 	Stats   map[string]any `json:"stats,omitempty"`
 	// Dropped is true if the UI Reconciliation triggered due to silent backpressure drops
 	Dropped bool `json:"dropped,omitempty"`
+}
+
+// RuntimeExecutionData is the payload for runtime.execution.* events (S→C additive).
+// These events correlate an input acceptance to its terminal Worker outcome via execution_id.
+// Old clients that don't recognize these kinds silently ignore them.
+type RuntimeExecutionData struct {
+	ExecutionID string    `json:"execution_id"`
+	Status      string    `json:"status"`
+	ErrorCode   ErrorCode `json:"error_code,omitempty"`
+	StartedAt   int64     `json:"started_at,omitempty"`
+	FinishedAt  int64     `json:"finished_at,omitempty"`
 }
 
 // MessageData is the payload for Message events (S→C — complete message, non-streaming).
