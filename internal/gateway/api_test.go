@@ -774,10 +774,14 @@ func TestGetHistory_HasMore(t *testing.T) {
 	api := newTestAPIWithTurns(t, sm, bridge, ts)
 
 	sm.On("Get", "sess-1").Return(&session.SessionInfo{ID: "sess-1", UserID: "anonymous"}, nil)
+	// Store returns ASC (oldest first, newest last). With limit=2 and 3 records,
+	// the API must keep the NEWEST 2 (Seq 2, 3) and report has_more=true.
+	// Regression guard: previously the code sliced `records[:limit]`, which
+	// returned the OLDEST 2 (Seq 1, 2) and dropped the latest exchange on refresh.
 	records := []*eventstore.TurnRecord{
-		{Seq: 1},
-		{Seq: 2},
-		{Seq: 3},
+		{ID: 1, Seq: 1, Content: "oldest"},
+		{ID: 2, Seq: 2, Content: "middle"},
+		{ID: 3, Seq: 3, Content: "newest"},
 	}
 	ts.On("QueryLatestTurns", mock.Anything, "sess-1", 3).Return(records, nil)
 
@@ -794,6 +798,9 @@ func TestGetHistory_HasMore(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Records, 2)
 	require.True(t, resp.HasMore)
+	require.Equal(t, int64(2), resp.Records[0].ID, "must keep middle record, not oldest")
+	require.Equal(t, int64(3), resp.Records[1].ID, "must keep newest record, not drop it")
+	require.Equal(t, "newest", resp.Records[1].Content)
 }
 
 func TestGetHistory_NoRecords(t *testing.T) {

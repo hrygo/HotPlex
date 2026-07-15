@@ -601,7 +601,9 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 
 	hasMore := len(records) > limit
 	if hasMore {
-		records = records[:limit]
+		// Store returns ASC (newest at the end). Slicing from the END keeps
+		// the latest exchange; `records[:limit]` would drop it (refresh bug).
+		records = records[len(records)-limit:]
 	}
 
 	respondJSON(w, map[string]any{"records": records, "has_more": hasMore})
