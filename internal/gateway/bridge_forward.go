@@ -50,6 +50,18 @@ type forwardContext struct {
 	pendingError   *events.Envelope
 	turnTimerFired atomic.Bool
 	turnTimer      *time.Timer
+	// flog carries trace_id from the forwardEvents OTel span. Helpers must
+	// use fc.flog (not b.log) to keep log lines correlatable with the span.
+	// Nil-safe via bridge.flogOf; tests build forwardContext without it.
+	flog *slog.Logger
+}
+
+// flogOf returns fc.flog or b.log when fc is nil or fc.flog is unset.
+func (b *Bridge) flogOf(fc *forwardContext) *slog.Logger {
+	if fc != nil && fc.flog != nil {
+		return fc.flog
+	}
+	return b.log
 }
 
 // forwardEvents proxies worker events to the hub with seq assignment.
@@ -99,6 +111,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		startTime:     time.Now(),
 		turnStartTime: time.Now(),
 		firstEvent:    true,
+		flog:          flog,
 	}
 
 	if b.collector != nil && b.sm != nil {
@@ -188,7 +201,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
 			flog.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
 		}
-		b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data)
+		b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data, flog)
 		fc.pendingError = nil
 	}
 
@@ -204,6 +217,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		sessPlatform:   fc.sessPlatform,
 		sessOwner:      fc.sessOwner,
 		resetGen:       myResetGen,
+		flog:           flog,
 	})
 }
 
@@ -232,7 +246,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 
 	// Buffer error events for potential LLM retry.
 	if env.Event.Type == events.Error {
-		b.log.Warn("bridge: received error from worker", "session_id", sessionID, "worker_type", workerType, "data", env.Event.Data)
+		b.flogOf(fc).Warn("bridge: received error from worker", "session_id", sessionID, "worker_type", workerType, "data", env.Event.Data)
 		if ed, ok := env.Event.Data.(events.ErrorData); ok {
 			fc.lastError = &ed
 		}
@@ -297,7 +311,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
-		b.log.Warn("bridge: forward event failed", "err", err, "session_id", sessionID, "worker_type", workerType, "event_type", env.Event.Type)
+		b.flogOf(fc).Warn("bridge: forward event failed", "err", err, "session_id", sessionID, "worker_type", workerType, "event_type", env.Event.Type)
 	}
 
 	b.captureForwardedEvent(env, deltaContent, reasoningContent, fc)
@@ -382,7 +396,7 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 	// Correlate with the emitting forwarder's immutable attach run. A stale
 	// forwarder must never finish the newest open execution for the session.
 	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, fc.workerRunID, rtStatus, ""); err != nil {
-		b.log.Debug("bridge: finish runtime on done", "err", err,
+		b.flogOf(fc).Debug("bridge: finish runtime on done", "err", err,
 			"session_id", sessionID, "execution_id", rec.ExecutionID, "status", rtStatus)
 		if errors.Is(err, execution.ErrRunMismatch) {
 			return
@@ -507,7 +521,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 			acc.TurnDurationMs = time.Now().UnixMilli() - startMs
 		} else {
 			acc.TurnDurationMs = time.Since(fc.turnStartTime).Milliseconds()
-			b.log.Debug("bridge: turn start stamp missing on done, using first-event fallback",
+			b.flogOf(fc).Debug("bridge: turn start stamp missing on done, using first-event fallback",
 				"session_id", sessionID, "worker_type", fc.workerType, "fallback_since", time.Since(fc.turnStartTime).Round(time.Millisecond))
 		}
 		acc.computePerTurnDeltas()
@@ -521,8 +535,8 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		b.captureAssistantTurn(sessionID, env.Seq, acc, fc.turnText.String(),
 			fc.sessOwner, fc.sessPlatform, env.Timestamp)
 		acc.resetPerTurn()
-		if b.log.Enabled(context.Background(), slog.LevelDebug) {
-			b.log.Debug("bridge: turn completed",
+		if b.flogOf(fc).Enabled(context.Background(), slog.LevelDebug) {
+			b.flogOf(fc).Debug("bridge: turn completed",
 				"session_id", sessionID, "worker_type", fc.workerType, "turn", acc.TurnCount.Load(),
 				"duration", time.Since(fc.turnStartTime).Round(time.Millisecond),
 				"text_len", fc.turnText.Len(), "tools", acc.ToolCallCount.Load())
@@ -591,10 +605,10 @@ func (b *Bridge) emitDoneFallbackMessage(sessionID string, fc *forwardContext, t
 		if emptySuccess {
 			tag = "empty_success"
 		}
-		b.log.Warn("bridge: done fallback send failed", "session_id", sessionID, "kind", tag, "err", err)
+		b.flogOf(fc).Warn("bridge: done fallback send failed", "session_id", sessionID, "kind", tag, "err", err)
 	}
 	// Persist to the events table so WS event replay also surfaces the fallback.
-	b.captureEvent(sessionID, env.Seq, events.Message, env.Event.Data)
+	b.captureEvent(sessionID, env.Seq, events.Message, env.Event.Data, b.flogOf(fc))
 }
 
 // maybeTransitionIdleAfterDone transitions a messaging session to IDLE after
@@ -611,7 +625,7 @@ func (b *Bridge) maybeTransitionIdleAfterDone(sessionID string, fc *forwardConte
 		return
 	}
 	if err := b.sm.Transition(context.Background(), sessionID, events.StateIdle); err != nil {
-		b.log.Debug("bridge: post-done transition to idle rejected",
+		b.flogOf(fc).Debug("bridge: post-done transition to idle rejected",
 			"session_id", sessionID, "platform", fc.sessPlatform, "err", err)
 	}
 }
@@ -624,7 +638,7 @@ func (b *Bridge) captureForwardedEvent(env *events.Envelope, deltaContent, reaso
 	} else if reasoningContent != "" && b.collector != nil {
 		b.collector.CaptureReasoningString(sessionID, env.Seq, reasoningContent)
 	} else if env.Event.Type != events.MessageDelta && env.Event.Type != events.Reasoning {
-		b.captureEvent(sessionID, env.Seq, env.Event.Type, env.Event.Data)
+		b.captureEvent(sessionID, env.Seq, env.Event.Type, env.Event.Data, b.flogOf(fc))
 	}
 }
 
@@ -639,9 +653,9 @@ func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
 		return
 	}
 	if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
-		b.log.Warn("bridge: forward buffered error failed", "err", err, "session_id", fc.sessionID, "worker_type", fc.workerType)
+		b.flogOf(fc).Warn("bridge: forward buffered error failed", "err", err, "session_id", fc.sessionID, "worker_type", fc.workerType)
 	}
-	b.captureEvent(fc.sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data)
+	b.captureEvent(fc.sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data, b.flogOf(fc))
 	fc.pendingError = nil
 }
 
@@ -661,6 +675,9 @@ type workerExitParams struct {
 	// If the current generation differs, another reset replaced this goroutine's
 	// worker and we must NOT cleanupCrashedWorker (would detach the NEW worker).
 	resetGen int64
+	// flog carries trace_id from the originating forwardEvents span so exit-path
+	// logs stay correlatable with the run that produced them.
+	flog *slog.Logger
 }
 
 // handleWorkerExit processes worker exit after the recv channel closes.
@@ -668,13 +685,17 @@ type workerExitParams struct {
 // and performs cleanup.
 func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	workerType := p.workerType
+	lg := p.flog
+	if lg == nil {
+		lg = b.log
+	}
 
 	// P0 guard: if the worker was reset (generation changed), a NEW forwardEvents
 	// goroutine is already managing the replacement worker. This OLD goroutine must
 	// exit silently — cleanupCrashedWorker would detach the NEW worker and delete
 	// the accumulator, breaking the session.
 	if rg, ok := w.(worker.ResetGenerationer); ok && rg.LoadResetGeneration() != p.resetGen {
-		b.log.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
+		lg.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
 			"session_id", p.sessionID, "worker_type", workerType,
 			"forwarder_reset_gen", p.resetGen, "current_reset_gen", rg.LoadResetGeneration(),
 			"worker_run_id", p.opts.workerRunID)
@@ -699,7 +720,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		defer close(ch)
 		defer func() {
 			if r := recover(); r != nil {
-				b.log.Error("bridge: panic in waitWorker", "session_id", p.sessionID, "panic", r, "stack", string(debug.Stack()))
+				lg.Error("bridge: panic in waitWorker", "session_id", p.sessionID, "panic", r, "stack", string(debug.Stack()))
 			}
 		}()
 		exitCode, _ = w.Wait()
@@ -707,7 +728,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	select {
 	case <-ch:
 	case <-time.After(waitTimeout):
-		b.log.Warn("bridge: Wait() timed out, force-killing", "session_id", p.sessionID, "worker_type", workerType)
+		lg.Warn("bridge: Wait() timed out, force-killing", "session_id", p.sessionID, "worker_type", workerType)
 		_ = w.Kill()
 		// Secondary timeout: if Wait() still doesn't return after Kill()
 		// (e.g., Go runtime deadlock or zombie process), abandon the wait
@@ -718,7 +739,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		case <-ch:
 			// Wait completed after Kill.
 		case <-killTimeout.C:
-			b.log.Warn("bridge: Wait() did not return after Kill(), abandoning",
+			lg.Warn("bridge: Wait() did not return after Kill(), abandoning",
 				"session_id", p.sessionID, "worker_type", workerType)
 		}
 	}
@@ -729,7 +750,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// to fresh Start() for workers that cannot preserve conversation history.
 	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
 	if fallbackAttempted && p.turnTextLen == 0 && time.Since(p.startTime) < 5*time.Second {
-		b.log.Info("bridge: session files missing after resume, skipping retry",
+		lg.Info("bridge: session files missing after resume, skipping retry",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
 		p.opts.retryDepth = 1
 	}
@@ -769,7 +790,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	if b.sm != nil {
 		si, smErr := b.sm.Get(context.Background(), p.sessionID)
 		if smErr == nil && si.State == events.StateTerminated {
-			b.log.Debug("bridge: session already terminated, skipping error for handler-killed worker", "session_id", p.sessionID, "worker_type", workerType)
+			lg.Debug("bridge: session already terminated, skipping error for handler-killed worker", "session_id", p.sessionID, "worker_type", workerType)
 			if !fallbackAttempted {
 				b.cleanupCrashedWorker(p.sessionID, w)
 			}
@@ -782,14 +803,14 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// 2. Worker was intentionally terminated: SIGTERM (exit 143) is always
 	//    bridge/handler/GC-initiated, never an unexpected crash.
 	if p.doneReceived && p.turnTextLen == 0 {
-		b.log.Info("bridge: worker exit clean (done received, no pending output)",
+		lg.Info("bridge: worker exit clean (done received, no pending output)",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
 	} else if exitCode == 143 {
-		b.log.Info("bridge: worker exit intentional (SIGTERM)",
+		lg.Info("bridge: worker exit intentional (SIGTERM)",
 			"session_id", p.sessionID, "worker_type", workerType)
 	} else if exitCode != 0 && exitCode != -1 {
 		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
-		b.log.Warn("bridge: worker exited with non-zero code, sending crash error",
+		lg.Warn("bridge: worker exited with non-zero code, sending crash error",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode,
 			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount.Load())
 		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(attribute.String("worker_type", string(workerType)), attribute.String("exit_code", fmt.Sprintf("%d", exitCode))))
@@ -808,7 +829,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	} else if exitCode == -1 {
 		b.sendError(p.sessionID, events.ErrCodeSessionTerminated, "worker terminated (killed)")
 	} else if !p.doneReceived {
-		b.log.Debug("bridge: sending error for platform cleanup (no done received)", "session_id", p.sessionID, "worker_type", workerType)
+		lg.Debug("bridge: sending error for platform cleanup (no done received)", "session_id", p.sessionID, "worker_type", workerType)
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker exited without sending done")
 	}
 
@@ -817,9 +838,10 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	}
 }
 
-// captureEvent persists an outbound event for replay.
-func (b *Bridge) captureEvent(sessionID string, seq int64, eventType events.Kind, data any) {
-	b.captureDirected(sessionID, seq, eventType, data, "outbound")
+// captureEvent persists an outbound event for replay. flog is optional;
+// when non-nil (forwardEvents path) it carries trace_id; otherwise b.log is used.
+func (b *Bridge) captureEvent(sessionID string, seq int64, eventType events.Kind, data any, flog ...*slog.Logger) {
+	b.captureDirected(sessionID, seq, eventType, data, "outbound", flog...)
 }
 
 // CaptureInboundEvent persists an inbound event for replay only (no turn write).
@@ -872,16 +894,21 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 }
 
 // captureDirected marshals event data and sends it to the collector with the given direction.
-func (b *Bridge) captureDirected(sessionID string, seq int64, eventType events.Kind, data any, direction string) {
+// flog is optional; when non-nil, capture diagnostics carry trace_id.
+func (b *Bridge) captureDirected(sessionID string, seq int64, eventType events.Kind, data any, direction string, flog ...*slog.Logger) {
+	lg := b.log
+	if len(flog) > 0 && flog[0] != nil {
+		lg = flog[0]
+	}
 	if b.collector == nil {
-		if b.log.Enabled(context.Background(), slog.LevelDebug) {
-			b.log.Debug("bridge: capture skipped, collector is nil", "session_id", sessionID, "type", eventType, "direction", direction)
+		if lg.Enabled(context.Background(), slog.LevelDebug) {
+			lg.Debug("bridge: capture skipped, collector is nil", "session_id", sessionID, "type", eventType, "direction", direction)
 		}
 		return
 	}
 	ed, err := json.Marshal(data)
 	if err != nil {
-		b.log.Warn("bridge: capture marshal failed", "session_id", sessionID, "type", eventType, "direction", direction, "err", err)
+		lg.Warn("bridge: capture marshal failed", "session_id", sessionID, "type", eventType, "direction", direction, "err", err)
 		return
 	}
 	if eventType == events.ToolResult {
