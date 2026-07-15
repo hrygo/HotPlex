@@ -971,6 +971,39 @@ func TestPCEntry_JoinPlatformSession_Dedup(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
+func TestHub_WebChatOwner_RetainsPlatformSubscriber(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	client, server := newTestWSConnPair(t)
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	webchat := newConn(h, client, "s1", nil)
+	t.Cleanup(func() { _ = webchat.Close() })
+	platform := &mockPlatformConn{}
+
+	h.JoinPlatformSession("s1", platform)
+	require.True(t, h.TryAcquireWebChatOwner("s1", webchat))
+	h.JoinSession("s1", webchat)
+
+	h.mu.RLock()
+	subscribers := h.sessions["s1"]
+	_, webchatPresent := subscribers[webchat]
+	platformPresent := false
+	for writer := range subscribers {
+		if entry, ok := writer.(*pcEntry); ok && entry.pc == platform {
+			platformPresent = true
+		}
+	}
+	h.mu.RUnlock()
+
+	require.True(t, webchatPresent)
+	require.True(t, platformPresent)
+	require.True(t, h.IsWebChatOwner("s1", webchat))
+}
+
 func TestHub_JoinPlatformSession_DeadEntryReplaced(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
