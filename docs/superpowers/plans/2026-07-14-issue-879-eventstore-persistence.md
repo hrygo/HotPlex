@@ -103,11 +103,11 @@
 ## PR3: 防御层（UNIQUE 索引 + runWriter panic recovery）
 
 **Files:**
-- Create: `internal/session/sql/migrations/027_events_unique_session_seq.sql` + `migrations-postgres/027_events_unique_session_seq.pg.sql`
+- Create: `internal/session/sql/migrations/028_events_unique_session_seq.sql` + `migrations-postgres/028_events_unique_session_seq.pg.sql`
 - Modify: `internal/eventstore/collector.go`（runWriter panic recovery）
 
 ### Tasks
-- [ ] T3.1 UNIQUE 索引 migration（027，SQLite + PG）
+- [ ] T3.1 UNIQUE 索引 migration（028，SQLite + PG）
   - **必须先去重**：现有重复 `(session_id,seq)` 会让 CREATE UNIQUE INDEX 失败。migration 先 `DELETE` 保留每组 (session_id,seq) 最大 id 的行，再建索引。
   - SQLite: `DELETE FROM events WHERE id NOT IN (SELECT MAX(id) FROM events GROUP BY session_id, seq);` + `CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_seq_uq ON events(session_id, seq);`
   - PG 同构（大写引号）
