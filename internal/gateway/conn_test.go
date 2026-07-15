@@ -241,6 +241,50 @@ func TestConnHandleExistingSession_DoesNotFreshStartOnResumeCheckFailure(t *test
 	require.False(t, starter.startCalled, "uncertain OCS availability must not discard context with a fresh start")
 }
 
+func TestConnResolveSession_RejectsDuplicateBeforeLifecycleWork(t *testing.T) {
+	hub := newTestHub(t, func(cfg *config.Config) {
+		cfg.Worker.DefaultWorkDir = safeTestWorkDir
+	})
+	client1, server1 := newTestWSConnPair(t)
+	client2, server2 := newTestWSConnPair(t)
+	t.Cleanup(func() {
+		_ = client1.Close()
+		_ = server1.Close()
+		_ = client2.Close()
+		_ = server2.Close()
+	})
+
+	const sessionID = "sess_owner_duplicate"
+	sm := &resumeCheckSM{info: &session.SessionInfo{
+		ID:         sessionID,
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateIdle,
+	}}
+	initData := InitData{
+		WorkerType: worker.TypeClaudeCode,
+		Config:     InitConfig{WorkDir: safeTestWorkDir},
+	}
+	env := &events.Envelope{SessionID: sessionID}
+
+	c1 := newConn(hub, client1, "candidate-1", nil)
+	c1.userID = "user1"
+	_, _, err := c1.resolveSession(env, initData, sm)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c1.Close() })
+
+	c2 := newConn(hub, client2, "candidate-2", nil)
+	c2.userID = "user1"
+	t.Cleanup(func() { _ = c2.Close() })
+	_, _, err = c2.resolveSession(env, initData, sm)
+	require.Error(t, err)
+	require.True(t, hub.IsWebChatOwner(sessionID, c1))
+	require.False(t, hub.IsWebChatOwner(sessionID, c2))
+	hub.mu.RLock()
+	require.Len(t, hub.sessions[sessionID], 1, "rejected init must not join outbound routing")
+	hub.mu.RUnlock()
+}
+
 func TestBackoffDuration(t *testing.T) {
 	t.Parallel()
 

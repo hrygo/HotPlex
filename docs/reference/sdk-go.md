@@ -245,6 +245,7 @@ SDK 导出 `client.ErrCodeXxx` 常量，与网关错误码一一对应：
 | 常量 | 值 | 含义 |
 |------|----|------|
 | `ErrCodeSessionBusy` | `SESSION_BUSY` | Session 正忙，稍后重试 |
+| `ErrCodeSessionAlreadyConnected` | `SESSION_ALREADY_CONNECTED` | 已有 WebChat 连接；关闭原连接后由用户显式重试，不能自动重连 |
 | `ErrCodeInternalError` | `INTERNAL_ERROR` | 网关内部错误 |
 | `ErrCodeUnauthorized` | `UNAUTHORIZED` | 认证失败 |
 | `ErrCodeSessionNotFound` | `SESSION_NOT_FOUND` | Session 不存在 |

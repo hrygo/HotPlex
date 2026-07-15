@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserHotPlexClient } from "./browser-client";
-import { AEP_VERSION, EventKind, WorkerType } from "./constants";
+import { AEP_VERSION, ErrorCode, EventKind, WorkerType } from "./constants";
 import type { Envelope } from "./types";
 
 afterEach(() => {
@@ -63,6 +63,44 @@ describe("BrowserHotPlexClient interaction acknowledgements", () => {
 
         expect(listener).toHaveBeenCalledOnce();
         expect(listener).toHaveBeenCalledWith(data, env);
+    });
+});
+
+describe("BrowserHotPlexClient duplicate session rejection", () => {
+    it("treats SESSION_ALREADY_CONNECTED as fatal and disables reconnect", () => {
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            shouldReconnect: boolean;
+            _handleMessage(
+                value: Envelope,
+                resolve: (value: unknown) => void,
+                reject: (err: Error) => void,
+            ): void;
+        };
+        const duplicate = vi.fn();
+        const genericError = vi.fn();
+        const rejected = vi.fn();
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        client.on("sessionAlreadyConnected", duplicate);
+        client.on("error", genericError);
+
+        internal._handleMessage(
+            envelope(EventKind.InitAck, {
+                code: ErrorCode.SessionAlreadyConnected,
+                error: "session already has an active WebSocket connection",
+            }),
+            vi.fn(),
+            rejected,
+        );
+
+        expect(duplicate).toHaveBeenCalledOnce();
+        expect(genericError).not.toHaveBeenCalled();
+        expect(consoleError).not.toHaveBeenCalled();
+        expect(internal.shouldReconnect).toBe(false);
+        expect(rejected).toHaveBeenCalledOnce();
     });
 });
 

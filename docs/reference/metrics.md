@@ -95,6 +95,7 @@ sum by (worker_type) (hotplex_worker_memory_bytes)
 | 指标 | 类型 | 说明 |
 |------|------|------|
 | `hotplex.gateway.connections` | ObservableGauge | 当前 WebSocket 连接数 |
+| `hotplex.gateway.webchat.session_owner_connections` | ObservableGauge | 当前拥有 WebChat WebSocket owner 的 Session 数 |
 | `hotplex.gateway.messages` | Counter | 消息总数，label: `direction`, `event_type` |
 | `hotplex.gateway.events` | Counter | 转发事件总数，label: `event_type`, `direction` |
 | `hotplex.gateway.init.handshake.duration` | Histogram | WS 握手耗时 |
@@ -119,6 +120,9 @@ sum by (worker_type) (hotplex_worker_memory_bytes)
 | 指标 | 类型 | 说明 |
 |------|------|------|
 | `hotplex.gateway.errors` | Counter | 错误总数，label: `error_code` |
+| `hotplex.gateway.webchat.duplicate_connection_rejected` | Counter | 因已有 WebChat owner 被拒绝的 init 数 |
+| `hotplex.gateway.webchat.non_owner_ingress_rejected` | Counter | 非 owner 的敏感入站事件拒绝数 |
+| `hotplex.gateway.webchat.owner_release_not_current` | Counter | 非当前 owner 尝试释放 owner 的次数 |
 
 ### 常用查询
 

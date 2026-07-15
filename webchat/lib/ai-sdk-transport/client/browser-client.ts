@@ -67,6 +67,7 @@ export interface BrowserClientEvents {
   disconnected: (reason: string) => void;
   reconnecting: (attempt: number) => void;
   reconnect_failed: (attempt: number) => void;
+  sessionAlreadyConnected: (data: ErrorData, env: Envelope) => void;
   delta: (data: MessageDeltaData, env: Envelope) => void;
   message: (data: MessageData, env: Envelope) => void;
   messageStart: (data: MessageStartData, env: Envelope) => void;
@@ -300,7 +301,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       // Handle handshake-level errors
       if (ackData.error || ackData.code) {
         const errorMsg = ackData.error || `Handshake failed with code: ${ackData.code}`;
-        logger.error('BrowserClient', 'Handshake error', { message: errorMsg });
 
         if (ackData.code === ErrorCode.SessionNotFound) {
           // Session was deleted on server — retry with the original session ID.
@@ -316,10 +316,26 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
         // Fatal errors shouldn't trigger reconnect
         if (ackData.code === ErrorCode.Unauthorized ||
-            ackData.code === ErrorCode.AuthRequired) {
+            ackData.code === ErrorCode.AuthRequired ||
+            ackData.code === ErrorCode.SessionAlreadyConnected) {
           this.shouldReconnect = false;
         }
 
+        if (ackData.code === ErrorCode.SessionAlreadyConnected) {
+          const errorData = {
+            code: ErrorCode.SessionAlreadyConnected,
+            message: errorMsg,
+          } as ErrorData;
+          logger.info('BrowserClient', 'Session already connected', { message: errorMsg });
+          this._stopHeartbeat();
+          this._clearReconnectTimer();
+          this.emit('sessionAlreadyConnected', errorData, env);
+          this.disconnect();
+          reject(new Error(errorMsg));
+          return;
+        }
+
+        logger.error('BrowserClient', 'Handshake error', { message: errorMsg });
         this.emit('error', {
           code: ackData.code || ErrorCode.InternalError,
           message: errorMsg
@@ -370,6 +386,16 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           logger.warn('BrowserClient', 'Received empty error data', { envId: env?.id });
         }
         
+        if (errData.code === ErrorCode.SessionAlreadyConnected) {
+          this.shouldReconnect = false;
+          this._stopHeartbeat();
+          this._clearReconnectTimer();
+          this.emit('sessionAlreadyConnected', errData, env);
+          this.emit('error', errData, env);
+          this.disconnect();
+          break;
+        }
+
         // Fatal errors shouldn't trigger reconnect
         if (errData.code === ErrorCode.SessionNotFound) {
           this.shouldReconnect = false;

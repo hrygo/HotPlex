@@ -98,6 +98,10 @@ type Hub struct {
 	mu       sync.RWMutex
 	conns    map[*Conn]struct{}                // all active connections
 	sessions map[string]map[SessionWriter]bool // sessionID → connections
+	// webchatOwners is intentionally separate from sessions. sessions is an
+	// outbound subscriber table and can contain Slack/Feishu writers alongside
+	// a WebChat connection; it cannot express exclusive WebSocket ownership.
+	webchatOwners map[string]*Conn // sessionID → sole initialized WebChat owner
 	// everHadConn tracks sessions that have had at least one connection
 	// registered (WS or platform). Used to suppress "event dropped" debug
 	// log noise for sessions that never had connections (e.g. cron jobs).
@@ -155,16 +159,17 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 	cfg := cfgStore.Load()
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Hub{
-		log:          log,
-		cfgStore:     cfgStore,
-		conns:        make(map[*Conn]struct{}),
-		sessions:     make(map[string]map[SessionWriter]bool),
-		everHadConn:  make(map[string]bool),
-		seqGen:       NewSeqGen(),
-		broadcast:    make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
-		ctx:          ctx,
-		cancel:       cancel,
-		InitThrottle: newHandshakeThrottle(),
+		log:           log,
+		cfgStore:      cfgStore,
+		conns:         make(map[*Conn]struct{}),
+		sessions:      make(map[string]map[SessionWriter]bool),
+		webchatOwners: make(map[string]*Conn),
+		everHadConn:   make(map[string]bool),
+		seqGen:        NewSeqGen(),
+		broadcast:     make(chan *EnvelopeWithConn, broadcastQueueSize(cfg)),
+		ctx:           ctx,
+		cancel:        cancel,
+		InitThrottle:  newHandshakeThrottle(),
 	}
 
 	h.upgrader = websocket.Upgrader{
@@ -185,8 +190,11 @@ func NewHub(log *slog.Logger, cfgStore *config.ConfigStore) *Hub {
 	// Register OTel observable gauge for connection count.
 	_, _ = observability.Meter().RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		o.ObserveInt64(observability.GatewayConnections(), h.connCount.Load())
+		h.mu.RLock()
+		o.ObserveInt64(observability.GatewayWebChatSessionOwnerConnections(), int64(len(h.webchatOwners)))
+		h.mu.RUnlock()
 		return nil
-	}, observability.GatewayConnections())
+	}, observability.GatewayConnections(), observability.GatewayWebChatSessionOwnerConnections())
 
 	return h
 }
@@ -202,7 +210,7 @@ func (h *Hub) RegisterConn(conn *Conn) {
 	h.conns[conn] = struct{}{}
 	h.mu.Unlock()
 	h.connCount.Add(1)
-	h.log.Debug("gateway: conn registered", "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
+	h.log.Debug("gateway: conn registered", "conn_id", conn.connID, "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
 }
 
 // UnregisterConn removes a connection and cleans up session routing mappings.
@@ -210,40 +218,78 @@ func (h *Hub) RegisterConn(conn *Conn) {
 // a reconnect must continue above values that may not be persisted yet.
 func (h *Hub) UnregisterConn(conn *Conn) {
 	h.mu.Lock()
+	_, registered := h.conns[conn]
 	delete(h.conns, conn)
 	for sid := range h.sessions {
 		h.removeSession(sid, conn)
 	}
+	// ReadPump releases its owner before calling UnregisterConn. Keep this
+	// defensive cleanup for alternate teardown paths so a dead connection can
+	// never leak a session owner lease.
+	for sid, owner := range h.webchatOwners {
+		if owner == conn {
+			delete(h.webchatOwners, sid)
+		}
+	}
 	h.mu.Unlock()
-	h.connCount.Add(-1)
-	h.log.Debug("gateway: conn unregistered", "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
+	if registered {
+		h.connCount.Add(-1)
+	}
+	h.log.Debug("gateway: conn unregistered", "conn_id", conn.connID, "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
 }
 
-// JoinSession subscribes conn to receive events for a session.
-// If the session already has another connection, the old ones are removed from
-// the session routing map (no longer receive events) and left to close
-// naturally when their WebSocket read loop encounters the closed socket.
-// This prevents the race where worker responses go to a stale connection,
-// while avoiding the reconnect storms caused by forcibly closing connections
-// (which triggers client WebSocket onclose → reconnect loops).
-// This implements the "按 session_id 去重连接，只保留最新连接" rule.
+// TryAcquireWebChatOwner atomically registers conn as the sole initialized
+// WebChat owner for sessionID. It intentionally does not alter outbound
+// subscriptions: caller joins the route only after successfully acquiring.
+func (h *Hub) TryAcquireWebChatOwner(sessionID string, conn *Conn) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, exists := h.webchatOwners[sessionID]; exists {
+		return false
+	}
+	h.webchatOwners[sessionID] = conn
+	return true
+}
+
+// IsWebChatOwner reports whether conn still owns sessionID's WebChat ingress.
+func (h *Hub) IsWebChatOwner(sessionID string, conn *Conn) bool {
+	h.mu.RLock()
+	owner := h.webchatOwners[sessionID]
+	h.mu.RUnlock()
+	return owner == conn
+}
+
+// webChatOwnerConnID returns the current owner identifier for structured
+// diagnostics. The value is opaque and never derived from credentials.
+func (h *Hub) webChatOwnerConnID(sessionID string) string {
+	h.mu.RLock()
+	owner := h.webchatOwners[sessionID]
+	h.mu.RUnlock()
+	if owner == nil {
+		return ""
+	}
+	return owner.connID
+}
+
+// ReleaseWebChatOwner removes conn only when it is the current owner. Its
+// return value fences lifecycle cleanup for stale, candidate, and rejected
+// connections that must never transition the session to idle.
+func (h *Hub) ReleaseWebChatOwner(sessionID string, conn *Conn) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.webchatOwners[sessionID] != conn {
+		return false
+	}
+	delete(h.webchatOwners, sessionID)
+	return true
+}
+
+// JoinSession subscribes conn to receive outbound events for a session. WebChat
+// ownership is enforced independently by TryAcquireWebChatOwner, so platform
+// subscribers are retained and this method never removes another writer.
 func (h *Hub) JoinSession(sessionID string, conn *Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
-	// Remove stale connections from session routing only — do NOT call Close().
-	// Each removed conn's ReadPump goroutine will exit naturally when the
-	// underlying TCP connection is torn down (either by the client closing
-	// its end, or by WritePump detecting the dead socket on next write).
-	// This avoids triggering the client's WebSocket onclose → reconnect logic.
-	if existing, ok := h.sessions[sessionID]; ok {
-		for c := range existing {
-			if c != conn {
-				delete(existing, c)
-				h.log.Info("gateway: removed stale conn from session", "session_id", sessionID, "remote", conn.RemoteAddr())
-			}
-		}
-	}
 
 	if h.sessions[sessionID] == nil {
 		h.sessions[sessionID] = make(map[SessionWriter]bool)
@@ -497,7 +543,6 @@ func (h *Hub) HandleHTTP(
 			c.botID = botID
 		}
 		h.RegisterConn(c)
-		h.JoinSession(sessionID, c)
 
 		// Start read pump in background. WritePump is started by newConn.
 		go c.ReadPump(handler, handler.sm, auth)

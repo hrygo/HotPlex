@@ -132,6 +132,12 @@ Docker/K8s 环境建议用 NetworkPolicy 替代，避免 NAT 后 IP 失真。
 
 外部访问时修改绑定：`gateway.addr: ":8888"`（监听所有接口，**必须**配合 TLS）。Admin API 通过 `admin.addr: "10.0.1.5:9999"` 绑定内网。
 
+### 3.1 WebSocket 连接切换
+
+直接连接 `/ws` 的客户端以 session 为粒度只允许一条已完成 `init` 的活动连接。该规则同样适用于企业自建前端、SDK 或网关集成；飞书和 Slack 消息适配器不走这条直接 WebSocket 连接路径。
+
+在负载均衡切换、浏览器刷新或客户端重连时，应先排空并关闭旧连接，再建立新连接。若新连接在旧连接关闭前使用同一 session 发送 `init`，Gateway 返回 `SESSION_ALREADY_CONNECTED` 并关闭新连接；客户端应记录该结果、等待旧连接关闭后串行重试，避免多条连接竞争重连。
+
 ---
 
 ## 4. 资源管理

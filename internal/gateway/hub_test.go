@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,7 +127,7 @@ func TestHub_JoinSession(t *testing.T) {
 	h.mu.RUnlock()
 }
 
-func TestHub_JoinSession_DisconnectsStale(t *testing.T) {
+func TestHub_JoinSession_RetainsOutboundSubscribers(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
 	conn1, server1 := newTestWSConnPair(t)
@@ -141,13 +142,66 @@ func TestHub_JoinSession_DisconnectsStale(t *testing.T) {
 
 	h.JoinSession("sess_x", c1)
 	h.JoinSession("sess_x", c2)
-	// JoinSession closes c1 but does not call LeaveSession (that happens in ReadPump).
-	// Simulate ReadPump cleanup so c1 is removed from the session map.
-	h.LeaveSession("sess_x", c1)
 
 	h.mu.RLock()
-	require.Len(t, h.sessions["sess_x"], 1)
+	require.Len(t, h.sessions["sess_x"], 2)
 	h.mu.RUnlock()
+}
+
+func TestHub_WebChatOwner_OnlyCurrentConnectionCanRelease(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn1, server1 := newTestWSConnPair(t)
+	conn2, server2 := newTestWSConnPair(t)
+	t.Cleanup(func() {
+		_ = conn1.Close()
+		_ = server1.Close()
+		_ = conn2.Close()
+		_ = server2.Close()
+	})
+
+	c1 := newConn(h, conn1, "sess_owner", nil)
+	c2 := newConn(h, conn2, "sess_owner", nil)
+
+	require.True(t, h.TryAcquireWebChatOwner("sess_owner", c1))
+	require.False(t, h.TryAcquireWebChatOwner("sess_owner", c2))
+	require.True(t, h.IsWebChatOwner("sess_owner", c1))
+	require.False(t, h.IsWebChatOwner("sess_owner", c2))
+	require.False(t, h.ReleaseWebChatOwner("sess_owner", c2))
+	require.True(t, h.IsWebChatOwner("sess_owner", c1))
+	require.True(t, h.ReleaseWebChatOwner("sess_owner", c1))
+	require.True(t, h.TryAcquireWebChatOwner("sess_owner", c2))
+	h.UnregisterConn(c2)
+	require.False(t, h.IsWebChatOwner("sess_owner", c2))
+}
+
+func TestHub_WebChatOwner_ConcurrentAcquireHasOneWinner(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	const contenders = 32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var winners atomic.Int32
+
+	for i := 0; i < contenders; i++ {
+		conn := &Conn{connID: fmt.Sprintf("conn-%d", i)}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if h.TryAcquireWebChatOwner("sess_concurrent", conn) {
+				winners.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	require.Equal(t, int32(1), winners.Load())
+	h.mu.RLock()
+	owner := h.webchatOwners["sess_concurrent"]
+	h.mu.RUnlock()
+	require.NotNil(t, owner)
 }
 
 func TestHub_LeaveSession(t *testing.T) {
@@ -917,6 +971,39 @@ func TestPCEntry_JoinPlatformSession_Dedup(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
+func TestHub_WebChatOwner_RetainsPlatformSubscriber(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	client, server := newTestWSConnPair(t)
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	webchat := newConn(h, client, "s1", nil)
+	t.Cleanup(func() { _ = webchat.Close() })
+	platform := &mockPlatformConn{}
+
+	h.JoinPlatformSession("s1", platform)
+	require.True(t, h.TryAcquireWebChatOwner("s1", webchat))
+	h.JoinSession("s1", webchat)
+
+	h.mu.RLock()
+	subscribers := h.sessions["s1"]
+	_, webchatPresent := subscribers[webchat]
+	platformPresent := false
+	for writer := range subscribers {
+		if entry, ok := writer.(*pcEntry); ok && entry.pc == platform {
+			platformPresent = true
+		}
+	}
+	h.mu.RUnlock()
+
+	require.True(t, webchatPresent)
+	require.True(t, platformPresent)
+	require.True(t, h.IsWebChatOwner("s1", webchat))
+}
+
 func TestHub_JoinPlatformSession_DeadEntryReplaced(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
@@ -1099,8 +1186,9 @@ func TestHub_HandleHTTP_DeferredAuth(t *testing.T) {
 	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
 }
 
-// TestHub_HandleHTTP_WithSessionID verifies that a request with an explicit
-// session_id query parameter results in a connection registered under that ID.
+// TestHub_HandleHTTP_WithSessionID verifies that the query-string session_id is
+// provisional only: a candidate connection is registered but no outbound route
+// exists until a valid init resolves and acquires the real session owner.
 func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	cfg := config.Default()
 	cfg.Security.APIKeys = []string{"test-key"}
@@ -1122,17 +1210,17 @@ func TestHub_HandleHTTP_WithSessionID(t *testing.T) {
 	conn, _, err := websocket.DefaultDialer.Dial(u, header)
 	require.NoError(t, err, "WebSocket upgrade should succeed with session_id param")
 	defer conn.Close()
-	// Verify the session has a connection registered (Eventually: registration races with WS upgrade under coverage).
 	require.Eventually(t, func() bool {
-		h.mu.RLock()
-		_, ok := h.sessions["sess_explicit"]
-		h.mu.RUnlock()
-		return ok
-	}, 2*time.Second, 10*time.Millisecond, "hub should have registered session sess_explicit")
+		return h.ConnectionsOpen() == 1
+	}, 2*time.Second, 10*time.Millisecond, "hub should have registered the candidate connection")
+	h.mu.RLock()
+	_, routed := h.sessions["sess_explicit"]
+	h.mu.RUnlock()
+	require.False(t, routed, "candidate connection must not subscribe before init")
 }
 
-// TestHub_HandleHTTP_GeneratesSessionID verifies that when no session_id is
-// provided, a new session ID is auto-generated and the connection is registered.
+// TestHub_HandleHTTP_GeneratesSessionID verifies that a candidate without a
+// query parameter is not pre-bound to a generated outbound session route.
 func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	cfg := config.Default()
 	cfg.Security.APIKeys = []string{"test-key"}
@@ -1147,7 +1235,7 @@ func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	server := httptest.NewServer(serveHandler)
 	defer server.Close()
 
-	u := "ws" + server.URL[4:] // no session_id query param
+	u := "ws" + server.URL[4:]
 	header := http.Header{}
 	header.Set("X-API-Key", "test-key")
 
@@ -1156,13 +1244,13 @@ func TestHub_HandleHTTP_GeneratesSessionID(t *testing.T) {
 	defer conn.Close()
 	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
 
-	// Hub should have at least one session registered (async: wait for registration).
 	require.Eventually(t, func() bool {
-		h.mu.RLock()
-		n := len(h.sessions)
-		h.mu.RUnlock()
-		return n == 1
-	}, 2*time.Second, 10*time.Millisecond, "hub should have exactly one auto-generated session")
+		return h.ConnectionsOpen() == 1
+	}, 2*time.Second, 10*time.Millisecond, "hub should have registered the candidate connection")
+	h.mu.RLock()
+	n := len(h.sessions)
+	h.mu.RUnlock()
+	require.Zero(t, n, "candidate connection must not create a session route before init")
 }
 
 // TestHub_HandleHTTP_RejectsInvalidAPIKey verifies that a wrong API key is rejected.

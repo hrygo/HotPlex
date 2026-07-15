@@ -26,6 +26,23 @@ import (
 // platformWebChat is the platform tag for WebSocket webchat sessions.
 const platformWebChat = "webchat"
 
+// isOwnerSensitiveIngress identifies events that may mutate a session, reach
+// a worker, or resolve a user interaction. Candidates and stale connections
+// are fenced before they receive a sequence number or reach Handler.
+func isOwnerSensitiveIngress(kind events.Kind) bool {
+	switch kind {
+	case events.Input,
+		events.Control,
+		events.WorkerCmd,
+		events.PermissionResponse,
+		events.QuestionResponse,
+		events.ElicitationResponse:
+		return true
+	default:
+		return false
+	}
+}
+
 // connHandler provides event handling capability for Conn.
 type connHandler interface {
 	Handle(ctx context.Context, env *events.Envelope) error
@@ -65,12 +82,17 @@ type Conn struct {
 	hub *Hub
 
 	sessionID   string
+	connID      string
 	userID      string
 	botID       string // SEC-007: bot isolation tag from X-Bot-ID header or init envelope
 	workspaceID string // workspace ID
 
 	// pendingAuth defers authentication to the init envelope (browser WS clients).
 	pendingAuth bool
+	// webchatOwner is set only after the Hub atomically accepts this connection
+	// as the initialized WebChat owner. Candidate and rejected connections do
+	// not release ownership or affect session lifecycle on cleanup.
+	webchatOwner bool
 
 	// starter handles session creation and worker lifecycle (nil = no-op, test mode).
 	starter SessionStarter
@@ -120,6 +142,7 @@ func newConn(hub *Hub, wc *websocket.Conn, sessionID string, starter SessionStar
 		hub:       hub,
 		starter:   starter,
 		sessionID: sessionID,
+		connID:    aep.NewID(),
 		hb:        newHeartbeat(log),
 		initDone:  true, // true by default; performInit sets false during handshake
 		writeCh:   make(chan []byte, 256),
@@ -172,20 +195,30 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		if r := recover(); r != nil {
 			c.log.Error("gateway: panic in ReadPump", "session_id", c.sessionID, "panic", r, "stack", string(debug.Stack()))
 		}
-		c.markInitDone() // flush buffered events or release on init failure
 		c.hb.Stop()
+
+		ownerReleased := false
+		if c.webchatOwner {
+			ownerReleased = c.hub.ReleaseWebChatOwner(c.sessionID, c)
+		}
+		if c.webchatOwner && !ownerReleased && c.sessionID != "" {
+			observability.GatewayWebChatOwnerReleaseNotCurrent().Add(c.hub.ctx, 1)
+		}
 
 		// Transition to IDLE BEFORE unregistering so the state(idle) event
 		// can be routed through Hub.Run while the conn is still in h.sessions.
 		// If we unregister first, routeMessage finds no connections and the
-		// state event is silently dropped.
-		if c.sessionID != "" && sm != nil {
+		// state event is silently dropped. Only the owner that successfully
+		// released may change session lifecycle state.
+		if ownerReleased && c.sessionID != "" && sm != nil {
 			if si, getErr := sm.Get(context.Background(), c.sessionID); getErr == nil && si != nil && si.State == events.StateRunning {
 				if err := sm.Transition(context.Background(), c.sessionID, events.StateIdle); err != nil {
 					c.log.Warn("gateway: conn close transition to idle", "session_id", c.sessionID, "err", err)
 				}
 			}
 		}
+
+		c.markInitDone() // flush buffered events or release on init failure
 
 		// Now safe to remove from routing — state event already queued.
 		c.hub.UnregisterConn(c)
@@ -241,6 +274,19 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 			continue
 		}
 
+		if isOwnerSensitiveIngress(env.Event.Type) && !c.hub.IsWebChatOwner(c.sessionID, c) {
+			observability.GatewayWebChatNonOwnerIngressRejected().Add(c.hub.ctx, 1)
+			c.log.Warn("gateway: rejected non-owner ingress",
+				"conn_id", c.connID,
+				"session_id", c.sessionID,
+				"remote", c.RemoteAddr(),
+				"owner_conn_id", c.hub.webChatOwnerConnID(c.sessionID),
+				"reason", "not_current_owner",
+			)
+			c.sendError(events.ErrCodeSessionAlreadyConnected, "session already has an active WebSocket connection")
+			return
+		}
+
 		observability.GatewayMessages().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("direction", "incoming"), attribute.String("event_type", string(env.Event.Type))))
 
 		// Stamp session ID, sequence number, and owner ID.
@@ -261,6 +307,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 
 		_, span := observability.Tracer().Start(context.Background(), "conn.recv")
 		span.SetAttributes(
+			attribute.String("conn_id", c.connID),
 			attribute.String("session_id", c.sessionID),
 			attribute.String("event_type", string(env.Event.Type)),
 			attribute.Int64("seq", env.Seq),
@@ -311,6 +358,7 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 func (c *Conn) performInit(auth connAuth, sm connSM) error {
 	_, span := observability.Tracer().Start(context.Background(), "conn.init")
 	defer span.End()
+	span.SetAttributes(attribute.String("conn_id", c.connID))
 	start := time.Now()
 	defer func() {
 		observability.GatewayInitHandshakeDuration().Record(c.hub.ctx, time.Since(start).Seconds())
@@ -482,11 +530,27 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 		return "", nil, fmt.Errorf("init throttled for session %s", sessionID)
 	}
 
+	// From this point error acknowledgements must name the resolved session ID,
+	// never the provisional query-string value used only during HTTP upgrade.
 	c.mu.Lock()
+	c.sessionID = sessionID
 	c.initDone = false
 	c.mu.Unlock()
 
-	c.hub.LeaveSession("", c)
+	if !c.hub.TryAcquireWebChatOwner(sessionID, c) {
+		observability.GatewayWebChatDuplicateConnectionRejected().Add(c.hub.ctx, 1)
+		c.log.Warn("gateway: rejected duplicate WebSocket owner",
+			"conn_id", c.connID,
+			"session_id", sessionID,
+			"remote", c.RemoteAddr(),
+			"owner_conn_id", c.hub.webChatOwnerConnID(sessionID),
+			"reason", "session_already_connected",
+		)
+		c.sendInitError(events.ErrCodeSessionAlreadyConnected, "session already has an active WebSocket connection")
+		return "", nil, fmt.Errorf("session %s already has an active WebSocket connection", sessionID)
+	}
+	c.webchatOwner = true
+
 	c.hub.JoinSession(sessionID, c)
 	// Hydrate SeqGen before resolveSessionState can start a worker or finalizeInit
 	// can allocate init_ack. Never fall back to 1 on a database error because a
@@ -748,7 +812,7 @@ func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, _ InitDat
 
 	c.markInitDone()
 
-	c.log.Info("gateway: init complete", "session_id", sessionID,
+	c.log.Info("gateway: init complete", "conn_id", c.connID, "session_id", sessionID,
 		"worker_type", si.WorkerType, "state", si.State)
 	span.SetStatus(codes.Ok, "init complete")
 	return nil

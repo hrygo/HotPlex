@@ -234,6 +234,7 @@ public enum SessionState {
 | `WorkerOOM` | `WORKER_OOM` | Worker 内存溢出 |
 | `WorkerSIGKILL` | `PROCESS_SIGKILL` | 进程被 SIGKILL |
 | `SessionBusy` | `SESSION_BUSY` | Session 正忙 |
+| `SessionAlreadyConnected` | `SESSION_ALREADY_CONNECTED` | Session 已有 WebChat 连接；关闭原连接后由用户显式重试 |
 | `SessionNotFound` | `SESSION_NOT_FOUND` | Session 不存在 |
 | `SessionExpired` | `SESSION_EXPIRED` | Session 已过期 |
 | `Unauthorized` | `UNAUTHORIZED` | 认证失败 |
