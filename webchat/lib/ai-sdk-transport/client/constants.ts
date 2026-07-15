@@ -99,6 +99,7 @@ export const ControlAction = {
   Throttle: 'throttle',
   Terminate: 'terminate',
   Delete: 'delete',
+  Stop: 'stop',
 } as const;
 
 export type ControlAction = typeof ControlAction[keyof typeof ControlAction];

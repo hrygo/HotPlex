@@ -622,7 +622,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this._send(env);
   }
 
-  sendControl(action: 'terminate' | 'delete'): void {
+  sendControl(action: 'terminate' | 'delete' | 'stop'): void {
     const env = createControlEnvelope(this._sessionId!, action);
     this._send(env);
   }

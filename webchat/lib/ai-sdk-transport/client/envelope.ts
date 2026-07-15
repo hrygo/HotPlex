@@ -182,7 +182,7 @@ export function createPingEnvelope(sessionId: string): Envelope<Record<string, n
  */
 export function createControlEnvelope(
   sessionId: string,
-  action: 'terminate' | 'delete'
+  action: 'terminate' | 'delete' | 'stop'
 ): Envelope<ControlData> {
   return createEnvelope(
     newEventId(),

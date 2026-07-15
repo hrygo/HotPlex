@@ -282,7 +282,8 @@ type DoneData struct {
 	Success bool           `json:"success"`
 	Stats   map[string]any `json:"stats,omitempty"`
 	// Dropped is true if the UI Reconciliation triggered due to silent backpressure drops
-	Dropped bool `json:"dropped,omitempty"`
+	Dropped bool   `json:"dropped,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // RuntimeExecutionData is the payload for runtime.execution.* events (S→C additive).
@@ -424,6 +425,7 @@ const (
 	ControlActionReset          ControlAction = "reset" // 清空上下文，Worker 自行决定 in-place 或 terminate+start
 	ControlActionGC             ControlAction = "gc"    // 归档会话，Worker 终止，保留历史
 	ControlActionCD             ControlAction = "cd"    // 切换工作目录，创建新会话
+	ControlActionStop           ControlAction = "stop"  // 停止当前 turn，保留 session
 )
 
 // ControlData is the payload for Control events.

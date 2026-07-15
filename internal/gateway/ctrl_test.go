@@ -426,6 +426,30 @@ func TestHandleControl_Terminate_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestHandleControl_Stop_Success(t *testing.T) {
+	t.Parallel()
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_stop"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	err = mgr.Transition(context.Background(), sid, events.StateRunning)
+	require.NoError(t, err)
+
+	w := new(mockWorkerForHandler)
+	w.On("Terminate", mock.Anything).Return(nil).Maybe()
+	mgr.AttachWorker(context.Background(), sid, w)
+
+	conn, _ := newTestWSConnPair(t)
+	t.Cleanup(func() { conn.Close() })
+	hub.JoinSession(sid, newConn(hub, conn, sid, nil))
+
+	env := controlEnvelope(sid, string(events.ControlActionStop))
+	env.OwnerID = "user1"
+	err = handler.handleControl(context.Background(), env)
+	require.NoError(t, err)
+}
+
 func TestHandleControl_Terminate_Unauthorized(t *testing.T) {
 	t.Parallel()
 	handler, mgr, hub, _ := newHandlerWithRealStore(t)

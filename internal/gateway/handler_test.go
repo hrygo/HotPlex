@@ -246,6 +246,12 @@ func (m *mockWorkerForHandler) ResetContext(ctx context.Context) (worker.ResetRe
 	args := m.Called(ctx)
 	return args.Get(0).(worker.ResetResult), args.Error(1)
 }
+func (m *mockWorkerForHandler) StopCurrentTurn(ctx context.Context) error {
+	return nil
+}
+func (m *mockWorkerForHandler) IsStopped() bool {
+	return false
+}
 
 // ─── handleReset tests ──────────────────────────────────────────────────────
 

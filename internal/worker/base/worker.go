@@ -46,6 +46,7 @@ type BaseWorker struct {
 	// This replaces the previous boolean flag which suffered from a race where
 	// ResetSession reset the flag to false before OLD forwardEvents could check it.
 	resetGen atomic.Int64
+	stopped  atomic.Bool
 }
 
 // NewBaseWorker creates a new BaseWorker with the given logger and config.
@@ -202,3 +203,9 @@ func (w *BaseWorker) IncResetGeneration() int64 { return w.resetGen.Add(1) }
 // LoadResetGeneration returns the current reset generation counter.
 // forwardEvents captures this at goroutine start to detect resets.
 func (w *BaseWorker) LoadResetGeneration() int64 { return w.resetGen.Load() }
+
+// IsStopped returns true if the worker was stopped by user via StopCurrentTurn.
+func (w *BaseWorker) IsStopped() bool { return w.stopped.Load() }
+
+// MarkStopped marks the worker as stopped by user.
+func (w *BaseWorker) MarkStopped() { w.stopped.Store(true) }

@@ -506,6 +506,19 @@ func (w *AppServerWorker) Terminate(ctx context.Context) error {
 	return nil
 }
 
+// StopCurrentTurn stops the current running turn on codex app-server using InterruptTurn.
+func (w *AppServerWorker) StopCurrentTurn(ctx context.Context) error {
+	w.mu.Lock()
+	tid := w.threadID
+	turnID := w.turnID
+	w.mu.Unlock()
+	if tid == "" || turnID == "" {
+		return nil
+	}
+	w.MarkStopped()
+	return w.manager.InterruptTurn(tid, turnID)
+}
+
 func (w *AppServerWorker) Kill() error {
 	w.shutdown()
 	w.mu.Lock()

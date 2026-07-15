@@ -591,6 +591,17 @@ func (w *Worker) Terminate(ctx context.Context) error {
 	return w.BaseWorker.Terminate(ctx)
 }
 
+// StopCurrentTurn stops the current turn by force-killing the claudecode process.
+func (w *Worker) StopCurrentTurn(ctx context.Context) error {
+	w.Log.Info("claudecode: stopping current turn via ForceKill")
+	w.MarkStopped()
+	if w.cancel != nil {
+		w.cancel()
+	}
+	w.cleanupTempFiles()
+	return w.BaseWorker.Kill()
+}
+
 func (w *Worker) Conn() worker.SessionConn {
 	if w.testConn != nil {
 		return w.testConn

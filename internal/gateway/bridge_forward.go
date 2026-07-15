@@ -792,11 +792,13 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		}
 	}
 
+	wasStopped := w.IsStopped()
+
 	// Crash recovery retry: attempt when the worker exited without completing
 	// its turn (no "done" received). Skip during shutdown, SIGTERM (143),
 	// Applies to both fresh and resumed sessions — Resume() gracefully falls back
 	// to fresh Start() for workers that cannot preserve conversation history.
-	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
+	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && !wasStopped && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
 	if fallbackAttempted && p.turnTextLen == 0 && time.Since(p.startTime) < 5*time.Second {
 		lg.Info("bridge: session files missing after resume, skipping retry",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
@@ -850,7 +852,10 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// 1. Session completed normally: "done" received with no pending turn text.
 	// 2. Worker was intentionally terminated: SIGTERM (exit 143) is always
 	//    bridge/handler/GC-initiated, never an unexpected crash.
-	if p.doneReceived && p.turnTextLen == 0 {
+	if wasStopped {
+		lg.Info("bridge: worker exit clean (stopped by user)",
+			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
+	} else if p.doneReceived && p.turnTextLen == 0 {
 		lg.Info("bridge: worker exit clean (done received, no pending output)",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
 	} else if exitCode == 143 {
