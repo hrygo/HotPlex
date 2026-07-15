@@ -66,7 +66,11 @@ func (b *Bridge) bgCtx() context.Context {
 }
 
 func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwardOpts) {
-	ctx, span := observability.Tracer().Start(opts.ctx, "bridge.forward_events")
+	parent := opts.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, span := observability.Tracer().Start(parent, "bridge.forward_events")
 	defer span.End()
 	flog := b.log.With("trace_id", observability.TraceID(ctx))
 	defer func() {
