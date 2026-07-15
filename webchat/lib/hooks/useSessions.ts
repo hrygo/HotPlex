@@ -40,6 +40,7 @@ export interface UseSessionsOptions {
 export interface UseSessionsReturn {
   sessions: SessionInfo[];
   activeSession: SessionInfo | null;
+  loadedWorkspaceId: string | null;
   isLoading: boolean;
   error: string | null;
   isOpen: boolean;
@@ -60,6 +61,7 @@ export function useSessions({
 }: UseSessionsOptions): UseSessionsReturn {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [activeSession, setActiveSession] = useState<SessionInfo | null>(null);
+  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -98,6 +100,7 @@ export function useSessions({
       // switch" expectation and blocked anchor auto-create when stale.
       const pick = pickDefaultSession(filtered, initialRef.current);
       if (pick) {
+        setLoadedWorkspaceId(workspaceId ?? null);
         setActiveSession(pick);
         onSelectRef.current(pick.id);
         return;
@@ -129,6 +132,7 @@ export function useSessions({
             updated_at: now,
           };
           setSessions([newSession]);
+          setLoadedWorkspaceId(workspaceId ?? null);
           setActiveSession(newSession);
           onSelectRef.current(newSession.id);
         } finally {
@@ -162,6 +166,8 @@ export function useSessions({
     const ctrl = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset selection before refetching on workspace switch
     setActiveSession(null);
+    setSessions([]);
+    setLoadedWorkspaceId(null);
     if (workspaceId) {
       refreshSessions(ctrl.signal);
     }
@@ -243,6 +249,7 @@ export function useSessions({
   return {
     sessions,
     activeSession,
+    loadedWorkspaceId,
     isLoading,
     error,
     isOpen,

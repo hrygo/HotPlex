@@ -579,11 +579,14 @@ func TestConn_sendInitError(t *testing.T) {
 
 	c := newConn(h, conn, "sess_initerr", nil)
 	c.sendInitError(events.ErrCodeUnauthorized, "bad token")
+	require.Equal(t, int64(0), h.NextSeqPeek("sess_initerr"),
+		"init errors must not consume the durable session sequence")
 
 	_ = server.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	_, data, err := server.ReadMessage()
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"type":"init_ack"`)
+	require.Contains(t, string(data), `"seq":0`)
 	require.Contains(t, string(data), "bad token")
 }
 

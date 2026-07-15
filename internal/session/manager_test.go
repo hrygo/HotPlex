@@ -535,6 +535,54 @@ func TestManager_DeletePhysical(t *testing.T) {
 	})
 }
 
+func TestManager_DeletePhysicalNotifiesRuntimeCleanup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("DeletePhysical", ctx, "sess_cleanup_seq").Return(nil)
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	var notified atomic.Bool
+	m.OnRuntimeRelease = func(_ context.Context, id string) {
+		require.Equal(t, "sess_cleanup_seq", id)
+		notified.Store(true)
+	}
+	require.NoError(t, m.DeletePhysical(ctx, "sess_cleanup_seq"))
+	require.True(t, notified.Load())
+}
+
+func TestManager_DeleteNotifiesRuntimeCleanup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).Return(nil)
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	seed := SessionInfo{
+		ID: "sess_logical_delete", UserID: "u1", WorkerType: worker.TypeClaudeCode,
+		State: events.StateTerminated, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	m.mu.Lock()
+	m.sessions[seed.ID] = &managedSession{info: seed}
+	m.mu.Unlock()
+
+	var notified atomic.Bool
+	m.OnRuntimeRelease = func(_ context.Context, id string) {
+		require.Equal(t, seed.ID, id)
+		notified.Store(true)
+	}
+	require.NoError(t, m.Delete(ctx, seed.ID))
+	require.True(t, notified.Load())
+}
+
 func TestManager_DeleteNotifiesWorkerSessionCleanup(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()

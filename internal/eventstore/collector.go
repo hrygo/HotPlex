@@ -147,15 +147,13 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 
 	// MessageEnd triggers flush of both accumulators but is not stored itself.
 	if eventType == events.MessageEnd {
-		c.flushBoth(sessionID)
+		c.flushBothAndSend(sessionID, nil)
 		return
 	}
 
 	if !IsStorable(eventType) {
 		return
 	}
-
-	c.flushBoth(sessionID)
 
 	req := &captureRequest{event: &StoredEvent{
 		SessionID: sessionID,
@@ -166,7 +164,7 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 		Source:    source,
 		CreatedAt: time.Now().UnixMilli(),
 	}}
-	c.send(req)
+	c.flushBothAndSend(sessionID, req)
 }
 
 // flushAndAccumulate holds accumMu once to cross-flush the other accumulator and
@@ -205,21 +203,24 @@ func (c *Collector) flushAndAccumulate(sessionID string, seq int64, isReasoning 
 			delete(c.accum, sessionID)
 		}
 	}
-	c.accumMu.Unlock()
-
 	c.sendAccumulators(sessionID, flushed, sizeFlushed)
+	c.accumMu.Unlock()
 }
 
-// flushBoth flushes both delta and reasoning accumulators under a single lock.
-func (c *Collector) flushBoth(sessionID string) {
+// flushBothAndSend serializes accumulator detachment and capture-channel
+// submission. Releasing accumMu before enqueue would let a later concurrent
+// capture submit a higher sequence first and invert persisted ID order.
+func (c *Collector) flushBothAndSend(sessionID string, trailing *captureRequest) {
 	c.accumMu.Lock()
 	dAcc := c.accum[sessionID]
 	delete(c.accum, sessionID)
 	rAcc := c.reasoningAccum[sessionID]
 	delete(c.reasoningAccum, sessionID)
-	c.accumMu.Unlock()
-
 	c.sendAccumulators(sessionID, dAcc, rAcc)
+	if trailing != nil {
+		c.send(trailing)
+	}
+	c.accumMu.Unlock()
 }
 
 func orderedAccumulatorRequests(sessionID string, first, second *deltaAccumulator) []*captureRequest {
@@ -298,8 +299,8 @@ func (c *Collector) flushAndAccumulateRaw(sessionID string, seq int64, isReasoni
 		acc = c.getOrCreateAccum(sessionID)
 	}
 	if acc == nil {
-		c.accumMu.Unlock()
 		c.sendAccumulators(sessionID, other, nil)
+		c.accumMu.Unlock()
 		return
 	}
 	acc.appendRaw(seq, content)
@@ -313,8 +314,8 @@ func (c *Collector) flushAndAccumulateRaw(sessionID string, seq int64, isReasoni
 			delete(c.accum, sessionID)
 		}
 	}
-	c.accumMu.Unlock()
 	c.sendAccumulators(sessionID, other, sizeFlushed)
+	c.accumMu.Unlock()
 }
 
 func (c *Collector) send(req *captureRequest) {
@@ -364,6 +365,14 @@ func (c *Collector) Flush() error {
 	case <-time.After(5 * time.Second):
 		return fmt.Errorf("eventstore: flush wait timeout")
 	}
+}
+
+// FlushSession submits all accumulated deltas for sessionID and waits until
+// the writer commits everything queued before the flush marker. Callers use it
+// before releasing session-scoped sequence state on physical deletion.
+func (c *Collector) FlushSession(sessionID string) error {
+	c.flushBothAndSend(sessionID, nil)
+	return c.Flush()
 }
 
 // Close drains the capture channel and flushes remaining events.

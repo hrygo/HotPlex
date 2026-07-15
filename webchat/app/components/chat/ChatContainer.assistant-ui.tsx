@@ -361,6 +361,7 @@ export default function ChatContainer() {
     // Sessions hook scoped to active workspace
     const {
         activeSession,
+        loadedWorkspaceId,
         isLoading: sessionsLoading,
         error: sessionError,
         selectSession,
@@ -373,7 +374,13 @@ export default function ChatContainer() {
         workspaceId: activeWorkspace?.id,
     });
 
-    const activeSessionId = activeSession?.id || null;
+    // useSessions clears stale sessions in an effect. Gate synchronously on the
+    // workspace whose list produced activeSession so a workspace switch cannot
+    // remount the transport with the previous workspace's session ID.
+    const activeSessionId =
+        loadedWorkspaceId === activeWorkspace?.id
+            ? activeSession?.id || null
+            : null;
 
     // Handle NewSessionModal confirm
     const handleModalConfirm = useCallback(

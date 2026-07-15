@@ -129,3 +129,18 @@ func TestHub_EnsureSeqHydrated(t *testing.T) {
 		require.Equal(t, int64(12), h.NextSeq("s1"))
 	})
 }
+
+func TestHub_ForgetSeqAllowsFreshHydration(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	hydrator := &mockSeqHydrator{seq: 10}
+	h.SetSeqHydrator(hydrator)
+	require.NoError(t, h.EnsureSeqHydrated("s1"))
+	require.Equal(t, int64(11), h.NextSeq("s1"))
+
+	h.ForgetSeq("s1")
+	hydrator.seq = 20
+	require.NoError(t, h.EnsureSeqHydrated("s1"))
+	require.Equal(t, 2, hydrator.calls)
+	require.Equal(t, int64(21), h.NextSeq("s1"))
+}

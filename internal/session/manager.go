@@ -124,9 +124,13 @@ type Manager struct {
 	gcDone  chan struct{}
 	gcReset chan time.Duration // signals GC ticker reset
 
-	OnTerminate   func(sessionID string)
-	OnDelete      func(ctx context.Context, info SessionInfo)
-	StateNotifier func(ctx context.Context, sessionID string, state events.SessionState, message string)
+	OnTerminate func(sessionID string)
+	OnDelete    func(ctx context.Context, info SessionInfo)
+	// OnRuntimeRelease runs synchronously after a durable delete makes a session
+	// non-resumable, or retention GC physically removes it. Consumers use it to
+	// release state that must survive disconnects and ordinary termination.
+	OnRuntimeRelease func(ctx context.Context, sessionID string)
+	StateNotifier    func(ctx context.Context, sessionID string, state events.SessionState, message string)
 
 	auditCollector *audit.Collector // issue #833 P1; nil = audit disabled
 }
@@ -945,6 +949,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		m.mu.Unlock()
 		if cleanup, ok := m.store.(CleanupTaskStore); ok {
 			_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
+			if err == nil {
+				m.notifyRuntimeRelease(ctx, id)
+			}
 			return err
 		}
 		var deletedInfo *SessionInfo
@@ -956,6 +963,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		if err := m.store.DeletePhysical(ctx, id); err != nil {
 			return err
 		}
+		m.notifyRuntimeRelease(ctx, id)
 		if deletedInfo != nil {
 			m.notifyDelete(*deletedInfo)
 		}
@@ -1017,6 +1025,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 
 	m.notifyStateChange(ctx, id, events.StateDeleted, "session deleted")
 	m.terminateWorkerGracefully(ctx, workerToTerminate, id)
+	m.notifyRuntimeRelease(ctx, id)
 	if _, ok := m.store.(CleanupTaskStore); !ok {
 		m.notifyDelete(candidate)
 	}
@@ -1062,6 +1071,9 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 
 	if cleanup, ok := m.store.(CleanupTaskStore); ok {
 		_, err := cleanup.DeletePhysicalWithCleanup(ctx, id)
+		if err == nil {
+			m.notifyRuntimeRelease(ctx, id)
+		}
 		return err
 	}
 	if deletedInfo == nil && m.OnDelete != nil {
@@ -1072,6 +1084,7 @@ func (m *Manager) DeletePhysical(ctx context.Context, id string) error {
 	if err := m.store.DeletePhysical(ctx, id); err != nil {
 		return err
 	}
+	m.notifyRuntimeRelease(ctx, id)
 	if deletedInfo != nil {
 		m.notifyDelete(*deletedInfo)
 	}
@@ -1517,6 +1530,9 @@ func (m *Manager) gc(ctx context.Context) {
 	if err != nil {
 		m.log.Error("session: gc (delete_terminated) failed", "cron_cutoff", cronCutoff, "default_cutoff", defaultCutoff, "err", err)
 	} else {
+		for _, info := range deleted {
+			m.notifyRuntimeRelease(ctx, info.ID)
+		}
 		if _, durable := m.store.(CleanupTaskStore); !durable {
 			for _, info := range deleted {
 				m.notifyDelete(*info)
@@ -1558,6 +1574,12 @@ func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state
 func (m *Manager) notifyDelete(info SessionInfo) {
 	if m.OnDelete != nil {
 		m.safeGo(func() { m.OnDelete(context.Background(), info) })
+	}
+}
+
+func (m *Manager) notifyRuntimeRelease(ctx context.Context, sessionID string) {
+	if m.OnRuntimeRelease != nil {
+		m.OnRuntimeRelease(ctx, sessionID)
 	}
 }
 

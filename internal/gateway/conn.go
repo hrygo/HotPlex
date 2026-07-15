@@ -769,7 +769,9 @@ func (c *Conn) writeSync(data []byte) error {
 
 func (c *Conn) sendInitError(code events.ErrorCode, msg string) {
 	ack := BuildInitAckError(c.sessionID, &InitError{Code: code, Message: msg})
-	ack.Seq = c.hub.NextSeq(c.sessionID)
+	// Init failures happen before durable sequence hydration is guaranteed.
+	// Keep the builder's seq=0 so reporting an error cannot initialize a session
+	// counter at 1 and make a later retry skip fail-closed hydration.
 	data, err := aep.EncodeJSON(ack)
 	if err != nil {
 		return

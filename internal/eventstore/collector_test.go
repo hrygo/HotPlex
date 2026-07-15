@@ -580,6 +580,21 @@ func TestCollector_Flush(t *testing.T) {
 	require.Equal(t, string(events.Done), page.Events[1].Type)
 }
 
+func TestCollector_FlushSessionFlushesPendingDelta(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+	t.Cleanup(func() { _ = c.Close() })
+
+	c.CaptureDeltaString("s1", 1, "pending")
+	require.NoError(t, c.FlushSession("s1"))
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 10)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1)
+	require.Equal(t, int64(1), page.Events[0].Seq)
+}
+
 func TestCollector_FlushAfterClose(t *testing.T) {
 	store := newTestStore(t)
 	c := NewCollector(store, slog.Default())

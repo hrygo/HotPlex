@@ -367,6 +367,22 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// Hydrate SeqGen from persisted events on reconnect so seq continues
 	// monotonically instead of restarting from 1 (issue #879).
 	hub.SetSeqHydrator(stores.event)
+	sm.OnRuntimeRelease = func(ctx context.Context, sessionID string) {
+		// A zero value means no durable sequence was allocated; remove a possible
+		// hydrated-empty entry without forcing a global collector flush.
+		if hub.NextSeqPeek(sessionID) == 0 {
+			hub.ForgetSeq(sessionID)
+			return
+		}
+		if stores.collector != nil {
+			if err := stores.collector.FlushSession(sessionID); err != nil {
+				log.Warn("gateway: retain seq after session flush failure",
+					"session_id", sessionID, "err", err)
+				return
+			}
+		}
+		hub.ForgetSeq(sessionID)
+	}
 
 	var configWatcher *config.Watcher
 	if configPath != "" {

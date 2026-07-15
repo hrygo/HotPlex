@@ -635,6 +635,12 @@ func (h *Hub) NextSeqPeek(sessionID string) int64 {
 	return h.seqGen.Peek(sessionID)
 }
 
+// ForgetSeq releases sequence state after the session has been physically
+// deleted and pending collector writes have been flushed.
+func (h *Hub) ForgetSeq(sessionID string) {
+	h.seqGen.Remove(sessionID)
+}
+
 // SetSeqHydrator injects the persisted-seq reader used to hydrate SeqGen on
 // reconnect (issue #879). Optional; when nil (eventstore disabled), SeqGen
 // restarts from 1 as before. Called once during gateway startup after the
