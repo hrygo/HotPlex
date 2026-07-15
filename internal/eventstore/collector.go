@@ -196,11 +196,18 @@ func (c *Collector) flushAndAccumulate(sessionID string, seq int64, isReasoning 
 			c.log.Warn("eventstore: delta unmarshal failed", "session_id", sessionID, "err", err)
 		}
 	}
+	var sizeFlushed *deltaAccumulator
+	if acc != nil && acc.content.Len() >= deltaFlushSize {
+		sizeFlushed = acc
+		if isReasoning {
+			delete(c.reasoningAccum, sessionID)
+		} else {
+			delete(c.accum, sessionID)
+		}
+	}
 	c.accumMu.Unlock()
 
-	if flushed != nil && flushed.count > 0 {
-		c.send(flushed.toRequest(sessionID))
-	}
+	c.sendAccumulators(sessionID, flushed, sizeFlushed)
 }
 
 // flushBoth flushes both delta and reasoning accumulators under a single lock.
@@ -212,25 +219,29 @@ func (c *Collector) flushBoth(sessionID string) {
 	delete(c.reasoningAccum, sessionID)
 	c.accumMu.Unlock()
 
-	// Send in firstSeq order so insertion order (id) matches the logical seq
-	// order. Without this, a message delta flushed ahead of the reasoning that
-	// produced it gets a smaller id, making ORDER BY id DESC disagree with
-	// ORDER BY seq DESC and mis-ordering concurrently-flushed deltas in
-	// query_latest (issue #879). reasoning typically precedes its message, but
-	// compare firstSeq so workers that emit message deltas first stay correct.
+	c.sendAccumulators(sessionID, dAcc, rAcc)
+}
+
+func orderedAccumulatorRequests(sessionID string, first, second *deltaAccumulator) []*captureRequest {
+	valid := func(acc *deltaAccumulator) bool { return acc != nil && acc.count > 0 }
 	switch {
-	case dAcc != nil && dAcc.count > 0 && rAcc != nil && rAcc.count > 0:
-		if rAcc.firstSeq <= dAcc.firstSeq {
-			c.send(rAcc.toRequest(sessionID))
-			c.send(dAcc.toRequest(sessionID))
-		} else {
-			c.send(dAcc.toRequest(sessionID))
-			c.send(rAcc.toRequest(sessionID))
+	case valid(first) && valid(second):
+		if second.firstSeq < first.firstSeq {
+			first, second = second, first
 		}
-	case rAcc != nil && rAcc.count > 0:
-		c.send(rAcc.toRequest(sessionID))
-	case dAcc != nil && dAcc.count > 0:
-		c.send(dAcc.toRequest(sessionID))
+		return []*captureRequest{first.toRequest(sessionID), second.toRequest(sessionID)}
+	case valid(first):
+		return []*captureRequest{first.toRequest(sessionID)}
+	case valid(second):
+		return []*captureRequest{second.toRequest(sessionID)}
+	default:
+		return nil
+	}
+}
+
+func (c *Collector) sendAccumulators(sessionID string, first, second *deltaAccumulator) {
+	for _, req := range orderedAccumulatorRequests(sessionID, first, second) {
+		c.send(req)
 	}
 }
 
@@ -266,21 +277,44 @@ func (c *Collector) getOrCreateReasoningAccum(sessionID string) *deltaAccumulato
 // skipping the json.Marshal/Unmarshal round-trip of Capture.
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureReasoningString(sessionID string, seq int64, content string) {
+	c.flushAndAccumulateRaw(sessionID, seq, true, content)
+}
+
+func (c *Collector) flushAndAccumulateRaw(sessionID string, seq int64, isReasoning bool, content string) {
 	c.accumMu.Lock()
-	acc := c.getOrCreateReasoningAccum(sessionID)
+	var other *deltaAccumulator
+	if isReasoning {
+		other = c.accum[sessionID]
+		delete(c.accum, sessionID)
+	} else {
+		other = c.reasoningAccum[sessionID]
+		delete(c.reasoningAccum, sessionID)
+	}
+
+	var acc *deltaAccumulator
+	if isReasoning {
+		acc = c.getOrCreateReasoningAccum(sessionID)
+	} else {
+		acc = c.getOrCreateAccum(sessionID)
+	}
 	if acc == nil {
 		c.accumMu.Unlock()
+		c.sendAccumulators(sessionID, other, nil)
 		return
 	}
 	acc.appendRaw(seq, content)
 
+	var sizeFlushed *deltaAccumulator
 	if acc.content.Len() >= deltaFlushSize {
-		delete(c.reasoningAccum, sessionID)
-		c.accumMu.Unlock()
-		c.send(acc.toRequest(sessionID))
-		return
+		sizeFlushed = acc
+		if isReasoning {
+			delete(c.reasoningAccum, sessionID)
+		} else {
+			delete(c.accum, sessionID)
+		}
 	}
 	c.accumMu.Unlock()
+	c.sendAccumulators(sessionID, other, sizeFlushed)
 }
 
 func (c *Collector) send(req *captureRequest) {
@@ -344,25 +378,14 @@ func (c *Collector) Close() error {
 		c.accumMu.Unlock()
 
 		for sid, acc := range pending {
-			if acc.count > 0 {
-				req := acc.toRequest(sid)
-				select {
-				case c.captureC <- req:
-				case <-time.After(5 * time.Second):
-					c.log.Error("eventstore: accumulator flush dropped during close",
-						"session_id", sid, "kind", "turn")
-				}
+			for _, req := range orderedAccumulatorRequests(sid, acc, pendingReasoning[sid]) {
+				c.sendDuringClose(req)
 			}
+			delete(pendingReasoning, sid)
 		}
 		for sid, acc := range pendingReasoning {
-			if acc.count > 0 {
-				req := acc.toRequest(sid)
-				select {
-				case c.captureC <- req:
-				case <-time.After(5 * time.Second):
-					c.log.Error("eventstore: accumulator flush dropped during close",
-						"session_id", sid, "kind", "reasoning")
-				}
+			for _, req := range orderedAccumulatorRequests(sid, nil, acc) {
+				c.sendDuringClose(req)
 			}
 		}
 
@@ -370,6 +393,15 @@ func (c *Collector) Close() error {
 		c.closeWg.Wait()
 	})
 	return nil
+}
+
+func (c *Collector) sendDuringClose(req *captureRequest) {
+	select {
+	case c.captureC <- req:
+	case <-time.After(5 * time.Second):
+		c.log.Error("eventstore: accumulator flush dropped during close",
+			"session_id", req.sessionID(), "kind", kindOf(req))
+	}
 }
 
 // DroppedEvents returns the total number of events dropped due to a full channel.
@@ -450,15 +482,18 @@ func (c *Collector) flushTimedOutAccumulators(batch *[]*captureRequest) {
 	now := time.Now()
 	c.accumMu.Lock()
 	for sid, acc := range c.accum {
-		if now.Sub(acc.firstSeenAt) >= c.deltaFlush {
+		rAcc := c.reasoningAccum[sid]
+		if now.Sub(acc.firstSeenAt) >= c.deltaFlush ||
+			(rAcc != nil && now.Sub(rAcc.firstSeenAt) >= c.deltaFlush) {
 			delete(c.accum, sid)
-			*batch = append(*batch, acc.toRequest(sid))
+			delete(c.reasoningAccum, sid)
+			*batch = append(*batch, orderedAccumulatorRequests(sid, acc, rAcc)...)
 		}
 	}
 	for sid, acc := range c.reasoningAccum {
 		if now.Sub(acc.firstSeenAt) >= c.deltaFlush {
 			delete(c.reasoningAccum, sid)
-			*batch = append(*batch, acc.toRequest(sid))
+			*batch = append(*batch, orderedAccumulatorRequests(sid, nil, acc)...)
 		}
 	}
 	c.accumMu.Unlock()
@@ -510,6 +545,41 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 			c.log.Error("eventstore: batch commit", "err", err)
 		}
 		done = true
+		return
+	}
+
+	if err := tx.Rollback(); err != nil {
+		c.log.Error("eventstore: batch rollback", "err", err)
+		return
+	}
+	done = true
+	c.flushIndividually(batch)
+}
+
+// flushIndividually isolates a bad request after a batch append failure so one
+// uniqueness violation does not discard unrelated events and turns.
+func (c *Collector) flushIndividually(batch []*captureRequest) {
+	for _, req := range batch {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tx, err := c.store.BeginTx(ctx)
+		if err == nil {
+			switch {
+			case req.turn != nil:
+				err = tx.AppendTurn(ctx, req.turn)
+			case req.event != nil:
+				err = tx.Append(ctx, req.event)
+			}
+		}
+		if err == nil {
+			err = tx.Commit()
+		} else if tx != nil {
+			_ = tx.Rollback()
+		}
+		cancel()
+		if err != nil {
+			c.log.Warn("eventstore: isolated append failed",
+				"session_id", req.sessionID(), "kind", kindOf(req), "err", err)
+		}
 	}
 }
 
@@ -517,21 +587,7 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 // skipping the json.Marshal/Unmarshal round-trip of Capture.
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureDeltaString(sessionID string, seq int64, content string) {
-	c.accumMu.Lock()
-	acc := c.getOrCreateAccum(sessionID)
-	if acc == nil {
-		c.accumMu.Unlock()
-		return
-	}
-	acc.appendRaw(seq, content)
-
-	if acc.content.Len() >= deltaFlushSize {
-		delete(c.accum, sessionID)
-		c.accumMu.Unlock()
-		c.send(acc.toRequest(sessionID))
-		return
-	}
-	c.accumMu.Unlock()
+	c.flushAndAccumulateRaw(sessionID, seq, false, content)
 }
 
 // ResetSession discards any accumulated delta and reasoning content for the given session.

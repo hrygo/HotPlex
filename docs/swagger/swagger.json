@@ -2352,7 +2352,7 @@
                     },
                     {
                         "type": "integer",
-                        "description": "Cursor sequence number",
+                        "description": "Persisted event row ID cursor",
                         "name": "cursor",
                         "in": "query"
                     },
@@ -3264,7 +3264,13 @@
                 "has_older": {
                     "type": "boolean"
                 },
+                "newest_id": {
+                    "type": "integer"
+                },
                 "newest_seq": {
+                    "type": "integer"
+                },
+                "oldest_id": {
                     "type": "integer"
                 },
                 "oldest_seq": {

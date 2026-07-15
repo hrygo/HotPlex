@@ -33,13 +33,20 @@ func (g *SeqGen) Peek(sessionID string) int64 {
 	return val.(*atomic.Int64).Load() //nolint:errcheck // LoadOrStore guarantees *atomic.Int64
 }
 
+// Initialized reports whether a sequence counter has been created for sessionID.
+// A hydrated empty session is initialized even though its current value is 0.
+func (g *SeqGen) Initialized(sessionID string) bool {
+	_, ok := g.seq.Load(sessionID)
+	return ok
+}
+
 // Next returns the next sequence number for a session.
 func (g *SeqGen) Next(sessionID string) int64 {
 	val, _ := g.seq.LoadOrStore(sessionID, new(atomic.Int64))
 	return val.(*atomic.Int64).Add(1) //nolint:errcheck // LoadOrStore guarantees *atomic.Int64
 }
 
-// Remove deletes the sequence counter for a session.
+// Remove deletes the sequence counter for a physically deleted session.
 func (g *SeqGen) Remove(sessionID string) {
 	g.seq.Delete(sessionID)
 }

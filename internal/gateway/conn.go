@@ -488,13 +488,14 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 
 	c.hub.LeaveSession("", c)
 	c.hub.JoinSession(sessionID, c)
-	// Hydrate SeqGen from persisted events so the upcoming init_ack and worker
-	// events continue monotonically instead of restarting from 1 (issue #879:
-	// WS disconnect deleted the counter → reconnect collided with persisted seq
-	// segments and buried new events under ORDER BY seq DESC). Runs after
-	// JoinSession and before resolveSessionState starts the worker (which assigns
-	// seqs in a goroutine) and before finalizeInit's init_ack NextSeq.
-	c.hub.EnsureSeqHydrated(sessionID)
+	// Hydrate SeqGen before resolveSessionState can start a worker or finalizeInit
+	// can allocate init_ack. Never fall back to 1 on a database error because a
+	// duplicate could roll back an entire collector batch.
+	if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
+		c.sendInitError(events.ErrCodeInternalError, "unable to restore session event sequence; retry later")
+		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+		return "", nil, err
+	}
 
 	return c.resolveSessionState(sessionID, initData, workDir, sm, preResolved, env.SessionID)
 }

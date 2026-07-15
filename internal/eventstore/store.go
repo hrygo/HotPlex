@@ -65,15 +65,15 @@ const (
 	SourceFreshStart = "fresh_start"
 )
 
-// CursorDirection controls pagination direction relative to a cursor seq value.
+// CursorDirection controls pagination direction relative to a persisted row ID.
 type CursorDirection int
 
 const (
 	// CursorLatest fetches the most recent N events (no cursor needed).
 	CursorLatest CursorDirection = iota
-	// CursorAfter fetches events with seq > cursor (newer, for incremental catch-up).
+	// CursorAfter fetches events with id > cursor (newer, for incremental catch-up).
 	CursorAfter
-	// CursorBefore fetches events with seq < cursor (older, for loading history).
+	// CursorBefore fetches events with id < cursor (older, for loading history).
 	CursorBefore
 )
 
@@ -151,6 +151,7 @@ type TurnStatItem struct {
 
 // StoredEvent represents a single persisted AEP event.
 type StoredEvent struct {
+	ID        int64           `json:"id"`
 	SessionID string          `json:"session_id"`
 	Seq       int64           `json:"seq"`
 	Type      string          `json:"type"`
@@ -162,10 +163,13 @@ type StoredEvent struct {
 
 // EventPage is a page of events with pagination metadata.
 type EventPage struct {
-	Events    []*StoredEvent `json:"events"`
-	OldestSeq int64          `json:"oldest_seq"`
-	NewestSeq int64          `json:"newest_seq"`
-	HasOlder  bool           `json:"has_older"`
+	Events   []*StoredEvent `json:"events"`
+	OldestID int64          `json:"oldest_id"`
+	NewestID int64          `json:"newest_id"`
+	// OldestSeq and NewestSeq are event metadata, not pagination cursors.
+	OldestSeq int64 `json:"oldest_seq"`
+	NewestSeq int64 `json:"newest_seq"`
+	HasOlder  bool  `json:"has_older"`
 }
 
 // EventStore defines the interface for AEP event persistence.
@@ -178,9 +182,9 @@ type EventStore interface {
 
 	// QueryBySession fetches events with cursor-based bidirectional pagination.
 	//   dir=CursorLatest, cursor=0  → latest N events (initial load)
-	//   dir=CursorAfter,  cursor=X  → events with seq > X (catch-up)
-	//   dir=CursorBefore, cursor=X  → events with seq < X (load older)
-	// Returns events always in seq ASC order.
+	//   dir=CursorAfter,  cursor=X  → events with id > X (catch-up)
+	//   dir=CursorBefore, cursor=X  → events with id < X (load older)
+	// Returns events always in insertion-id ASC order.
 	QueryBySession(ctx context.Context, sessionID string, cursor int64, dir CursorDirection, limit int) (*EventPage, error)
 
 	// DeleteBySession removes all events for a session.
@@ -498,7 +502,7 @@ func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 	var events []*StoredEvent
 	for rows.Next() {
 		var e StoredEvent
-		if err := rows.Scan(&e.SessionID, &e.Seq, &e.Type, &e.Data, &e.Direction, &e.Source, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Seq, &e.Type, &e.Data, &e.Direction, &e.Source, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("eventstore: scan: %w", err)
 		}
 		events = append(events, &e)

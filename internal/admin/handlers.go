@@ -388,12 +388,18 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 		"last_seq_sent": a.hub.NextSeqPeek(id),
 		"worker_health": snap.WorkerHealth,
 		"runtime_only":  true, // turn_count/last_seq_sent are ephemeral; see db_* below.
+		"db_turn_count": nil,
+		"db_last_seq":   nil,
 	}
 	if a.turnStore != nil {
-		if stats, err := a.turnStore.TurnStats(r.Context(), id); err == nil && stats != nil {
+		if stats, err := a.turnStore.TurnStats(r.Context(), id); err != nil {
+			a.log.Warn("admin: query durable turn count failed", "session_id", id, "err", err)
+		} else if stats != nil {
 			debug["db_turn_count"] = stats.TotalTurns
 		}
-		if seq, err := a.turnStore.LatestSeq(r.Context(), id); err == nil {
+		if seq, err := a.turnStore.LatestSeq(r.Context(), id); err != nil {
+			a.log.Warn("admin: query durable event seq failed", "session_id", id, "err", err)
+		} else {
 			debug["db_last_seq"] = seq
 		}
 	}

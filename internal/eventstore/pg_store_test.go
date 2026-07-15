@@ -22,7 +22,7 @@ func newEventPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 	pg := dbutil.DialectPostgres
 	sqlMap := map[string]string{
 		"insert":       pg.Rebind("INSERT INTO events (session_id, seq, type, data, direction, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"),
-		"query_latest": pg.Rebind("SELECT session_id, seq, type, data, direction, source, created_at FROM events WHERE session_id = ? ORDER BY seq DESC LIMIT ?"),
+		"query_latest": pg.Rebind("SELECT id, session_id, seq, type, data, direction, source, created_at FROM events WHERE session_id = ? ORDER BY id DESC LIMIT ?"),
 	}
 
 	store := &pgStore{
@@ -39,7 +39,7 @@ func newEventPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 }
 
 func eventColumns() []string {
-	return []string{"session_id", "seq", "type", "data", "direction", "source", "created_at"}
+	return []string{"id", "session_id", "seq", "type", "data", "direction", "source", "created_at"}
 }
 
 func TestPGEventStore_AppendEvent(t *testing.T) {
@@ -77,11 +77,11 @@ func TestPGEventStore_QueryBySession_Latest(t *testing.T) {
 	fetchLimit := 201
 
 	q := dbutil.DialectPostgres.Rebind(
-		"SELECT session_id, seq, type, data, direction, source, created_at FROM events WHERE session_id = ? ORDER BY seq DESC LIMIT ?")
+		"SELECT id, session_id, seq, type, data, direction, source, created_at FROM events WHERE session_id = ? ORDER BY id DESC LIMIT ?")
 
 	rows := sqlmock.NewRows(eventColumns()).
-		AddRow(sessionID, int64(2), "message.delta", []byte(`{"c":"b"}`), "out", "normal", int64(2000)).
-		AddRow(sessionID, int64(1), "message.delta", []byte(`{"c":"a"}`), "out", "normal", int64(1000))
+		AddRow(int64(2), sessionID, int64(2), "message.delta", []byte(`{"c":"b"}`), "out", "normal", int64(2000)).
+		AddRow(int64(1), sessionID, int64(1), "message.delta", []byte(`{"c":"a"}`), "out", "normal", int64(1000))
 
 	mock.ExpectQuery(regexp.QuoteMeta(q)).WithArgs(sessionID, fetchLimit).WillReturnRows(rows)
 
@@ -93,6 +93,8 @@ func TestPGEventStore_QueryBySession_Latest(t *testing.T) {
 	require.Equal(t, int64(2), page.Events[1].Seq)
 	require.Equal(t, int64(1), page.OldestSeq)
 	require.Equal(t, int64(2), page.NewestSeq)
+	require.Equal(t, int64(1), page.OldestID)
+	require.Equal(t, int64(2), page.NewestID)
 	require.False(t, page.HasOlder)
 }
 

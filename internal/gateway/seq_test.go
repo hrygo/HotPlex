@@ -84,7 +84,7 @@ func TestHub_EnsureSeqHydrated(t *testing.T) {
 		t.Parallel()
 		h := newTestHub(t)
 		// No SetSeqHydrator → nil; Next starts at 1 (pre-issue-#879 behavior).
-		h.EnsureSeqHydrated("s1")
+		require.NoError(t, h.EnsureSeqHydrated("s1"))
 		require.Equal(t, int64(1), h.NextSeq("s1"))
 	})
 
@@ -92,7 +92,7 @@ func TestHub_EnsureSeqHydrated(t *testing.T) {
 		t.Parallel()
 		h := newTestHub(t)
 		h.SetSeqHydrator(&mockSeqHydrator{seq: 9899})
-		h.EnsureSeqHydrated("s1")
+		require.NoError(t, h.EnsureSeqHydrated("s1"))
 		// Reconnect after a session that persisted 9899 events → next seq is 9900,
 		// not 1 (regression: seq collision + buried new events, issue #879).
 		require.Equal(t, int64(9900), h.NextSeq("s1"))
@@ -102,16 +102,30 @@ func TestHub_EnsureSeqHydrated(t *testing.T) {
 		t.Parallel()
 		h := newTestHub(t)
 		h.SetSeqHydrator(&mockSeqHydrator{seq: 0})
-		h.EnsureSeqHydrated("fresh")
+		require.NoError(t, h.EnsureSeqHydrated("fresh"))
 		require.Equal(t, int64(1), h.NextSeq("fresh"))
 	})
 
-	t.Run("db error falls back to 1", func(t *testing.T) {
+	t.Run("db error fails closed", func(t *testing.T) {
 		t.Parallel()
 		h := newTestHub(t)
 		h.SetSeqHydrator(&mockSeqHydrator{err: errors.New("db down")})
-		// Best-effort: hydrate failure must not block the handshake.
-		h.EnsureSeqHydrated("s1")
-		require.Equal(t, int64(1), h.NextSeq("s1"))
+		err := h.EnsureSeqHydrated("s1")
+		require.ErrorContains(t, err, "db down")
+		require.Equal(t, int64(0), h.NextSeqPeek("s1"))
+	})
+
+	t.Run("initialized session skips database on reconnect", func(t *testing.T) {
+		t.Parallel()
+		h := newTestHub(t)
+		hydrator := &mockSeqHydrator{seq: 10}
+		h.SetSeqHydrator(hydrator)
+		require.NoError(t, h.EnsureSeqHydrated("s1"))
+		require.Equal(t, int64(11), h.NextSeq("s1"))
+
+		hydrator.err = errors.New("db down")
+		require.NoError(t, h.EnsureSeqHydrated("s1"))
+		require.Equal(t, 1, hydrator.calls)
+		require.Equal(t, int64(12), h.NextSeq("s1"))
 	})
 }

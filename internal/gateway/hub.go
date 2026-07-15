@@ -199,9 +199,9 @@ func (h *Hub) RegisterConn(conn *Conn) {
 	h.log.Debug("gateway: conn registered", "remote", conn.RemoteAddr(), "session_id", conn.sessionID)
 }
 
-// UnregisterConn removes a connection and cleans up session mappings.
-// Session-level entries (seqGen) are cleaned up when a session has no
-// remaining connections.
+// UnregisterConn removes a connection and cleans up session routing mappings.
+// Sequence counters outlive connections because collector writes are async and
+// a reconnect must continue above values that may not be persisted yet.
 func (h *Hub) UnregisterConn(conn *Conn) {
 	h.mu.Lock()
 	delete(h.conns, conn)
@@ -246,9 +246,8 @@ func (h *Hub) JoinSession(sessionID string, conn *Conn) {
 	h.everHadConn[sessionID] = true
 }
 
-// LeaveSession unsubscribes conn from a session.
-// If the session has no remaining connections, session-level entries (seqGen)
-// are cleaned up to prevent memory leaks.
+// LeaveSession unsubscribes conn from a session. The session sequence counter
+// is retained for the Hub lifetime; a connection is not a session lifecycle.
 func (h *Hub) LeaveSession(sessionID string, conn *Conn) {
 	h.mu.Lock()
 	h.removeSession(sessionID, conn)
@@ -263,7 +262,6 @@ func (h *Hub) removeSession(sessionID string, conn SessionWriter) {
 		if len(conns) == 0 {
 			delete(h.sessions, sessionID)
 			delete(h.everHadConn, sessionID)
-			h.seqGen.Remove(sessionID)
 		}
 	}
 }
@@ -646,27 +644,24 @@ func (h *Hub) SetSeqHydrator(sh SeqHydrator) {
 }
 
 // EnsureSeqHydrated seeds the SeqGen counter for sessionID from persisted
-// events so the next NextSeq continues monotonically instead of restarting
-// from 1 (issue #879: WS disconnect deleted the counter → reconnect collided
-// with persisted seq segments and buried new events under ORDER BY seq DESC).
-// Best-effort: a DB error is logged and does not block the handshake (SeqGen
-// simply starts from 1). MUST be called after JoinSession and before the first
-// NextSeq (e.g. before starting the worker or sending init_ack).
-func (h *Hub) EnsureSeqHydrated(sessionID string) {
+// events on first use. A database error is fatal to the handshake: falling
+// back to 1 could collide with durable history and make the collector reject
+// the entire batch. MUST run before the first NextSeq for a session.
+func (h *Hub) EnsureSeqHydrated(sessionID string) error {
 	if h.seqHydrator == nil {
-		return
+		return nil
+	}
+	if h.seqGen.Initialized(sessionID) {
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, 3*time.Second)
 	defer cancel()
 	latest, err := h.seqHydrator.LatestSeq(ctx, sessionID)
 	if err != nil {
-		h.log.Warn("gateway: hydrate seq from db failed; starting from 1",
-			"session_id", sessionID, "err", err)
-		return
+		return fmt.Errorf("gateway: hydrate seq for session %s: %w", sessionID, err)
 	}
-	if latest > 0 {
-		h.seqGen.Init(sessionID, latest)
-	}
+	h.seqGen.Init(sessionID, latest)
+	return nil
 }
 
 // ConnectionsOpen returns the number of currently open WebSocket connections.

@@ -66,6 +66,8 @@ func TestSQLiteStore_AppendAndQuery(t *testing.T) {
 		page, err := store.QueryBySession(ctx, "sess1", 0, CursorLatest, 3)
 		require.NoError(t, err)
 		require.Len(t, page.Events, 3)
+		require.Equal(t, int64(3), page.OldestID)
+		require.Equal(t, int64(5), page.NewestID)
 		require.Equal(t, int64(3), page.OldestSeq)
 		require.Equal(t, int64(5), page.NewestSeq)
 		require.True(t, page.HasOlder)
@@ -92,6 +94,39 @@ func TestSQLiteStore_AppendAndQuery(t *testing.T) {
 		_, err := store.QueryBySession(ctx, "no-such-session", 0, CursorLatest, 10)
 		require.ErrorIs(t, err, ErrNotFound)
 	})
+}
+
+func TestSQLiteStore_QueryBySessionUsesIDCursor(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Simulate legacy reconnect history: insertion order is authoritative even
+	// though the in-memory seq counter previously reset from 3 back to 1.
+	for _, seq := range []int64{3, 1, 2} {
+		require.NoError(t, store.Append(ctx, &StoredEvent{
+			SessionID: "legacy", Seq: seq, Type: "message",
+			Data: raw(`{}`), Direction: "outbound", Source: SourceNormal,
+			CreatedAt: time.Now().UnixMilli(),
+		}))
+	}
+
+	latest, err := store.QueryBySession(ctx, "legacy", 0, CursorLatest, 2)
+	require.NoError(t, err)
+	require.Equal(t, []int64{2, 3}, []int64{latest.Events[0].ID, latest.Events[1].ID})
+	require.Equal(t, []int64{1, 2}, []int64{latest.Events[0].Seq, latest.Events[1].Seq})
+	require.True(t, latest.HasOlder)
+
+	before, err := store.QueryBySession(ctx, "legacy", latest.OldestID, CursorBefore, 2)
+	require.NoError(t, err)
+	require.Len(t, before.Events, 1)
+	require.Equal(t, int64(1), before.Events[0].ID)
+	require.Equal(t, int64(3), before.Events[0].Seq)
+
+	after, err := store.QueryBySession(ctx, "legacy", latest.OldestID, CursorAfter, 2)
+	require.NoError(t, err)
+	require.Len(t, after.Events, 1)
+	require.Equal(t, int64(3), after.Events[0].ID)
 }
 
 func TestSQLiteStore_DeleteBySession(t *testing.T) {

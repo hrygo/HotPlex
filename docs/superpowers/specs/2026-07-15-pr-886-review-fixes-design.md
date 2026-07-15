@@ -13,9 +13,9 @@ The repair must preserve all existing event rows and keep replay behavior determ
 
 ### 1. Preserve legacy duplicates while enforcing uniqueness for new events
 
-Migration 028 will add a non-null `seq_guard_id` column with a default of `0`. Every row that predates the migration is assigned its own row ID as the guard value. The unique index becomes `(session_id, seq_guard_id, seq)`.
+Migration 028 will add a non-null `seq_guard_id` column with a default of `0`. One canonical row per legacy `(session_id, seq)` group keeps guard `0`; additional duplicate rows are assigned their own row IDs as guard values. The unique index becomes `(session_id, seq_guard_id, seq)`.
 
-Existing rows are therefore never deleted, including rows that share `(session_id, seq)`. New inserts omit the guard column and receive `0`, so duplicate sequence numbers remain rejected among post-migration writes. The down migration removes the index and compatibility column without deleting event data.
+Existing rows are therefore never deleted, including rows that share `(session_id, seq)`. New inserts omit the guard column and receive `0`, so they conflict with every legacy sequence already present and with duplicate post-migration writes. The down migration removes the index and compatibility column without deleting event data.
 
 This is preferred over resequencing history because sequence numbers may already be referenced by protocol metadata, turns, or external diagnostics. It is also preferred over removing the constraint because the database should continue detecting new allocation defects.
 

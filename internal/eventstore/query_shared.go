@@ -64,6 +64,8 @@ func queryBySession(ctx context.Context, qe queryExecer, q map[string]string, se
 
 	page := &EventPage{Events: events}
 	if len(events) > 0 {
+		page.OldestID = events[0].ID
+		page.NewestID = events[len(events)-1].ID
 		page.OldestSeq = events[0].Seq
 		page.NewestSeq = events[len(events)-1].Seq
 	}
@@ -73,7 +75,7 @@ func queryBySession(ctx context.Context, qe queryExecer, q map[string]string, se
 			page.HasOlder = hasMore
 		default:
 			var exists int
-			err := qe.QueryRowContext(ctx, q["has_older"], sessionID, page.OldestSeq).Scan(&exists)
+			err := qe.QueryRowContext(ctx, q["has_older"], sessionID, page.OldestID).Scan(&exists)
 			page.HasOlder = err == nil && exists == 1
 		}
 	}

@@ -418,6 +418,77 @@ func TestCollector_ReasoningDeltaInterleave(t *testing.T) {
 	require.Equal(t, "thinking...", rData["content"])
 }
 
+func TestCollector_SizeFlushPreservesReasoningMessageOrder(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+
+	c.CaptureReasoningString("s1", 1, "thinking")
+	c.CaptureDeltaString("s1", 2, strings.Repeat("m", deltaFlushSize))
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2)
+	require.Equal(t, []string{string(events.Reasoning), string(events.Message)},
+		[]string{page.Events[0].Type, page.Events[1].Type})
+	require.Less(t, page.Events[0].ID, page.Events[1].ID)
+}
+
+func TestCollector_TimerFlushOrdersCoexistingAccumulators(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	c := NewCollectorWithIntervals(store, slog.Default(), 10*time.Millisecond, 10*time.Millisecond)
+
+	// Seed both maps to exercise the timer's defensive ordering path. Normal
+	// capture cross-flushes on type switches, but both maps can coexist across
+	// code upgrades or a capture racing a timer boundary.
+	rAcc := newDeltaAccumulator(events.Reasoning)
+	rAcc.appendRaw(1, "thinking")
+	dAcc := newDeltaAccumulator(events.Message)
+	dAcc.appendRaw(2, "answer")
+	rAcc.firstSeenAt = time.Now().Add(-time.Second)
+	dAcc.firstSeenAt = time.Now().Add(-time.Second)
+	c.accumMu.Lock()
+	c.reasoningAccum["s1"] = rAcc
+	c.accum["s1"] = dAcc
+	c.accumMu.Unlock()
+
+	require.Eventually(t, func() bool {
+		page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+		return err == nil && len(page.Events) == 2
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Equal(t, []string{string(events.Reasoning), string(events.Message)},
+		[]string{page.Events[0].Type, page.Events[1].Type})
+}
+
+func TestCollector_BatchFailureIsolatesBadEvent(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	_, err := store.db.Exec(`CREATE UNIQUE INDEX events_session_seq_test
+		ON events(session_id, seq)`)
+	require.NoError(t, err)
+	require.NoError(t, store.Append(context.Background(), &StoredEvent{
+		SessionID: "s1", Seq: 1, Type: string(events.Done), Data: raw(`{}`),
+		Direction: "outbound", Source: SourceNormal, CreatedAt: time.Now().UnixMilli(),
+	}))
+
+	c := NewCollector(store, slog.Default())
+	c.Capture("s1", 1, events.Done, raw(`{}`), "outbound", SourceNormal)
+	c.Capture("s1", 2, events.Done, raw(`{}`), "outbound", SourceNormal)
+	require.NoError(t, c.Flush())
+	require.NoError(t, c.Close())
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 2)
+	require.Equal(t, []int64{1, 2}, []int64{page.Events[0].Seq, page.Events[1].Seq})
+}
+
 func TestCollector_ReasoningTimerFlush(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping timer test in short mode")

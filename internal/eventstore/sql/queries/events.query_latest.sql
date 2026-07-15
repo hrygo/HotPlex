@@ -4,7 +4,7 @@
 -- seq DESC would bury low-seq new events under the LIMIT. Mirrors
 -- turns.query_latest's ORDER BY t.id DESC. Correct because flushBoth now sends
 -- deltas in firstSeq order, so insertion order (id) matches logical seq order.
-SELECT session_id, seq, type, data, direction, source, created_at
+SELECT id, session_id, seq, type, data, direction, source, created_at
 FROM events
 WHERE session_id = ?
 ORDER BY id DESC
