@@ -11,7 +11,7 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
-// handleControl processes client-originated control messages (terminate, delete).
+// handleControl processes client-originated control messages (terminate, delete, stop).
 // Server-originated control messages (reconnect, session_invalid, throttle) are
 // sent via SendControlToSession.
 func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error {

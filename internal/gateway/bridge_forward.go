@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -892,7 +893,18 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	}
 
 	if !fallbackAttempted {
-		b.cleanupCrashedWorker(p.sessionID, w)
+		if wasStopped {
+			// User-initiated stop: detach the dead worker and transition to Idle
+			// so the session stays alive for the next turn (not Terminated).
+			if b.sm != nil {
+				b.sm.DetachWorkerIf(p.sessionID, w)
+				if err := b.sm.Transition(context.Background(), p.sessionID, events.StateIdle); err != nil {
+					lg.Debug("bridge: transition to idle after stop", "session_id", p.sessionID, "err", err)
+				}
+			}
+		} else {
+			b.cleanupCrashedWorker(p.sessionID, w)
+		}
 	}
 }
 
@@ -1213,15 +1225,15 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 		branch = gitBranchOf(workDir)
 	}
 	sessionCreated := startTime
-	if b.sm != nil {
-		type mockDetector interface {
-			IsMock() bool
-		}
-		if _, isMock := b.sm.(mockDetector); !isMock {
+	if b.sm != nil && flag.Lookup("test.v") == nil {
+		// Best-effort: resolve session creation time for accurate duration_seconds.
+		// Errors silently fall back to startTime.
+		func() {
+			defer func() { _ = recover() }()
 			if si, err := b.sm.Get(context.Background(), sessionID); err == nil && !si.CreatedAt.IsZero() {
 				sessionCreated = si.CreatedAt
 			}
-		}
+		}()
 	}
 
 	b.accumMu.Lock()

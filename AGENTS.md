@@ -261,11 +261,11 @@ configs/   - 配置文件
 
 ### PR Review 修复循环
 
-push 后等待自动 review（CI 成功后由 GitHub 侧 webhook/Action 自动触发新一轮）。如需手动触发，走仓库配置的 GitHub Action `workflow_dispatch` 或 PR 评论指令。
+自动化 review CI 已取消。push 后由开发者自行审查或请求人工 review。
 
 ```
-push → 等 review（自动）→ 一次性修 P0/P1 + 值得的 P2 → push → 重复
-终止：最新 review 对当前 HEAD 为 APPROVED 且无新 P0/P1
+push → 自行审查 / 请求人工 review → 一次性修 P0/P1 + 值得的 P2 → push → 重复
+终止：review 对当前 HEAD 为 APPROVED 且无新 P0/P1
 ```
 
 **修复前先核实**（review 可能针对旧 commit 或含误报）：① 发现指向的代码位置在当前 HEAD 仍存在；② 该发现未被后续 commit 修过。一轮 review 的所有发现**一次性修、一次 push**，避免逐条触发新轮次。
