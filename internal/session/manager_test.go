@@ -590,6 +590,26 @@ func TestManager_DeleteNotifiesRuntimeCleanup(t *testing.T) {
 	require.True(t, notified.Load())
 }
 
+func TestManager_IsSeqActiveRejectsDeletingSession(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	m.mu.Lock()
+	m.sessions["s1"] = &managedSession{
+		info:     SessionInfo{ID: "s1", State: events.StateRunning},
+		deleting: true,
+	}
+	m.mu.Unlock()
+
+	require.False(t, m.IsSeqActive(ctx, "s1"))
+}
+
 func TestManager_DeleteNotifiesWorkerSessionCleanup(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()

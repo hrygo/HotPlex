@@ -368,8 +368,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	// monotonically instead of restarting from 1 (issue #879).
 	hub.SetSeqHydrator(stores.event)
 	hub.SetSeqSessionExists(func(sessionID string) bool {
-		_, err := sm.Get(context.Background(), sessionID)
-		return err == nil
+		return sm.IsSeqActive(context.Background(), sessionID)
 	})
 	sm.OnRuntimeRelease = func(ctx context.Context, sessionID string) {
 		err := hub.ReleaseSeq(sessionID, func() error {

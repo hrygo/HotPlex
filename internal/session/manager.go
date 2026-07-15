@@ -434,6 +434,25 @@ func (m *Manager) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	return info, nil
 }
 
+// IsSeqActive reports whether a session may still allocate or persist AEP
+// sequence events. It rejects the in-memory deleting phase before the durable
+// DELETED write completes, closing the gap where late producers could enter
+// between delete start and the runtime-release barrier.
+func (m *Manager) IsSeqActive(ctx context.Context, id string) bool {
+	m.mu.RLock()
+	ms, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if ok {
+		ms.mu.RLock()
+		active := !ms.deleting && ms.info.State != events.StateDeleted
+		ms.mu.RUnlock()
+		return active
+	}
+
+	info, err := m.store.Get(ctx, id)
+	return err == nil && info.State != events.StateDeleted
+}
+
 // updateSession applies a field mutation under ms.mu, persists to DB, and rolls back on error.
 // The apply closure must capture previous values and return a rollback closure — all under the lock.
 func (m *Manager) updateSession(ctx context.Context, ms *managedSession, apply func(*SessionInfo) func()) error {
