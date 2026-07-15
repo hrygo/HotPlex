@@ -131,7 +131,6 @@ export const ProtocolConstants = {
   MaxMissedPongs: 3,             // (from heartbeat.go:29)
   ReconnectBaseDelayMs: 1000,   // 1 second base for exponential backoff
   ReconnectMaxDelayMs: 60000,   // 60 seconds max
-  SessionBusyRetryDelayMs: 500,  // 500ms initial delay for SESSION_BUSY retry
 } as const;
 
 // Event ID prefix (from internal/aep/codec.go)
