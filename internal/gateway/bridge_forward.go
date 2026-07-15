@@ -453,7 +453,19 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 			time.Since(time.UnixMilli(*rec.StartedAt)).Seconds())
 	}
 
-	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, 0, eventKind, events.RuntimeExecutionData{
+	var seq int64
+	if b.collector != nil {
+		// processForwardedEvent already holds the session's sequence lease.
+		// Re-entering BeginSeqOperation through SendToSession can self-deadlock
+		// when a ReleaseSeq writer is queued behind the outer read lock.
+		seq = b.hub.NextSeqHeld(sessionID)
+	} else {
+		seq = b.hub.NextSeq(sessionID)
+	}
+	if seq == 0 {
+		return
+	}
+	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, seq, eventKind, events.RuntimeExecutionData{
 		ExecutionID: rec.ExecutionID,
 		Status:      string(rtStatus),
 	})
