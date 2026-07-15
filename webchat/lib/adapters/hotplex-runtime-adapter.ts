@@ -702,7 +702,8 @@ export function useHotPlexRuntime({
             stoppingRef.current = false;
 
             // Fetch skills after the first turn completes (worker conversation is now active)
-            if (!skillsFetchedRef.current) {
+            // Skip if the turn was stopped by the user, since the worker is detached.
+            if (!skillsFetchedRef.current && data?.reason !== "stopped_by_user") {
                 skillsFetchedRef.current = true;
                 try {
                     client.sendWorkerCommand(WorkerStdioCommand.Skills);
