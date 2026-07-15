@@ -300,7 +300,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	execRecord, duplicate, err := h.acceptInputExecution(ctx, env)
+	execRecord, duplicate, err := h.acceptInputExecutionWithRetry(ctx, env)
 	if err != nil {
 		if errors.Is(err, execution.ErrPayloadConflict) {
 			observability.ExecutionConflict().Add(ctx, 1)
@@ -501,6 +501,33 @@ func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope
 		return nil, duplicate, err
 	}
 	return record, duplicate, nil
+}
+
+// acceptInputExecutionWithRetry accepts the input, and if the session is fenced
+// (previous runtime outcome unknown, which blocks Accept via the active gate's
+// partial unique index), clears the fence and retries once. Without this a
+// fenced session stays permanently blocked. Worker health is left to the
+// existing session/crash-recovery machinery, so clearing the fence only
+// re-opens Accept; the old record stays runtime_status=unknown in history.
+func (h *Handler) acceptInputExecutionWithRetry(ctx context.Context, env *events.Envelope) (*execution.Record, bool, error) {
+	rec, duplicate, err := h.acceptInputExecution(ctx, env)
+	if err == nil || !errors.Is(err, execution.ErrSessionBusy) || h.executionStore == nil {
+		return rec, duplicate, err
+	}
+	fenced, ferr := h.executionStore.FenceBySession(ctx, env.SessionID)
+	if ferr != nil || fenced == nil {
+		return rec, duplicate, err
+	}
+	freshRunID := "run_" + uuid.NewString()
+	if cerr := h.executionStore.ClearFenceAfterFreshStart(ctx, fenced.ExecutionID, fenced.FenceReason, freshRunID); cerr != nil {
+		h.log.Warn("gateway: clear stale fence failed",
+			"err", cerr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
+		return rec, duplicate, err
+	}
+	h.log.Info("gateway: cleared stale fence, retrying accept",
+		"session_id", env.SessionID, "execution_id", fenced.ExecutionID,
+		"fence_reason", fenced.FenceReason)
+	return h.acceptInputExecution(ctx, env)
 }
 
 func clientMessageID(env *events.Envelope) string {
