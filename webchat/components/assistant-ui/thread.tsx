@@ -7,7 +7,7 @@ import {
   ComposerPrimitive,
 } from "@assistant-ui/react";
 import { useAui, useAuiState } from "@assistant-ui/store";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { CommandMenu } from "./CommandMenu";
 import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 import type { ConnectionState } from "@/lib/config";
@@ -109,25 +109,57 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
         </div>
       </ThreadPrimitive.Viewport>
 
-      {conn === 'already_connected' && (
-        <div className="pointer-events-none absolute inset-x-4 top-4 z-30 flex justify-center">
-          <section
-            role="alert"
-            className="pointer-events-auto w-full max-w-3xl rounded-2xl border border-[var(--accent-coral)]/35 bg-[var(--bg-elevated)]/95 px-5 py-4 text-center shadow-xl backdrop-blur"
+      <AnimatePresence>
+        {conn === 'already_connected' && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-[var(--bg-base)]/50 backdrop-blur-md px-6"
           >
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">{t('status.session_already_connected_title')}</h2>
-            <p className="mt-1 text-sm text-[var(--text-muted)]">{t('status.session_already_connected_description')}</p>
-            <button
-              type="button"
-              onClick={onRetryConnection}
-              disabled={!onRetryConnection}
-              className="mt-4 rounded-lg bg-[var(--accent-coral)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            <motion.section
+              role="alert"
+              initial={{ scale: 0.98, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.98, opacity: 0 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="w-full max-w-[320px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 text-center shadow-xl flex flex-col items-center justify-center gap-5"
             >
-              {t('action.retry_connection')}
-            </button>
-          </section>
-        </div>
-      )}
+              {/* Symmetrical, Minimalist Icon */}
+              <div className="w-10 h-10 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-base)] flex items-center justify-center text-[var(--accent-coral)]">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+
+              {/* Clean Symmetrical Texts */}
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  {t('status.session_already_connected_title')}
+                </h2>
+                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed max-w-[240px] mx-auto">
+                  {t('status.session_already_connected_description')}
+                </p>
+              </div>
+
+              {/* Symmetrical Flat Button */}
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                type="button"
+                onClick={onRetryConnection}
+                disabled={!onRetryConnection}
+                className="w-full rounded-xl bg-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/90 py-2 text-xs font-medium text-white transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--accent-coral)]/40 focus:ring-offset-2 focus:ring-offset-[var(--bg-elevated)] disabled:cursor-not-allowed disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+                </svg>
+                {t('action.retry_connection')}
+              </motion.button>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="composer-wrapper px-4 pb-12">
         {(conn === 'disconnected' || conn === 'reconnecting') && (
