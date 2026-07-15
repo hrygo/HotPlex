@@ -427,4 +427,31 @@ describe("BrowserHotPlexClient input retry identity", () => {
         expect(internal.pendingInput).toBeNull();
         await expect(pending).rejects.toThrow("link lost");
     });
+
+    it("clears and resolves pending input immediately when sendControl('stop') is called", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            pendingInput: unknown;
+            ws: { readyState: number } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1 };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const pending = client.sendInputAsync("hello");
+        expect(internal.pendingInput).not.toBeNull();
+
+        client.sendControl("stop");
+
+        expect(internal.pendingInput).toBeNull();
+        await expect(pending).resolves.toBeUndefined();
+    });
 });

@@ -625,6 +625,9 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   sendControl(action: 'terminate' | 'delete' | 'stop'): void {
     const env = createControlEnvelope(this._sessionId!, action);
     this._send(env);
+    if (action === 'stop') {
+      this._settlePending({ kind: 'resolve' });
+    }
   }
 
   sendWorkerCommand(command: typeof WorkerStdioCommand[keyof typeof WorkerStdioCommand], args?: string, extra?: Record<string, unknown>): void {
