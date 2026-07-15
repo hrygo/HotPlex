@@ -19,8 +19,9 @@ const (
 	collectorBatchMax      = 100
 	collectorFlushInterval = 1 * time.Second
 
-	deltaFlushSize     = 4096 // bytes — flush accumulator when content exceeds this
-	deltaFlushInterval = 3 * time.Second
+	deltaFlushSize             = 4096 // bytes — flush accumulator when content exceeds this
+	deltaFlushInterval         = 3 * time.Second
+	collectorSessionLockShards = 256
 )
 
 // StorableTypes is the set of AEP event types eligible for event storage replay.
@@ -102,7 +103,10 @@ type Collector struct {
 	accumMu        sync.Mutex
 	accum          map[string]*deltaAccumulator // sessionID → active delta accumulator
 	reasoningAccum map[string]*deltaAccumulator // sessionID → active reasoning accumulator
-	dropped        atomic.Int64
+	// captureLocks serialize producers with FlushSessionAndThen per session.
+	// Fixed sharding avoids an unbounded lock map under high session churn.
+	captureLocks [collectorSessionLockShards]sync.Mutex
+	dropped      atomic.Int64
 }
 
 // NewCollector creates a Collector that writes events to store.
@@ -135,6 +139,10 @@ func newCollector(store EventStore, log *slog.Logger, flush, deltaFlush time.Dur
 // MessageDelta and Reasoning events are accumulated in-memory and merged
 // on flush trigger (MessageEnd, next storable event, size/timer threshold).
 func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, data json.RawMessage, direction, source string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if eventType == events.MessageDelta {
 		c.flushAndAccumulate(sessionID, seq, false, data)
 		return
@@ -278,6 +286,9 @@ func (c *Collector) getOrCreateReasoningAccum(sessionID string) *deltaAccumulato
 // skipping the json.Marshal/Unmarshal round-trip of Capture.
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureReasoningString(sessionID string, seq int64, content string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	c.flushAndAccumulateRaw(sessionID, seq, true, content)
 }
 
@@ -371,8 +382,24 @@ func (c *Collector) Flush() error {
 // the writer commits everything queued before the flush marker. Callers use it
 // before releasing session-scoped sequence state on physical deletion.
 func (c *Collector) FlushSession(sessionID string) error {
+	return c.FlushSessionAndThen(sessionID, nil)
+}
+
+// FlushSessionAndThen serializes all event producers for sessionID while it
+// drains accumulated and queued writes, then runs after before producers may
+// resume. The gateway uses after to forget SeqGen without a capture gap.
+func (c *Collector) FlushSessionAndThen(sessionID string, after func()) error {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	c.flushBothAndSend(sessionID, nil)
-	return c.Flush()
+	if err := c.Flush(); err != nil {
+		return err
+	}
+	if after != nil {
+		after()
+	}
+	return nil
 }
 
 // Close drains the capture channel and flushes remaining events.
@@ -596,15 +623,31 @@ func (c *Collector) flushIndividually(batch []*captureRequest) {
 // skipping the json.Marshal/Unmarshal round-trip of Capture.
 // Flushes immediately when accumulated content exceeds deltaFlushSize.
 func (c *Collector) CaptureDeltaString(sessionID string, seq int64, content string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	c.flushAndAccumulateRaw(sessionID, seq, false, content)
 }
 
 // ResetSession discards any accumulated delta and reasoning content for the given session.
 func (c *Collector) ResetSession(sessionID string) {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	c.accumMu.Lock()
 	delete(c.accum, sessionID)
 	delete(c.reasoningAccum, sessionID)
 	c.accumMu.Unlock()
+}
+
+func (c *Collector) captureLock(sessionID string) *sync.Mutex {
+	// FNV-1a without allocating a hash.Hash on the capture hot path.
+	hash := uint32(2166136261)
+	for i := 0; i < len(sessionID); i++ {
+		hash ^= uint32(sessionID[i])
+		hash *= 16777619
+	}
+	return &c.captureLocks[hash%collectorSessionLockShards]
 }
 
 // deltaAccumulator merges streaming content (message.delta or reasoning) in-memory.

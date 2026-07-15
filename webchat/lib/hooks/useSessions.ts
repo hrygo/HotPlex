@@ -14,7 +14,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   listSessions,
   createSession,
@@ -68,11 +68,17 @@ export function useSessions({
 
   const onSelectRef = useRef(onSelect);
   const initialRef = useRef(initialSessionId);
+  const workspaceIdRef = useRef(workspaceId);
   // Keep refs in sync with latest props (read inside callbacks below).
   useEffect(() => {
     onSelectRef.current = onSelect;
     initialRef.current = initialSessionId;
   });
+  // A pending create must observe a workspace switch before its promise can
+  // publish state or call onSelect for the previous workspace.
+  useLayoutEffect(() => {
+    workspaceIdRef.current = workspaceId;
+  }, [workspaceId]);
 
   const isCreating = useRef(false);
   const DEFAULT_WORKER_TYPE = defaultWorkerType;
@@ -182,6 +188,7 @@ export function useSessions({
 
   const createNewSession = useCallback(async (title: string, workerType?: string) => {
     const wt = workerType || DEFAULT_WORKER_TYPE;
+    const requestedWorkspaceId = workspaceId;
     if (isCreating.current) return;
     isCreating.current = true;
     setIsLoading(true);
@@ -190,8 +197,9 @@ export function useSessions({
         clientSessionId: newSessionId(),
         workerType: wt,
         title: title || undefined,
-        workspaceId,
+        workspaceId: requestedWorkspaceId,
       });
+      if (requestedWorkspaceId !== workspaceIdRef.current) return;
       const now = new Date().toISOString();
       const newSession: SessionInfo = {
         id: session_id,
@@ -204,6 +212,7 @@ export function useSessions({
         updated_at: now,
       };
       setSessions(prev => [newSession, ...prev.filter(s => s.state !== 'deleted')]);
+      setLoadedWorkspaceId(requestedWorkspaceId ?? null);
       setActiveSession(newSession);
       onSelectRef.current(session_id);
     } catch (e) {

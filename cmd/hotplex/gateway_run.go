@@ -375,11 +375,14 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 			return
 		}
 		if stores.collector != nil {
-			if err := stores.collector.FlushSession(sessionID); err != nil {
+			if err := stores.collector.FlushSessionAndThen(sessionID, func() {
+				hub.ForgetSeq(sessionID)
+			}); err != nil {
 				log.Warn("gateway: retain seq after session flush failure",
 					"session_id", sessionID, "err", err)
 				return
 			}
+			return
 		}
 		hub.ForgetSeq(sessionID)
 	}

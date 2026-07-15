@@ -595,6 +595,34 @@ func TestCollector_FlushSessionFlushesPendingDelta(t *testing.T) {
 	require.Equal(t, int64(1), page.Events[0].Seq)
 }
 
+func TestCollector_FlushSessionAndThenSerializesProducer(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+	t.Cleanup(func() { _ = c.Close() })
+
+	producerDone := make(chan struct{})
+	require.NoError(t, c.FlushSessionAndThen("s1", func() {
+		go func() {
+			c.CaptureDeltaString("s1", 2, "after-release")
+			close(producerDone)
+		}()
+		select {
+		case <-producerDone:
+			t.Error("producer entered while session drain callback held the lock")
+		default:
+		}
+	}))
+	require.Eventually(t, func() bool {
+		select {
+		case <-producerDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestCollector_FlushAfterClose(t *testing.T) {
 	store := newTestStore(t)
 	c := NewCollector(store, slog.Default())
