@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1342,27 +1343,35 @@ type mockBridgeWorker struct {
 	startErr   error
 	resumeErr  error
 	lastIO     time.Time
+	terminated atomic.Bool
+	startInfo  worker.SessionInfo
 }
 
-func (m *mockBridgeWorker) Type() worker.WorkerType                             { return m.workerType }
-func (m *mockBridgeWorker) SupportsResume() bool                                { return true }
-func (m *mockBridgeWorker) CanResumeTerminated() bool                           { return true }
-func (m *mockBridgeWorker) SupportsStreaming() bool                             { return true }
-func (m *mockBridgeWorker) SupportsTools() bool                                 { return true }
-func (m *mockBridgeWorker) EnvBlocklist() []string                              { return nil }
-func (m *mockBridgeWorker) SessionStoreDir() string                             { return "" }
-func (m *mockBridgeWorker) MaxTurns() int                                       { return 0 }
-func (m *mockBridgeWorker) Modalities() []string                                { return []string{"text"} }
-func (m *mockBridgeWorker) Start(context.Context, worker.SessionInfo) error     { return m.startErr }
+func (m *mockBridgeWorker) Type() worker.WorkerType   { return m.workerType }
+func (m *mockBridgeWorker) SupportsResume() bool      { return true }
+func (m *mockBridgeWorker) CanResumeTerminated() bool { return true }
+func (m *mockBridgeWorker) SupportsStreaming() bool   { return true }
+func (m *mockBridgeWorker) SupportsTools() bool       { return true }
+func (m *mockBridgeWorker) EnvBlocklist() []string    { return nil }
+func (m *mockBridgeWorker) SessionStoreDir() string   { return "" }
+func (m *mockBridgeWorker) MaxTurns() int             { return 0 }
+func (m *mockBridgeWorker) Modalities() []string      { return []string{"text"} }
+func (m *mockBridgeWorker) Start(_ context.Context, info worker.SessionInfo) error {
+	m.startInfo = info
+	return m.startErr
+}
 func (m *mockBridgeWorker) Input(context.Context, string, map[string]any) error { return nil }
 func (m *mockBridgeWorker) Resume(context.Context, worker.SessionInfo) error    { return m.resumeErr }
-func (m *mockBridgeWorker) Terminate(context.Context) error                     { return nil }
-func (m *mockBridgeWorker) Kill() error                                         { return nil }
-func (m *mockBridgeWorker) Wait() (int, error)                                  { return m.exitCode, nil }
-func (m *mockBridgeWorker) Conn() worker.SessionConn                            { return m.conn }
-func (m *mockBridgeWorker) Health() worker.WorkerHealth                         { return worker.WorkerHealth{} }
-func (m *mockBridgeWorker) LastIO() time.Time                                   { return m.lastIO }
-func (m *mockBridgeWorker) SetLastIO(t time.Time)                               { m.lastIO = t }
+func (m *mockBridgeWorker) Terminate(context.Context) error {
+	m.terminated.Store(true)
+	return nil
+}
+func (m *mockBridgeWorker) Kill() error                 { return nil }
+func (m *mockBridgeWorker) Wait() (int, error)          { return m.exitCode, nil }
+func (m *mockBridgeWorker) Conn() worker.SessionConn    { return m.conn }
+func (m *mockBridgeWorker) Health() worker.WorkerHealth { return worker.WorkerHealth{} }
+func (m *mockBridgeWorker) LastIO() time.Time           { return m.lastIO }
+func (m *mockBridgeWorker) SetLastIO(t time.Time)       { m.lastIO = t }
 func (m *mockBridgeWorker) ResetContext(context.Context) (worker.ResetResult, error) {
 	return worker.ResetResult{}, nil
 }

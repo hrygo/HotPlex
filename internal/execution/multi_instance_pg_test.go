@@ -11,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/session"
-	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -23,20 +23,22 @@ func openPGStore(t *testing.T) (*SQLStore, *sql.DB) {
 	if dsn == "" {
 		t.Skip("HOTPLEX_TEST_PG_DSN not set; skipping PG multi-instance test")
 	}
-	db, err := sql.Open(sqlutil.DriverNamePG, dsn)
+	db, err := dbutil.Open(dbutil.DialectPostgres, &config.DBConfig{
+		Driver:   "postgres",
+		Postgres: config.PostgresConfig{ConnStr: dsn},
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	_, err = db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS public CASCADE")
+	_, err = db.DB.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS public CASCADE")
 	require.NoError(t, err)
-	_, err = db.ExecContext(context.Background(), "CREATE SCHEMA public")
+	_, err = db.DB.ExecContext(context.Background(), "CREATE SCHEMA public")
 	require.NoError(t, err)
 
-	require.NoError(t, session.RunMigrations(context.Background(), db, dbutil.DialectPostgres))
+	require.NoError(t, session.RunMigrations(context.Background(), db.DB, dbutil.DialectPostgres))
 
 	now := time.Now()
-	writeMu := sqlutil.NewWriteMu(sqlutil.DialectPG)
-	sm, err := session.NewPGStore(context.Background(), db, writeMu, nil)
+	sm, err := session.NewPGStore(context.Background(), db)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sm.Close() })
 	require.NoError(t, sm.Upsert(context.Background(), &session.SessionInfo{
@@ -44,15 +46,14 @@ func openPGStore(t *testing.T) (*SQLStore, *sql.DB) {
 		State: events.StateRunning, CreatedAt: now, UpdatedAt: now,
 	}))
 
-	store, err := NewSQLStore(context.Background(), db, dbutil.DialectPostgres, writeMu, nil)
+	store, err := NewSQLStore(context.Background(), db.DB, dbutil.DialectPostgres, nil, nil)
 	require.NoError(t, err)
-	return store, db
+	return store, db.DB
 }
 
 func TestPGMultiInstance_StartupDoesNotTouchOtherInstancesRecords(t *testing.T) {
 	storeA, db := openPGStore(t)
 	ctx := context.Background()
-	writeMu := sqlutil.NewWriteMu(sqlutil.DialectPG)
 
 	rec, _, err := storeA.Accept(ctx, AcceptRequest{
 		SessionID: "session-pg", ClientMessageID: "msg-pg-multi", PayloadHash: "h",
@@ -61,13 +62,12 @@ func TestPGMultiInstance_StartupDoesNotTouchOtherInstancesRecords(t *testing.T) 
 	require.NoError(t, err)
 	require.NoError(t, storeA.MarkRunning(ctx, rec.ExecutionID, "gw-A", "run-A"))
 
-	storeB, err := NewSQLStore(ctx, db, dbutil.DialectPostgres, writeMu, nil)
+	storeB, err := NewSQLStore(ctx, db, dbutil.DialectPostgres, nil, nil)
 	require.NoError(t, err)
 
-	nowMs := time.Now().UnixMilli()
-	recovered, err := storeB.RecoverExpiredLeases(ctx, nowMs)
+	recovered, err := storeB.RecoverExpiredLeases(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), recovered, "instance B must not recover A's unexpired lease")
+	require.Equal(t, int64(0), recovered.Recovered, "instance B must not recover A's unexpired lease")
 
 	stored, err := storeA.getByID(ctx, rec.ExecutionID)
 	require.NoError(t, err)
@@ -78,7 +78,6 @@ func TestPGMultiInstance_StartupDoesNotTouchOtherInstancesRecords(t *testing.T) 
 func TestPGMultiInstance_ExpiredLeaseRecoveredExactlyOnce(t *testing.T) {
 	storeA, db := openPGStore(t)
 	ctx := context.Background()
-	writeMu := sqlutil.NewWriteMu(sqlutil.DialectPG)
 
 	rec, _, err := storeA.Accept(ctx, AcceptRequest{
 		SessionID: "session-pg", ClientMessageID: "msg-pg-expire", PayloadHash: "h",
@@ -86,17 +85,18 @@ func TestPGMultiInstance_ExpiredLeaseRecoveredExactlyOnce(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	storeB, err := NewSQLStore(ctx, db, dbutil.DialectPostgres, writeMu, nil)
+	storeB, err := NewSQLStore(ctx, db, dbutil.DialectPostgres, nil, nil)
 	require.NoError(t, err)
 
-	future := time.Now().Add(2 * time.Minute).UnixMilli()
-	recoveredB, err := storeB.RecoverExpiredLeases(ctx, future)
+	_, err = db.ExecContext(ctx, `UPDATE execution_inputs SET lease_until = 0 WHERE execution_id = $1`, rec.ExecutionID)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), recoveredB)
+	recoveredB, err := storeB.RecoverExpiredLeases(ctx, nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recoveredB.Recovered)
 
-	recoveredA, err := storeA.RecoverExpiredLeases(ctx, future)
+	recoveredA, err := storeA.RecoverExpiredLeases(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), recoveredA)
+	require.Equal(t, int64(0), recoveredA.Recovered)
 
 	stored, err := storeA.getByID(ctx, rec.ExecutionID)
 	require.NoError(t, err)

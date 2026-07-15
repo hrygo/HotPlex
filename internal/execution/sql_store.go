@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +51,13 @@ func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 
 func (s *SQLStore) rebind(query string) string {
 	return s.dialect.Rebind(query)
+}
+
+func (s *SQLStore) dbNowMillisExpr() string {
+	if s.dialect == dbutil.DialectPostgres {
+		return `CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)`
+	}
+	return `CAST(strftime('%s','now') AS INTEGER) * 1000`
 }
 
 func (s *SQLStore) withWriteLock(fn func() error) error {
@@ -105,7 +113,6 @@ func (s *SQLStore) Accept(ctx context.Context, request AcceptRequest) (*Record, 
 	defer cancel()
 
 	now := time.Now().UnixMilli()
-	leaseUntil := now + int64(LeaseTTL)*1000
 	record := &Record{
 		ExecutionID:     "exec_" + uuid.NewString(),
 		SessionID:       request.SessionID,
@@ -116,7 +123,6 @@ func (s *SQLStore) Accept(ctx context.Context, request AcceptRequest) (*Record, 
 		UpdatedAt:       now,
 		OwnerInstanceID: request.OwnerInstanceID,
 		WorkerRunID:     request.WorkerRunID,
-		LeaseUntil:      leaseUntil,
 		RuntimeStatus:   RuntimePending,
 	}
 
@@ -127,11 +133,11 @@ func (s *SQLStore) Accept(ctx context.Context, request AcceptRequest) (*Record, 
 				(execution_id, session_id, client_message_id, payload_hash, status, error_code,
 				 created_at, updated_at, owner_instance_id, worker_run_id, lease_until,
 				 runtime_status, runtime_error_code, fence_reason)
-			VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, '', '')
+			VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, `+s.dbNowMillisExpr()+` + ?, ?, '', '')
 			ON CONFLICT(session_id, client_message_id) DO NOTHING`),
 			record.ExecutionID, record.SessionID, record.ClientMessageID, record.PayloadHash,
 			record.Status, record.CreatedAt, record.UpdatedAt,
-			record.OwnerInstanceID, record.WorkerRunID, record.LeaseUntil, record.RuntimeStatus)
+			record.OwnerInstanceID, record.WorkerRunID, int64(LeaseTTL)*1000, record.RuntimeStatus)
 		if err != nil {
 			if s.dialect.IsUniqueViolation(err) {
 				return ErrSessionBusy
@@ -149,7 +155,11 @@ func (s *SQLStore) Accept(ctx context.Context, request AcceptRequest) (*Record, 
 		return nil, false, err
 	}
 	if inserted {
-		return record, false, nil
+		stored, err := s.getByID(ctx, record.ExecutionID)
+		if err != nil {
+			return nil, false, err
+		}
+		return stored, false, nil
 	}
 
 	existing, err := s.getByClientMessage(ctx, request.SessionID, request.ClientMessageID)
@@ -479,22 +489,26 @@ func (s *SQLStore) ClearFenceAfterFreshStart(ctx context.Context, executionID, r
 	return nil
 }
 
-func (s *SQLStore) RenewLeases(ctx context.Context, ownerID string, ttlSeconds int64) (int64, error) {
+func (s *SQLStore) RenewLeases(ctx context.Context, ownerID string, ttlSeconds int64, excludeExecutionIDs []string) (int64, error) {
 	if ownerID == "" {
 		return 0, errors.New("execution: owner id is required")
 	}
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 
-	now := time.Now().UnixMilli()
-	newLease := now + ttlSeconds*1000
 	var rows int64
 	err := s.withWriteLock(func() error {
-		result, err := s.db.ExecContext(ctx, s.rebind(`
+		if len(excludeExecutionIDs) > 0 {
+			var err error
+			rows, err = s.renewLeasesExcluding(ctx, ownerID, ttlSeconds, excludeExecutionIDs)
+			return err
+		}
+		query := `
 			UPDATE execution_inputs
-			SET lease_until = ?, updated_at = ?
-			WHERE owner_instance_id = ? AND runtime_status IN ('pending', 'running')`),
-			newLease, now, ownerID)
+			SET lease_until = ` + s.dbNowMillisExpr() + ` + ?, updated_at = ` + s.dbNowMillisExpr() + `
+			WHERE owner_instance_id = ? AND runtime_status IN ('pending', 'running')`
+		args := []any{ttlSeconds * 1000, ownerID}
+		result, err := s.db.ExecContext(ctx, s.rebind(query), args...)
 		if err != nil {
 			return fmt.Errorf("execution: renew leases: %w", err)
 		}
@@ -504,11 +518,72 @@ func (s *SQLStore) RenewLeases(ctx context.Context, ownerID string, ttlSeconds i
 	return rows, err
 }
 
-func (s *SQLStore) RecoverExpiredLeases(ctx context.Context, nowUnixMilli int64) (int64, error) {
+const sqlIDBatchSize = 500
+
+func (s *SQLStore) renewLeasesExcluding(ctx context.Context, ownerID string, ttlSeconds int64, excludedIDs []string) (int64, error) {
+	excluded := make(map[string]struct{}, len(excludedIDs))
+	for _, executionID := range excludedIDs {
+		excluded[executionID] = struct{}{}
+	}
+
+	queryRows, err := s.db.QueryContext(ctx, s.rebind(`
+		SELECT execution_id FROM execution_inputs
+		WHERE owner_instance_id = ? AND runtime_status IN ('pending', 'running')`), ownerID)
+	if err != nil {
+		return 0, fmt.Errorf("execution: query renewable leases: %w", err)
+	}
+	var renewable []string
+	for queryRows.Next() {
+		var executionID string
+		if err := queryRows.Scan(&executionID); err != nil {
+			_ = queryRows.Close()
+			return 0, fmt.Errorf("execution: scan renewable lease: %w", err)
+		}
+		if _, skip := excluded[executionID]; !skip {
+			renewable = append(renewable, executionID)
+		}
+	}
+	if err := queryRows.Err(); err != nil {
+		_ = queryRows.Close()
+		return 0, fmt.Errorf("execution: iterate renewable leases: %w", err)
+	}
+	if err := queryRows.Close(); err != nil {
+		return 0, fmt.Errorf("execution: close renewable leases: %w", err)
+	}
+
+	var renewed int64
+	for start := 0; start < len(renewable); start += sqlIDBatchSize {
+		end := start + sqlIDBatchSize
+		if end > len(renewable) {
+			end = len(renewable)
+		}
+		batch := renewable[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+2)
+		args = append(args, ttlSeconds*1000, ownerID)
+		for i, executionID := range batch {
+			placeholders[i] = "?"
+			args = append(args, executionID)
+		}
+		result, err := s.db.ExecContext(ctx, s.rebind(`
+			UPDATE execution_inputs
+			SET lease_until = `+s.dbNowMillisExpr()+` + ?, updated_at = `+s.dbNowMillisExpr()+`
+			WHERE owner_instance_id = ? AND runtime_status IN ('pending', 'running')
+			  AND execution_id IN (`+strings.Join(placeholders, ",")+`)`), args...)
+		if err != nil {
+			return renewed, fmt.Errorf("execution: renew lease batch: %w", err)
+		}
+		count, _ := result.RowsAffected()
+		renewed += count
+	}
+	return renewed, nil
+}
+
+func (s *SQLStore) RecoverExpiredLeases(ctx context.Context, trackedExecutionIDs []string) (LeaseRecoveryResult, error) {
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 
-	var rows int64
+	var recovery LeaseRecoveryResult
 	err := s.withWriteLock(func() error {
 		result, err := s.db.ExecContext(ctx, s.rebind(`
 			UPDATE execution_inputs
@@ -520,18 +595,66 @@ func (s *SQLStore) RecoverExpiredLeases(ctx context.Context, nowUnixMilli int64)
 			    END,
 			    runtime_error_code = 'GATEWAY_LEASE_EXPIRED',
 			    fence_reason = 'GATEWAY_LEASE_EXPIRED',
-			    finished_at = ?,
-			    updated_at = ?
+			    finished_at = `+s.dbNowMillisExpr()+`,
+			    updated_at = `+s.dbNowMillisExpr()+`
 			WHERE runtime_status IN ('pending', 'running')
-			  AND lease_until <= ?`),
-			nowUnixMilli, nowUnixMilli, nowUnixMilli)
+			  AND lease_until <= `+s.dbNowMillisExpr()))
 		if err != nil {
 			return fmt.Errorf("execution: recover expired leases: %w", err)
 		}
-		rows, _ = result.RowsAffected()
+		recovery.Recovered, _ = result.RowsAffected()
+
+		active, err := s.activeExecutionIDs(ctx, trackedExecutionIDs)
+		if err != nil {
+			return err
+		}
+		for _, executionID := range trackedExecutionIDs {
+			if _, ok := active[executionID]; !ok {
+				recovery.ConvergedExecutionIDs = append(recovery.ConvergedExecutionIDs, executionID)
+			}
+		}
 		return nil
 	})
-	return rows, err
+	return recovery, err
+}
+
+func (s *SQLStore) activeExecutionIDs(ctx context.Context, executionIDs []string) (map[string]struct{}, error) {
+	active := make(map[string]struct{})
+	for start := 0; start < len(executionIDs); start += sqlIDBatchSize {
+		end := start + sqlIDBatchSize
+		if end > len(executionIDs) {
+			end = len(executionIDs)
+		}
+		batch := executionIDs[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, executionID := range batch {
+			placeholders[i] = "?"
+			args[i] = executionID
+		}
+		rows, err := s.db.QueryContext(ctx, s.rebind(`
+			SELECT execution_id FROM execution_inputs
+			WHERE runtime_status IN ('pending', 'running')
+			  AND execution_id IN (`+strings.Join(placeholders, ",")+`)`), args...)
+		if err != nil {
+			return nil, fmt.Errorf("execution: query active tracked leases: %w", err)
+		}
+		for rows.Next() {
+			var executionID string
+			if err := rows.Scan(&executionID); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("execution: scan active tracked lease: %w", err)
+			}
+			active[executionID] = struct{}{}
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("execution: close active tracked leases: %w", err)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("execution: iterate active tracked leases: %w", err)
+		}
+	}
+	return active, nil
 }
 
 func (s *SQLStore) TerminateOwnerLeases(ctx context.Context, ownerID, reason string) (int64, error) {
@@ -549,14 +672,16 @@ func (s *SQLStore) TerminateOwnerLeases(ctx context.Context, ownerID, reason str
 	err := s.withWriteLock(func() error {
 		result, err := s.db.ExecContext(ctx, s.rebind(`
 			UPDATE execution_inputs
-			SET runtime_status = 'unknown',
+			SET status = CASE WHEN status = 'accepted' THEN 'unknown' ELSE status END,
+			    error_code = CASE WHEN status = 'accepted' THEN ? ELSE error_code END,
+			    runtime_status = 'unknown',
 			    runtime_error_code = ?,
 			    fence_reason = ?,
 			    finished_at = ?,
 			    updated_at = ?
 			WHERE owner_instance_id = ?
 			  AND runtime_status IN ('pending', 'running')`),
-			reason, reason, now, now, ownerID)
+			reason, reason, reason, now, now, ownerID)
 		if err != nil {
 			return fmt.Errorf("execution: terminate owner leases: %w", err)
 		}

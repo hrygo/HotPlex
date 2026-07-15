@@ -92,6 +92,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		b.sm.DetachWorker(sid)
 		return nil, err
 	}
+	b.bindWorkerRun(sid, w, params.forwardOpts.workerRunID)
 
 	// Best-effort async persist so WorkerSessionID survives gateway restart
 	// even if no turn events arrive (SIGTERM before first Prompt). The
@@ -111,10 +112,57 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
+		defer b.clearWorkerRun(sid, w, params.forwardOpts.workerRunID)
 		b.forwardEvents(w, sid, *params.forwardOpts)
 	}()
 
 	return w, nil
+}
+
+func (b *Bridge) bindWorkerRun(sessionID string, w worker.Worker, runID string) string {
+	if runID == "" {
+		runID = "run_" + uuid.NewString()
+	}
+	b.workerRuns.Store(sessionID, workerRunBinding{worker: w, id: runID})
+	return runID
+}
+
+// clearWorkerRun conditionally removes a binding. Matching both Worker and run
+// ID prevents an old forwarder (including an in-place reset on the same Worker)
+// from deleting the replacement binding.
+func (b *Bridge) clearWorkerRun(sessionID string, expectedWorker worker.Worker, expectedRunID string) {
+	value, ok := b.workerRuns.Load(sessionID)
+	if !ok {
+		return
+	}
+	binding, ok := value.(workerRunBinding)
+	if !ok || binding.worker != expectedWorker || (expectedRunID != "" && binding.id != expectedRunID) {
+		return
+	}
+	b.workerRuns.CompareAndDelete(sessionID, value)
+}
+
+func (b *Bridge) suspendWorkerRun(sessionID string, expectedWorker worker.Worker) (workerRunBinding, bool) {
+	for {
+		value, ok := b.workerRuns.Load(sessionID)
+		if !ok {
+			return workerRunBinding{}, false
+		}
+		binding, ok := value.(workerRunBinding)
+		if !ok || binding.worker != expectedWorker {
+			return workerRunBinding{}, false
+		}
+		if b.workerRuns.CompareAndDelete(sessionID, value) {
+			return binding, true
+		}
+	}
+}
+
+func (b *Bridge) restoreWorkerRun(sessionID string, binding workerRunBinding) {
+	if binding.worker == nil || binding.id == "" || b.sm == nil || b.sm.GetWorker(sessionID) != binding.worker {
+		return
+	}
+	b.workerRuns.LoadOrStore(sessionID, binding)
 }
 
 func (b *Bridge) persistWorkerSessionIDEnsure(ctx context.Context, w worker.Worker, sessionID string) {
@@ -298,6 +346,9 @@ func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Wor
 		}
 	} else {
 		b.sm.DetachWorker(sessionID)
+	}
+	if crashedWorker != nil {
+		b.clearWorkerRun(sessionID, crashedWorker, "")
 	}
 	if err := b.sm.Transition(context.Background(), sessionID, events.StateTerminated); err != nil {
 		b.log.Debug("bridge: transition to terminated after worker exit", "session_id", sessionID, "err", err)

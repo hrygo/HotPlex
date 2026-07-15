@@ -35,22 +35,33 @@ type LeaseManager struct {
 	start  sync.Once
 	stop   sync.Once
 	closed atomic.Bool
+
+	exclusions LeaseExclusionTracker
 }
 
-func NewLeaseManager(store Store, ownerID string, cfg LeaseConfig, log *slog.Logger) *LeaseManager {
+type LeaseExclusionTracker interface {
+	AbandonedExecutionIDs() []string
+	ClearAbandonedExecutionIDs([]string)
+}
+
+func NewLeaseManager(store Store, ownerID string, cfg LeaseConfig, log *slog.Logger, exclusionTrackers ...LeaseExclusionTracker) *LeaseManager {
 	if log == nil {
 		log = slog.Default()
 	}
 	if cfg.RenewInterval == 0 || cfg.RecoverInterval == 0 || cfg.ShutdownTimeout == 0 {
 		cfg = DefaultLeaseConfig()
 	}
-	return &LeaseManager{
+	m := &LeaseManager{
 		store:   store,
 		ownerID: ownerID,
 		cfg:     cfg,
 		log:     log.With("component", "lease_manager", "owner", ownerID),
 		stopCh:  make(chan struct{}),
 	}
+	if len(exclusionTrackers) > 0 {
+		m.exclusions = exclusionTrackers[0]
+	}
+	return m
 }
 
 func (m *LeaseManager) Start(ctx context.Context) {
@@ -72,7 +83,11 @@ func (m *LeaseManager) renewLoop(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			renewed, err := m.store.RenewLeases(ctx, m.ownerID, int64(LeaseTTL))
+			var excluded []string
+			if m.exclusions != nil {
+				excluded = m.exclusions.AbandonedExecutionIDs()
+			}
+			renewed, err := m.store.RenewLeases(ctx, m.ownerID, int64(LeaseTTL), excluded)
 			if err != nil {
 				observability.LeaseRenewFailure().Add(ctx, 1)
 				m.log.Warn("lease renew failed", "error", err)
@@ -108,14 +123,21 @@ func (m *LeaseManager) recoverLoop(ctx context.Context) {
 }
 
 func (m *LeaseManager) recoverOnce(ctx context.Context) {
-	recovered, err := m.store.RecoverExpiredLeases(ctx, time.Now().UnixMilli())
+	var tracked []string
+	if m.exclusions != nil {
+		tracked = m.exclusions.AbandonedExecutionIDs()
+	}
+	result, err := m.store.RecoverExpiredLeases(ctx, tracked)
 	if err != nil {
 		m.log.Warn("expired lease recovery failed", "error", err)
 		return
 	}
-	if recovered > 0 {
-		observability.LeaseExpiredRecovery().Add(ctx, recovered)
-		m.log.Warn("recovered expired leases", "recovered", recovered)
+	if m.exclusions != nil && len(result.ConvergedExecutionIDs) > 0 {
+		m.exclusions.ClearAbandonedExecutionIDs(result.ConvergedExecutionIDs)
+	}
+	if result.Recovered > 0 {
+		observability.LeaseExpiredRecovery().Add(ctx, result.Recovered)
+		m.log.Warn("recovered expired leases", "recovered", result.Recovered)
 	}
 }
 

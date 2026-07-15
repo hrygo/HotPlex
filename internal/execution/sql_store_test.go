@@ -158,10 +158,13 @@ func TestSQLStore_RecoverExpiredLeases(t *testing.T) {
 	require.Equal(t, RuntimePending, record.RuntimeStatus)
 	require.NotZero(t, record.LeaseUntil)
 
-	future := time.Now().Add(2 * time.Minute).UnixMilli()
-	recovered, err := store.RecoverExpiredLeases(context.Background(), future)
+	_, err = store.db.ExecContext(context.Background(),
+		`UPDATE execution_inputs SET lease_until = 0 WHERE execution_id = ?`, record.ExecutionID)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), recovered)
+	recovered, err := store.RecoverExpiredLeases(context.Background(), []string{record.ExecutionID})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recovered.Recovered)
+	require.Equal(t, []string{record.ExecutionID}, recovered.ConvergedExecutionIDs)
 
 	stored, err := store.getByClientMessage(context.Background(), "session-1", "message-3")
 	require.NoError(t, err)
@@ -169,7 +172,9 @@ func TestSQLStore_RecoverExpiredLeases(t *testing.T) {
 	require.Equal(t, "GATEWAY_LEASE_EXPIRED", stored.FenceReason)
 	require.Equal(t, "GATEWAY_LEASE_EXPIRED", stored.RuntimeErrorCode)
 
-	recoveredAgain, err := store.RecoverExpiredLeases(context.Background(), future)
+	recoveredAgain, err := store.RecoverExpiredLeases(context.Background(), []string{record.ExecutionID})
 	require.NoError(t, err)
-	require.Equal(t, int64(0), recoveredAgain, "already recovered — must not double-recover")
+	require.Equal(t, int64(0), recoveredAgain.Recovered, "already recovered — must not double-recover")
+	require.Equal(t, []string{record.ExecutionID}, recoveredAgain.ConvergedExecutionIDs,
+		"a tracker must clear exclusions even when another recovery already converged the row")
 }

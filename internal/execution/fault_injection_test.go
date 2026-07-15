@@ -71,9 +71,9 @@ func TestFaultInjection_LeaseExpiryConvergesToUnknownThenLateDoneRefines(t *test
 		time.Now().Add(-time.Minute).UnixMilli(), rec.ExecutionID)
 	require.NoError(t, err)
 
-	recovered, err := store.RecoverExpiredLeases(ctx, time.Now().UnixMilli())
+	recovered, err := store.RecoverExpiredLeases(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), recovered)
+	require.Equal(t, int64(1), recovered.Recovered)
 
 	stored, err := store.getByID(ctx, rec.ExecutionID)
 	require.NoError(t, err)

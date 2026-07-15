@@ -96,6 +96,12 @@ type Bridge struct {
 	dedup          *PermissionDenyDedup
 	executionStore execution.Store     // durable ingress runtime correlation; nil = disabled
 	repairer       *execution.Repairer // terminal-state repair retry; nil-safe
+	workerRuns     sync.Map            // sessionID -> workerRunBinding; updated on each successful attach
+}
+
+type workerRunBinding struct {
+	worker worker.Worker
+	id     string
 }
 
 type crashHistory struct {
@@ -326,6 +332,93 @@ func (b *Bridge) ResumeSession(ctx context.Context, id, workDir string) error {
 	return b.resumeWithOpts(ctx, id, workDir, forwardOpts{resumed: true, workDir: workDir})
 }
 
+// CurrentWorkerRunID returns the opaque run ID of the Worker currently attached
+// to sessionID. The worker identity check prevents a stale attach from supplying
+// correlation data after the SessionManager has already replaced it.
+func (b *Bridge) CurrentWorkerRunID(sessionID string) (string, bool) {
+	_, runID, ok := b.CurrentWorkerBinding(sessionID)
+	return runID, ok
+}
+
+// CurrentWorkerBinding returns a Worker and its attach run ID from the same
+// immutable binding. A replacement after this method returns does not break
+// correlation: callers dispatch to the returned Worker and persist its run ID.
+func (b *Bridge) CurrentWorkerBinding(sessionID string) (worker.Worker, string, bool) {
+	value, ok := b.workerRuns.Load(sessionID)
+	if !ok {
+		return nil, "", false
+	}
+	binding, ok := value.(workerRunBinding)
+	if !ok || binding.id == "" || b.sm == nil || b.sm.GetWorker(sessionID) != binding.worker {
+		return nil, "", false
+	}
+	return binding.worker, binding.id, true
+}
+
+// StartFreshWorker isolates the currently attached Worker and starts a new
+// provider session without Resume or input replay. It returns only after Start
+// succeeds, so callers can safely use the returned run ID to conditionally clear
+// an ambiguity fence before accepting a new input.
+func (b *Bridge) StartFreshWorker(ctx context.Context, sessionID string) (string, error) {
+	if b.closed.Load() {
+		return "", fmt.Errorf("bridge: rejecting fresh worker during shutdown")
+	}
+
+	si, err := b.sm.Get(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if si.State == events.StateDeleted {
+		return "", session.ErrSessionNotFound
+	}
+
+	if existing := b.sm.GetWorker(sessionID); existing != nil {
+		if err := existing.Terminate(ctx); err != nil {
+			return "", fmt.Errorf("bridge: isolate fenced worker: %w", err)
+		}
+		if !b.sm.DetachWorkerIf(sessionID, existing) {
+			return "", fmt.Errorf("bridge: fenced worker changed during isolation")
+		}
+		b.clearWorkerRun(sessionID, existing, "")
+	}
+
+	if si.State == events.StateTerminated {
+		if err := b.sm.Transition(ctx, sessionID, events.StateRunning); err != nil {
+			return "", fmt.Errorf("bridge: transition fenced session to running: %w", err)
+		}
+		si.State = events.StateRunning
+	}
+
+	opts := forwardOpts{workDir: si.WorkDir}
+	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, si.WorkDir, si)
+	// A fence requires a provider-fresh session. In particular ACP Start uses
+	// WorkerSessionID to load/fork a remote session, so clear all native-resume
+	// identity before invoking Start.
+	workerInfo.WorkerSessionID = ""
+	workerInfo.ForkSession = false
+	_, err = b.createAndLaunchWorker(workerLaunchParams{
+		ctx:                ctx,
+		wt:                 si.WorkerType,
+		workerInfo:         workerInfo,
+		platform:           si.Platform,
+		botID:              si.BotID,
+		botName:            si.BotName,
+		forwardOpts:        &opts,
+		workspaceOverrides: b.resolveWorkspaceOverrides(ctx, si.WorkspaceID),
+	}, func(ctx context.Context, w worker.Worker, info worker.SessionInfo) error {
+		if err := w.Start(ctx, info); err != nil {
+			return fmt.Errorf("bridge: start fresh worker: %w", err)
+		}
+		return nil
+	}, func(_ worker.Worker, attachErr error) {
+		b.log.Warn("bridge: attach fresh worker failed", "session_id", sessionID, "err", attachErr)
+	})
+	if err != nil {
+		return "", err
+	}
+	return opts.workerRunID, nil
+}
+
 // resumeWithOpts is the internal implementation of ResumeSession that accepts
 // forwardOpts for controlling retry behavior.
 func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts forwardOpts) error {
@@ -367,6 +460,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		}
 		_ = existing.Terminate(context.Background())
 		b.sm.DetachWorker(id)
+		b.clearWorkerRun(id, existing, "")
 	}
 
 	// Transition TERMINATED sessions to RUNNING before attaching the worker.
@@ -586,9 +680,25 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("bridge: reset: no worker for session %s", sessionID)
 	}
 
+	// ResetContext may replace the Worker's connection before returning. Remove
+	// the old run binding first so concurrent input fails closed instead of being
+	// sent to a new connection while persisted against the old run.
+	suspendedBinding, bindingSuspended := b.suspendWorkerRun(sessionID, w)
 	result, err := w.ResetContext(ctx)
 	if err != nil {
+		if bindingSuspended {
+			b.restoreWorkerRun(sessionID, suspendedBinding)
+		}
 		return fmt.Errorf("bridge: reset worker: %w", err)
+	}
+	workerRunID := ""
+	if result.ConnReplaced {
+		if b.sm.GetWorker(sessionID) != w {
+			return fmt.Errorf("bridge: reset worker changed before run binding")
+		}
+		workerRunID = b.bindWorkerRun(sessionID, w, "")
+	} else if bindingSuspended {
+		b.restoreWorkerRun(sessionID, suspendedBinding)
 	}
 
 	// Reload agent config so the worker's next session picks up file changes.
@@ -627,7 +737,8 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
-		b.forwardEvents(w, sessionID, forwardOpts{ctx: context.Background()})
+		defer b.clearWorkerRun(sessionID, w, workerRunID)
+		b.forwardEvents(w, sessionID, forwardOpts{ctx: context.Background(), workerRunID: workerRunID})
 	}()
 
 	return nil
@@ -686,6 +797,7 @@ func (b *Bridge) SwitchWorkDir(ctx context.Context, oldSessionID, newWorkDir str
 			b.log.Warn("switch-workdir: worker terminate failed", "session_id", oldSessionID, "err", err)
 		}
 		b.sm.DetachWorker(oldSessionID)
+		b.clearWorkerRun(oldSessionID, w, "")
 	}
 
 	if err := b.sm.Transition(ctx, oldSessionID, events.StateIdle); err != nil {

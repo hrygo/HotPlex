@@ -711,7 +711,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	mux := http.NewServeMux()
-	leaseMgr := execution.NewLeaseManager(stores.execution, ownerInstanceID, execution.DefaultLeaseConfig(), log)
+	leaseMgr := execution.NewLeaseManager(stores.execution, ownerInstanceID, execution.DefaultLeaseConfig(), log, repairer)
 	deps := &GatewayDeps{
 		Log:             log,
 		Ctx:             ctx,

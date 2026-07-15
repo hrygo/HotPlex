@@ -292,7 +292,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
-	si, err := h.sm.Get(ctx, env.SessionID)
+	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
@@ -358,6 +358,15 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		finalized = true
 		h.sendInputAck(ctx, env, execRecord, false)
 	}
+	// Fence recovery may have replaced the Worker and transitioned a TERMINATED
+	// session back to RUNNING while accepting this input. Re-read state so the
+	// fresh Worker is not immediately replaced by the normal resume path below.
+	si, err := h.sm.Get(ctx, env.SessionID)
+	if err != nil {
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
+		finishOutcome(execution.StatusFailed, events.ErrCodeSessionNotFound)
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after input acceptance")
+	}
 
 	if !si.State.IsActive() {
 		// Auto-resume TERMINATED sessions so the user can continue on the
@@ -392,7 +401,18 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 	}
 
-	w := h.sm.GetWorker(env.SessionID)
+	var w worker.Worker
+	workerRunID := ""
+	if h.bridge != nil && h.executionStore != nil {
+		var ok bool
+		w, workerRunID, ok = h.bridge.CurrentWorkerBinding(env.SessionID)
+		if !ok {
+			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker run identity unavailable")
+		}
+	} else {
+		w = h.sm.GetWorker(env.SessionID)
+	}
 	if w == nil {
 		h.log.Warn("gateway: handleInput no worker found", "session_id", env.SessionID)
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
@@ -410,10 +430,18 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	}
 
 	if execRecord != nil && h.executionStore != nil {
-		if mrErr := h.executionStore.MarkRunning(ctx, execRecord.ExecutionID, h.ownerInstanceID, execRecord.WorkerRunID); mrErr != nil {
+		persistedRunID := execRecord.WorkerRunID
+		if workerRunID == "" {
+			workerRunID = persistedRunID
+		}
+		if mrErr := h.executionStore.MarkRunning(ctx, execRecord.ExecutionID, h.ownerInstanceID, workerRunID); mrErr != nil {
 			h.log.Warn("gateway: mark execution running failed", "err", mrErr,
 				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+			h.finishRuntimeWithoutDispatch(ctx, execRecord, persistedRunID, events.ErrCodeInternalError)
+			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "execution dispatch registration failed")
 		}
+		execRecord.WorkerRunID = workerRunID
 	}
 
 	if h.log.Enabled(ctx, slog.LevelDebug) {
@@ -490,12 +518,22 @@ func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope
 	if err != nil {
 		return nil, false, fmt.Errorf("marshal input for idempotency: %w", err)
 	}
+	workerRunID := ""
+	if h.bridge != nil {
+		workerRunID, _ = h.bridge.CurrentWorkerRunID(env.SessionID)
+	}
+	if workerRunID == "" {
+		// Duplicate lookup must remain possible even when the session currently has
+		// no Worker. A newly accepted record is rebound to the actual attach run by
+		// MarkRunning after resume/fresh-start readiness.
+		workerRunID = "run_" + uuid.NewString()
+	}
 	record, duplicate, err := h.executionStore.Accept(ctx, execution.AcceptRequest{
 		SessionID:       env.SessionID,
 		ClientMessageID: clientMessageID(env),
 		PayloadHash:     sha256Hex(string(payload)),
 		OwnerInstanceID: h.ownerInstanceID,
-		WorkerRunID:     "run_" + uuid.NewString(),
+		WorkerRunID:     workerRunID,
 	})
 	if err != nil {
 		return nil, duplicate, err
@@ -518,7 +556,15 @@ func (h *Handler) acceptInputExecutionWithRetry(ctx context.Context, env *events
 	if ferr != nil || fenced == nil {
 		return rec, duplicate, err
 	}
-	freshRunID := "run_" + uuid.NewString()
+	if h.bridge == nil {
+		return rec, duplicate, err
+	}
+	freshRunID, startErr := h.bridge.StartFreshWorker(ctx, env.SessionID)
+	if startErr != nil {
+		h.log.Warn("gateway: fresh worker start for fenced execution failed",
+			"err", startErr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
+		return rec, duplicate, err
+	}
 	if cerr := h.executionStore.ClearFenceAfterFreshStart(ctx, fenced.ExecutionID, fenced.FenceReason, freshRunID); cerr != nil {
 		h.log.Warn("gateway: clear stale fence failed",
 			"err", cerr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
@@ -573,6 +619,25 @@ func (h *Handler) finishInputExecution(ctx context.Context, record *execution.Re
 		observability.ExecutionDeliveryLatency().Record(ctx, time.Since(time.UnixMilli(record.CreatedAt)).Seconds())
 	}
 	return nil
+}
+
+func (h *Handler) finishRuntimeWithoutDispatch(ctx context.Context, record *execution.Record, workerRunID string, code events.ErrorCode) {
+	if h.executionStore == nil || record == nil || workerRunID == "" {
+		return
+	}
+	err := h.executionStore.FinishRuntime(
+		context.WithoutCancel(ctx), record.ExecutionID, workerRunID, execution.RuntimeFailed, string(code),
+	)
+	if err == nil || h.repairer == nil {
+		return
+	}
+	h.repairer.Enqueue(execution.RepairIntent{
+		ExecutionID: record.ExecutionID,
+		WorkerRunID: workerRunID,
+		Kind:        execution.RepairRuntime,
+		Status:      string(execution.RuntimeFailed),
+		ErrorCode:   string(code),
+	})
 }
 
 func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, record *execution.Record, duplicate bool) {

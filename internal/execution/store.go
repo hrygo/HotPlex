@@ -87,6 +87,11 @@ type AcceptRequest struct {
 	WorkerRunID string
 }
 
+type LeaseRecoveryResult struct {
+	Recovered             int64
+	ConvergedExecutionIDs []string
+}
+
 // Store is the persistence contract for execution ingress records.
 type Store interface {
 	// Accept creates a durable accepted record with owner, lease, and runtime
@@ -138,14 +143,13 @@ type Store interface {
 	// RenewLeases batch-renews all pending/running executions owned by ownerID,
 	// extending lease_until to now + ttl. Returns the number of renewed records.
 	// No-op when the owner has no active executions.
-	RenewLeases(ctx context.Context, ownerID string, ttlSeconds int64) (int64, error)
+	RenewLeases(ctx context.Context, ownerID string, ttlSeconds int64, excludeExecutionIDs []string) (int64, error)
 
 	// RecoverExpiredLeases recovers executions whose lease has expired, setting
-	// runtime_status to unknown and fence_reason. Only pending/running records
-	// with lease_until <= now are affected. Returns the number of recovered
-	// records. Safe for concurrent reconcilers: the conditional UPDATE ensures
-	// only one wins per row.
-	RecoverExpiredLeases(ctx context.Context, nowUnixMilli int64) (int64, error)
+	// runtime_status to unknown and fence_reason. trackedExecutionIDs are checked
+	// after recovery; IDs no longer active are returned so renewal exclusions can
+	// be released even when another gateway won the recovery race.
+	RecoverExpiredLeases(ctx context.Context, trackedExecutionIDs []string) (LeaseRecoveryResult, error)
 
 	// TerminateOwnerLeases marks all active (pending/running) executions owned by
 	// ownerID as unknown with a fence_reason. Used during graceful shutdown.

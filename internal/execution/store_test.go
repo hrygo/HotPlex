@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -264,7 +265,7 @@ func TestRenewLeases_BatchByOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	originalLease := rec1.LeaseUntil
-	renewed, err := store.RenewLeases(context.Background(), testOwner, 120)
+	renewed, err := store.RenewLeases(context.Background(), testOwner, 120, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), renewed)
 
@@ -280,7 +281,7 @@ func TestRenewLeases_BatchByOwner(t *testing.T) {
 func TestRenewLeases_NoActiveReturnsZero(t *testing.T) {
 	t.Parallel()
 	store, _ := newTestSQLStore(t)
-	renewed, err := store.RenewLeases(context.Background(), testOwner, 60)
+	renewed, err := store.RenewLeases(context.Background(), testOwner, 60, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), renewed)
 }
@@ -294,9 +295,48 @@ func TestRenewLeases_OtherOwner(t *testing.T) {
 	_, _, err := store.Accept(context.Background(), req)
 	require.NoError(t, err)
 
-	renewed, err := store.RenewLeases(context.Background(), testOwner, 60)
+	renewed, err := store.RenewLeases(context.Background(), testOwner, 60, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), renewed, "must not renew other owner's leases")
+}
+
+func TestRenewLeases_LargeExclusionSetIsBounded(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	for _, sessionID := range []string{"session-renew-large-include", "session-renew-large-exclude"} {
+		require.NoError(t, sessionStore.Upsert(ctx, &session.SessionInfo{
+			ID: sessionID, UserID: "u1", WorkerType: "claude_code",
+			State: events.StateRunning, CreatedAt: now, UpdatedAt: now,
+		}))
+	}
+	included, _, err := store.Accept(ctx, AcceptRequest{
+		SessionID: "session-renew-large-include", ClientMessageID: "msg-include", PayloadHash: "h1",
+		OwnerInstanceID: testOwner, WorkerRunID: "run-include",
+	})
+	require.NoError(t, err)
+	excluded, _, err := store.Accept(ctx, AcceptRequest{
+		SessionID: "session-renew-large-exclude", ClientMessageID: "msg-exclude", PayloadHash: "h2",
+		OwnerInstanceID: testOwner, WorkerRunID: "run-exclude",
+	})
+	require.NoError(t, err)
+
+	exclusions := make([]string, 40_001)
+	exclusions[0] = excluded.ExecutionID
+	for i := 1; i < len(exclusions); i++ {
+		exclusions[i] = fmt.Sprintf("missing-%d", i)
+	}
+	renewed, err := store.RenewLeases(ctx, testOwner, 120, exclusions)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, renewed)
+
+	storedIncluded, err := store.getByID(ctx, included.ExecutionID)
+	require.NoError(t, err)
+	storedExcluded, err := store.getByID(ctx, excluded.ExecutionID)
+	require.NoError(t, err)
+	require.Greater(t, storedIncluded.LeaseUntil, included.LeaseUntil)
+	require.Equal(t, excluded.LeaseUntil, storedExcluded.LeaseUntil)
 }
 
 func TestTerminateOwnerLeases_MarksUnknownAndFenced(t *testing.T) {
@@ -311,6 +351,8 @@ func TestTerminateOwnerLeases_MarksUnknownAndFenced(t *testing.T) {
 	stored, err := store.getByID(context.Background(), rec.ExecutionID)
 	require.NoError(t, err)
 	require.Equal(t, RuntimeUnknown, stored.RuntimeStatus)
+	require.Equal(t, StatusUnknown, stored.Status)
+	require.Equal(t, "GATEWAY_SHUTDOWN", stored.ErrorCode)
 	require.Equal(t, "GATEWAY_SHUTDOWN", stored.FenceReason)
 	require.NotNil(t, stored.FinishedAt)
 }

@@ -67,7 +67,7 @@ func TestLeaseManager_NoActiveExecutionsNoop(t *testing.T) {
 
 	// Confirm the renew loop stays a no-op while there are no active executions.
 	require.Eventually(t, func() bool {
-		renewed, err := store.RenewLeases(context.Background(), testOwner, 60)
+		renewed, err := store.RenewLeases(context.Background(), testOwner, 60, nil)
 		return err == nil && renewed == 0
 	}, 2*time.Second, 10*time.Millisecond, "no active executions should produce no renew writes")
 
@@ -96,7 +96,9 @@ func TestLeaseManager_RecoverExpiredLeases(t *testing.T) {
 		time.Now().Add(-time.Minute).UnixMilli(), rec.ExecutionID)
 	require.NoError(t, err)
 
-	mgr := NewLeaseManager(store, "gw-new", fastLeaseConfig(), nil)
+	repairer := NewRepairer(store, fastRepairConfig(), nil)
+	repairer.abandoned[rec.ExecutionID] = struct{}{}
+	mgr := NewLeaseManager(store, "gw-new", fastLeaseConfig(), nil, repairer)
 	mgr.Start(ctx)
 	defer func() { _ = mgr.Shutdown(context.Background()) }()
 
@@ -107,6 +109,9 @@ func TestLeaseManager_RecoverExpiredLeases(t *testing.T) {
 		}
 		return r.RuntimeStatus == RuntimeUnknown && r.FenceReason == "GATEWAY_LEASE_EXPIRED"
 	}, 2*time.Second, 10*time.Millisecond, "expired lease must be recovered to unknown+fenced")
+	require.Eventually(t, func() bool {
+		return len(repairer.AbandonedExecutionIDs()) == 0
+	}, 2*time.Second, 10*time.Millisecond, "recovered executions must be removed from renewal exclusions")
 }
 
 func TestLeaseManager_ShutdownTerminatesOwnLeases(t *testing.T) {

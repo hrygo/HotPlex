@@ -36,10 +36,9 @@ func TestMultiInstance_StartupDoesNotTouchOtherInstancesRecords(t *testing.T) {
 	storeB, err := NewSQLStore(ctx, sessionStore.DB(), storeA.dialect, storeA.writeMu, nil)
 	require.NoError(t, err)
 
-	nowMs := time.Now().UnixMilli()
-	recovered, err := storeB.RecoverExpiredLeases(ctx, nowMs)
+	recovered, err := storeB.RecoverExpiredLeases(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), recovered, "instance B must not recover A's unexpired lease")
+	require.Equal(t, int64(0), recovered.Recovered, "instance B must not recover A's unexpired lease")
 
 	stored, err := storeA.getByID(ctx, rec.ExecutionID)
 	require.NoError(t, err)
@@ -71,14 +70,15 @@ func TestMultiInstance_ExpiredLeaseRecoveredExactlyOnce(t *testing.T) {
 	storeB, err := NewSQLStore(ctx, sessionStore.DB(), storeA.dialect, storeA.writeMu, nil)
 	require.NoError(t, err)
 
-	future := time.Now().Add(2 * time.Minute).UnixMilli()
-	recoveredB, err := storeB.RecoverExpiredLeases(ctx, future)
+	_, err = storeA.db.ExecContext(ctx, `UPDATE execution_inputs SET lease_until = 0 WHERE execution_id = ?`, rec.ExecutionID)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), recoveredB)
+	recoveredB, err := storeB.RecoverExpiredLeases(ctx, nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recoveredB.Recovered)
 
-	recoveredA, err := storeA.RecoverExpiredLeases(ctx, future)
+	recoveredA, err := storeA.RecoverExpiredLeases(ctx, nil)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), recoveredA, "already recovered by B — must not double-recover")
+	require.Equal(t, int64(0), recoveredA.Recovered, "already recovered by B — must not double-recover")
 
 	stored, err := storeA.getByID(ctx, rec.ExecutionID)
 	require.NoError(t, err)
@@ -109,11 +109,11 @@ func TestMultiInstance_RenewLeasesOnlyAffectsOwnOwner(t *testing.T) {
 	storeB, err := NewSQLStore(ctx, sessionStore.DB(), storeA.dialect, storeA.writeMu, nil)
 	require.NoError(t, err)
 
-	renewedByB, err := storeB.RenewLeases(ctx, "gw-B", 120)
+	renewedByB, err := storeB.RenewLeases(ctx, "gw-B", 120, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), renewedByB, "B must not renew A's leases")
 
-	renewedByA, err := storeA.RenewLeases(ctx, "gw-A", 120)
+	renewedByA, err := storeA.RenewLeases(ctx, "gw-A", 120, nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), renewedByA)
 

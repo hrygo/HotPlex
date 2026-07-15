@@ -70,6 +70,7 @@ type Repairer struct {
 
 	mu        sync.Mutex
 	intents   map[string]*RepairIntent
+	abandoned map[string]struct{}
 	enqueued  int64
 	succeeded int64
 	timedOut  int64
@@ -90,11 +91,12 @@ func NewRepairer(store Store, cfg RepairConfig, log *slog.Logger) *Repairer {
 		cfg.QueueCapacity = 2
 	}
 	return &Repairer{
-		store:   store,
-		cfg:     cfg,
-		log:     log.With("component", "repairer"),
-		intents: make(map[string]*RepairIntent),
-		stopCh:  make(chan struct{}),
+		store:     store,
+		cfg:       cfg,
+		log:       log.With("component", "repairer"),
+		intents:   make(map[string]*RepairIntent),
+		abandoned: make(map[string]struct{}),
+		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -119,12 +121,18 @@ func (r *Repairer) Enqueue(intent RepairIntent) {
 		}
 	} else if len(r.intents) >= r.cfg.QueueCapacity {
 		atomic.AddInt64(&r.dropped, 1)
+		if intent.Kind == RepairRuntime {
+			r.abandoned[intent.ExecutionID] = struct{}{}
+		}
 		r.mu.Unlock()
 		observability.RepairDropped().Add(context.Background(), 1)
 		r.log.Warn("repair intent dropped, queue full",
 			"execution_id", intent.ExecutionID, "kind", intent.Kind.String(),
 			"capacity", r.cfg.QueueCapacity)
 		return
+	}
+	if intent.Kind == RepairRuntime {
+		delete(r.abandoned, intent.ExecutionID)
 	}
 	r.intents[key] = &intent
 	count := len(r.intents)
@@ -189,6 +197,9 @@ func (r *Repairer) processDue(ctx context.Context) {
 	for key, intent := range r.intents {
 		if now.Sub(intent.enqueuedAt) > r.cfg.MaxLifetime {
 			delete(r.intents, key)
+			if intent.Kind == RepairRuntime {
+				r.abandoned[intent.ExecutionID] = struct{}{}
+			}
 			atomic.AddInt64(&r.timedOut, 1)
 			observability.RepairTimeout().Add(ctx, 1)
 			r.log.Warn("repair intent timed out",
@@ -215,7 +226,12 @@ func (r *Repairer) tryProcess(ctx context.Context, intent *RepairIntent) {
 	if err == nil {
 		key := intent.ExecutionID + ":" + intent.Kind.String()
 		r.mu.Lock()
-		delete(r.intents, key)
+		if current, ok := r.intents[key]; ok && current == intent {
+			delete(r.intents, key)
+			if intent.Kind == RepairRuntime {
+				delete(r.abandoned, intent.ExecutionID)
+			}
+		}
 		count := len(r.intents)
 		r.mu.Unlock()
 		atomic.AddInt64(&r.succeeded, 1)
@@ -237,6 +253,29 @@ func (r *Repairer) tryProcess(ctx context.Context, intent *RepairIntent) {
 		backoff = r.cfg.InitialBackoff
 	}
 	intent.nextAttempt = time.Now().Add(backoff)
+}
+
+// AbandonedExecutionIDs returns active executions whose terminal repair was
+// dropped or exceeded its retry lifetime. Lease renewal excludes these IDs so
+// database recovery can eventually converge them to unknown+fenced.
+func (r *Repairer) AbandonedExecutionIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ids := make([]string, 0, len(r.abandoned))
+	for executionID := range r.abandoned {
+		ids = append(ids, executionID)
+	}
+	return ids
+}
+
+// ClearAbandonedExecutionIDs releases renewal exclusions after the store has
+// confirmed that the corresponding executions are no longer active.
+func (r *Repairer) ClearAbandonedExecutionIDs(executionIDs []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, executionID := range executionIDs {
+		delete(r.abandoned, executionID)
+	}
 }
 
 func (r *Repairer) processIntent(ctx context.Context, intent *RepairIntent) error {

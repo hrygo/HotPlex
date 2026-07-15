@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -354,16 +355,18 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 		eventKind = events.RuntimeExecutionFailed
 	}
 
-	// Use the record's worker_run_id (stored at Accept/MarkRunning) rather than
-	// fc.workerRunID, which is a bridge-generated per-session id that never
-	// matches the DB and would make every FinishRuntime return ErrRunMismatch.
-	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, rec.WorkerRunID, rtStatus, ""); err != nil {
+	// Correlate with the emitting forwarder's immutable attach run. A stale
+	// forwarder must never finish the newest open execution for the session.
+	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, fc.workerRunID, rtStatus, ""); err != nil {
 		b.log.Debug("bridge: finish runtime on done", "err", err,
 			"session_id", sessionID, "execution_id", rec.ExecutionID, "status", rtStatus)
+		if errors.Is(err, execution.ErrRunMismatch) {
+			return
+		}
 		if b.repairer != nil {
 			b.repairer.Enqueue(execution.RepairIntent{
 				ExecutionID: rec.ExecutionID,
-				WorkerRunID: rec.WorkerRunID,
+				WorkerRunID: fc.workerRunID,
 				Kind:        execution.RepairRuntime,
 				Status:      string(rtStatus),
 			})

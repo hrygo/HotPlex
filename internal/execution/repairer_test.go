@@ -21,6 +21,23 @@ type flakyStore struct {
 	calls int64
 }
 
+type blockingRuntimeStore struct {
+	*flakyStore
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingRuntimeStore) FinishRuntime(ctx context.Context, execID, runID string, status RuntimeStatus, ec string) error {
+	if status == RuntimeUnknown {
+		s.once.Do(func() {
+			close(s.started)
+			<-s.release
+		})
+	}
+	return s.flakyStore.FinishRuntime(ctx, execID, runID, status, ec)
+}
+
 func (f *flakyStore) SetDelivery(ctx context.Context, execID, ownerID string, status Status, ec string) error {
 	atomic.AddInt64(&f.calls, 1)
 	f.mu.Lock()
@@ -307,4 +324,117 @@ func TestRepairer_ShutdownDrainCompletes(t *testing.T) {
 
 	require.Less(t, elapsed, 1*time.Second, "shutdown must complete quickly when DB is healthy")
 	require.Equal(t, 0, r.Backlog(), "backlog must be empty after successful drain")
+}
+
+func TestRepairer_InFlightIntentDoesNotDeleteNewerTerminal(t *testing.T) {
+	t.Parallel()
+	base, sessionStore := newRepairTestStore(t)
+	ensureRepairSession(t, sessionStore, "session-rp7")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rec, _, err := base.Accept(ctx, AcceptRequest{
+		SessionID: "session-rp7", ClientMessageID: "msg-rp7", PayloadHash: "h",
+		OwnerInstanceID: testOwner, WorkerRunID: testRun,
+	})
+	require.NoError(t, err)
+	require.NoError(t, base.MarkRunning(ctx, rec.ExecutionID, testOwner, testRun))
+
+	store := &blockingRuntimeStore{
+		flakyStore: base,
+		started:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	r := NewRepairer(store, fastRepairConfig(), nil)
+	r.Start(ctx)
+	defer r.Shutdown(context.Background())
+
+	r.Enqueue(RepairIntent{
+		ExecutionID: rec.ExecutionID, WorkerRunID: testRun,
+		Kind: RepairRuntime, Status: string(RuntimeUnknown),
+	})
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("unknown repair did not start")
+	}
+	r.Enqueue(RepairIntent{
+		ExecutionID: rec.ExecutionID, WorkerRunID: testRun,
+		Kind: RepairRuntime, Status: string(RuntimeCompleted),
+	})
+	close(store.release)
+
+	require.Eventually(t, func() bool {
+		stored, getErr := base.getByID(context.Background(), rec.ExecutionID)
+		return getErr == nil && stored.RuntimeStatus == RuntimeCompleted && r.Backlog() == 0
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestRepairer_TimedOutIntentIsExcludedFromLeaseRenewal(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newRepairTestStore(t)
+	ensureRepairSession(t, sessionStore, "session-rp8")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rec, _, err := store.Accept(ctx, AcceptRequest{
+		SessionID: "session-rp8", ClientMessageID: "msg-rp8", PayloadHash: "h",
+		OwnerInstanceID: testOwner, WorkerRunID: testRun,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.MarkRunning(ctx, rec.ExecutionID, testOwner, testRun))
+
+	cfg := fastRepairConfig()
+	cfg.MaxLifetime = 50 * time.Millisecond
+	store.setFail(true)
+	r := NewRepairer(store, cfg, nil)
+	r.Start(ctx)
+	defer r.Shutdown(context.Background())
+	r.Enqueue(RepairIntent{
+		ExecutionID: rec.ExecutionID, WorkerRunID: testRun,
+		Kind: RepairRuntime, Status: string(RuntimeCompleted),
+	})
+
+	require.Eventually(t, func() bool {
+		return len(r.AbandonedExecutionIDs()) == 1
+	}, time.Second, 10*time.Millisecond)
+	store.setFail(false)
+	renewed, err := store.RenewLeases(ctx, testOwner, 120, r.AbandonedExecutionIDs())
+	require.NoError(t, err)
+	require.Zero(t, renewed, "abandoned repair must stop extending its execution lease")
+}
+
+func TestRepairer_TimedOutDeliveryDoesNotStopLeaseRenewal(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newRepairTestStore(t)
+	ensureRepairSession(t, sessionStore, "session-rp9")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rec, _, err := store.Accept(ctx, AcceptRequest{
+		SessionID: "session-rp9", ClientMessageID: "msg-rp9", PayloadHash: "h",
+		OwnerInstanceID: testOwner, WorkerRunID: testRun,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.MarkRunning(ctx, rec.ExecutionID, testOwner, testRun))
+
+	cfg := fastRepairConfig()
+	cfg.MaxLifetime = 50 * time.Millisecond
+	store.setFail(true)
+	r := NewRepairer(store, cfg, nil)
+	r.Start(ctx)
+	defer r.Shutdown(context.Background())
+	r.Enqueue(RepairIntent{
+		ExecutionID: rec.ExecutionID, OwnerID: testOwner,
+		Kind: RepairDelivery, Status: string(StatusDelivered),
+	})
+
+	require.Eventually(t, func() bool {
+		return r.Backlog() == 0
+	}, time.Second, 10*time.Millisecond)
+	require.Empty(t, r.AbandonedExecutionIDs())
+	store.setFail(false)
+	renewed, err := store.RenewLeases(ctx, testOwner, 120, r.AbandonedExecutionIDs())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, renewed, "delivery-only repair failure must not abandon a live runtime")
 }

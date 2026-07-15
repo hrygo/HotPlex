@@ -55,11 +55,15 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 			return h.sendErrorf(ctx, env, events.ErrCodeUnauthorized, "ownership required")
 		}
 		// Delete the session (bypasses TERMINATED state per design §5).
+		attachedWorker := h.sm.GetWorker(env.SessionID)
 		if err := h.sm.Delete(ctx, env.SessionID); err != nil {
 			if errors.Is(err, session.ErrSessionNotFound) {
 				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 			}
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "delete failed: %v", err)
+		}
+		if h.bridge != nil && attachedWorker != nil {
+			h.bridge.clearWorkerRun(env.SessionID, attachedWorker, "")
 		}
 		return nil
 
@@ -173,6 +177,9 @@ func (h *Handler) handleGC(ctx context.Context, env *events.Envelope) error {
 			h.log.Warn("gateway: gc worker terminate failed", "session_id", env.SessionID, "err", err)
 		}
 		h.sm.DetachWorker(env.SessionID)
+		if h.bridge != nil {
+			h.bridge.clearWorkerRun(env.SessionID, w, "")
+		}
 	}
 
 	// Re-read after worker cleanup to avoid stale-snapshot race with concurrent
