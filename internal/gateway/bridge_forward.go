@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -34,6 +35,7 @@ const waitKillTimeout = 5 * time.Second
 type forwardContext struct {
 	sessionID      string
 	workerType     worker.WorkerType
+	workerRunID    string
 	sessPlatform   string
 	sessOwner      string
 	workDir        string
@@ -81,6 +83,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 	fc := &forwardContext{
 		sessionID:     sessionID,
 		workerType:    workerType,
+		workerRunID:   opts.workerRunID,
 		workDir:       opts.workDir,
 		ctx:           opts.ctx,
 		startTime:     time.Now(),
@@ -267,12 +270,8 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done {
 		fc.doneReceived = true
 		b.resetCrashLoop(sessionID)
-		// Messaging sessions transition to IDLE on turn completion (Fix A,
-		// issue #815): otherwise they stay RUNNING and get reaped by the 30m
-		// zombie ExecutionTimeout, forcing codex into a fresh-start that loses
-		// ephemeral-thread context. webchat is excluded — it IDLEs on WS close
-		// (conn.go:146), and transitioning here breaks Fast Reconnect.
 		b.maybeTransitionIdleAfterDone(sessionID, fc)
+		b.finishRuntimeOnDone(sessionID, fc, env)
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
@@ -318,6 +317,52 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		fc.turnStartTime = time.Now()
 	}
 
+}
+
+// finishRuntimeOnDone correlates the terminal runtime status when a Done event
+// arrives. It queries the active execution for the session and calls
+// FinishRuntime to persist the terminal state. Runtime events are emitted to
+// the client for execution_id correlation. Spec 2026-07-14 lines 259-275.
+func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *events.Envelope) {
+	if b.executionStore == nil || fc.workerRunID == "" {
+		return
+	}
+
+	rec, err := b.executionStore.ActiveBySession(context.Background(), sessionID)
+	if err != nil {
+		return
+	}
+
+	success := true
+	if dd, ok := env.Event.Data.(events.DoneData); ok {
+		success = dd.Success
+	} else if m, ok := env.Event.Data.(map[string]any); ok {
+		if s, _ := m["success"].(bool); !s {
+			success = false
+		}
+	}
+
+	var rtStatus execution.RuntimeStatus
+	var eventKind events.Kind
+	if success {
+		rtStatus = execution.RuntimeCompleted
+		eventKind = events.RuntimeExecutionCompleted
+	} else {
+		rtStatus = execution.RuntimeFailed
+		eventKind = events.RuntimeExecutionFailed
+	}
+
+	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, fc.workerRunID, rtStatus, ""); err != nil {
+		b.log.Debug("bridge: finish runtime on done", "err", err,
+			"session_id", sessionID, "execution_id", rec.ExecutionID, "status", rtStatus)
+	}
+
+	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, 0, eventKind, events.RuntimeExecutionData{
+		ExecutionID: rec.ExecutionID,
+		Status:      string(rtStatus),
+	})
+	rtEnv.OwnerID = fc.sessOwner
+	_ = b.hub.SendToSession(context.Background(), rtEnv)
 }
 
 // extractTurnContent extracts message/reasoning content for turn tracking.

@@ -13,13 +13,14 @@ import (
 
 // HandlerDeps groups all dependencies for Handler construction.
 type HandlerDeps struct {
-	Log            *slog.Logger
-	Hub            *Hub
-	SM             SessionManager
-	Auth           *security.Authenticator
-	Bridge         *Bridge
-	SkillsLocator  SkillsLocator
-	ExecutionStore execution.Store
+	Log             *slog.Logger
+	Hub             *Hub
+	SM              SessionManager
+	Auth            *security.Authenticator
+	Bridge          *Bridge
+	SkillsLocator   SkillsLocator
+	ExecutionStore  execution.Store
+	OwnerInstanceID string
 }
 
 // WorkspaceOverridesReader is the narrow workspace-store subset Bridge needs to
@@ -50,4 +51,5 @@ type BridgeDeps struct {
 	WSStore                WorkspaceOverridesReader // WebChat per-workspace agent-config overrides (spec ②); nil = disabled
 	PermissionDedupEnabled bool                     // suppress repeated permission cards after a user denial (Permission-Deny-Dedup-Spec)
 	PermissionDedupWindow  time.Duration            // denial cache TTL; only honored when PermissionDedupEnabled
+	ExecutionStore         execution.Store          // durable ingress reliability closure (spec 2026-07-14); nil = disabled
 }

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -20,11 +22,12 @@ import (
 
 // forwardOpts configures the forwardEvents goroutine behavior.
 type forwardOpts struct {
-	ctx        context.Context // parent context for cancellation propagation
-	resumed    bool            // true if this goroutine was spawned by ResumeSession
-	workDir    string          // workDir to use for resume retry
-	retryDepth int             // number of resume retries attempted (limits to 1)
-	lastInput  string          // inherited lastInput from previous retry goroutine; used as fallback when retry worker never receives input
+	ctx         context.Context
+	resumed     bool
+	workDir     string
+	retryDepth  int
+	lastInput   string
+	workerRunID string
 }
 
 // workerLaunchParams holds the parameters for createAndLaunchWorker.
@@ -57,6 +60,9 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	}
 	if params.forwardOpts.ctx == nil {
 		params.forwardOpts.ctx = params.ctx
+	}
+	if params.forwardOpts.workerRunID == "" {
+		params.forwardOpts.workerRunID = "run_" + uuid.NewString()
 	}
 
 	start := time.Now()

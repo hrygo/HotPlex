@@ -14,6 +14,7 @@ import (
 	"github.com/hrygo/hotplex/internal/brain"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
@@ -92,7 +93,8 @@ type Bridge struct {
 	// dedup suppresses repeated permission cards after a user denial (Permission-
 	// Deny-Dedup-Spec). Nil when the feature is disabled. Methods are nil-safe,
 	// so call sites can invoke b.dedup.* unconditionally.
-	dedup *PermissionDenyDedup
+	dedup          *PermissionDenyDedup
+	executionStore execution.Store // durable ingress runtime correlation; nil = disabled
 }
 
 type crashHistory struct {
@@ -128,6 +130,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		crashTracker:       make(map[string]*crashHistory),
 		shutdownCtx:        shutdownCtx,
 		shutdownCancel:     shutdownCancel,
+		executionStore:     deps.ExecutionStore,
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))

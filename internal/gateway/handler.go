@@ -9,6 +9,8 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -34,14 +36,15 @@ const LevelTrace = slog.Level(-8)
 // Handler processes incoming messages from a client connection.
 // It coordinates between the hub, session manager, and pool.
 type Handler struct {
-	log            *slog.Logger
-	hub            *Hub
-	sm             SessionManager
-	auth           *security.Authenticator
-	bridge         *Bridge
-	skillsLocator  SkillsLocator
-	auditCollector *audit.Collector
-	executionStore execution.Store
+	log             *slog.Logger
+	hub             *Hub
+	sm              SessionManager
+	auth            *security.Authenticator
+	bridge          *Bridge
+	skillsLocator   SkillsLocator
+	auditCollector  *audit.Collector
+	executionStore  execution.Store
+	ownerInstanceID string
 }
 
 // SkillsLocator discovers skills from the filesystem.
@@ -53,13 +56,14 @@ type SkillsLocator interface {
 // NewHandler creates a new message handler.
 func NewHandler(deps HandlerDeps) *Handler {
 	return &Handler{
-		log:            deps.Log.With("component", "handler"),
-		hub:            deps.Hub,
-		sm:             deps.SM,
-		auth:           deps.Auth,
-		bridge:         deps.Bridge,
-		skillsLocator:  deps.SkillsLocator,
-		executionStore: deps.ExecutionStore,
+		log:             deps.Log.With("component", "handler"),
+		hub:             deps.Hub,
+		sm:              deps.SM,
+		auth:            deps.Auth,
+		bridge:          deps.Bridge,
+		skillsLocator:   deps.SkillsLocator,
+		executionStore:  deps.ExecutionStore,
+		ownerInstanceID: deps.OwnerInstanceID,
 	}
 }
 
@@ -300,6 +304,10 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage,
 				"client message id %q was already used with different input", clientMessageID(env))
 		}
+		if errors.Is(err, execution.ErrSessionBusy) {
+			h.cancelRetryIfNeeded(env.SessionID)
+			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
+		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
 		// A genuine new input failed to durably register; cancel any in-flight
 		// LLM retry so it cannot fire and answer the previous failed turn.
@@ -393,6 +401,13 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 	}
 
+	if execRecord != nil && h.executionStore != nil {
+		if mrErr := h.executionStore.MarkRunning(ctx, execRecord.ExecutionID, h.ownerInstanceID, execRecord.WorkerRunID); mrErr != nil {
+			h.log.Warn("gateway: mark execution running failed", "err", mrErr,
+				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+		}
+	}
+
 	if h.log.Enabled(ctx, slog.LevelDebug) {
 		runes := []rune(content)
 		preview := string(runes)
@@ -471,6 +486,8 @@ func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope
 		SessionID:       env.SessionID,
 		ClientMessageID: clientMessageID(env),
 		PayloadHash:     sha256Hex(string(payload)),
+		OwnerInstanceID: h.ownerInstanceID,
+		WorkerRunID:     "run_" + uuid.NewString(),
 	})
 	if err != nil {
 		return nil, duplicate, err
@@ -499,11 +516,11 @@ func (h *Handler) finishInputExecution(ctx context.Context, record *execution.Re
 	}
 	// Reflect the intended terminal status on the in-memory record before the
 	// durable write, so every subsequent input.ack carries the outcome the
-	// client should act on even when SetStatus fails. The defer safety-net and
+	// client should act on even when SetDelivery fails. The defer safety-net and
 	// gateway-restart recovery reconcile the durable record afterwards.
 	record.Status = status
 	record.ErrorCode = string(code)
-	if err := h.executionStore.SetStatus(context.WithoutCancel(ctx), record.ExecutionID, status, string(code)); err != nil {
+	if err := h.executionStore.SetDelivery(context.WithoutCancel(ctx), record.ExecutionID, h.ownerInstanceID, status, string(code)); err != nil {
 		return err
 	}
 	return nil

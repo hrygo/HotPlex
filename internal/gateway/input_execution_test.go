@@ -44,6 +44,38 @@ func (s *fakeExecutionStore) SetStatus(_ context.Context, _ string, status execu
 	return s.statusErr
 }
 
+func (s *fakeExecutionStore) SetDelivery(_ context.Context, _ string, _ string, status execution.Status, errorCode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.status = status
+	s.errorCode = errorCode
+	s.statusCalls++
+	return s.statusErr
+}
+
+func (s *fakeExecutionStore) MarkRunning(context.Context, string, string, string) error { return nil }
+func (s *fakeExecutionStore) FinishRuntime(context.Context, string, string, execution.RuntimeStatus, string) error {
+	return nil
+}
+func (s *fakeExecutionStore) ActiveBySession(context.Context, string) (*execution.Record, error) {
+	return nil, execution.ErrNotFound
+}
+func (s *fakeExecutionStore) FenceBySession(context.Context, string) (*execution.Record, error) {
+	return nil, execution.ErrNotFound
+}
+func (s *fakeExecutionStore) ClearFenceAfterFreshStart(context.Context, string, string, string) error {
+	return nil
+}
+func (s *fakeExecutionStore) RenewLeases(context.Context, string, int64) (int64, error) {
+	return 0, nil
+}
+func (s *fakeExecutionStore) RecoverExpiredLeases(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+func (s *fakeExecutionStore) TerminateOwnerLeases(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
+
 func (s *fakeExecutionStore) snapshot() (execution.Status, string, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -138,6 +138,98 @@ func TestMigrations_023UserActivity_AppliesAndIsImmutable(t *testing.T) {
 	}
 }
 
+// TestMigrations_027_ExecutionOwnerLease_SchemaAndConstraints covers the durable
+// ingress reliability closure migration (spec 2026-07-14, lines 143-188):
+//   - all 8 new columns exist on execution_inputs
+//   - both indexes (owner_runtime composite + one_active_per_session partial unique) exist
+//   - the partial unique index rejects a second pending/running execution per session
+//   - fence_reason also activates the partial unique index for terminal-but-fenced rows
+//   - the runtime_status CHECK constraint rejects invalid values
+func TestMigrations_027_ExecutionOwnerLease_SchemaAndConstraints(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openMigrationTestDB(t)
+	require.NoError(t, session.RunMigrations(ctx, db, dbutil.DialectSQLite))
+
+	wantCols := map[string]bool{
+		"owner_instance_id":  false,
+		"worker_run_id":      false,
+		"lease_until":        false,
+		"runtime_status":     false,
+		"runtime_error_code": false,
+		"started_at":         false,
+		"finished_at":        false,
+		"fence_reason":       false,
+	}
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(execution_inputs)`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		require.NoError(t, rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk))
+		if _, ok := wantCols[name]; ok {
+			wantCols[name] = true
+		}
+	}
+	require.NoError(t, rows.Err())
+	for col, found := range wantCols {
+		require.True(t, found, "execution_inputs missing column %s after migration 027", col)
+	}
+
+	for _, idx := range []string{"idx_execution_owner_runtime", "idx_execution_one_active_per_session"} {
+		var n int
+		err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='execution_inputs'`, idx,
+		).Scan(&n)
+		require.NoError(t, err)
+		require.Equal(t, 1, n, "expected index %s on execution_inputs", idx)
+	}
+
+	_, err = db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`)
+	require.NoError(t, err)
+
+	const ts = 1700000000000
+	insertExec := func(execID, sessionID, runtime, fence string) error {
+		_, err := db.ExecContext(ctx, `INSERT INTO execution_inputs
+			(execution_id, session_id, client_message_id, payload_hash, status, error_code,
+			 created_at, updated_at, owner_instance_id, worker_run_id, lease_until,
+			 runtime_status, runtime_error_code, fence_reason)
+			VALUES (?, ?, ?, ?, 'accepted', '', ?, ?, '', '', 0, ?, '', ?)`,
+			execID, sessionID, "msg_"+execID, "hash_"+execID, ts, ts, runtime, fence)
+		return err
+	}
+
+	require.NoError(t, insertExec("exec_a", "s1", "pending", ""),
+		"first pending execution for s1 should succeed")
+
+	err = insertExec("exec_b", "s1", "pending", "")
+	require.Error(t, err, "partial unique index must reject second pending execution per session")
+
+	require.NoError(t, insertExec("exec_c", "s1", "completed", ""),
+		"completed execution must not conflict with pending via partial index")
+
+	require.NoError(t, insertExec("exec_d", "s2", "unknown", "LEASE_EXPIRED"),
+		"fenced execution for s2 should succeed")
+
+	require.NoError(t, insertExec("exec_e", "s2", "unknown", ""),
+		"non-fenced unknown execution must not conflict with fenced one")
+
+	_, err = db.ExecContext(ctx, `INSERT INTO execution_inputs
+		(execution_id, session_id, client_message_id, payload_hash, status, error_code,
+		 created_at, updated_at, owner_instance_id, worker_run_id, lease_until,
+		 runtime_status, runtime_error_code, fence_reason)
+		VALUES (?, ?, ?, ?, 'unknown', '', ?, ?, '', '', 0, 'unknown', '', 'ANOTHER_FENCE')`,
+		"exec_f", "s2", "msg_f", "hash_f", ts, ts)
+	require.Error(t, err, "partial unique index must reject second fenced execution per session")
+
+	err = insertExec("exec_g", "s3", "bogus", "")
+	require.Error(t, err, "CHECK constraint must reject invalid runtime_status")
+}
+
 // TestMigrations_023UserActivity_TriggerBlocksEveryColumnShapeOfUpdate guards against
 // the trigger being accidentally weakened to allow some UPDATE shapes. We try a
 // no-op-equivalent UPDATE (SET ts=ts) and confirm it still aborts.
