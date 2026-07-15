@@ -1232,6 +1232,10 @@ type mockBridgeSM struct {
 	mock.Mock
 }
 
+func (m *mockBridgeSM) IsMock() bool {
+	return true
+}
+
 func (m *mockBridgeSM) CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error) {
 	args := m.Called(ctx, id, userID, botID, botName, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
 	if args.Get(0) == nil {

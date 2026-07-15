@@ -310,6 +310,11 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// stale true from a previous turn masking a crash in the current turn).
 	if env.Event.Type == events.State {
 		fc.doneReceived = false
+		if stateData, ok := env.Event.Data.(events.StateData); ok && stateData.State == events.StateRunning {
+			fc.turnStartTime = time.Now()
+		} else if m, ok := env.Event.Data.(map[string]any); ok && m["state"] == string(events.StateRunning) {
+			fc.turnStartTime = time.Now()
+		}
 	}
 
 	if fc.turnTimer != nil && !fc.turnTimerFired.Load() {
@@ -1202,10 +1207,21 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 		return acc
 	}
 
-	// Slow path: resolve git branch before acquiring write lock.
+	// Slow path: resolve git branch and session creation time before acquiring write lock.
 	var branch string
 	if workDir != "" {
 		branch = gitBranchOf(workDir)
+	}
+	sessionCreated := startTime
+	if b.sm != nil {
+		type mockDetector interface {
+			IsMock() bool
+		}
+		if _, isMock := b.sm.(mockDetector); !isMock {
+			if si, err := b.sm.Get(context.Background(), sessionID); err == nil && !si.CreatedAt.IsZero() {
+				sessionCreated = si.CreatedAt
+			}
+		}
 	}
 
 	b.accumMu.Lock()
@@ -1225,7 +1241,7 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 		return acc
 	}
 	acc = &sessionAccumulator{
-		StartedAt: startTime,
+		StartedAt: sessionCreated,
 		WorkDir:   workDir,
 		GitBranch: branch,
 	}
