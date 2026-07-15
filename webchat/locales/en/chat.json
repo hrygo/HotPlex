@@ -67,6 +67,8 @@
     "preparing": "PREPARING",
     "error": "ERROR",
     "active": "ACTIVE",
+    "thinking": "Thinking",
+    "accepted": "Agent accepted the request",
     "session_expired_settings": "Session expired — please re-login to access Settings",
     "starting_session": "Starting new session...",
     "loading_workers": "Loading worker engines...",

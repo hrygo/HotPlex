@@ -278,6 +278,12 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
           {ext.metadata?.turnSummary && (
             <TurnSummaryCard data={ext.metadata.turnSummary} />
           )}
+          {ext.metadata?.progress && (
+            <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <span className="w-2 h-2 rounded-full bg-[var(--accent-gold)] animate-pulse" />
+              <span>{t(`status.${ext.metadata.progress}`)}</span>
+            </div>
+          )}
         </div>
         <MessageActions message={message} />
         {isError && (

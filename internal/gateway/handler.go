@@ -292,6 +292,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
+	inputReceivedAt := time.Now()
 	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
@@ -331,6 +332,10 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	finalized := execRecord == nil
 	if !finalized {
 		observability.ExecutionAccept().Add(ctx, 1)
+		if h.bridge != nil {
+			h.bridge.beginTurnTTFT(env.SessionID, execRecord.ExecutionID, worker.WorkerType("unknown"), inputReceivedAt)
+			h.bridge.markTurnDurablyAccepted(env.SessionID, execRecord.ExecutionID)
+		}
 	}
 	defer func() {
 		if finalized {
@@ -357,6 +362,9 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		// not overwrite the intended outcome with a generic unknown.
 		finalized = true
 		h.sendInputAck(ctx, env, execRecord, false)
+		if h.bridge != nil && status == execution.StatusFailed {
+			h.bridge.finishTurnTTFT(env.SessionID, string(status))
+		}
 	}
 	// Fence recovery may have replaced the Worker and transitioned a TERMINATED
 	// session back to RUNNING while accepting this input. Re-read state so the
@@ -418,6 +426,9 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 		finishOutcome(execution.StatusFailed, events.ErrCodeSessionNotFound)
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "no worker attached to session")
+	}
+	if h.bridge != nil && execRecord != nil {
+		h.bridge.setTurnTTFTWorkerType(env.SessionID, execRecord.ExecutionID, w.Type())
 	}
 
 	if si.State == events.StateIdle {
@@ -484,6 +495,9 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 		return h.sendErrorf(ctx, env, code, "worker input failed: %v", err)
+	}
+	if h.bridge != nil && execRecord != nil {
+		h.bridge.markTurnWorkerAccepted(env.SessionID, execRecord.ExecutionID)
 	}
 	if err := h.finishInputExecution(ctx, execRecord, execution.StatusDelivered, ""); err != nil {
 		h.log.Error("gateway: persist delivered input status failed", "err", err,

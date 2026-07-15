@@ -196,6 +196,9 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	for env := range recvCh {
 		b.processForwardedEvent(env, w, opts, fc)
 	}
+	if !fc.doneReceived {
+		b.finishTurnTTFT(sessionID, "worker_exit")
+	}
 
 	// Flush buffered error that never reached a retry decision point.
 	if fc.pendingError != nil {
@@ -335,16 +338,27 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	deltaContent, reasoningContent := b.extractTurnContent(env, fc)
+	if env.Event.Type == events.Reasoning && reasoningContent != "" {
+		b.recordTurnFirstOutput(sessionID, false)
+	}
+	if (env.Event.Type == events.MessageDelta || env.Event.Type == events.Message) && extractMessageContent(env) != "" {
+		b.recordTurnFirstOutput(sessionID, true)
+	}
 
 	// Stats accumulation.
 	b.accumulateStats(env, w, opts, fc)
 
+	terminalStatus := ""
 	// Done processing: mark received.
 	if env.Event.Type == events.Done {
 		fc.doneReceived = true
 		b.resetCrashLoop(sessionID)
 		b.maybeTransitionIdleAfterDone(sessionID, fc)
 		b.finishRuntimeOnDone(sessionID, fc, env)
+		terminalStatus = "completed"
+		if done, ok := asDoneData(env.Event.Data); ok && !done.Success {
+			terminalStatus = "failed"
+		}
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
@@ -386,6 +400,9 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	if env.Event.Type == events.Done {
+		// A retry continues the same accepted input, so only finish TTFT after
+		// the retry decision confirms this is the terminal worker attempt.
+		b.finishTurnTTFT(sessionID, terminalStatus)
 		fc.turnText.Reset()
 		// Do NOT reset fc.turnStartTime here. The previous code did
 		// `fc.turnStartTime = time.Now()` at Done, which started the NEXT turn's

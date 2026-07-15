@@ -126,8 +126,9 @@ describe("BrowserHotPlexClient input retry identity", () => {
         internal.ws = { readyState: 1 };
         const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
 
-        client.sendInput("hello");
+        const submittedID = client.sendInput("hello");
         const firstId = send.mock.calls[0][0].id;
+        expect(submittedID).toBe(firstId);
         internal._reconnecting = true;
 
         internal._handleMessage(

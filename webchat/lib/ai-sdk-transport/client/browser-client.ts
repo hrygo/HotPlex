@@ -570,7 +570,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this.ws.send(serializeEnvelope(env));
   }
 
-  sendInput(content: string): void {
+  sendInput(content: string): string {
     if (this.pendingInput) {
       throw new Error('Input already pending');
     }
@@ -593,6 +593,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       }
       throw err;
     }
+    return pending.clientMessageId;
   }
 
   async sendInputAsync(content: string): Promise<void> {

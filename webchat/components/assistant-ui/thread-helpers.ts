@@ -7,6 +7,7 @@ export interface ThreadMessageExtension {
   metadata?: {
     contextUsage?: ContextUsageData;
     turnSummary?: TurnSessionStats;
+    progress?: 'thinking' | 'accepted';
   };
   content: unknown[];
 }

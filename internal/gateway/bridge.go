@@ -97,6 +97,7 @@ type Bridge struct {
 	executionStore execution.Store     // durable ingress runtime correlation; nil = disabled
 	repairer       *execution.Repairer // terminal-state repair retry; nil-safe
 	workerRuns     sync.Map            // sessionID -> workerRunBinding; updated on each successful attach
+	turnTTFT       *turnTTFTTracker
 }
 
 type workerRunBinding struct {
@@ -139,6 +140,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		shutdownCancel:     shutdownCancel,
 		executionStore:     deps.ExecutionStore,
 		repairer:           deps.Repairer,
+		turnTTFT:           newTurnTTFTTracker(),
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))
