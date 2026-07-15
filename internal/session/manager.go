@@ -1546,22 +1546,32 @@ func (m *Manager) gc(ctx context.Context) {
 // safeGo runs fn in a goroutine with panic recovery. Panics are logged with
 // stack trace instead of crashing the entire process.
 func (m *Manager) safeGo(fn func()) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				m.log.Error("session: callback panic",
-					"panic", r,
-					"stack", string(debug.Stack()))
-			}
-		}()
-		fn()
+	go m.safeCall(fn)
+}
+
+func (m *Manager) safeCall(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			m.log.Error("session: callback panic",
+				"panic", r,
+				"stack", string(debug.Stack()))
+		}
 	}()
+	fn()
 }
 
 // notifyStateChange sends state change and termination callbacks.
 func (m *Manager) notifyStateChange(ctx context.Context, sessionID string, state events.SessionState, message string) {
 	if m.StateNotifier != nil {
-		m.safeGo(func() { m.StateNotifier(ctx, sessionID, state, message) })
+		notify := func() { m.StateNotifier(ctx, sessionID, state, message) }
+		if state == events.StateDeleted {
+			// Deletion releases the session's sequence counter after this method.
+			// Complete state-event allocation/capture first so a delayed callback
+			// cannot recreate the counter at 1 after collector flushing.
+			m.safeCall(notify)
+		} else {
+			m.safeGo(notify)
+		}
 	}
 	if (state == events.StateTerminated || state == events.StateDeleted) && m.OnTerminate != nil {
 		m.safeGo(func() { m.OnTerminate(sessionID) })

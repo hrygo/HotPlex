@@ -575,8 +575,15 @@ func TestManager_DeleteNotifiesRuntimeCleanup(t *testing.T) {
 	m.mu.Unlock()
 
 	var notified atomic.Bool
+	var stateNotified atomic.Bool
+	m.StateNotifier = func(_ context.Context, id string, state events.SessionState, _ string) {
+		require.Equal(t, seed.ID, id)
+		require.Equal(t, events.StateDeleted, state)
+		stateNotified.Store(true)
+	}
 	m.OnRuntimeRelease = func(_ context.Context, id string) {
 		require.Equal(t, seed.ID, id)
+		require.True(t, stateNotified.Load(), "deleted state must be captured before runtime release")
 		notified.Store(true)
 	}
 	require.NoError(t, m.Delete(ctx, seed.ID))
