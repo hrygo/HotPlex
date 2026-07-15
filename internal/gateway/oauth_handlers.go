@@ -114,7 +114,7 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 
 	// Check for IdP error response.
 	if errCode := r.URL.Query().Get("error"); errCode != "" {
-		h.log.Warn("oauth callback: idp error", "provider", providerName, "error", errCode)
+		h.log.Warn("oauth callback: idp error", "provider", providerName, "err", errCode)
 		redirectAuthError(w, r, "IDP_ERROR")
 		return
 	}
@@ -176,7 +176,7 @@ func (h *OAuthHandlers) Callback(w http.ResponseWriter, r *http.Request) {
 
 	// Issue session cookie (same as password login).
 	if err := h.cookieAuth.SetCookie(w, r, userID); err != nil {
-		h.log.Error("oauth callback: cookie issuance failed", "provider", providerName, "err", err)
+		h.log.Error("oauth callback: cookie issuance failed", "provider", providerName, "user_id", userID, "err", err)
 		redirectAuthError(w, r, "INTERNAL")
 		return
 	}

@@ -48,7 +48,7 @@ func TestBridge_ForwardEvents_RefreshesLastIO(t *testing.T) {
 	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 	done := make(chan struct{})
 	go func() {
-		b.forwardEvents(fw, "sess_lastio", forwardOpts{ctx: ctx})
+		b.forwardEvents(forwarderBinding{worker: fw, conn: fw.Conn()}, "sess_lastio", forwardOpts{ctx: ctx})
 		close(done)
 	}()
 

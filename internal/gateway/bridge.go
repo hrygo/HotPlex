@@ -738,7 +738,7 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	go func() {
 		defer b.fwdWg.Done()
 		defer b.clearWorkerRun(sessionID, w, workerRunID)
-		b.forwardEvents(w, sessionID, forwardOpts{ctx: context.Background(), workerRunID: workerRunID})
+		b.launchForwarderLocked(w, sessionID, forwardOpts{ctx: context.Background(), workerRunID: workerRunID})
 	}()
 
 	return nil
@@ -1034,7 +1034,7 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 	if si.WorkerType == worker.TypeCodexCLI && b.turnsQuerier != nil {
 		turns, err := b.turnsQuerier.QueryTurns(b.shutdownCtx, sessionID, 50, 0)
 		if err != nil {
-			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "error", err)
+			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "err", err)
 		} else if len(turns) > 0 {
 			compressor := NewHistoryCompressor(b.log, b.hub)
 			latestCreatedAt := turns[len(turns)-1].CreatedAt

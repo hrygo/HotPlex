@@ -499,7 +499,7 @@ func (m *Manager) drainStderr(stderr io.ReadCloser) {
 			append([]slog.Attr{slog.String("stderr", msg)}, attrs...)...)
 	}
 	if err := scanner.Err(); err != nil {
-		m.log.Warn("proc: drainStderr ended with error", "error", err)
+		m.log.Warn("proc: drainStderr ended with error", "err", err)
 	}
 }
 

@@ -42,7 +42,7 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, prompt string) (<-chan st
 				return
 			}
 			if err != nil {
-				c.logger.Error("stream receive error", "error", err)
+				c.logger.Error("stream receive error", "err", err)
 				return
 			}
 

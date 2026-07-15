@@ -181,7 +181,7 @@ func (a *Adapter) ConfigureWith(config messaging.AdapterConfig) error {
 
 func (a *Adapter) Start(ctx context.Context) error {
 	if !a.StartGuard() {
-		a.Log.Warn("slack: adapter already started, skipping")
+		a.Log.Debug("slack: adapter already started, skipping")
 		return nil
 	}
 	if a.botToken == "" || a.appToken == "" {

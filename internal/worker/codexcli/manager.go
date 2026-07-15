@@ -603,7 +603,7 @@ func (m *CodexAppServerManager) dispatchFrame(data []byte) {
 
 	// ID absent: notification or unknown.
 	if frame.Error != nil {
-		m.log.Debug("codex-app-server: error frame without ID, dropping", "error", frame.Error.Message)
+		m.log.Debug("codex-app-server: error frame without ID, dropping", "err", frame.Error.Message)
 		return
 	}
 

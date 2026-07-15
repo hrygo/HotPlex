@@ -307,16 +307,18 @@ func (a *Adapter) consumeLoop(ctx context.Context, consumer pulsar.Consumer, don
 		}
 		receiveRetries = 0
 
-		a.Log.Debug("yuanxin: message received from Pulsar", "msg_id", msg.ID().String(), "payload_len", len(msg.Payload()))
+		if a.Log.Enabled(ctx, slog.LevelDebug) {
+			a.Log.Debug("yuanxin: message received from Pulsar", "msg_id", msg.ID().String(), "payload_len", len(msg.Payload()))
+		}
 
 		if err := a.handleMessage(ctx, msg); err != nil {
-			a.Log.Error("yuanxin: handle message error", "err", err)
+			a.Log.Error("yuanxin: handle message error", "msg_id", msg.ID().String(), "err", err)
 			consumer.Nack(msg)
 			continue
 		}
 
 		if err := consumer.Ack(msg); err != nil {
-			a.Log.Error("yuanxin: ack message error", "err", err)
+			a.Log.Error("yuanxin: ack message error", "msg_id", msg.ID().String(), "err", err)
 		}
 	}
 }
@@ -327,15 +329,19 @@ type YuanxinMessage struct {
 }
 
 func (a *Adapter) handleMessage(ctx context.Context, msg pulsar.Message) error {
-	a.Log.Debug("yuanxin: handleMessage called", "msg_id", msg.ID().String())
+	if a.Log.Enabled(ctx, slog.LevelDebug) {
+		a.Log.Debug("yuanxin: handleMessage called", "msg_id", msg.ID().String())
+	}
 
 	var yuanxinMsg YuanxinMessage
 	if err := json.Unmarshal(msg.Payload(), &yuanxinMsg); err != nil {
-		a.Log.Error("yuanxin: unmarshal failed", "err", err, "payload", string(msg.Payload()))
+		a.Log.Error("yuanxin: unmarshal failed", "msg_id", msg.ID().String(), "err", err, "payload", string(msg.Payload()))
 		return fmt.Errorf("yuanxin: unmarshal: %w", err)
 	}
 
-	a.Log.Debug("yuanxin: message parsed", "metadata", yuanxinMsg.Metadata, "msg", yuanxinMsg.Msg)
+	if a.Log.Enabled(ctx, slog.LevelDebug) {
+		a.Log.Debug("yuanxin: message parsed", "metadata", yuanxinMsg.Metadata, "msg", yuanxinMsg.Msg)
+	}
 
 	platformMsgID := msg.ID().String()
 	text := messaging.SanitizeText(yuanxinMsg.Msg)
@@ -360,7 +366,9 @@ func (a *Adapter) handleMessage(ctx context.Context, msg pulsar.Message) error {
 
 	if a.Gate != nil {
 		allowed, reason := a.Gate.Check(true, userID, false)
-		a.Log.Debug("yuanxin: gate check", "allowed", allowed, "reason", reason, "user", userID)
+		if a.Log.Enabled(ctx, slog.LevelDebug) {
+			a.Log.Debug("yuanxin: gate check", "allowed", allowed, "reason", reason, "user", userID)
+		}
 		if !allowed {
 			return nil
 		}
@@ -388,13 +396,17 @@ func (a *Adapter) handleMessage(ctx context.Context, msg pulsar.Message) error {
 		md["platform_msg_id"] = platformMsgID
 	}
 
-	a.Log.Debug("yuanxin: calling Bridge.Handle", "session_id", envelope.SessionID, "owner_id", envelope.OwnerID, "text", text)
+	if a.Log.Enabled(ctx, slog.LevelDebug) {
+		a.Log.Debug("yuanxin: calling Bridge.Handle", "session_id", envelope.SessionID, "owner_id", envelope.OwnerID, "text", text)
+	}
 
 	if err := a.Bridge().Handle(ctx, envelope, conn); err != nil {
-		a.Log.Error("yuanxin: Bridge.Handle failed", "err", err)
+		a.Log.Error("yuanxin: Bridge.Handle failed", "session_id", envelope.SessionID, "err", err)
 		return err
 	}
-	a.Log.Debug("yuanxin: Bridge.Handle succeeded", "session_id", envelope.SessionID)
+	if a.Log.Enabled(ctx, slog.LevelDebug) {
+		a.Log.Debug("yuanxin: Bridge.Handle succeeded", "session_id", envelope.SessionID)
+	}
 	return nil
 }
 

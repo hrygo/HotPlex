@@ -156,7 +156,7 @@ func (c *AnthropicClient) ChatStream(ctx context.Context, prompt string) (<-chan
 		}
 
 		if err := stream.Err(); err != nil {
-			c.logger.Error("Anthropic stream error", "error", err)
+			c.logger.Error("Anthropic stream error", "err", err)
 		}
 	}()
 

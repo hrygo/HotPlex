@@ -335,7 +335,7 @@ func (a *AdminAPI) HandleAPIKeyUserList(w http.ResponseWriter, r *http.Request) 
 	}
 	users, err := a.akStore.list(r.Context())
 	if err != nil {
-		a.log.Error("admin: list api key users", "error", err)
+		a.log.Error("admin: list api key users", "err", err)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 		return
 	}
@@ -389,7 +389,7 @@ func (a *AdminAPI) HandleAPIKeyUserCreate(w http.ResponseWriter, r *http.Request
 	}
 	canonicalUserID, err := a.canonicalizeAPIKeyUserID(r.Context(), u.UserID)
 	if err != nil {
-		a.log.Error("admin: canonicalize api key user_id", "error", err)
+		a.log.Error("admin: canonicalize api key user_id", "err", err)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 		return
 	}
@@ -509,7 +509,7 @@ func (a *AdminAPI) HandleAPIKeyUserUpdate(w http.ResponseWriter, r *http.Request
 	}
 	canonicalUserID, err := a.canonicalizeAPIKeyUserID(r.Context(), u.UserID)
 	if err != nil {
-		a.log.Error("admin: canonicalize api key user_id", "error", err)
+		a.log.Error("admin: canonicalize api key user_id", "err", err)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 		return
 	}

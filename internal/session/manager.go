@@ -1444,7 +1444,7 @@ func (m *Manager) gc(ctx context.Context) {
 		var err error
 		maxIds, err = m.store.GetExpiredMaxLifetime(egCtx, now)
 		if err != nil {
-			m.log.Error("session: gc (max_lifetime) query", "err", err)
+			m.log.Error("session: gc (max_lifetime) query", "now", now, "err", err)
 		}
 		return nil // don't propagate — we log and continue
 	})
@@ -1452,7 +1452,7 @@ func (m *Manager) gc(ctx context.Context) {
 		var err error
 		idleIds, err = m.store.GetExpiredIdle(egCtx, now)
 		if err != nil {
-			m.log.Error("session: gc (idle) query", "err", err)
+			m.log.Error("session: gc (idle) query", "now", now, "err", err)
 		}
 		return nil
 	})
@@ -1515,7 +1515,7 @@ func (m *Manager) gc(ctx context.Context) {
 	defaultCutoff := now.Add(-cfg.Session.TermRetention)
 	deleted, err := m.store.DeleteTerminated(ctx, cronCutoff, defaultCutoff)
 	if err != nil {
-		m.log.Error("session: gc (delete_terminated) failed", "err", err)
+		m.log.Error("session: gc (delete_terminated) failed", "cron_cutoff", cronCutoff, "default_cutoff", defaultCutoff, "err", err)
 	} else {
 		if _, durable := m.store.(CleanupTaskStore); !durable {
 			for _, info := range deleted {

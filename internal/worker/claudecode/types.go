@@ -51,7 +51,11 @@ type StreamMessage struct {
 }
 
 // AssistantMessage represents a complete assistant message.
+// ID carries the native Claude message.id so cross-turn dedup has a stable,
+// per-message identity instead of degrading to a worker-lifetime constant
+// (Turn-Integrity spec RC-2 / Fix B).
 type AssistantMessage struct {
+	ID      string          `json:"id,omitempty"`
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"` // Array of content blocks
 }

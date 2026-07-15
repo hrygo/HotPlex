@@ -88,23 +88,43 @@ func TestMaybeSendDoneFallback(t *testing.T) {
 		require.Nil(t, tryReadEnvelope(t, server), "no fallback expected when turn has text")
 	})
 
-	t.Run("skipped_when_no_tools", func(t *testing.T) {
+	t.Run("empty_success_emits_terminal_on_feishu", func(t *testing.T) {
 		t.Parallel()
 		b, acc, fc, server := setup(t, "feishu")
-		// ToolCallCount stays 0
-
+		// No text AND no tool calls → empty-success integrity failure. The turn
+		// must NOT end silently leaving a placeholder; emit a retryable terminal
+		// (Turn-Integrity Fix C, invariant I-5).
 		b.maybeSendDoneFallback("s1", acc, fc)
 
-		require.Nil(t, tryReadEnvelope(t, server), "no fallback expected when no tool calls")
+		env := tryReadEnvelope(t, server)
+		require.NotNil(t, env, "empty-success must emit a terminal Message")
+		require.Equal(t, events.Message, env.Event.Type)
+		data, ok := env.Event.Data.(map[string]any)
+		require.True(t, ok)
+		content, _ := data["content"].(string)
+		require.NotEmpty(t, content, "terminal text must be non-empty")
+		require.Greater(t, fc.turnText.Len(), 0, "turnText must be backfilled for the turns table")
 	})
 
-	t.Run("skipped_for_webchat", func(t *testing.T) {
+	t.Run("empty_success_emits_terminal_on_webchat", func(t *testing.T) {
+		t.Parallel()
+		b, acc, fc, server := setup(t, platformWebChat)
+		// WebChat is skipped for tool-only fallbacks, but empty-success still
+		// needs an explicit terminal so the assistant turn is not left blank.
+		b.maybeSendDoneFallback("s1", acc, fc)
+
+		env := tryReadEnvelope(t, server)
+		require.NotNil(t, env, "webchat empty-success must emit a terminal Message, not a blank assistant turn")
+		require.Equal(t, events.Message, env.Event.Type)
+	})
+
+	t.Run("skipped_for_webchat_tool_only", func(t *testing.T) {
 		t.Parallel()
 		b, acc, fc, server := setup(t, platformWebChat)
 		acc.ToolCallCount.Store(3)
-
+		// Tool-only turn on webchat: UI renders the tool list independently, no fallback.
 		b.maybeSendDoneFallback("s1", acc, fc)
 
-		require.Nil(t, tryReadEnvelope(t, server), "no fallback expected for webchat")
+		require.Nil(t, tryReadEnvelope(t, server), "no tool-only fallback expected for webchat")
 	})
 }

@@ -260,7 +260,7 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.botConfig.DeleteBot(r.Context(), name); err != nil {
 		if errors.Is(err, ErrBotRunning) {
-			a.log.Error("admin: delete bot conflict", "bot", name, "error", err)
+			a.log.Error("admin: delete bot conflict", "bot", name, "err", err)
 			web.WriteAppError(w, http.StatusConflict, "CONFLICT", "bot is currently running")
 		} else {
 			respondStoreError(w, a.log, "admin: delete bot", err)

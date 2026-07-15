@@ -16,7 +16,7 @@ func Init(logger *slog.Logger) error {
 	config, validationErrs := LoadConfigFromEnv()
 
 	for _, err := range validationErrs {
-		logger.Warn("Brain config validation warning", "error", err)
+		logger.Warn("Brain config validation warning", "err", err)
 	}
 
 	if !config.Enabled {
@@ -255,7 +255,7 @@ func (w *enhancedBrainWrapper) selectModel(ctx context.Context, model string, sc
 	if err == nil {
 		model = selectedModel.Name
 	} else if w.logger != nil {
-		w.logger.Warn("Model selection failed, using default", "error", err)
+		w.logger.Warn("Model selection failed, using default", "err", err)
 		model = w.config.Model.Model
 	}
 

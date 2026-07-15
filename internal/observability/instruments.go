@@ -139,6 +139,20 @@ var (
 	workerCrashes     metric.Int64Counter
 	workerCrashesInit sync.Once
 
+	// Turn-Integrity diagnostics (Fix E): empty-success turns, stale-forwarder
+	// event splits, assistant snapshot drift, and platform terminal fallbacks.
+	workerEmptySuccess     metric.Int64Counter
+	workerEmptySuccessInit sync.Once
+
+	staleForwarderEvents     metric.Int64Counter
+	staleForwarderEventsInit sync.Once
+
+	assistantSnapshotDrift     metric.Int64Counter
+	assistantSnapshotDriftInit sync.Once
+
+	platformTerminalFallback     metric.Int64Counter
+	platformTerminalFallbackInit sync.Once
+
 	workerMemory     metric.Int64ObservableGauge
 	workerMemoryInit sync.Once
 
@@ -188,6 +202,76 @@ func WorkerCrashes() metric.Int64Counter {
 		}
 	})
 	return workerCrashes
+}
+
+// WorkerEmptySuccess counts successful Done events that delivered no displayable
+// assistant content and no tool calls (Turn-Integrity Fix E). Labeled by
+// worker_type and platform so empty-card incidents can be correlated to a
+// worker × platform pair.
+func WorkerEmptySuccess() metric.Int64Counter {
+	workerEmptySuccessInit.Do(func() {
+		var err error
+		workerEmptySuccess, err = Meter().Int64Counter(
+			"hotplex.worker.empty_success_total",
+			metric.WithDescription("Successful turns that produced no displayable assistant content and no tool calls"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.worker.empty_success_total", err)
+		}
+	})
+	return workerEmptySuccess
+}
+
+// StaleForwarderEvents counts events observed by a stale forwarder after a
+// reset replaced its Conn (Turn-Integrity Fix E). Non-zero indicates the frozen
+// binding failed to prevent a dual consumer.
+func StaleForwarderEvents() metric.Int64Counter {
+	staleForwarderEventsInit.Do(func() {
+		var err error
+		staleForwarderEvents, err = Meter().Int64Counter(
+			"hotplex.gateway.stale_forwarder_event_total",
+			metric.WithDescription("Events dropped by stale forwarders after a reset replaced their conn"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.stale_forwarder_event_total", err)
+		}
+	})
+	return staleForwarderEvents
+}
+
+// AssistantSnapshotDrift counts mapper snapshot identity divergences — a full
+// assistant snapshot that was not a strict prefix extension of the prior text
+// (Turn-Integrity Fix E). Non-zero means snapshots were re-emitted in full
+// rather than silently swallowed.
+func AssistantSnapshotDrift() metric.Int64Counter {
+	assistantSnapshotDriftInit.Do(func() {
+		var err error
+		assistantSnapshotDrift, err = Meter().Int64Counter(
+			"hotplex.worker.assistant_snapshot_drift_total",
+			metric.WithDescription("Assistant snapshots re-emitted in full after prefix drift instead of being swallowed"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.worker.assistant_snapshot_drift_total", err)
+		}
+	})
+	return assistantSnapshotDrift
+}
+
+// PlatformTerminalFallback counts synthetic terminal messages emitted by a
+// platform adapter when the worker produced nothing displayable, e.g. a Feishu
+// placeholder replaced by an empty-success terminal (Turn-Integrity Fix E).
+func PlatformTerminalFallback() metric.Int64Counter {
+	platformTerminalFallbackInit.Do(func() {
+		var err error
+		platformTerminalFallback, err = Meter().Int64Counter(
+			"hotplex.messaging.platform_terminal_fallback_total",
+			metric.WithDescription("Platform-side terminal fallbacks replacing an empty placeholder/partial"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.messaging.platform_terminal_fallback_total", err)
+		}
+	})
+	return platformTerminalFallback
 }
 
 func WorkerMemory() metric.Int64ObservableGauge {

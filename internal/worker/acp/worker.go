@@ -373,7 +373,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	if debugEnabled.Load() {
 		tw, err := NewTraceWriter(filepath.Join(config.HotplexHome(), "logs"), session.SessionID)
 		if err != nil {
-			w.Log.Warn("acp: failed to create trace file", "error", err)
+			w.Log.Warn("acp: failed to create trace file", "err", err)
 		} else {
 			w.trace.Store(tw)
 			w.Log.Info("acp: protocol trace enabled", "path", tw.Path())
@@ -404,7 +404,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			forkResult, forkErr := client.ForkSession(sctx, session.WorkerSessionID)
 			if forkErr != nil {
 				w.Log.Warn("acp: session fork failed, falling back to new session",
-					"session_id", session.SessionID, "error", forkErr)
+					"session_id", session.SessionID, "err", forkErr)
 				id, err := forceNewSession()
 				if err != nil {
 					return err
@@ -420,7 +420,7 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 			if loadErr != nil {
 				w.Log.Error("acp: session load failed, falling back to new session (history lost)",
 					"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
-					"error", loadErr,
+					"err", loadErr,
 					"hint", "check agent session storage and persistence")
 				id, err := forceNewSession()
 				if err != nil {
@@ -1134,7 +1134,7 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		var params any
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			w.Log.Warn("acp: malformed params in server request",
-				"method", req.Method, "error", err)
+				"method", req.Method, "err", err)
 		}
 		conn.TrySend(w.mapper.newEnvelope(events.Raw, events.RawData{
 			Kind: "acp.server_request." + req.Method,

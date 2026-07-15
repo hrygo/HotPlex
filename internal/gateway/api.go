@@ -318,7 +318,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 			if err := worker.ValidateType(pref); err == nil {
 				wt = pref
 			} else {
-				g.log.Warn("workspace worker_preference invalid, falling back to default",
+				g.log.Info("workspace worker_preference invalid, falling back to default",
 					"workspace_id", ws.ID, "worker_preference", pref, "err", err)
 			}
 		}
@@ -601,7 +601,9 @@ func (g *GatewayAPI) GetHistory(w http.ResponseWriter, r *http.Request) {
 
 	hasMore := len(records) > limit
 	if hasMore {
-		records = records[:limit]
+		// Store returns ASC (newest at the end). Slicing from the END keeps
+		// the latest exchange; `records[:limit]` would drop it (refresh bug).
+		records = records[len(records)-limit:]
 	}
 
 	respondJSON(w, map[string]any{"records": records, "has_more": hasMore})

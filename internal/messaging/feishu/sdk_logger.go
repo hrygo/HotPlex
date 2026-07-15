@@ -80,13 +80,19 @@ func redactURL(s string) string {
 	return sensitiveParamRe.ReplaceAllString(s, "${1}***")
 }
 
-// sdkDebugSilent lists Feishu SDK Debug log message substrings that are
-// silenced during normal operation (every ~2 min heartbeat cycle). These are
-// routine ping/pong keep-alive messages that don't carry actionable info.
-// Failures still surface via Warn/Error level.
+// sdkDebugSilent lists Feishu SDK Debug/Info log message substrings that are
+// silenced during normal operation. Two categories:
+//  1. Routine ping/pong keep-alive (~every 2 min) — no actionable info.
+//  2. Inbound events registered with no-op handlers in newEventHandler
+//     (reaction, read) — high-volume, zero business value. Their DEBUG
+//     payloads are pure noise that buries real event traffic.
+//
+// Failures still surface via Warn/Error level (sdkWarnFilter ignores this list).
 var sdkDebugSilent = []string{
 	"ping success",
 	"receive pong",
+	"im.message.reaction.",
+	"im.message.read_v1",
 }
 
 // sdkReconnectSilent removes verbose reconnection-related log prefixes

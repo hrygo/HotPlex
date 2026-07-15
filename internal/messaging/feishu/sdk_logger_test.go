@@ -186,6 +186,50 @@ func TestSlogLogger_InfoSilencesHeartbeat(t *testing.T) {
 	require.Empty(t, got, "Info should silence 'disconnected to wss://'")
 }
 
+// No-op event payloads (reaction, read) are silenced at Debug/Info level —
+// these events have empty handlers in newEventHandler and their inbound DEBUG
+// traffic buries real message events. Warn/Error must still surface them.
+
+func TestSlogLogger_DebugSilencesNoopEventPayloads(t *testing.T) {
+	t.Parallel()
+	var got string
+	h := slog.NewTextHandler(&captureWriter{&got}, &slog.HandlerOptions{Level: slog.LevelDebug})
+	l := SlogLogger{Logger: slog.New(h)}
+
+	l.Debug(context.Background(), `receive message, message_type: event, payload: {"header":{"event_type":"im.message.reaction.created_v1"}}`)
+	require.Empty(t, got, "Debug should silence reaction.created no-op event")
+
+	got = ""
+	l.Debug(context.Background(), `receive message, payload: {"event_type":"im.message.reaction.deleted_v1"}`)
+	require.Empty(t, got, "Debug should silence reaction.deleted no-op event")
+
+	got = ""
+	l.Debug(context.Background(), `receive message, payload: {"event_type":"im.message.read_v1"}`)
+	require.Empty(t, got, "Debug should silence message.read no-op event")
+}
+
+func TestSlogLogger_DebugKeepsRealMessageEvents(t *testing.T) {
+	t.Parallel()
+	var got string
+	h := slog.NewTextHandler(&captureWriter{&got}, &slog.HandlerOptions{Level: slog.LevelDebug})
+	l := SlogLogger{Logger: slog.New(h)}
+
+	l.Debug(context.Background(), `receive message, payload: {"event_type":"im.message.receive_v1"}`)
+	require.Contains(t, got, "im.message.receive_v1",
+		"Debug must NOT silence real inbound message events")
+}
+
+func TestSlogLogger_WarnDoesNotSilenceNoopEventPayloads(t *testing.T) {
+	t.Parallel()
+	var got string
+	h := slog.NewTextHandler(&captureWriter{&got}, nil)
+	l := SlogLogger{Logger: slog.New(h)}
+
+	l.Warn(context.Background(), `dispatch failed, payload: {"event_type":"im.message.reaction.created_v1"}`)
+	require.Contains(t, got, "im.message.reaction.created_v1",
+		"Warn must NOT silence no-op event payloads — failures must surface")
+}
+
 func TestSlogLogger_WarnDoesNotSilenceHeartbeat(t *testing.T) {
 	t.Parallel()
 	var got1, got2 string

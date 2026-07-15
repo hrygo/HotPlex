@@ -55,11 +55,12 @@ type WorkerEvent struct {
 
 // StreamPayload represents streaming content.
 type StreamPayload struct {
-	Type      string // "thinking", "text", "tool_use", "code", "image"
-	MessageID string
-	Content   string
-	Input     json.RawMessage // For tool_use
-	IsDelta   bool            // True if this content is a delta/chunk; False if it's full cumulative text
+	Type       string // "thinking", "text", "tool_use", "code", "image"
+	MessageID  string
+	Content    string
+	Input      json.RawMessage // For tool_use
+	IsDelta    bool            // True if this content is a delta/chunk; False if it's full cumulative text
+	BlockIndex int             // 0-based content block index within the originating message; gives multi-block messages isolated dedup namespaces (Turn-Integrity Fix B1)
 }
 
 // ToolCallPayload represents a tool invocation.
@@ -205,15 +206,17 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 	}
 
 	var events []*WorkerEvent
-	for _, block := range blocks {
+	for i, block := range blocks {
 		switch block.Type {
 		case "text":
 			events = append(events, &WorkerEvent{
 				Type: EventAssistant,
 				Payload: &StreamPayload{
-					Type:    "text",
-					Content: block.Text,
-					IsDelta: false,
+					Type:       "text",
+					MessageID:  assistantMsg.ID,
+					Content:    block.Text,
+					IsDelta:    false,
+					BlockIndex: i,
 				},
 				RawMessage: msg,
 			})
@@ -225,9 +228,11 @@ func (p *Parser) parseAssistant(msg *SDKMessage) ([]*WorkerEvent, error) {
 				events = append(events, &WorkerEvent{
 					Type: EventStream,
 					Payload: &StreamPayload{
-						Type:    string(StreamThinking),
-						Content: block.Thinking,
-						IsDelta: false,
+						Type:       string(StreamThinking),
+						MessageID:  assistantMsg.ID,
+						Content:    block.Thinking,
+						IsDelta:    false,
+						BlockIndex: i,
 					},
 					RawMessage: msg,
 				})
