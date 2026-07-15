@@ -348,17 +348,17 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// Stats accumulation.
 	b.accumulateStats(env, w, opts, fc)
 
+	terminalStatus := ""
 	// Done processing: mark received.
 	if env.Event.Type == events.Done {
 		fc.doneReceived = true
 		b.resetCrashLoop(sessionID)
 		b.maybeTransitionIdleAfterDone(sessionID, fc)
 		b.finishRuntimeOnDone(sessionID, fc, env)
-		terminalStatus := "completed"
+		terminalStatus = "completed"
 		if done, ok := asDoneData(env.Event.Data); ok && !done.Success {
 			terminalStatus = "failed"
 		}
-		b.finishTurnTTFT(sessionID, terminalStatus)
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
@@ -400,6 +400,9 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	}
 
 	if env.Event.Type == events.Done {
+		// A retry continues the same accepted input, so only finish TTFT after
+		// the retry decision confirms this is the terminal worker attempt.
+		b.finishTurnTTFT(sessionID, terminalStatus)
 		fc.turnText.Reset()
 		// Do NOT reset fc.turnStartTime here. The previous code did
 		// `fc.turnStartTime = time.Now()` at Done, which started the NEXT turn's
