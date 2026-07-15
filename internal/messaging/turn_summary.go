@@ -222,6 +222,16 @@ func FormatDoneFallback(d TurnSummaryData) string {
 	return fmt.Sprintf("✅ 已完成 · 🔧 %s · ⏱ %s", tools, dur)
 }
 
+// FormatEmptySuccess synthesizes a user-facing message when a turn completes
+// with neither assistant text nor tool calls — an "empty-success" integrity
+// failure. The worker reported success but produced nothing displayable. Used
+// by the bridge so no platform (feishu/slack/webchat) leaves a placeholder or
+// silent success (Turn-Integrity spec Fix C, invariant I-5/I-9). The message
+// is intentionally retryable so the user knows to resend.
+func FormatEmptySuccess() string {
+	return "⚠️ 本轮未收到可展示的 Agent 回复，请重试。"
+}
+
 // FormatSessionDuration formats session elapsed seconds to human-readable string.
 func FormatSessionDuration(secs float64) string {
 	if secs <= 0 {

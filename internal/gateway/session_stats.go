@@ -41,6 +41,13 @@ type sessionAccumulator struct {
 	PerTurnCost    float64
 	TurnDurationMs int64 // current turn duration in milliseconds
 
+	// turnStartUnixMilli is the wall-clock start of the CURRENT turn, recorded
+	// by the input path when a turn is about to be delivered to the worker and
+	// consumed by the forwarder on Done. It excludes inter-turn idle time, which
+	// the previous "reset clock at Done" approach incorrectly billed to the
+	// next turn (Turn-Integrity spec RC-4 / Fix D). 0 = not set this turn.
+	turnStartUnixMilli atomic.Int64
+
 	// Cumulative totals at the end of the previous turn (for delta computation).
 	PrevTotalIn   int64
 	PrevTotalOut  int64
@@ -127,6 +134,26 @@ func (a *sessionAccumulator) resetPerTurn() {
 	a.PerTurnCacheRead = 0
 	a.TurnDurationMs = 0
 	a.ContextFill = 0
+}
+
+// recordTurnStart stamps the start of the current turn in unix milliseconds.
+// Called by the input path right before delivering the user's input to the
+// worker (Turn-Integrity Fix D).
+func (a *sessionAccumulator) recordTurnStart(now time.Time) {
+	a.turnStartUnixMilli.Store(now.UnixMilli())
+}
+
+// clearTurnStart clears the turn start stamp. Called when input delivery fails
+// so a subsequent Done does not bill a turn that never started (Fix D).
+func (a *sessionAccumulator) clearTurnStart() {
+	a.turnStartUnixMilli.Store(0)
+}
+
+// consumeTurnStartMs atomically reads and clears the turn start stamp, returning
+// it in unix milliseconds. Returns 0 (and leaves it cleared) when no start was
+// recorded for this turn — the caller falls back to the first worker event time.
+func (a *sessionAccumulator) consumeTurnStartMs() int64 {
+	return a.turnStartUnixMilli.Swap(0)
 }
 
 // mergeContextUsage sets ContextFill, ContextWindow, and ModelName from the worker's

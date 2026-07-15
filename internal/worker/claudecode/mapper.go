@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync"
 
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -19,8 +20,15 @@ type Mapper struct {
 
 	// sentTexts tracks the cumulative text/reasoning already sent for each item ID
 	// to perform delta-based diff calculations. Sourced under mu.
+	// Key shape: "<messageID>_<blockIndex>_<type>" (Turn-Integrity Fix B1).
 	sentTexts map[string]string
 	mu        sync.Mutex
+
+	// turnEpoch scopes synthetic assistant IDs per turn so that messages without
+	// a native id cannot collide across turns (Fix B2). Bumped on each Result;
+	// sentTexts is cleared at the same boundary (Fix B3) to bound growth.
+	turnEpoch  int64
+	driftCount int64 // total snapshot identity divergences; diagnostic (Fix E)
 }
 
 // NewMapper creates a new Mapper instance.
@@ -124,18 +132,29 @@ func (m *Mapper) mapRawStringPayload(raw json.RawMessage, mapFn func(string) (*e
 // mapStream converts a stream_event to an AEP envelope.
 // thinking → events.Reasoning; all other types → events.MessageDelta.
 func (m *Mapper) mapStream(p *StreamPayload) (*events.Envelope, error) { //nolint:unparam // consistent mapper API
+	m.mu.Lock()
 	msgID := p.MessageID
 	if msgID == "" {
-		msgID = "assistant_msg"
+		// No native message id: synthesize a turn-scoped identity instead of
+		// falling back to a worker-lifetime constant. A constant key made
+		// shorter follow-up turns silently empty (Turn-Integrity RC-2/Fix B2).
+		msgID = fmt.Sprintf("assistant:%d:%d", m.turnEpoch, p.BlockIndex)
 	}
+	// Composite dedup key: native id + block index + content type. Multiple
+	// content blocks in one message get isolated namespaces (Fix B1).
+	dedupKey := fmt.Sprintf("%s_%d_%s", msgID, p.BlockIndex, p.Type)
 
 	var content string
 	if p.IsDelta {
-		m.recordSentDelta(msgID+"_"+p.Type, p.Content)
+		if m.sentTexts == nil {
+			m.sentTexts = make(map[string]string)
+		}
+		m.sentTexts[dedupKey] += p.Content
 		content = p.Content
 	} else {
-		content = m.getDeltaText(msgID+"_"+p.Type, p.Content)
+		content = m.diffSnapshotLocked(dedupKey, p.Content, msgID, p.Type)
 	}
+	m.mu.Unlock()
 
 	if p.Type == "thinking" {
 		return events.NewEnvelope(
@@ -195,6 +214,12 @@ func (m *Mapper) mapToolProgress(p *ToolResultPayload) (*events.Envelope, error)
 // mapResult converts result to done (+ optional error).
 // Merges Usage and ModelUsage into DoneData.Stats so downstream consumers
 // (Bridge accumulator, platform adapters) can extract token/cost/context data.
+//
+// Turn boundary (Turn-Integrity Fix B2/B3): on every Result the per-turn dedup
+// state is cleared and turnEpoch bumped. This (a) prevents sentTexts from
+// growing unboundedly across long sessions, and (b) ensures synthetic
+// assistant IDs for the next turn cannot collide with this one. Native IDs
+// already differ per message; the epoch only matters for the no-ID fallback.
 func (m *Mapper) mapResult(p *ResultPayload) ([]*events.Envelope, error) {
 	stats := make(map[string]any, len(p.Stats)+2)
 	maps.Copy(stats, p.Stats)
@@ -204,6 +229,11 @@ func (m *Mapper) mapResult(p *ResultPayload) ([]*events.Envelope, error) {
 	if p.ModelUsage != nil {
 		stats["model_usage"] = p.ModelUsage
 	}
+
+	m.mu.Lock()
+	m.sentTexts = make(map[string]string)
+	m.turnEpoch++
+	m.mu.Unlock()
 
 	if !p.Success {
 		msg := p.Message
@@ -341,43 +371,38 @@ func mapMCPStatusResponse(raw map[string]any) *events.MCPStatusData {
 	return events.MapMCPStatusResponse(raw)
 }
 
-// getDeltaText computes the newly appended characters for a given item ID
-// by comparing the current text against the previously recorded sent text.
-// It updates the recorded text to reflect the new state.
-// Access to m.sentTexts is guarded under m.mu.
-func (m *Mapper) getDeltaText(itemID, currentText string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// diffSnapshotLocked computes the newly appended characters for a full
+// cumulative snapshot against the previously recorded text. It must be called
+// with m.mu held.
+//
+// Three cases (Turn-Integrity Fix B3):
+//  1. Identical to what was sent → return "" (legal repeat, not a lost update).
+//  2. Current is a strict extension of sent → return the tail and advance.
+//  3. Prefix drift (shorter or divergent) → MUST NOT silently return "". Emit
+//     the full snapshot under a fresh synthetic block identity and record an
+//     integrity warning. This replaces the old length-only comparison that
+//     dropped shorter follow-up turns entirely.
+func (m *Mapper) diffSnapshotLocked(dedupKey, currentText, msgID, contentType string) string {
 	if m.sentTexts == nil {
 		m.sentTexts = make(map[string]string)
 	}
-
-	sentRunes := []rune(m.sentTexts[itemID])
-	currRunes := []rune(currentText)
-
-	lastLen := len(sentRunes)
-	currLen := len(currRunes)
-
-	if currLen <= lastLen {
+	sent := m.sentTexts[dedupKey]
+	switch {
+	case currentText == sent:
 		return ""
+	case strings.HasPrefix(currentText, sent):
+		delta := currentText[len(sent):]
+		m.sentTexts[dedupKey] = currentText
+		return delta
+	default:
+		// Prefix drift: record the full snapshot under a divergence-scoped key
+		// so it is delivered in full rather than swallowed.
+		driftKey := fmt.Sprintf("%s_drift_%d", dedupKey, m.driftCount)
+		m.driftCount++
+		m.sentTexts[driftKey] = currentText
+		m.log.Warn("mapper: assistant snapshot identity divergence, emitting full snapshot",
+			"message_id", msgID, "content_type", contentType,
+			"sent_len", len(sent), "snapshot_len", len(currentText))
+		return currentText
 	}
-
-	deltaRunes := currRunes[lastLen:]
-	delta := string(deltaRunes)
-	m.sentTexts[itemID] += delta
-	return delta
-}
-
-// recordSentDelta appends the sent delta string for a given item ID
-// after delta content has been sent via another event source (like delta notification).
-func (m *Mapper) recordSentDelta(itemID, delta string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.sentTexts == nil {
-		m.sentTexts = make(map[string]string)
-	}
-
-	m.sentTexts[itemID] += delta
 }

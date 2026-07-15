@@ -725,9 +725,28 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 
 	c.mu.Lock()
 	content := c.buf.String()
+	// Empty-success backstop (Turn-Integrity RC-3/Fix C, invariant I-6): a
+	// placeholder is never completed content. If Close reaches here with an
+	// empty buffer while the placeholder is still active, no real assistant
+	// content ever arrived — replace the placeholder with a retryable terminal
+	// so the card does not keep displaying ":Get:/:StatusFlashOfInspiration:".
+	// lastFlushed alone cannot make this distinction: SendPlaceholder sets it to
+	// the placeholder text, which the old code mistook for "already flushed".
+	activePlaceholder := ""
+	if content == "" && c.placeholder != "" {
+		activePlaceholder = c.placeholder
+		c.placeholder = ""
+	}
 	c.mu.Unlock()
 
-	content = OptimizeMarkdownStyle(SanitizeForCard(content))
+	if activePlaceholder != "" {
+		content = OptimizeMarkdownStyle(SanitizeForCard(messaging.FormatEmptySuccess()))
+		c.log.Warn("feishu: empty-success turn, replacing placeholder with retryable terminal",
+			"msg_id", c.msgID)
+		observability.PlatformTerminalFallback().Add(ctx, 1)
+	} else {
+		content = OptimizeMarkdownStyle(SanitizeForCard(content))
+	}
 
 	c.log.Debug("feishu: streaming card close",
 		"card_kit_ok", c.cardKitOK,

@@ -113,10 +113,37 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	go func() {
 		defer b.fwdWg.Done()
 		defer b.clearWorkerRun(sid, w, params.forwardOpts.workerRunID)
-		b.forwardEvents(w, sid, *params.forwardOpts)
+		b.launchForwarderLocked(w, sid, *params.forwardOpts)
 	}()
 
 	return w, nil
+}
+
+// forwarderBinding is the immutable ownership contract captured synchronously
+// before a forwardEvents goroutine is spawned. Freezing the Conn and reset
+// generation at launch — instead of reading w.Conn() from inside the spawned
+// goroutine — prevents a stale forwarder from binding to a replacement Conn
+// after /reset and splitting the event stream with the new forwarder
+// (Turn-Integrity spec RC-1 / Fix A, invariant I-1/I-2).
+type forwarderBinding struct {
+	worker   worker.Worker
+	conn     worker.SessionConn // frozen event source; forwardEvents reads ONLY this
+	resetGen int64              // frozen reset generation for stale-exit detection
+}
+
+// launchForwarderLocked is the single entry point for spawning a forwardEvents
+// goroutine. It MUST be called from the launching (synchronous) goroutine so
+// the Conn is captured before any concurrent ResetContext can replace it.
+// All four launch paths — fresh Start, Resume, /reset ConnReplaced, and crash
+// recovery — route through here (Fix A).
+func (b *Bridge) launchForwarderLocked(w worker.Worker, sessionID string, opts forwardOpts) {
+	conn := w.Conn()
+	var resetGen int64
+	if rg, ok := w.(worker.ResetGenerationer); ok {
+		resetGen = rg.LoadResetGeneration()
+	}
+	fb := forwarderBinding{worker: w, conn: conn, resetGen: resetGen}
+	b.forwardEvents(fb, sessionID, opts)
 }
 
 func (b *Bridge) bindWorkerRun(sessionID string, w worker.Worker, runID string) string {
@@ -125,6 +152,31 @@ func (b *Bridge) bindWorkerRun(sessionID string, w worker.Worker, runID string) 
 	}
 	b.workerRuns.Store(sessionID, workerRunBinding{worker: w, id: runID})
 	return runID
+}
+
+// RecordTurnStart stamps the current turn's start time on the session
+// accumulator. Called by the input path immediately before delivering the
+// user's input to the worker. Safe to call when the accumulator does not yet
+// exist (it is created on-demand). Turn-Integrity Fix D.
+func (b *Bridge) RecordTurnStart(sessionID string) {
+	b.getOrInitAccum(sessionID, "", time.Now()).recordTurnStart(time.Now())
+}
+
+// ClearTurnStart clears the current turn's start stamp. Called by the input
+// path when delivery to the worker failed, so the subsequent Done does not
+// bill a turn that never started. Turn-Integrity Fix D.
+func (b *Bridge) ClearTurnStart(sessionID string) {
+	acc := b.getOrInitAccum(sessionID, "", time.Now())
+	acc.clearTurnStart()
+}
+
+// consumeTurnStartMs reads and clears the current turn's start stamp. Called by
+// the forwarder on Done to compute a duration that excludes inter-turn idle.
+// Returns 0 when no start was recorded (crash recovery / replay); the caller
+// falls back to the first worker event time.
+func (b *Bridge) consumeTurnStartMs(sessionID string) int64 {
+	acc := b.getOrInitAccum(sessionID, "", time.Now())
+	return acc.consumeTurnStartMs()
 }
 
 // clearWorkerRun conditionally removes a binding. Matching both Worker and run

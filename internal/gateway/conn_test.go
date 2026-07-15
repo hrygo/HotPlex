@@ -1431,7 +1431,7 @@ func TestBridge_ForwardEvents_NormalEvent(t *testing.T) {
 	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 	done := make(chan struct{})
 	go func() {
-		b.forwardEvents(fw, "sess_fwd", forwardOpts{})
+		b.forwardEvents(forwarderBinding{worker: fw, conn: fw.Conn()}, "sess_fwd", forwardOpts{})
 		close(done)
 	}()
 
@@ -1470,7 +1470,7 @@ func TestBridge_ForwardEvents_CrashExitCode(t *testing.T) {
 	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
 	done := make(chan struct{})
 	go func() {
-		b.forwardEvents(fw, "sess_crash", forwardOpts{})
+		b.forwardEvents(forwarderBinding{worker: fw, conn: fw.Conn()}, "sess_crash", forwardOpts{})
 		close(done)
 	}()
 

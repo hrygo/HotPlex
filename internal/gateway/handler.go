@@ -453,6 +453,13 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		h.log.Debug("gateway: delivering input to worker", "session_id", env.SessionID, "content_len", len(content), "preview", preview)
 	}
 
+	// Stamp the turn start immediately before delivery so the Done-bound timer
+	// measures only this turn's processing, excluding inter-turn idle
+	// (Turn-Integrity spec RC-4 / Fix D).
+	if h.bridge != nil {
+		h.bridge.RecordTurnStart(env.SessionID)
+	}
+
 	if err := w.Input(ctx, content, nil); err != nil {
 		var we *worker.WorkerError
 		if errors.As(err, &we) && we.Kind == worker.ErrKindTimeout {
@@ -461,6 +468,11 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 			return nil
 		}
 		h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
+		// Input never reached the worker: clear the turn start so a later Done
+		// (or crash-cleanup) cannot bill idle time to a turn that never ran.
+		if h.bridge != nil {
+			h.bridge.ClearTurnStart(env.SessionID)
+		}
 		code := classifyWorkerError(err)
 		finishOutcome(execution.StatusFailed, code)
 		// ErrKindUnavailable (e.g. ACP session lost) means the worker's

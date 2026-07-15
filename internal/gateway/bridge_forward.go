@@ -65,21 +65,23 @@ func (b *Bridge) bgCtx() context.Context {
 	return context.Background()
 }
 
-func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOpts) {
+func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwardOpts) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.log.Error("bridge: panic in forwardEvents", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
 
+	w := fb.worker
 	workerType := w.Type()
-	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID, "worker_type", workerType, "resumed", opts.resumed)
+	b.log.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID,
+		"worker_type", workerType, "resumed", opts.resumed,
+		"has_frozen_conn", fb.conn != nil, "forwarder_reset_gen", fb.resetGen,
+		"worker_run_id", opts.workerRunID)
 
-	// Capture reset generation at goroutine start to detect stale goroutine after /reset.
-	var myResetGen int64
-	if rg, ok := w.(worker.ResetGenerationer); ok {
-		myResetGen = rg.LoadResetGeneration()
-	}
+	// reset generation was frozen at launch (Fix A). A stale forwarder whose
+	// worker was since reset detects the mismatch in handleWorkerExit.
+	myResetGen := fb.resetGen
 
 	fc := &forwardContext{
 		sessionID:     sessionID,
@@ -125,7 +127,7 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		tn, err := b.turnsQuerier.LatestTurnNum(tnCtx, sessionID, acc.Generation.Load())
 		tnCancel()
 		if err != nil {
-			b.log.Warn("turns: restore turn num", "error", err)
+			b.log.Warn("turns: restore turn num", "err", err)
 		}
 		if tn > 0 {
 			acc.TurnCount.Store(int32(tn))
@@ -157,7 +159,19 @@ func (b *Bridge) forwardEvents(w worker.Worker, sessionID string, opts forwardOp
 		defer fc.turnTimer.Stop()
 	}
 
-	recvCh := w.Conn().Recv()
+	// Event source: the frozen Conn captured at launch (Fix A). forwardEvents
+	// MUST NOT call w.Conn() here — doing so would re-read the mutable field and
+	// could bind a stale forwarder to a replacement Conn after /reset, splitting
+	// the event stream. The nil fallback is purely defensive: real workers
+	// always publish a Conn before launch, and the (synchronous) launch path
+	// already captured the best value available at that instant.
+	recvSource := fb.conn
+	if recvSource == nil {
+		b.log.Error("bridge: frozen conn is nil at forwardEvents start, falling back to live Conn()",
+			"session_id", sessionID, "worker_type", workerType)
+		recvSource = w.Conn()
+	}
+	recvCh := recvSource.Recv()
 	for env := range recvCh {
 		b.processForwardedEvent(env, w, opts, fc)
 	}
@@ -315,7 +329,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 
 	if env.Event.Type == events.Done {
 		fc.turnText.Reset()
-		fc.turnStartTime = time.Now()
+		// Do NOT reset fc.turnStartTime here. The previous code did
+		// `fc.turnStartTime = time.Now()` at Done, which started the NEXT turn's
+		// clock at this Done — so inter-turn idle was billed to the next turn.
+		// Turn start is now recorded by the input path (Fix D) and read on Done.
 	}
 
 }
@@ -474,7 +491,18 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 			acc.mergePerTurnStats(dd)
 		}
 		acc.TurnCount.Add(1)
-		acc.TurnDurationMs = time.Since(fc.turnStartTime).Milliseconds()
+		// Turn duration: prefer the input-path start stamp so the timer covers
+		// only this turn's processing and excludes inter-turn idle (Fix D). On
+		// miss (crash recovery / replay with no recorded start), fall back to
+		// the first worker event time and leave a debug breadcrumb.
+		startMs := b.consumeTurnStartMs(sessionID)
+		if startMs > 0 {
+			acc.TurnDurationMs = time.Now().UnixMilli() - startMs
+		} else {
+			acc.TurnDurationMs = time.Since(fc.turnStartTime).Milliseconds()
+			b.log.Debug("bridge: turn start stamp missing on done, using first-event fallback",
+				"session_id", sessionID, "worker_type", fc.workerType, "fallback_since", time.Since(fc.turnStartTime).Round(time.Millisecond))
+		}
 		acc.computePerTurnDeltas()
 
 		if cr, ok := w.(worker.ControlRequester); ok {
@@ -495,41 +523,68 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 	}
 }
 
-// maybeSendDoneFallback synthesizes a user-facing Message event when a turn
-// did tool work but produced no assistant text — so feishu/slack don't show an
-// empty reply for tool-only turns (e.g. "build and deploy" tasks where the
-// worker only calls tools and never writes a reply). Mirrors sendCommandFeedback
-// (worker_cmds.go). Skipped for webchat (its UI renders the tool_call list
-// independently), and when the turn already produced text or made no tool calls.
+// maybeSendDoneFallback classifies a successful turn's user-visible result and
+// synthesizes a Message event when the worker produced no assistant text. Three
+// states (Turn-Integrity spec Fix C, invariant I-5/I-9):
+//  1. assistant text > 0 → real content delivered; no fallback.
+//  2. text == 0 && tool_count > 0 → legitimate tool-only turn; emit one
+//     "✅ 已完成 · 🔧 …" fallback on feishu/slack (webchat renders tools itself).
+//  3. text == 0 && tool_count == 0 → empty-success integrity failure; emit an
+//     explicit retryable terminal on ALL platforms (incl. webchat) so no card
+//     is left showing a placeholder and no session ends silently.
+//
+// Classification uses THIS turn's real delivery ledger only — never placeholder,
+// status copy, the previous turn, or a wrong forwarder's partial state.
 //
 // Must run BEFORE captureAssistantTurn: it backfills fc.turnText with the
 // fallback text so the turns table records it (history/replay shows the
 // fallback instead of an empty assistant turn). Also persists to the events
 // table via captureEvent so WS event replay surfaces it too.
 func (b *Bridge) maybeSendDoneFallback(sessionID string, acc *sessionAccumulator, fc *forwardContext) {
-	if fc.turnText.Len() != 0 || acc.ToolCallCount.Load() == 0 {
+	if fc.turnText.Len() > 0 {
+		return // state 1: real assistant content
+	}
+	toolCount := acc.ToolCallCount.Load()
+	if toolCount == 0 {
+		// state 3: empty-success integrity failure. Emit a retryable terminal
+		// on every platform. WebChat is NOT skipped here — an empty assistant
+		// turn leaves a blank reply, which this message replaces.
+		b.emitDoneFallbackMessage(sessionID, fc, messaging.FormatEmptySuccess(), true)
+		if b.collector != nil {
+			observability.WorkerEmptySuccess().Add(context.Background(), 1,
+				metric.WithAttributes(attribute.String("worker_type", string(fc.workerType))),
+				metric.WithAttributes(attribute.String("platform", fc.sessPlatform)))
+		}
 		return
 	}
+	// state 2: tool-only turn. WebChat renders the tool list independently.
 	if fc.sessPlatform == platformWebChat {
 		return
 	}
 	d := messaging.TurnSummaryData{
-		ToolCallCount:  int(acc.ToolCallCount.Load()),
+		ToolCallCount:  int(toolCount),
 		ToolNames:      acc.ToolNames,
 		TurnDurationMs: acc.TurnDurationMs,
 	}
-	text := messaging.FormatDoneFallback(d)
-	// Backfill turnText so captureAssistantTurn records the fallback to the
-	// turns table (history/replay shows it, not an empty assistant turn).
-	fc.turnText.WriteString(text)
+	b.emitDoneFallbackMessage(sessionID, fc, messaging.FormatDoneFallback(d), false)
+}
 
+// emitDoneFallbackMessage sends a synthesized user-facing Message, backfills
+// fc.turnText so the turns table records it, and persists it for replay.
+// emptySuccess flags the message for the empty-success metric path.
+func (b *Bridge) emitDoneFallbackMessage(sessionID string, fc *forwardContext, text string, emptySuccess bool) {
+	fc.turnText.WriteString(text)
 	env := events.NewEnvelope(
 		aep.NewID(), sessionID, b.hub.NextSeq(sessionID),
 		events.Message,
 		events.MessageData{Content: text},
 	)
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
-		b.log.Warn("bridge: done fallback send failed", "session_id", sessionID, "err", err)
+		tag := "done_fallback"
+		if emptySuccess {
+			tag = "empty_success"
+		}
+		b.log.Warn("bridge: done fallback send failed", "session_id", sessionID, "kind", tag, "err", err)
 	}
 	// Persist to the events table so WS event replay also surfaces the fallback.
 	b.captureEvent(sessionID, env.Seq, events.Message, env.Event.Data)
@@ -614,7 +669,14 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	if rg, ok := w.(worker.ResetGenerationer); ok && rg.LoadResetGeneration() != p.resetGen {
 		b.log.Info("bridge: worker exit from stale forwardEvents after reset, skipping cleanup",
 			"session_id", p.sessionID, "worker_type", workerType,
-			"my_gen", p.resetGen, "current_gen", rg.LoadResetGeneration())
+			"forwarder_reset_gen", p.resetGen, "current_reset_gen", rg.LoadResetGeneration(),
+			"worker_run_id", p.opts.workerRunID)
+		// Diagnostic (Turn-Integrity Fix E): a non-zero count means a stale
+		// forwarder observed the replacement. With the frozen binding (Fix A)
+		// this forwarder read only its own (closed) Conn, so it consumed no
+		// replacement events — the metric tracks the exit, not a real split.
+		observability.StaleForwarderEvents().Add(context.Background(), 1,
+			metric.WithAttributes(attribute.String("worker_type", string(workerType))))
 		return
 	}
 
@@ -805,7 +867,9 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 // captureDirected marshals event data and sends it to the collector with the given direction.
 func (b *Bridge) captureDirected(sessionID string, seq int64, eventType events.Kind, data any, direction string) {
 	if b.collector == nil {
-		b.log.Debug("bridge: capture skipped, collector is nil", "session_id", sessionID, "type", eventType, "direction", direction)
+		if b.log.Enabled(context.Background(), slog.LevelDebug) {
+			b.log.Debug("bridge: capture skipped, collector is nil", "session_id", sessionID, "type", eventType, "direction", direction)
+		}
 		return
 	}
 	ed, err := json.Marshal(data)
@@ -1006,6 +1070,12 @@ func (b *Bridge) getOrInitAccum(sessionID, workDir string, startTime time.Time) 
 	}
 
 	b.accumMu.Lock()
+	// Lazily init the accum map for Bridges constructed without NewBridge
+	// (handler-focused tests build &Bridge{} literals). Nil-map reads are safe,
+	// only the write below would panic.
+	if b.accum == nil {
+		b.accum = make(map[string]*sessionAccumulator)
+	}
 	// Double-check after acquiring write lock.
 	if acc, ok := b.accum[sessionID]; ok {
 		if workDir != "" && acc.WorkDir == "" {
