@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -143,4 +144,33 @@ func TestHub_ForgetSeqAllowsFreshHydration(t *testing.T) {
 	require.NoError(t, h.EnsureSeqHydrated("s1"))
 	require.Equal(t, 2, hydrator.calls)
 	require.Equal(t, int64(21), h.NextSeq("s1"))
+}
+
+func TestHub_ReleaseSeqWaitsForDurableProducer(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	releaseProducer := h.BeginSeqOperation("s1")
+	require.Equal(t, int64(1), h.NextSeq("s1"))
+
+	drainEntered := make(chan struct{})
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseDone <- h.ReleaseSeq("s1", func() error {
+			close(drainEntered)
+			return nil
+		})
+	}()
+
+	require.Never(t, func() bool {
+		select {
+		case <-drainEntered:
+			return true
+		default:
+			return false
+		}
+	}, 50*time.Millisecond, 5*time.Millisecond)
+
+	releaseProducer()
+	require.NoError(t, <-releaseDone)
+	require.Equal(t, int64(0), h.NextSeqPeek("s1"))
 }

@@ -623,6 +623,66 @@ func TestCollector_FlushSessionAndThenSerializesProducer(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestCollector_CaptureWithSeqSerializesAllocationAndRelease(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	c := NewCollector(store, slog.Default())
+	t.Cleanup(func() { _ = c.Close() })
+
+	allocated := make(chan struct{})
+	allowCapture := make(chan struct{})
+	producerDone := make(chan struct{})
+	go func() {
+		c.CaptureWithSeq(
+			"s1",
+			func() int64 {
+				close(allocated)
+				<-allowCapture
+				return 7
+			},
+			events.Done,
+			json.RawMessage(`{"success":true}`),
+			"outbound",
+			SourceNormal,
+			nil,
+		)
+		close(producerDone)
+	}()
+	<-allocated
+
+	released := make(chan struct{})
+	flushDone := make(chan error, 1)
+	go func() {
+		flushDone <- c.FlushSessionAndThen("s1", func() { close(released) })
+	}()
+	select {
+	case <-released:
+		t.Fatal("session released while a producer held an allocated seq")
+	default:
+	}
+
+	close(allowCapture)
+	require.Eventually(t, func() bool {
+		select {
+		case <-producerDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, <-flushDone)
+	select {
+	case <-released:
+	default:
+		t.Fatal("release callback did not run after the producer drained")
+	}
+
+	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 10)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1)
+	require.Equal(t, int64(7), page.Events[0].Seq)
+}
+
 func TestCollector_FlushAfterClose(t *testing.T) {
 	store := newTestStore(t)
 	c := NewCollector(store, slog.Default())

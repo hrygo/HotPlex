@@ -142,6 +142,35 @@ func (c *Collector) Capture(sessionID string, seq int64, eventType events.Kind, 
 	lock := c.captureLock(sessionID)
 	lock.Lock()
 	defer lock.Unlock()
+	c.captureLocked(sessionID, seq, eventType, data, direction, source)
+}
+
+// CaptureWithSeq allocates a sequence number and captures its event under the
+// same per-session barrier used by FlushSessionAndThen. This prevents a
+// producer from reserving an old-generation seq immediately before session
+// release, then publishing it after SeqGen has been forgotten. afterCapture,
+// when non-nil, also runs under the barrier for associated non-event writes.
+func (c *Collector) CaptureWithSeq(
+	sessionID string,
+	nextSeq func() int64,
+	eventType events.Kind,
+	data json.RawMessage,
+	direction, source string,
+	afterCapture func(seq int64),
+) int64 {
+	lock := c.captureLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	seq := nextSeq()
+	c.captureLocked(sessionID, seq, eventType, data, direction, source)
+	if afterCapture != nil {
+		afterCapture(seq)
+	}
+	return seq
+}
+
+func (c *Collector) captureLocked(sessionID string, seq int64, eventType events.Kind, data json.RawMessage, direction, source string) {
 
 	if eventType == events.MessageDelta {
 		c.flushAndAccumulate(sessionID, seq, false, data)

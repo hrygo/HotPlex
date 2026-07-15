@@ -27,6 +27,8 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+const seqBarrierShards = 256
+
 // isReadTimeout reports whether err is a read deadline exceeded error.
 func isReadTimeout(err error) bool {
 	if err == nil {
@@ -108,7 +110,8 @@ type Hub struct {
 	connCount atomic.Int64
 
 	// Sequence generation per session
-	seqGen *SeqGen
+	seqGen      *SeqGen
+	seqBarriers [seqBarrierShards]sync.RWMutex
 	// seqHydrator reads persisted event seqs to seed SeqGen on reconnect
 	// (issue #879). nil when eventstore is disabled — SeqGen then restarts at 1.
 	seqHydrator SeqHydrator
@@ -630,6 +633,16 @@ func (h *Hub) NextSeq(sessionID string) int64 {
 	return h.seqGen.Next(sessionID)
 }
 
+// BeginSeqOperation pins a session's sequence generation until the returned
+// release function is called. Durable producers acquire this before NextSeq
+// and hold it through collector capture, so physical deletion cannot reset the
+// counter while an old-generation event is still in flight.
+func (h *Hub) BeginSeqOperation(sessionID string) func() {
+	barrier := h.seqBarrier(sessionID)
+	barrier.RLock()
+	return barrier.RUnlock
+}
+
 // NextSeqPeek returns the current sequence number for a session without incrementing.
 func (h *Hub) NextSeqPeek(sessionID string) int64 {
 	return h.seqGen.Peek(sessionID)
@@ -638,7 +651,34 @@ func (h *Hub) NextSeqPeek(sessionID string) int64 {
 // ForgetSeq releases sequence state after the session has been physically
 // deleted and pending collector writes have been flushed.
 func (h *Hub) ForgetSeq(sessionID string) {
+	_ = h.ReleaseSeq(sessionID, nil)
+}
+
+// ReleaseSeq waits for all durable sequence producers, runs drain, and only
+// then removes the per-session counter. A drain failure retains the counter so
+// a reconnect cannot reuse sequence numbers that may still be pending.
+func (h *Hub) ReleaseSeq(sessionID string, drain func() error) error {
+	barrier := h.seqBarrier(sessionID)
+	barrier.Lock()
+	defer barrier.Unlock()
+
+	if drain != nil {
+		if err := drain(); err != nil {
+			return err
+		}
+	}
 	h.seqGen.Remove(sessionID)
+	return nil
+}
+
+func (h *Hub) seqBarrier(sessionID string) *sync.RWMutex {
+	// FNV-1a without allocating on the sequence hot path.
+	hash := uint32(2166136261)
+	for i := 0; i < len(sessionID); i++ {
+		hash ^= uint32(sessionID[i])
+		hash *= 16777619
+	}
+	return &h.seqBarriers[hash%seqBarrierShards]
 }
 
 // SetSeqHydrator injects the persisted-seq reader used to hydrate SeqGen on
@@ -654,6 +694,9 @@ func (h *Hub) SetSeqHydrator(sh SeqHydrator) {
 // back to 1 could collide with durable history and make the collector reject
 // the entire batch. MUST run before the first NextSeq for a session.
 func (h *Hub) EnsureSeqHydrated(sessionID string) error {
+	releaseSeq := h.BeginSeqOperation(sessionID)
+	defer releaseSeq()
+
 	if h.seqHydrator == nil {
 		return nil
 	}
