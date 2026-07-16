@@ -68,7 +68,7 @@ export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
     parts.push(`${Math.round(pct)}%`);
   }
   if (data.turn_duration_ms > 0) {
-    parts.push(formatDuration(data.turn_duration_ms));
+    parts.push(`⏱️ ${formatDuration(data.turn_duration_ms)}`);
   }
   if (data.tool_call_count > 0) {
     parts.push(`🛠 ${data.tool_call_count}`);
@@ -83,7 +83,7 @@ export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
-      className="my-1.5 rounded-[var(--radius-sm)] px-3 py-1.5 flex items-center gap-2 flex-wrap"
+      className="my-1.5 rounded-[var(--radius-sm)] px-3 py-1.5 flex items-center gap-2 flex-wrap w-fit"
       style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
     >
       {pct > 0 && data.context_window > 0 && (
