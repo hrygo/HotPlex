@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.35.1] - 2026-07-16
+
+### Summary
+
+v1.35.1 是一次 patch 版本更新，主要优化了 **智能体多轮会话（Turn）指标统计与 WebChat 重连 UI 体验**。解决了在部分环境下因 Claude Code 和 OpenCode Server 返回字段采用 camelCase 导致 Token 指标解析失效的兼容性问题（#901）。此外，修复了网络重连遮罩盖住输入框导致无法操作的布局问题，重构了用户头像样式并支持了发送消息时展示呼吸微动效的“活着（living）”状态指示器，同时优化了 TTFT 指标在重试周期的生命周期追踪。
+
+### Added
+
+- **WebChat UI**: Beautiful custom user SVG gradient avatar and send "living" pulse ripple animation. (#894)
+- **WebChat UI**: Add staged feedback support and visual TTFT (Time to First Token) metrics reporting.
+
+### Changed
+
+- **Gateway Core**: Support camelCase key fallbacks in session accumulator turn stats (`inputTokens`, `outputTokens` etc.) to handle diverse worker schema variants. (#901)
+- **Worker**: Support camelCase fallbacks for OpenCode Server `tokens` path (`cacheRead`, `cacheWrite`) to make gateway statistics fully robust. (#901)
+
+### Fixed
+
+- **WebChat UI**: Fix reconnecting banner z-index overlap layout defect to prevent covering control buttons and inputs during network reconnection. (#894)
+- **Gateway Core**: Retain TTFT tracking state and timestamp across LLM retry cycles.
+- **Events**: Support string parsing and all numeric types in `ToInt64` to prevent token stats extraction failure.
+
 ## [1.35.0] - 2026-07-15
 
 ### Summary
