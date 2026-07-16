@@ -58,6 +58,44 @@ func TestSessionAccumulator_MergePerTurnStats(t *testing.T) {
 		require.InDelta(t, 0.0234, acc.TotalCostUSD, 0.0001)
 	})
 
+	t.Run("model usage camelCase fallback", func(t *testing.T) {
+		acc := &sessionAccumulator{StartedAt: time.Now()}
+		acc.mergePerTurnStats(events.DoneData{
+			Stats: map[string]any{
+				"modelUsage": map[string]any{
+					"claude-sonnet-4-6": map[string]any{
+						"inputTokens":              float64(1200),
+						"outputTokens":             float64(300),
+						"cacheCreationInputTokens": float64(200),
+						"cacheReadInputTokens":     float64(100),
+						"contextWindow":            float64(200000),
+					},
+				},
+			},
+		})
+
+		require.Equal(t, int64(1500), acc.TotalInput)
+		require.Equal(t, int64(300), acc.TotalOutput)
+		require.Equal(t, int64(200000), acc.ContextWindow)
+	})
+
+	t.Run("opencode camelCase token fields", func(t *testing.T) {
+		acc := &sessionAccumulator{StartedAt: time.Now()}
+		acc.mergePerTurnStats(events.DoneData{
+			Stats: map[string]any{
+				"tokens": map[string]any{
+					"inputTokens":  float64(800),
+					"outputTokens": float64(160),
+					"cacheRead":    float64(120),
+					"cacheWrite":   float64(80),
+				},
+			},
+		})
+
+		require.Equal(t, int64(1000), acc.TotalInput)
+		require.Equal(t, int64(160), acc.TotalOutput)
+	})
+
 	t.Run("nil stats", func(t *testing.T) {
 		acc := &sessionAccumulator{StartedAt: time.Now()}
 		acc.mergePerTurnStats(events.DoneData{})

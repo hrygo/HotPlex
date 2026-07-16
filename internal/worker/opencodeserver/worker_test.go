@@ -64,7 +64,9 @@ func TestOpenCodeServerWorker_EnvBlocklist(t *testing.T) {
 func TestOpenCodeServerWorker_ConnBeforeStart(t *testing.T) {
 	t.Parallel()
 	w := New()
-	require.Nil(t, w.Conn())
+	// require.Nil uses reflection and treats a typed nil as nil. Production
+	// callers compare the interface value directly, so preserve that contract.
+	require.True(t, w.Conn() == nil)
 }
 
 func TestOpenCodeServerWorker_HealthBeforeStart(t *testing.T) {

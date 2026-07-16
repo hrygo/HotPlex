@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { PermissionApprovalCard } from "@/components/assistant-ui/tools/PermissionApprovalCard";
 import { QuestionResponseCard } from "@/components/assistant-ui/tools/QuestionResponseCard";
 import { ElicitationFormCard } from "@/components/assistant-ui/tools/ElicitationFormCard";
+import { shouldSkipAssistantMessageRender } from "./assistant-message-memo";
 
 // ToolCallPart is isolated so that a streaming sibling (growing text/reasoning)
 // does not re-render completed tool parts. Its memo comparator compares the
@@ -307,45 +308,6 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
       </div>
     </motion.div>
   );
-}, (prev, next) => {
-  if (prev.message.id !== next.message.id) return false;
-  // A status transition must always re-render: the streaming cursor and part
-  // status chips depend on ext.status, not just content. The previous check
-  // only forced re-render while next is 'running', missing the running→complete
-  // transition where text is unchanged but the cursor must disappear.
-  const prevRunning = getExt(prev.message).status?.type === 'running';
-  const nextRunning = getExt(next.message).status?.type === 'running';
-  if (prevRunning || nextRunning) return false;
-  if (prev.onInteractionRespond !== next.onInteractionRespond) return false;
-  // Shallow-compare the content array element-wise. The previous check
-  // (`prev.message.content === next.message.content`) compared array
-  // references, but convertToThreadMessage rebuilds the array on every render,
-  // so the reference always differs and the memo was effectively disabled —
-  // every delta flush re-rendered every assistant message. Compare by value
-  // instead, covering the fields each part type actually mutates:
-  //  - text / reasoning: text
-  //  - tool-call: toolName + args + toolCallId + result + status
-  // Without args/toolName, a tool-call whose args are patched post-stream
-  // (e.g. reconcile) wouldn't re-render. Without reasoning text, a reconcile
-  // that rewrites completed reasoning content wouldn't update either.
-  const pc = getExt(prev.message).content || [];
-  const nc = getExt(next.message).content || [];
-  if (pc.length !== nc.length) return false;
-  for (let i = 0; i < pc.length; i++) {
-    const a = pc[i] as Record<string, unknown>;
-    const b = nc[i] as Record<string, unknown>;
-    if (a?.type !== b?.type) return false;
-    if (a?.type === 'text' || a?.type === 'reasoning') {
-      if (a.text !== b.text) return false;
-    } else if (a?.type === 'tool-call') {
-      if (a.toolName !== b.toolName) return false;
-      if (a.args !== b.args) return false;
-      if (a.toolCallId !== b.toolCallId) return false;
-      if (a.result !== b.result) return false;
-      if (a.status !== b.status) return false;
-    }
-  }
-  return true;
-});
+}, shouldSkipAssistantMessageRender);
 
 export { AssistantMessage };

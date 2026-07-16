@@ -59,70 +59,86 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 	if data.Stats == nil {
 		return
 	}
+	modelUsage := mapValue(data.Stats, "model_usage", "modelUsage")
 
 	// Claude Code format: input_tokens, cache_creation_input_tokens, and
 	// cache_read_input_tokens are separate additive fields (Anthropic API).
 	// Total input = input_tokens + cache_creation_input_tokens + cache_read_input_tokens.
 	if usage, ok := data.Stats["usage"].(map[string]any); ok {
-		inputTokens := events.ToInt64(usage["input_tokens"])
-		if inputTokens == 0 {
-			inputTokens = events.ToInt64(usage["inputTokens"])
-		}
-		cacheWrite := events.ToInt64(usage["cache_creation_input_tokens"])
-		if cacheWrite == 0 {
-			cacheWrite = events.ToInt64(usage["cacheCreationInputTokens"])
-		}
-		cacheRead := events.ToInt64(usage["cache_read_input_tokens"])
-		if cacheRead == 0 {
-			cacheRead = events.ToInt64(usage["cacheReadInputTokens"])
-		}
-		outputTokens := events.ToInt64(usage["output_tokens"])
-		if outputTokens == 0 {
-			outputTokens = events.ToInt64(usage["outputTokens"])
-		}
-
-		a.TotalInput += inputTokens + cacheWrite + cacheRead
-		a.TotalOutput += outputTokens
-		a.TotalCacheWrite += cacheWrite
-		a.TotalCacheRead += cacheRead
+		a.mergeClaudeUsage(usage)
 	} else if tokens, ok := data.Stats["tokens"].(map[string]any); ok {
 		// OpenCode format: input/cache_read/cache_write are separate additive fields.
-		input := events.ToInt64(tokens["input"])
-		output := events.ToInt64(tokens["output"])
-		cacheRead := events.ToInt64(tokens["cache_read"])
-		if cacheRead == 0 {
-			cacheRead = events.ToInt64(tokens["cacheRead"])
+		a.mergeOpenCodeTokens(tokens)
+	} else {
+		// Some Claude Code responses only include per-model camelCase usage.
+		// Use it only as a fallback so a complete usage map is never double-counted.
+		for _, value := range modelUsage {
+			if usage, ok := value.(map[string]any); ok {
+				a.mergeClaudeUsage(usage)
+			}
 		}
-		cacheWrite := events.ToInt64(tokens["cache_write"])
-		if cacheWrite == 0 {
-			cacheWrite = events.ToInt64(tokens["cacheWrite"])
-		}
-
-		a.TotalInput += input + cacheRead + cacheWrite
-		a.TotalOutput += output
-		a.TotalCacheWrite += cacheWrite
-		a.TotalCacheRead += cacheRead
 	}
 
 	// Claude Code modelUsage: extract model name + contextWindow
-	if modelUsage, ok := data.Stats["model_usage"].(map[string]any); ok {
-		for modelName, v := range modelUsage {
-			mu, ok := v.(map[string]any)
-			if !ok {
-				continue
-			}
-			if a.ModelName == "" {
-				a.ModelName = shortModelName(modelName)
-			}
-			if cw := events.ToInt64(mu["contextWindow"]); cw > 0 {
-				a.ContextWindow = cw
-			}
+	for modelName, v := range modelUsage {
+		mu, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		if a.ModelName == "" {
+			a.ModelName = shortModelName(modelName)
+		}
+		if cw := events.ToInt64(mu["contextWindow"]); cw > 0 {
+			a.ContextWindow = cw
 		}
 	}
 
 	// Cost: Claude Code uses "total_cost_usd", OpenCode uses "cost"
 	a.TotalCostUSD += events.ToFloat64(data.Stats["total_cost_usd"])
 	a.TotalCostUSD += events.ToFloat64(data.Stats["cost"])
+}
+
+func mapValue(values map[string]any, keys ...string) map[string]any {
+	for _, key := range keys {
+		if value, ok := values[key].(map[string]any); ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func tokenValue(values map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		value := events.ToInt64(values[key])
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func (a *sessionAccumulator) mergeClaudeUsage(usage map[string]any) {
+	inputTokens := tokenValue(usage, "input_tokens", "inputTokens")
+	cacheWrite := tokenValue(usage, "cache_creation_input_tokens", "cacheCreationInputTokens")
+	cacheRead := tokenValue(usage, "cache_read_input_tokens", "cacheReadInputTokens")
+	outputTokens := tokenValue(usage, "output_tokens", "outputTokens")
+
+	a.TotalInput += inputTokens + cacheWrite + cacheRead
+	a.TotalOutput += outputTokens
+	a.TotalCacheWrite += cacheWrite
+	a.TotalCacheRead += cacheRead
+}
+
+func (a *sessionAccumulator) mergeOpenCodeTokens(tokens map[string]any) {
+	input := tokenValue(tokens, "input", "input_tokens", "inputTokens")
+	output := tokenValue(tokens, "output", "output_tokens", "outputTokens")
+	cacheRead := tokenValue(tokens, "cache_read", "cacheRead", "cacheReadTokens")
+	cacheWrite := tokenValue(tokens, "cache_write", "cacheWrite", "cacheWriteTokens")
+
+	a.TotalInput += input + cacheRead + cacheWrite
+	a.TotalOutput += output
+	a.TotalCacheWrite += cacheWrite
+	a.TotalCacheRead += cacheRead
 }
 
 // Workers report cumulative totals, so deltas are derived by subtracting

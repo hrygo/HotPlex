@@ -426,6 +426,9 @@ func (w *Worker) Wait() (int, error) {
 func (w *Worker) Conn() worker.SessionConn {
 	w.Mu.Lock()
 	defer w.Mu.Unlock()
+	if w.httpConn == nil {
+		return nil
+	}
 	return w.httpConn
 }
 
@@ -1064,6 +1067,9 @@ type ocsModelRef struct {
 var _ worker.InputRecoverer = (*conn)(nil)
 
 func (c *conn) LastInput() string {
+	if c == nil {
+		return ""
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastInput

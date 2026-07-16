@@ -940,6 +940,13 @@ func TestConn_LastInput_EmptyOnNoSend(t *testing.T) {
 	require.Empty(t, c.LastInput())
 }
 
+func TestConn_LastInput_NilReceiver(t *testing.T) {
+	t.Parallel()
+
+	var c *conn
+	require.Empty(t, c.LastInput())
+}
+
 // ─── Error Classification Tests ───────────────────────────────────────────────
 
 func TestConn_Send_ServerDown(t *testing.T) {
