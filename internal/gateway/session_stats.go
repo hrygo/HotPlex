@@ -87,13 +87,21 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 		a.TotalCacheRead += cacheRead
 	} else if tokens, ok := data.Stats["tokens"].(map[string]any); ok {
 		// OpenCode format: input/cache_read/cache_write are separate additive fields.
-		input := events.ToInt64(tokens["input"]) +
-			events.ToInt64(tokens["cache_read"]) +
-			events.ToInt64(tokens["cache_write"])
-		a.TotalInput += input
-		a.TotalOutput += events.ToInt64(tokens["output"])
-		a.TotalCacheWrite += events.ToInt64(tokens["cache_write"])
-		a.TotalCacheRead += events.ToInt64(tokens["cache_read"])
+		input := events.ToInt64(tokens["input"])
+		output := events.ToInt64(tokens["output"])
+		cacheRead := events.ToInt64(tokens["cache_read"])
+		if cacheRead == 0 {
+			cacheRead = events.ToInt64(tokens["cacheRead"])
+		}
+		cacheWrite := events.ToInt64(tokens["cache_write"])
+		if cacheWrite == 0 {
+			cacheWrite = events.ToInt64(tokens["cacheWrite"])
+		}
+
+		a.TotalInput += input + cacheRead + cacheWrite
+		a.TotalOutput += output
+		a.TotalCacheWrite += cacheWrite
+		a.TotalCacheRead += cacheRead
 	}
 
 	// Claude Code modelUsage: extract model name + contextWindow
