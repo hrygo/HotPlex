@@ -15,7 +15,7 @@ function getSeverity(pct: number): Severity {
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   const k = n / 1000;
-  return k % 1 === 0 ? `${k}K` : `~${k.toFixed(1)}K}`;
+  return k % 1 === 0 ? `${k}K` : `~${k.toFixed(1)}K`;
 }
 
 function formatDuration(ms: number): string {
@@ -67,11 +67,24 @@ export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
   if (pct > 0 && data.context_window > 0) {
     parts.push(`${Math.round(pct)}%`);
   }
+  if (data.turn_input_tok > 0 || data.turn_output_tok > 0) {
+    parts.push(`📥 ${formatTokens(data.turn_input_tok)} · 📤 ${formatTokens(data.turn_output_tok)}`);
+  }
   if (data.turn_duration_ms > 0) {
     parts.push(`⏱️ ${formatDuration(data.turn_duration_ms)}`);
   }
+  if (data.git_branch) {
+    parts.push(`🌿 ${data.git_branch}`);
+  }
   if (data.tool_call_count > 0) {
-    parts.push(`🛠 ${data.tool_call_count}`);
+    let toolStr = `🛠 ${data.tool_call_count}`;
+    if (data.tool_names && Object.keys(data.tool_names).length > 0) {
+      const names = Object.entries(data.tool_names)
+        .map(([name, count]) => count > 1 ? `${name}×${count}` : name)
+        .join(', ');
+      toolStr += ` (${names})`;
+    }
+    parts.push(toolStr);
   }
   const cost = data.turn_cost_usd ? formatCost(data.turn_cost_usd) : '';
   if (cost) parts.push(cost);
