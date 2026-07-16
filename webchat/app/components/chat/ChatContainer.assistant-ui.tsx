@@ -35,6 +35,10 @@ import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import type { WorkerType } from "@/lib/ai-sdk-transport/client/constants";
 import { selectRecoveryWorkspace } from "@/lib/workspace-recovery";
+import {
+    FollowUpQueueStore,
+    type FollowUpQueueControls,
+} from "@/lib/adapters/follow-up-queue";
 
 // Clear all hotplex workspace/session selection state from localStorage.
 // Called on logout so a different account logging into the same browser does
@@ -60,6 +64,7 @@ function ChatInterface({
     onSessionStateChange,
     workspaceId,
     onWorkspaceError,
+    followUpQueueStore,
 }: {
     sessionId: string | null;
     workerType?: WorkerType;
@@ -67,6 +72,7 @@ function ChatInterface({
     onSessionStateChange?: (state: string) => void;
     workspaceId?: string;
     onWorkspaceError?: (workspaceId?: string) => void;
+    followUpQueueStore: FollowUpQueueStore;
 }) {
     const { skills, mergeSkills } = useSkillsCache(sessionId);
     const adapter = useHotPlexRuntime({
@@ -80,6 +86,7 @@ function ChatInterface({
             onWorkspaceError && workspaceId
                 ? () => onWorkspaceError(workspaceId)
                 : undefined,
+        followUpQueueStore,
     });
 
     const runtime = useExternalStoreRuntime(adapter);
@@ -91,6 +98,7 @@ function ChatInterface({
         onInteractionRespond?: (toolCallId: string, allowed: boolean) => void;
         isStopping?: boolean;
         onRetryConnection?: () => void;
+        followUpQueue?: FollowUpQueueControls;
     };
     const extras = adapter.extras as AdapterExtras | undefined;
     const hasMore = extras?.hasMore ?? false;
@@ -99,6 +107,7 @@ function ChatInterface({
     const onInteractionRespond = extras?.onInteractionRespond;
     const isStopping = extras?.isStopping ?? false;
     const onRetryConnection = extras?.onRetryConnection;
+    const followUpQueue = extras?.followUpQueue;
     const suggestions = adapter.suggestions as
         readonly { title: string; label: string; prompt: string }[] | undefined;
 
@@ -113,6 +122,7 @@ function ChatInterface({
                 suggestions={suggestions}
                 isStopping={isStopping}
                 onRetryConnection={onRetryConnection}
+                followUpQueue={followUpQueue}
             />
         </AssistantRuntimeProvider>
     );
@@ -121,6 +131,7 @@ function ChatInterface({
 export default function ChatContainer() {
     const router = useRouter();
     const { t } = useTranslation(['chat', 'common']);
+    const [followUpQueueStore] = useState(() => new FollowUpQueueStore());
     const [sidebarOpen, setSidebarOpen] = useState(true);
     // Reactive mobile detection: the mobile drawer (fixed overlay) needs a11y
     // behaviors (ESC / focus trap / scroll lock / aria-modal) that the desktop
@@ -384,6 +395,11 @@ export default function ChatContainer() {
         loadedWorkspaceId === activeWorkspace?.id
             ? activeSession?.id || null
             : null;
+
+    const handleDeleteSession = useCallback(async (id: string) => {
+        followUpQueueStore.clearSession(id);
+        await removeSession(id);
+    }, [followUpQueueStore, removeSession]);
 
     // Handle NewSessionModal confirm
     const handleModalConfirm = useCallback(
@@ -687,7 +703,7 @@ export default function ChatContainer() {
                         isLoading={sessionsLoading}
                         onSelect={selectSession}
                         onCreate={handleCreateNew}
-                        onDelete={removeSession}
+                        onDelete={handleDeleteSession}
                         currentUserRole={currentUser?.role}
                     />
                 </aside>
@@ -761,6 +777,7 @@ export default function ChatContainer() {
                                 }
                                 workspaceId={activeWorkspace?.id}
                                 onWorkspaceError={handleWorkspaceError}
+                                followUpQueueStore={followUpQueueStore}
                             />
                         )}
                     </div>

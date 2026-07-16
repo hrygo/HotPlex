@@ -16,6 +16,8 @@ import { UserMessage } from "./UserMessage";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { PreAssistantIndicator } from "./PreAssistantIndicator";
 import { useTranslation } from "react-i18next";
+import { FollowUpQueue } from "./FollowUpQueue";
+import type { FollowUpQueueControls } from "@/lib/adapters/follow-up-queue";
 
 interface ThreadProps {
   skills?: SkillEntry[];
@@ -26,6 +28,7 @@ interface ThreadProps {
   suggestions?: readonly { title: string; label: string; prompt: string }[];
   isStopping?: boolean;
   onRetryConnection?: () => void;
+  followUpQueue?: FollowUpQueueControls;
 }
 
 const connLabelKey = {
@@ -44,7 +47,7 @@ const connDot: Record<ConnectionState, string> = {
   already_connected: 'bg-[var(--accent-coral)]',
 };
 
-export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, onInteractionRespond, suggestions, isStopping: isStoppingProp, onRetryConnection }: ThreadProps) {
+export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, onInteractionRespond, suggestions, isStopping: isStoppingProp, onRetryConnection, followUpQueue }: ThreadProps) {
   const { t } = useTranslation('chat');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyHasMore, setHistoryHasMore] = useState(hasMore);
@@ -159,12 +162,16 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       </AnimatePresence>
 
       <div className="composer-wrapper px-4 pb-12">
+        {followUpQueue && (
+          <FollowUpQueue queue={followUpQueue} isStopping={isStoppingProp} />
+        )}
         <ThreadComposer
           skills={skills}
           isRunning={isRunning}
           isStoppingProp={isStoppingProp}
           disabled={conn === 'already_connected'}
           connectionState={conn}
+          followUpQueue={followUpQueue}
         />
         <div className="mt-2 flex justify-between items-center max-w-3xl mx-auto px-2">
           <div className="flex gap-4">
@@ -196,12 +203,14 @@ interface ThreadComposerProps {
   isStoppingProp?: boolean;
   disabled?: boolean;
   connectionState?: ConnectionState;
+  followUpQueue?: FollowUpQueueControls;
 }
 
-const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp, disabled, connectionState }: ThreadComposerProps) {
+const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp, disabled, connectionState, followUpQueue }: ThreadComposerProps) {
   const { t } = useTranslation('chat');
   const [localText, setLocalText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const aui = useAui();
   const text = useAuiState((s) => s.composer.text);
   const composingRef = useRef(false);
@@ -228,6 +237,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     const val = e.target.value;
     setLocalText(val);
     setMenuOpen(val.startsWith("/"));
+    setQueueError(null);
     if (!composingRef.current) aui.composer().setText(val);
   }, [aui]);
 
@@ -237,13 +247,47 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     setMenuOpen(false);
   }, [aui]);
 
+  const handleQueueSubmit = useCallback(() => {
+    if (!followUpQueue || !localText.trim()) return;
+    const result = followUpQueue.enqueue(localText);
+    if (!result.ok) {
+      setQueueError(t(
+        result.reason === "limit"
+          ? "follow_up.error.limit"
+          : "follow_up.error.blank",
+      ));
+      return;
+    }
+    setQueueError(null);
+    setLocalText("");
+    setMenuOpen(false);
+    aui.composer().setText("");
+  }, [aui, followUpQueue, localText, t]);
+
+  const queueing =
+    isRunning ||
+    !!isStoppingProp ||
+    (followUpQueue?.items.length ?? 0) > 0;
+  const handleComposerKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      !queueing ||
+      event.key !== "Enter" ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return;
+    }
+    event.preventDefault();
+    handleQueueSubmit();
+  }, [handleQueueSubmit, queueing]);
+
   return (
     <div className="composer-container relative max-w-3xl mx-auto">
       <AnimatePresence>
         {menuOpen && <CommandMenu isOpen={menuOpen} inputValue={localText} onSelect={handleSelectCommand} onClose={() => setMenuOpen(false)} skills={skills} />}
       </AnimatePresence>
       <div className="relative">
-        <div className="absolute bottom-full left-0 right-0 z-20 mb-3 flex flex-col gap-2.5">
+        <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-3 flex flex-col gap-2.5">
           {/* Reconnecting / Disconnected Banner */}
           {(connectionState === 'disconnected' || connectionState === 'reconnecting') && (
             <div className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-coral)]/10 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] text-[11px] font-medium w-full shadow-sm animate-fadeIn">
@@ -272,7 +316,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
             </div>
 
             {/* Right Side: Scroll to Bottom */}
-            <ThreadPrimitive.ScrollToBottom className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-glass)] border border-[var(--border-subtle)] backdrop-blur-md shadow-[var(--shadow-sm)] text-[var(--text-muted)] hover:text-[var(--accent-gold)] hover:border-[var(--accent-gold)]/30 hover:bg-[var(--bg-hover)] transition-all active:scale-95 group/scroll whitespace-nowrap">
+            <ThreadPrimitive.ScrollToBottom className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-glass)] border border-[var(--border-subtle)] backdrop-blur-md shadow-[var(--shadow-sm)] text-[var(--text-muted)] hover:text-[var(--accent-gold)] hover:border-[var(--accent-gold)]/30 hover:bg-[var(--bg-hover)] transition-all active:scale-95 group/scroll whitespace-nowrap">
               <svg className="w-3.5 h-3.5 animate-bounce-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
               </svg>
@@ -281,7 +325,14 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
           </div>
         </div>
 
-        <ComposerPrimitive.Root className="composer-root">
+        <ComposerPrimitive.Root
+          className="composer-root"
+          onSubmit={(event) => {
+            if (!queueing) return;
+            event.preventDefault();
+            handleQueueSubmit();
+          }}
+        >
           <div className="composer-input-row">
             <ComposerPrimitive.Input
               className="composer-input"
@@ -294,7 +345,16 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
               onChange={handleChange}
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
+              onKeyDown={handleComposerKeyDown}
             />
+            {queueError && (
+              <p
+                role="alert"
+                className="absolute bottom-full left-3 right-3 mb-2 rounded-lg border border-[var(--accent-coral)]/35 bg-[var(--bg-elevated)] px-3 py-2 text-[10px] text-[var(--accent-coral)] shadow-sm"
+              >
+                {queueError}
+              </p>
+            )}
             <div className="flex items-center gap-2">
               {(isRunning || isStoppingProp) && (
                 <ComposerPrimitive.Cancel className={`btn-icon ${isStoppingProp ? 'btn-stop-stopping' : 'btn-stop'}`} disabled={disabled || isStoppingProp} aria-label={t(isStoppingProp ? 'aria.stopping' : 'aria.stop')}>
@@ -308,7 +368,19 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   )}
                 </ComposerPrimitive.Cancel>
               )}
-              <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+              {queueing ? (
+                <button
+                  type="button"
+                  onClick={handleQueueSubmit}
+                  className="btn-icon btn-primary"
+                  disabled={disabled || !followUpQueue || !localText.trim()}
+                  aria-label={t('follow_up.aria.enqueue')}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
+                </button>
+              ) : (
+                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+              )}
             </div>
           </div>
         </ComposerPrimitive.Root>

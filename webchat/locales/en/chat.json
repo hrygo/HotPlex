@@ -287,6 +287,46 @@
       }
     }
   },
+  "follow_up": {
+    "title": "Follow-up queue",
+    "count": "{{count}} queued",
+    "status": {
+      "queued": "Queued",
+      "sending": "Sending",
+      "failed": "Action needed"
+    },
+    "action": {
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "edit": "Edit",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "retry": "Retry",
+      "send_now": "Send now"
+    },
+    "error": {
+      "limit": "The queue can hold up to 20 messages. Your draft is preserved; resolve an existing item first.",
+      "blank": "The message cannot be blank.",
+      "unknown": "The delivery outcome is unknown. To avoid duplicate work, review it and retry manually.",
+      "connection": "The connection was interrupted. The message remains queued; retry it manually after reconnecting.",
+      "busy": "The previous turn is still active. The message was not sent; retry it manually later.",
+      "send": "Delivery was not confirmed. The message remains queued for a manual retry.",
+      "stop": "The current turn did not confirm it stopped, so this message was not sent. Retry it manually."
+    },
+    "aria": {
+      "panel": "Follow-up message queue",
+      "position": "Queue item {{position}}",
+      "expand": "Expand queued message {{position}}",
+      "collapse": "Collapse queued message {{position}}",
+      "edit": "Edit queued message {{position}}",
+      "edit_input": "Edit queued message {{position}} content",
+      "delete": "Delete queued message {{position}}",
+      "retry": "Retry queued message {{position}}",
+      "send_now": "Stop the current turn and send queued message {{position}} next",
+      "enqueue": "Add message to the follow-up queue"
+    }
+  },
   "aria": {
     "send": "Send message",
     "stop": "Stop generating",
