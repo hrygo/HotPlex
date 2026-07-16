@@ -180,6 +180,8 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
   const isError = message?.status === "error";
   const ext = getExt(message);
   const content = ext.content || [];
+  const custom = ext.metadata?.custom;
+  const isStreaming = ext.status?.type === "running" || custom?.progress === "thinking" || custom?.progress === "accepted";
 
   // Stable toggle so ToolCallPart memo is not defeated by a fresh closure each
   // render. The default-expanded state (the last part) is passed in by the caller.
@@ -212,10 +214,23 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
 
   return (
     <motion.div className={`group msg-assistant flex items-start gap-4 mb-8 ${isError ? "border-l-2 border-[var(--accent-coral)] pl-3" : ""}`} variants={messageVariants} initial="hidden" animate="visible">
-      <div className="flex-shrink-0">
-        <div className="w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] shadow-sm flex items-center justify-center relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/5 to-transparent" />
-          <BrandIcon size={24} />
+      <div className="flex-shrink-0 relative">
+        {isStreaming && (
+          <>
+            <div className="absolute inset-0 rounded-[var(--radius-md)] bg-[var(--accent-gold)]/10 animate-avatar-ripple-1 -z-10" />
+            <div className="absolute inset-0 rounded-[var(--radius-md)] bg-[var(--accent-gold)]/10 animate-avatar-ripple-2 -z-10" />
+          </>
+        )}
+        <div className={`w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border shadow-sm flex items-center justify-center relative overflow-hidden transition-all duration-500 ${isStreaming ? "border-[var(--accent-gold)]/40 shadow-[0_0_15px_rgba(251,191,36,0.25)] scale-[1.02]" : "border-[var(--border-subtle)]"}`}>
+          {isStreaming ? (
+            <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/20 via-indigo-500/5 to-transparent animate-gradient-shift" />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/5 to-transparent" />
+          )}
+          {isStreaming && (
+            <div className="absolute inset-[1px] rounded-[calc(var(--radius-md)-1px)] border border-white/5 bg-transparent" />
+          )}
+          <BrandIcon size={24} className={`transition-all duration-500 relative z-10 ${isStreaming ? "opacity-100 scale-105 filter drop-shadow-[0_0_4px_rgba(251,191,36,0.5)] animate-avatar-breath" : "opacity-80"}`} />
         </div>
       </div>
 
@@ -272,16 +287,16 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
 
             return null;
           })}
-          {ext.metadata?.contextUsage && (
-            <ContextUsageCard data={ext.metadata.contextUsage} />
+          {custom?.contextUsage && (
+            <ContextUsageCard data={custom.contextUsage} />
           )}
-          {ext.metadata?.turnSummary && (
-            <TurnSummaryCard data={ext.metadata.turnSummary} />
+          {custom?.turnSummary && (
+            <TurnSummaryCard data={custom.turnSummary} />
           )}
-          {ext.metadata?.progress && (
+          {custom?.progress && (
             <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
               <span className="w-2 h-2 rounded-full bg-[var(--accent-gold)] animate-pulse" />
-              <span>{t(`status.${ext.metadata.progress}`)}</span>
+              <span>{t(`status.${custom.progress}`)}</span>
             </div>
           )}
         </div>

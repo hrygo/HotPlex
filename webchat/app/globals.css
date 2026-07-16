@@ -1431,3 +1431,69 @@ a:not(:disabled):active,
     box-shadow: 0 0 0 2px var(--accent-gold-glow) !important;
     outline: none !important;
 }
+
+/* ============================================================
+   Living Avatar Animations
+   ============================================================ */
+@keyframes avatarRipple1 {
+    0% {
+        transform: scale(1);
+        opacity: 0.6;
+    }
+    100% {
+        transform: scale(1.6);
+        opacity: 0;
+    }
+}
+
+@keyframes avatarRipple2 {
+    0% {
+        transform: scale(1);
+        opacity: 0.4;
+    }
+    100% {
+        transform: scale(2.2);
+        opacity: 0;
+    }
+}
+
+@keyframes avatarBreath {
+    0%, 100% {
+        transform: scale(1.05);
+        filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.5));
+    }
+    50% {
+        transform: scale(0.95);
+        filter: drop-shadow(0 0 2px rgba(251, 191, 36, 0.15));
+    }
+}
+
+@keyframes gradientShift {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+.animate-avatar-ripple-1 {
+    animation: avatarRipple1 3s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+.animate-avatar-ripple-2 {
+    animation: avatarRipple2 3s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+    animation-delay: 1.5s;
+}
+
+.animate-avatar-breath {
+    animation: avatarBreath 2s ease-in-out infinite;
+}
+
+.animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradientShift 6s ease infinite;
+}
