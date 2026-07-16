@@ -111,6 +111,62 @@ const DEFAULT_HEARTBEAT_CONFIG = {
   maxMissedPongs: ProtocolConstants.MaxMissedPongs,
 };
 
+// React cleanup cannot await the WebSocket close handshake. Keep a short-lived,
+// tab-local barrier so a replacement client for the same session does not send
+// init until the previous socket has finished closing and Gateway has released
+// its owner. This module state is not shared across browser tabs, so a genuine
+// second tab still receives SESSION_ALREADY_CONNECTED.
+const CLOSE_HANDOFF_TIMEOUT_MS = 2_000;
+const LOCAL_HANDOFF_RETRY_DELAY_MS = 100;
+const sessionCloseHandoffs = new Map<string, Promise<void>>();
+// A browser page can temporarily mount two runtime instances for one session
+// (for example during Fast Refresh). Keep a page-local owner so the newer
+// instance explicitly closes the older socket before connecting. Module state
+// is isolated per tab, preserving server-side protection across tabs/devices.
+const pageSessionOwners = new Map<string, BrowserHotPlexClient>();
+
+function registerSessionCloseHandoff(sessionId: string, socket: WebSocket): void {
+  let finish!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    let settled = false;
+    const complete = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (sessionCloseHandoffs.get(sessionId) === barrier) {
+        sessionCloseHandoffs.delete(sessionId);
+      }
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      logger.warn('BrowserClient', 'WebSocket close handoff timed out', { sessionId });
+      complete();
+    }, CLOSE_HANDOFF_TIMEOUT_MS);
+    finish = complete;
+  });
+
+  sessionCloseHandoffs.set(sessionId, barrier);
+  if (socket.readyState === WebSocket.CLOSED) {
+    finish();
+    return;
+  }
+  if (typeof socket.addEventListener === 'function') {
+    socket.addEventListener('close', finish, { once: true });
+  } else {
+    // Defensive compatibility for non-browser test doubles. Real browser
+    // sockets always expose addEventListener.
+    finish();
+  }
+}
+
+async function waitForSessionCloseHandoff(sessionId: string | undefined): Promise<boolean> {
+  if (!sessionId) return false;
+  const barrier = sessionCloseHandoffs.get(sessionId);
+  if (!barrier) return false;
+  await barrier;
+  return true;
+}
+
 // ============================================================================
 // BrowserHotPlexClient
 // ============================================================================
@@ -153,6 +209,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private inputSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private inputTombstoneTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingConnectReject: ((err: Error) => void) | null = null;
+  private connectPromise: Promise<InitAckData> | null = null;
+  private connectTarget: string | null = null;
+  private lastInitAck: InitAckData | null = null;
+  private connectionGeneration = 0;
+  private lifecycleGeneration = 0;
+  private localHandoffRetryAvailable = false;
+  private pageSessionOwner: string | null = null;
 
   private closed = false;
 
@@ -201,32 +264,83 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   // Connection Lifecycle
   // ============================================================================
 
-  async connect(sessionId?: string): Promise<InitAckData> {
+  connect(sessionId?: string): Promise<InitAckData> {
     this.closed = false;
     this.shouldReconnect = true;
     const id = sessionId || this._sessionId || undefined;
+    const target = id ?? null;
+
+    if (this._connected && this.connectTarget === target && this.lastInitAck &&
+        this.ws?.readyState === WebSocket.OPEN) {
+      return Promise.resolve(this.lastInitAck);
+    }
+    if (this.connectPromise) {
+      if (this.connectTarget === target) {
+        return this.connectPromise;
+      }
+      return Promise.reject(new Error('Connection already in progress for another session'));
+    }
+
+    this._claimPageSessionOwner(target);
+
+    if (this._connected && this.connectTarget === target && this.ws) {
+      this._stopHeartbeat();
+      this._connected = false;
+      this._closeCurrentSocketForHandoff('Replacing inactive connection');
+    }
     if (id) {
       this._sessionId = id;
     }
-    return this._doConnect(id);
+
+    this._clearReconnectTimer();
+    this.connectTarget = target;
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const promise = this._doConnect(id, true, lifecycleGeneration);
+    this.connectPromise = promise;
+    const clearFlight = () => {
+      if (this.connectPromise === promise) {
+        this.connectPromise = null;
+      }
+    };
+    promise.then(clearFlight, clearFlight);
+    return promise;
   }
 
-  async resume(existingSessionId: string): Promise<InitAckData> {
-    this.closed = false;
-    this.shouldReconnect = true;
-    this._sessionId = existingSessionId;
-    return this._doConnect(existingSessionId);
+  resume(existingSessionId: string): Promise<InitAckData> {
+    return this.connect(existingSessionId);
   }
 
-  private _doConnect(sessionId: string | undefined): Promise<InitAckData> {
+  private async _doConnect(
+    sessionId: string | undefined,
+    allowLocalHandoffRetry = true,
+    lifecycleGeneration = this.lifecycleGeneration,
+    retryDelayMs = 0,
+  ): Promise<InitAckData> {
+    const hadLocalHandoff = await waitForSessionCloseHandoff(sessionId);
+
     // Prevent zombie connections: if the client was explicitly closed via
     // disconnect(), do not create a new WebSocket. This guards against a
     // race where a pending reconnect timer fires after React effect cleanup
     // has already torn down the component.
-    if (this.closed) {
+    if (this.closed || lifecycleGeneration !== this.lifecycleGeneration) {
       return Promise.reject(new Error('Client is closed'));
     }
 
+    if (retryDelayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+      if (this.closed || lifecycleGeneration !== this.lifecycleGeneration) {
+        return Promise.reject(new Error('Client is closed'));
+      }
+    }
+
+    this.localHandoffRetryAvailable = allowLocalHandoffRetry && hadLocalHandoff;
+    return this._openConnection(sessionId, lifecycleGeneration);
+  }
+
+  private _openConnection(
+    sessionId: string | undefined,
+    lifecycleGeneration: number,
+  ): Promise<InitAckData> {
     this._connecting = true;
     return new Promise((resolve, reject) => {
       this.pendingConnectReject = reject;
@@ -243,7 +357,9 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         // Build URL without api_key — auth is passed via auth.token in init envelope.
         const url = this.config.url;
 
-        this.ws = new WebSocket(url);
+        const socket = new WebSocket(url);
+        const generation = ++this.connectionGeneration;
+        this.ws = socket;
 
         const initEnv = createInitEnvelope(
           sessionId,
@@ -254,33 +370,33 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         );
 
         const onOpen = () => {
-          if (!this.ws) return;
-          this.ws.send(serializeEnvelope(initEnv));
+          if (generation !== this.connectionGeneration || socket !== this.ws) return;
+          socket.send(serializeEnvelope(initEnv));
         };
 
         const onMessage = (event: MessageEvent) => {
+          if (generation !== this.connectionGeneration || socket !== this.ws) return;
           const line = (typeof event.data === 'string' ? event.data : '').trim();
           if (!line) return;
 
           try {
             const env = deserializeEnvelope(line);
-            this._handleMessage(env, resolve, reject);
+            this._handleMessage(env, resolve, reject, sessionId, lifecycleGeneration);
           } catch (err) {
             this.emit('error', { code: ErrorCode.InvalidMessage, message: String(err) } as ErrorData, {} as Envelope);
           }
         };
 
         const onError = () => {
+          if (generation !== this.connectionGeneration || socket !== this.ws) return;
           // WebSocket error events don't carry useful info; close event follows
         };
 
-        const activeWs = this.ws;
-
-        this.ws.addEventListener('open', onOpen);
-        this.ws.addEventListener('message', onMessage);
-        this.ws.addEventListener('error', onError);
-        this.ws.addEventListener('close', (event: CloseEvent) => {
-          if (activeWs !== this.ws) return;
+        socket.addEventListener('open', onOpen);
+        socket.addEventListener('message', onMessage);
+        socket.addEventListener('error', onError);
+        socket.addEventListener('close', (event: CloseEvent) => {
+          if (generation !== this.connectionGeneration || socket !== this.ws) return;
           this._handleClose(event.code, event.reason || 'Connection closed');
         });
       } catch (err) {
@@ -291,7 +407,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     });
   }
 
-  private _handleMessage(env: Envelope, resolve: (ack: InitAckData) => void, reject: (err: Error) => void): void {
+  private _handleMessage(
+    env: Envelope,
+    resolve: (ack: InitAckData) => void,
+    reject: (err: Error) => void,
+    connectionSessionId: string | undefined,
+    lifecycleGeneration: number,
+  ): void {
     const { event, session_id } = env;
 
     if (isInitAck(env)) {
@@ -308,9 +430,26 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           // to map client session_id to a deterministic UUIDv5. By retrying with the
           // same session ID, the auto-created session always maps to the same server-side
           // session key, providing stable worker-to-session consistency.
-          const retryId = this._sessionId;
+          const retryId = connectionSessionId;
           this._sessionId = null;
-          this._doConnect(retryId ?? undefined).then(resolve, reject);
+          this._doConnect(retryId, true, lifecycleGeneration).then(resolve, reject);
+          return;
+        }
+
+        if (ackData.code === ErrorCode.SessionAlreadyConnected &&
+            this.localHandoffRetryAvailable) {
+          this.localHandoffRetryAvailable = false;
+          const retryId = connectionSessionId || session_id || undefined;
+          logger.info('BrowserClient', 'Retrying local WebSocket handoff conflict', {
+            sessionId: retryId,
+          });
+          this._closeCurrentSocketForHandoff('Local handoff retry');
+          this._doConnect(
+            retryId,
+            false,
+            lifecycleGeneration,
+            LOCAL_HANDOFF_RETRY_DELAY_MS,
+          ).then(resolve, reject);
           return;
         }
 
@@ -350,8 +489,11 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       this._connected = true;
       this._connecting = false;
       this._reconnecting = false;
+      this.localHandoffRetryAvailable = false;
       this.reconnectAttempt = 0;
       this.pendingConnectReject = null;
+      this.lastInitAck = ackData;
+      this.connectTarget = session_id || this.connectTarget;
 
       if (ackData.state) {
         this._state = ackData.state;
@@ -653,6 +795,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   }
 
   disconnect(): void {
+    this.lifecycleGeneration++;
     this.closed = true;
     this.shouldReconnect = false;
 
@@ -667,17 +810,57 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     this._settlePending({ kind: 'reject', error: new Error('Client disconnected'), force: true });
 
-    if (this.ws) {
-      const ws = this.ws;
-      this.ws = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close(1000, 'Client disconnect');
-      }
-    }
+    this._releasePageSessionOwner();
+    this._closeCurrentSocketForHandoff('Client disconnect');
 
     this._connected = false;
     this._connecting = false;
+    this.connectPromise = null;
+    this.lastInitAck = null;
     this.emit('disconnected', 'Client initiated disconnect');
+  }
+
+  private _claimPageSessionOwner(sessionId: string | null): void {
+    if (!sessionId) return;
+
+    if (this.pageSessionOwner && this.pageSessionOwner !== sessionId) {
+      this._releasePageSessionOwner();
+    }
+
+    const previous = pageSessionOwners.get(sessionId);
+    if (previous && previous !== this) {
+      logger.info('BrowserClient', 'Handing off same-page session owner', {
+        sessionId,
+      });
+      previous.disconnect();
+    }
+
+    pageSessionOwners.set(sessionId, this);
+    this.pageSessionOwner = sessionId;
+  }
+
+  private _releasePageSessionOwner(): void {
+    if (
+      this.pageSessionOwner &&
+      pageSessionOwners.get(this.pageSessionOwner) === this
+    ) {
+      pageSessionOwners.delete(this.pageSessionOwner);
+    }
+    this.pageSessionOwner = null;
+  }
+
+  private _closeCurrentSocketForHandoff(reason: string): void {
+    const socket = this.ws;
+    if (!socket) return;
+
+    this.ws = null;
+    this.connectionGeneration++;
+    if (this._sessionId) {
+      registerSessionCloseHandoff(this._sessionId, socket);
+    }
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close(1000, reason);
+    }
   }
 
   // ============================================================================
@@ -749,12 +932,18 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this.emit('reconnecting', this.reconnectAttempt);
 
     this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
       if (!this._sessionId || this.closed) return;
 
       try {
-        await this._doConnect(this._sessionId);
+        await this.connect(this._sessionId);
       } catch {
-        this._handleClose(4001, 'Reconnect failed');
+        // A socket close during the handshake already schedules the next
+        // attempt. Only synthesize a close when connect() failed without a
+        // close event (for example, the WebSocket constructor threw).
+        if (this._reconnecting && !this.reconnectTimer) {
+          this._handleClose(4001, 'Reconnect failed');
+        }
       }
     }, delay);
   }
@@ -780,13 +969,16 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       }
     }
 
+    if (!wasConnected && this._connecting && this.pendingConnectReject) {
+      // Every failed handshake must settle its single-flight promise. During
+      // automatic reconnect the close path continues below to schedule the
+      // next attempt; the timer catch sees that timer and does not duplicate it.
+      this._connecting = false;
+      this.pendingConnectReject(new Error(`WebSocket closed during handshake: ${reason}`));
+      this.pendingConnectReject = null;
+    }
+
     if (!wasConnected && !this._reconnecting) {
-      // Connection closed before or during handshake — reject pending connect
-      if (this._connecting && this.pendingConnectReject) {
-        this._connecting = false;
-        this.pendingConnectReject(new Error(`WebSocket closed during handshake: ${reason}`));
-        this.pendingConnectReject = null;
-      }
       return;
     }
 

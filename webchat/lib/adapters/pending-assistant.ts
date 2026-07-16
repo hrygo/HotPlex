@@ -14,6 +14,18 @@ export function createPendingAssistantMessage(
     };
 }
 
+// Empty parts identify a local pending placeholder. It must stay visible until
+// the first Worker event replaces it with content.
+export function isVisibleAdapterMessage(
+    message: Pick<HotPlexMessage, "parts">,
+): boolean {
+    return message.parts.length === 0 ||
+        !message.parts.every(
+            (part) =>
+                part.type === "context-usage" || part.type === "turn-summary",
+        );
+}
+
 export function matchesActiveInput(
     activeClientMessageID: string | null,
     acknowledgedClientMessageID: string,

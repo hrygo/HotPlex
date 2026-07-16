@@ -15,7 +15,7 @@ function getSeverity(pct: number): Severity {
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   const k = n / 1000;
-  return k % 1 === 0 ? `${k}K` : `~${k.toFixed(1)}K}`;
+  return k % 1 === 0 ? `${k}K` : `~${k.toFixed(1)}K`;
 }
 
 function formatDuration(ms: number): string {
@@ -28,8 +28,8 @@ function formatDuration(ms: number): string {
 }
 
 function formatCost(usd: number): string {
-  if (usd < 0.01) return '';
-  if (usd < 1) return `$${usd.toFixed(2)}`;
+  if (usd <= 0) return '';
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
 }
 
@@ -56,24 +56,49 @@ const severityConfig: Record<Severity, { color: string; bg: string; border: stri
   },
 };
 
-export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
-  const pct = Math.max(0, Math.min(100, data.context_pct ?? 0));
+export function TurnSummaryCard({ data: rawData }: { data: TurnSessionStats }) {
+  console.log("TurnSummaryCard stats data:", rawData);
+  const data = (rawData || {}) as any;
+
+  const pct = Math.max(0, Math.min(100, data.context_pct ?? data.contextPct ?? 0));
+  const contextWindow = data.context_window ?? data.contextWindow ?? 0;
   const severity = getSeverity(pct);
   const cfg = severityConfig[severity];
 
   const parts: string[] = [];
 
-  if (data.model_name) parts.push(data.model_name);
-  if (pct > 0 && data.context_window > 0) {
+  const modelName = data.model_name ?? data.modelName;
+  if (modelName) parts.push(modelName);
+  if (pct > 0 && contextWindow > 0) {
     parts.push(`${Math.round(pct)}%`);
   }
-  if (data.turn_duration_ms > 0) {
-    parts.push(formatDuration(data.turn_duration_ms));
+  const inputTok = data.turn_input_tok ?? data.turnInputTok ?? data.total_input_tok ?? data.totalInputTok ?? 0;
+  const outputTok = data.turn_output_tok ?? data.turnOutputTok ?? data.total_output_tok ?? data.totalOutputTok ?? 0;
+  if (inputTok > 0 || outputTok > 0) {
+    parts.push(`📥 ${formatTokens(inputTok)} · 📤 ${formatTokens(outputTok)}`);
   }
-  if (data.tool_call_count > 0) {
-    parts.push(`🛠 ${data.tool_call_count}`);
+  const durationMs = data.turn_duration_ms ?? data.turnDurationMs ?? 0;
+  if (durationMs > 0) {
+    parts.push(`⏱️ ${formatDuration(durationMs)}`);
   }
-  const cost = data.turn_cost_usd ? formatCost(data.turn_cost_usd) : '';
+  const gitBranch = data.git_branch ?? data.gitBranch;
+  if (gitBranch) {
+    parts.push(`🌿 ${gitBranch}`);
+  }
+  const toolCallCount = data.tool_call_count ?? data.toolCallCount ?? 0;
+  if (toolCallCount > 0) {
+    let toolStr = `🛠 ${toolCallCount}`;
+    const toolNames = data.tool_names ?? data.toolNames;
+    if (toolNames && Object.keys(toolNames).length > 0) {
+      const names = Object.entries(toolNames)
+        .map(([name, count]) => (count as number) > 1 ? `${name}×${count}` : name)
+        .join(', ');
+      toolStr += ` (${names})`;
+    }
+    parts.push(toolStr);
+  }
+  const costVal = data.turn_cost_usd ?? data.turnCostUsd ?? data.turnCostUSD ?? data.total_cost_usd ?? data.totalCostUsd ?? data.totalCostUSD ?? 0;
+  const cost = costVal ? formatCost(costVal) : '';
   if (cost) parts.push(cost);
 
   if (parts.length === 0) return null;
@@ -83,10 +108,10 @@ export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
-      className="my-1.5 rounded-[var(--radius-sm)] px-3 py-1.5 flex items-center gap-2 flex-wrap"
+      className="my-1.5 rounded-[var(--radius-sm)] px-3 py-1.5 flex items-center gap-2 flex-wrap w-fit"
       style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
     >
-      {pct > 0 && data.context_window > 0 && (
+      {pct > 0 && contextWindow > 0 && (
         <div className="flex items-center gap-1.5">
           <span
             className="block w-1.5 h-1.5 rounded-full"

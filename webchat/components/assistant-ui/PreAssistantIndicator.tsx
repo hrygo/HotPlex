@@ -22,10 +22,13 @@ export function PreAssistantIndicator() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: "easeOut" }}
     >
-      <div className="flex-shrink-0">
-        <div className="w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] flex items-center justify-center border border-[var(--border-subtle)] relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-tr from-[var(--accent-gold)]/10 to-transparent animate-pulse" />
-          <BrandIcon size={24} className="opacity-40 animate-pulse-subtle" />
+      <div className="flex-shrink-0 relative">
+        <div className="absolute inset-0 rounded-[var(--radius-md)] border border-transparent animate-avatar-ripple-1 -z-10" />
+        <div className="absolute inset-0 rounded-[var(--radius-md)] border border-transparent animate-avatar-ripple-2 -z-10" />
+        <div className="w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--accent-gold)]/60 shadow-[0_0_20px_rgba(251,191,36,0.4)] scale-[1.04] flex items-center justify-center relative overflow-hidden transition-all duration-500">
+          <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/40 via-purple-600/30 to-[var(--accent-emerald)]/20 animate-gradient-shift" />
+          <div className="absolute inset-[1px] rounded-[calc(var(--radius-md)-1px)] border border-white/10 bg-transparent" />
+          <BrandIcon size={24} className="transition-all duration-500 relative z-10 opacity-100 scale-105 filter drop-shadow-[0_0_6px_rgba(251,191,36,0.65)] animate-avatar-breath" />
         </div>
       </div>
 

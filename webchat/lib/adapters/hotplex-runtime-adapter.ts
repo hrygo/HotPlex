@@ -70,6 +70,7 @@ import {
 import {
     completeStreamingAssistant,
     createPendingAssistantMessage,
+    isVisibleAdapterMessage,
     matchesActiveInput,
     removePendingAssistant,
     updatePendingAssistant,
@@ -151,7 +152,7 @@ const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [];
  * Converts HotPlex message to assistant-ui ThreadMessageLike format.
  * Handles both old format (content: string) and new format (parts: MessagePart[]).
  */
-function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
+export function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
     // Filter out ToolSummaryPart, ContextUsagePart, and TurnSummaryPart — not recognized by assistant-ui's ThreadMessageLike type
     const parts = message.parts ?? [];
     const content = parts.filter(
@@ -182,11 +183,13 @@ function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
         createdAt: message.createdAt,
         attachments: [] as const,
         metadata: {
-            ...(contextUsagePart
-                ? { contextUsage: contextUsagePart.data }
-                : {}),
-            ...(turnSummaryPart ? { turnSummary: turnSummaryPart.data } : {}),
-            ...(message.progress ? { progress: message.progress } : {}),
+            custom: {
+                ...(contextUsagePart
+                    ? { contextUsage: contextUsagePart.data }
+                    : {}),
+                ...(turnSummaryPart ? { turnSummary: turnSummaryPart.data } : {}),
+                ...(message.progress ? { progress: message.progress } : {}),
+            },
         } satisfies Record<string, unknown>,
     } as ThreadMessageLike & {
         status?: { type: "running" } | { type: "complete"; reason: string };
@@ -1283,7 +1286,7 @@ export function useHotPlexRuntime({
             if (!matchesActiveInput(activeInputMessageIdRef.current, data.client_message_id)) {
                 return;
             }
-            if (data.status === "delivered") {
+            if (data.status === "accepted" || data.status === "delivered") {
                 setMessages((prev) =>
                     updatePendingAssistant(
                         prev,
@@ -1612,6 +1615,54 @@ export function useHotPlexRuntime({
             throw new Error("HotPlex client not initialized.");
         }
 
+        const textContent = Array.isArray(message.content)
+            ? message.content
+                  .filter(
+                      (part): part is { type: "text"; text: string } =>
+                          part.type === "text",
+                  )
+                  .map((part) => part.text)
+                  .join("")
+            : "";
+        if (!textContent.trim()) {
+            return;
+        }
+
+        const userMessage: HotPlexMessage = {
+            id: `user-${Date.now()}`,
+            role: "user",
+            parts: [{ type: "text", text: textContent }],
+            createdAt: new Date(),
+            status: "complete",
+        };
+        const assistantID = `assistant-local-${Date.now()}`;
+        const pendingAssistant = createPendingAssistantMessage(
+            assistantID,
+            new Date(),
+        );
+        const rollbackOptimisticInput = () => {
+            pendingAssistantIdRef.current = null;
+            activeAssistantIdRef.current = null;
+            activeInputMessageIdRef.current = null;
+            setIsRunning(false);
+            setMessages((prev) =>
+                prev.filter(
+                    (current) =>
+                        current.id !== userMessage.id &&
+                        current.id !== assistantID,
+                ),
+            );
+        };
+
+        // Insert feedback before reconnecting: WebSocket recovery can take
+        // seconds, but it must not create a blank interval in the thread.
+        pendingAssistantIdRef.current = assistantID;
+        activeAssistantIdRef.current = assistantID;
+        activeInputMessageIdRef.current = null;
+        setMessages((prev) => [...prev, userMessage, pendingAssistant]);
+        setIsRunning(true);
+        startTurn();
+
         // Handle disconnected state: attempt to reconnect if not already connecting
         if (!client.connected) {
             logger.info(
@@ -1675,6 +1726,7 @@ export function useHotPlexRuntime({
                     }
                 });
             } catch (err) {
+                rollbackOptimisticInput();
                 throw new Error(
                     err instanceof Error
                         ? err.message
@@ -1683,60 +1735,12 @@ export function useHotPlexRuntime({
             }
         }
 
-        // Extract text content from message parts
-        const textContent = Array.isArray(message.content)
-            ? message.content
-                  .filter(
-                      (part): part is { type: "text"; text: string } =>
-                          part.type === "text",
-                  )
-                  .map((part) => part.text)
-                  .join("")
-            : "";
-
-        if (!textContent.trim()) {
-            return;
-        }
-
-        // 1. Add user message to state
-        const userMessage: HotPlexMessage = {
-            id: `user-${Date.now()}`,
-            role: "user",
-            parts: [{ type: "text", text: textContent }],
-            createdAt: new Date(),
-            status: "complete",
-        };
-        const assistantID = `assistant-local-${Date.now()}`;
-        const pendingAssistant = createPendingAssistantMessage(
-            assistantID,
-            new Date(),
-        );
-
-        // The user message and local assistant placeholder must enter state in
-        // one update so the first frame always shows that the turn is pending.
-        pendingAssistantIdRef.current = assistantID;
-        activeAssistantIdRef.current = assistantID;
-        activeInputMessageIdRef.current = null;
-        setMessages((prev) => [...prev, userMessage, pendingAssistant]);
-        setIsRunning(true);
-        startTurn(); // Begin timing for metrics
-
         // Send to HotPlex gateway with error handling
         try {
             activeInputMessageIdRef.current = client.sendInput(textContent);
         } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            // The optimistically-added user message did not go out — remove it.
-            pendingAssistantIdRef.current = null;
-            activeAssistantIdRef.current = null;
-            activeInputMessageIdRef.current = null;
-            setMessages((prev) =>
-                prev.filter(
-                    (message) =>
-                        message.id !== userMessage.id &&
-                        message.id !== assistantID,
-                ),
-            );
+            rollbackOptimisticInput();
             if (errMsg === "Input already pending") {
                 // A previous turn is still in flight (often an unknown-outcome
                 // tombstone). This is not a connection fault.
@@ -1987,14 +1991,7 @@ export function useHotPlexRuntime({
                 (m): m is HotPlexMessage =>
                     !!m && (m.role === "user" || m.role === "assistant"),
             )
-            .filter(
-                (m) =>
-                    !m.parts.every(
-                        (p) =>
-                            p.type === "context-usage" ||
-                            p.type === "turn-summary",
-                    ),
-            )
+            .filter(isVisibleAdapterMessage)
             .filter((m) => {
                 // Layer 1: exact ID dedup
                 if (seenIds.has(m.id)) return false;

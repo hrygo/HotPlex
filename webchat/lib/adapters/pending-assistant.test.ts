@@ -3,6 +3,7 @@ import type { HotPlexMessage } from "@/lib/types/message";
 import {
     completeStreamingAssistant,
     createPendingAssistantMessage,
+    isVisibleAdapterMessage,
     matchesActiveInput,
     removePendingAssistant,
     updatePendingAssistant,
@@ -21,6 +22,10 @@ describe("pending assistant state", () => {
             status: "streaming",
             progress: "thinking",
         });
+    });
+
+    it("keeps an empty local placeholder visible to the thread adapter", () => {
+        expect(isVisibleAdapterMessage(pending())).toBe(true);
     });
 
     it("adopts the placeholder without changing its ID for delta-first output", () => {

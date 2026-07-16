@@ -5,9 +5,11 @@ import type { ContextUsageData, TurnSessionStats } from "@/lib/ai-sdk-transport/
 export interface ThreadMessageExtension {
   status?: { type: string };
   metadata?: {
-    contextUsage?: ContextUsageData;
-    turnSummary?: TurnSessionStats;
-    progress?: 'thinking' | 'accepted';
+    custom?: {
+      contextUsage?: ContextUsageData;
+      turnSummary?: TurnSessionStats;
+      progress?: 'thinking' | 'accepted';
+    };
   };
   content: unknown[];
 }
@@ -24,9 +26,13 @@ export const messageVariants = {
  
 export function extractCommand(args: any) { return args?.command || args?.Command || ""; }
  
-export function extractFilePath(args: any) { return args?.file_path || args?.path || args?.target_file; }
+export function extractFilePath(args: any) { 
+  return args?.file_path || args?.path || args?.target_file || args?.TargetFile || args?.targetFile || args?.AbsolutePath || args?.absolutePath || ""; 
+}
  
-export function extractFileContent(args: any, result: any) { return args?.content || args?.code || (typeof result === "string" ? result : ""); }
+export function extractFileContent(args: any, result: any) { 
+  return args?.content || args?.code || args?.ReplacementContent || args?.CodeContent || (typeof result === "string" ? result : ""); 
+}
 
 export interface Suggestion {
   title: string;
