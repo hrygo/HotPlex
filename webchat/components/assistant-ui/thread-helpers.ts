@@ -5,9 +5,11 @@ import type { ContextUsageData, TurnSessionStats } from "@/lib/ai-sdk-transport/
 export interface ThreadMessageExtension {
   status?: { type: string };
   metadata?: {
-    contextUsage?: ContextUsageData;
-    turnSummary?: TurnSessionStats;
-    progress?: 'thinking' | 'accepted';
+    custom?: {
+      contextUsage?: ContextUsageData;
+      turnSummary?: TurnSessionStats;
+      progress?: 'thinking' | 'accepted';
+    };
   };
   content: unknown[];
 }
