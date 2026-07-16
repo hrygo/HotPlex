@@ -28,8 +28,8 @@ function formatDuration(ms: number): string {
 }
 
 function formatCost(usd: number): string {
-  if (usd < 0.01) return '';
-  if (usd < 1) return `$${usd.toFixed(2)}`;
+  if (usd <= 0) return '';
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
 }
 
@@ -57,6 +57,7 @@ const severityConfig: Record<Severity, { color: string; bg: string; border: stri
 };
 
 export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
+  console.log("TurnSummaryCard stats data:", data);
   const pct = Math.max(0, Math.min(100, data.context_pct ?? 0));
   const severity = getSeverity(pct);
   const cfg = severityConfig[severity];
@@ -67,8 +68,10 @@ export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
   if (pct > 0 && data.context_window > 0) {
     parts.push(`${Math.round(pct)}%`);
   }
-  if (data.turn_input_tok > 0 || data.turn_output_tok > 0) {
-    parts.push(`📥 ${formatTokens(data.turn_input_tok)} · 📤 ${formatTokens(data.turn_output_tok)}`);
+  const inputTok = data.turn_input_tok || data.total_input_tok;
+  const outputTok = data.turn_output_tok || data.total_output_tok;
+  if (inputTok > 0 || outputTok > 0) {
+    parts.push(`📥 ${formatTokens(inputTok)} · 📤 ${formatTokens(outputTok)}`);
   }
   if (data.turn_duration_ms > 0) {
     parts.push(`⏱️ ${formatDuration(data.turn_duration_ms)}`);
@@ -86,7 +89,8 @@ export function TurnSummaryCard({ data }: { data: TurnSessionStats }) {
     }
     parts.push(toolStr);
   }
-  const cost = data.turn_cost_usd ? formatCost(data.turn_cost_usd) : '';
+  const costVal = data.turn_cost_usd || data.total_cost_usd;
+  const cost = costVal ? formatCost(costVal) : '';
   if (cost) parts.push(cost);
 
   if (parts.length === 0) return null;
