@@ -25,6 +25,295 @@ function envelope(type: string, data: unknown): Envelope {
     };
 }
 
+class ControlledWebSocket {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    static instances: ControlledWebSocket[] = [];
+
+    readonly url: string;
+    readyState = ControlledWebSocket.CONNECTING;
+    sent: string[] = [];
+    onclose: ((event: CloseEvent) => void) | null = null;
+    private listeners = new Map<string, Set<(event: any) => void>>();
+
+    constructor(url: string) {
+        this.url = url;
+        ControlledWebSocket.instances.push(this);
+    }
+
+    static reset(): void {
+        ControlledWebSocket.instances = [];
+    }
+
+    addEventListener(type: string, listener: (event: any) => void): void {
+        const listeners = this.listeners.get(type) ?? new Set();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+    }
+
+    send(data: string): void {
+        this.sent.push(data);
+    }
+
+    close(): void {
+        if (this.readyState === ControlledWebSocket.CLOSED) return;
+        this.readyState = ControlledWebSocket.CLOSING;
+    }
+
+    open(): void {
+        this.readyState = ControlledWebSocket.OPEN;
+        this.dispatch("open", {});
+    }
+
+    message(value: Envelope): void {
+        this.dispatch("message", { data: JSON.stringify(value) });
+    }
+
+    finishClose(code = 1000, reason = "closed"): void {
+        this.readyState = ControlledWebSocket.CLOSED;
+        const event = { code, reason } as CloseEvent;
+        this.dispatch("close", event);
+        this.onclose?.(event);
+    }
+
+    private dispatch(type: string, event: any): void {
+        for (const listener of this.listeners.get(type) ?? []) {
+            listener(event);
+        }
+    }
+}
+
+function initAck(sessionId: string): Envelope {
+    return {
+        ...envelope(EventKind.InitAck, { state: "running" }),
+        session_id: sessionId,
+    };
+}
+
+describe("BrowserHotPlexClient connection handoff", () => {
+    afterEach(() => {
+        ControlledWebSocket.reset();
+    });
+
+    it("coalesces concurrent connect calls for the same client", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const first = client.connect("session-single-flight");
+        const second = client.connect("session-single-flight");
+
+        await Promise.resolve();
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message(initAck("session-single-flight"));
+
+        await expect(first).resolves.toMatchObject({ state: "running" });
+        await expect(second).resolves.toMatchObject({ state: "running" });
+        client.disconnect();
+        socket.finishClose();
+    });
+
+    it("does not let a rejected cross-session connect corrupt the active target", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const activeConnect = client.connect("session-a");
+        await expect(client.connect("session-b")).rejects.toThrow(
+            "Connection already in progress for another session",
+        );
+        expect(client.sessionId).toBe("session-a");
+
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message(initAck("session-a"));
+        await expect(activeConnect).resolves.toMatchObject({ state: "running" });
+        expect(client.sessionId).toBe("session-a");
+        client.disconnect();
+        socket.finishClose();
+    });
+
+    it("waits for the previous instance to close before opening the same session", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const firstClient = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const firstConnect = firstClient.connect("session-remount");
+        await Promise.resolve();
+        const firstSocket = ControlledWebSocket.instances[0];
+        firstSocket.open();
+        firstSocket.message(initAck("session-remount"));
+        await firstConnect;
+
+        firstClient.disconnect();
+        const nextClient = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const nextConnect = nextClient.connect("session-remount");
+        void nextConnect.catch(() => undefined);
+
+        await Promise.resolve();
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+
+        firstSocket.finishClose();
+        await vi.waitFor(() => {
+            expect(ControlledWebSocket.instances).toHaveLength(2);
+        });
+
+        const nextSocket = ControlledWebSocket.instances[1];
+        nextSocket.open();
+        nextSocket.message(initAck("session-remount"));
+        await expect(nextConnect).resolves.toMatchObject({ state: "running" });
+
+        nextClient.sendPermissionResponse("permission-remount", true);
+        nextClient.sendQuestionResponse("question-remount", { choice: "yes" });
+        nextClient.sendElicitationResponse("elicitation-remount", "accept", { value: "ok" });
+        expect(nextSocket.sent.slice(-3).map((line) => JSON.parse(line).event.type)).toEqual([
+            EventKind.PermissionResponse,
+            EventKind.QuestionResponse,
+            EventKind.ElicitationResponse,
+        ]);
+
+        nextClient.disconnect();
+        nextSocket.finishClose();
+    });
+
+    it("reconnects instead of returning a stale ack for a closing socket", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const firstConnect = client.connect("session-closing");
+        await Promise.resolve();
+        const firstSocket = ControlledWebSocket.instances[0];
+        firstSocket.open();
+        firstSocket.message(initAck("session-closing"));
+        await firstConnect;
+
+        firstSocket.readyState = ControlledWebSocket.CLOSING;
+        const reconnect = client.connect("session-closing");
+        await Promise.resolve();
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+
+        firstSocket.finishClose();
+        await vi.waitFor(() => {
+            expect(ControlledWebSocket.instances).toHaveLength(2);
+        });
+        const nextSocket = ControlledWebSocket.instances[1];
+        nextSocket.open();
+        nextSocket.message(initAck("session-closing"));
+        await expect(reconnect).resolves.toMatchObject({ state: "running" });
+        client.disconnect();
+        nextSocket.finishClose();
+    });
+
+    it("backs off before retrying one locally handed-off duplicate", async () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const firstClient = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const firstConnect = firstClient.connect("session-local-retry");
+        await Promise.resolve();
+        const firstSocket = ControlledWebSocket.instances[0];
+        firstSocket.open();
+        firstSocket.message(initAck("session-local-retry"));
+        await firstConnect;
+        firstClient.disconnect();
+
+        const nextClient = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const conflict = vi.fn();
+        nextClient.on("sessionAlreadyConnected", conflict);
+        const nextConnect = nextClient.connect("session-local-retry");
+
+        firstSocket.finishClose();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(ControlledWebSocket.instances).toHaveLength(2);
+        const rejectedSocket = ControlledWebSocket.instances[1];
+        rejectedSocket.open();
+        rejectedSocket.message({
+            ...initAck("session-local-retry"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    code: ErrorCode.SessionAlreadyConnected,
+                    error: "session already has an active WebSocket connection",
+                },
+            },
+        });
+
+        expect(conflict).not.toHaveBeenCalled();
+        rejectedSocket.finishClose();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(99);
+        expect(ControlledWebSocket.instances).toHaveLength(2);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ControlledWebSocket.instances).toHaveLength(3);
+
+        const retrySocket = ControlledWebSocket.instances[2];
+        retrySocket.open();
+        retrySocket.message(initAck("session-local-retry"));
+        await expect(nextConnect).resolves.toMatchObject({ state: "running" });
+        expect(conflict).not.toHaveBeenCalled();
+        nextClient.disconnect();
+        retrySocket.finishClose();
+    });
+
+    it("invalidates a connect that was waiting when the client disconnects", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const owner = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const ownerConnect = owner.connect("session-cancel-waiter");
+        await Promise.resolve();
+        const ownerSocket = ControlledWebSocket.instances[0];
+        ownerSocket.open();
+        ownerSocket.message(initAck("session-cancel-waiter"));
+        await ownerConnect;
+        owner.disconnect();
+
+        const replacement = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const cancelledConnect = replacement.connect("session-cancel-waiter");
+        const cancelled = expect(cancelledConnect).rejects.toThrow("Client is closed");
+        replacement.disconnect();
+        const activeConnect = replacement.connect("session-cancel-waiter");
+
+        ownerSocket.finishClose();
+        await cancelled;
+        await vi.waitFor(() => {
+            expect(ControlledWebSocket.instances).toHaveLength(2);
+        });
+
+        const activeSocket = ControlledWebSocket.instances[1];
+        activeSocket.open();
+        activeSocket.message(initAck("session-cancel-waiter"));
+        await expect(activeConnect).resolves.toMatchObject({ state: "running" });
+        replacement.disconnect();
+        activeSocket.finishClose();
+    });
+});
+
 describe("BrowserHotPlexClient interaction acknowledgements", () => {
     it.each([
         [EventKind.PermissionResponse, "permissionResponse", { id: "permission-1", allowed: true }],
