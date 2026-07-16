@@ -1083,7 +1083,8 @@ func TestBridge_NewBridge(t *testing.T) {
 
 // fakeWorkerConn implements worker.SessionConn with a fake channel.
 type fakeWorkerConn struct {
-	ch chan *events.Envelope
+	ch        chan *events.Envelope
+	lastInput string
 }
 
 func (f *fakeWorkerConn) Send(ctx context.Context, msg *events.Envelope) error { return nil }
@@ -1091,8 +1092,10 @@ func (f *fakeWorkerConn) Recv() <-chan *events.Envelope                        {
 func (f *fakeWorkerConn) Close() error                                         { return nil }
 func (f *fakeWorkerConn) UserID() string                                       { return "test_user" }
 func (f *fakeWorkerConn) SessionID() string                                    { return "test_session" }
+func (f *fakeWorkerConn) LastInput() string                                    { return f.lastInput }
 
 var _ worker.SessionConn = (*fakeWorkerConn)(nil)
+var _ worker.InputRecoverer = (*fakeWorkerConn)(nil)
 
 // fakeWorker is a minimal worker.Worker implementation for Bridge tests.
 type fakeWorker struct {

@@ -88,6 +88,12 @@ histogram_quantile(0.95, rate(hotplex_worker_execution_duration_bucket[5m]))
 sum by (worker_type) (hotplex_worker_memory_bytes)
 ```
 
+## Gateway Forwarder 指标
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.gateway.forwarder.panics` | Counter | Worker 事件转发 goroutine 已恢复的 panic 数，label: `worker_type` |
+
 ## Turn TTFT 指标
 
 | 指标 | 类型 | 说明 |

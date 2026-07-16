@@ -85,15 +85,19 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	}
 	ctx, span := observability.Tracer().Start(parent, "bridge.forward_events")
 	defer span.End()
+	w := fb.worker
+	workerType := w.Type()
 	flog := b.log.With("trace_id", observability.TraceID(ctx))
 	defer func() {
 		if r := recover(); r != nil {
-			flog.Error("bridge: panic in forwardEvents", "session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
+			observability.GatewayForwarderPanics().Add(context.Background(), 1,
+				metric.WithAttributes(attribute.String("worker_type", string(workerType))))
+			flog.Error("bridge: panic in forwardEvents", "session_id", sessionID,
+				"worker_type", workerType, "worker_run_id", opts.workerRunID,
+				"panic", r, "stack", string(debug.Stack()))
 		}
 	}()
 
-	w := fb.worker
-	workerType := w.Type()
 	flog.Debug("bridge: forwardEvents goroutine started", "session_id", sessionID,
 		"worker_type", workerType, "resumed", opts.resumed,
 		"has_frozen_conn", fb.conn != nil, "forwarder_reset_gen", fb.resetGen,
@@ -196,6 +200,12 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	for env := range recvCh {
 		b.processForwardedEvent(env, w, opts, fc)
 	}
+	// Wait() can release the live Worker.Conn. Read from the connection that
+	// supplied this forwarder's events before that cleanup so crash recovery
+	// re-delivers the correct turn input and never observes a replacement/reset
+	// connection. In the defensive nil-frozen-Conn path this also preserves the
+	// input from the live fallback that actually supplied the event stream.
+	lastInput := snapshotLastInput(recvSource)
 	if !fc.doneReceived {
 		b.finishTurnTTFT(sessionID, "worker_exit")
 	}
@@ -233,8 +243,17 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		sessPlatform:   fc.sessPlatform,
 		sessOwner:      fc.sessOwner,
 		resetGen:       myResetGen,
+		lastInput:      lastInput,
 		flog:           flog,
 	})
+}
+
+func snapshotLastInput(conn worker.SessionConn) string {
+	ir, ok := conn.(worker.InputRecoverer)
+	if !ok {
+		return ""
+	}
+	return sanitizeLastInput(ir.LastInput())
 }
 
 // processForwardedEvent handles a single worker event in the forwarding loop.
@@ -749,6 +768,9 @@ type workerExitParams struct {
 	// flog carries trace_id from the originating forwardEvents span so exit-path
 	// logs stay correlatable with the run that produced them.
 	flog *slog.Logger
+	// lastInput was captured from the frozen forwarder connection before Wait()
+	// releases the worker's mutable live connection.
+	lastInput string
 }
 
 // handleWorkerExit processes worker exit after the recv channel closes.
@@ -828,12 +850,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		p.opts.retryDepth = 1
 	}
 	if fallbackAttempted {
-		var lastInput string
-		if conn := w.Conn(); conn != nil {
-			if ir, ok := conn.(worker.InputRecoverer); ok {
-				lastInput = sanitizeLastInput(ir.LastInput())
-			}
-		}
+		lastInput := p.lastInput
 		if lastInput == "" {
 			lastInput = p.opts.lastInput
 		}

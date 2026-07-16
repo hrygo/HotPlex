@@ -338,6 +338,9 @@ var (
 	gatewayErrors     metric.Int64Counter
 	gatewayErrorsInit sync.Once
 
+	gatewayForwarderPanics     metric.Int64Counter
+	gatewayForwarderPanicsInit sync.Once
+
 	gatewayInitHandshakeDuration     metric.Float64Histogram
 	gatewayInitHandshakeDurationInit sync.Once
 
@@ -513,6 +516,22 @@ func GatewayErrors() metric.Int64Counter {
 		}
 	})
 	return gatewayErrors
+}
+
+// GatewayForwarderPanics counts recovered panics in the per-session worker
+// event forwarder. The worker_type label is a bounded worker enum.
+func GatewayForwarderPanics() metric.Int64Counter {
+	gatewayForwarderPanicsInit.Do(func() {
+		var err error
+		gatewayForwarderPanics, err = Meter().Int64Counter(
+			"hotplex.gateway.forwarder.panics",
+			metric.WithDescription("Recovered panics in worker event forwarders"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.gateway.forwarder.panics", err)
+		}
+	})
+	return gatewayForwarderPanics
 }
 
 func GatewayInitHandshakeDuration() metric.Float64Histogram {
