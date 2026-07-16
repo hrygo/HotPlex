@@ -189,6 +189,46 @@ describe("BrowserHotPlexClient connection handoff", () => {
         nextSocket.finishClose();
     });
 
+    it("hands off an active same-page client before opening a replacement", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const firstClient = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const firstConnect = firstClient.connect("session-page-owner");
+        await Promise.resolve();
+        const firstSocket = ControlledWebSocket.instances[0];
+        firstSocket.open();
+        firstSocket.message(initAck("session-page-owner"));
+        await firstConnect;
+
+        const replacement = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const replacementConnect = replacement.connect("session-page-owner");
+        void replacementConnect.catch(() => undefined);
+
+        await Promise.resolve();
+        expect(firstSocket.readyState).toBe(ControlledWebSocket.CLOSING);
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+
+        firstSocket.finishClose();
+        await vi.waitFor(() => {
+            expect(ControlledWebSocket.instances).toHaveLength(2);
+        });
+
+        const replacementSocket = ControlledWebSocket.instances[1];
+        replacementSocket.open();
+        replacementSocket.message(initAck("session-page-owner"));
+        await expect(replacementConnect).resolves.toMatchObject({
+            state: "running",
+        });
+
+        replacement.disconnect();
+        replacementSocket.finishClose();
+    });
+
     it("reconnects instead of returning a stale ack for a closing socket", async () => {
         vi.stubGlobal("WebSocket", ControlledWebSocket);
         const client = new BrowserHotPlexClient({

@@ -119,6 +119,11 @@ const DEFAULT_HEARTBEAT_CONFIG = {
 const CLOSE_HANDOFF_TIMEOUT_MS = 2_000;
 const LOCAL_HANDOFF_RETRY_DELAY_MS = 100;
 const sessionCloseHandoffs = new Map<string, Promise<void>>();
+// A browser page can temporarily mount two runtime instances for one session
+// (for example during Fast Refresh). Keep a page-local owner so the newer
+// instance explicitly closes the older socket before connecting. Module state
+// is isolated per tab, preserving server-side protection across tabs/devices.
+const pageSessionOwners = new Map<string, BrowserHotPlexClient>();
 
 function registerSessionCloseHandoff(sessionId: string, socket: WebSocket): void {
   let finish!: () => void;
@@ -210,6 +215,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private connectionGeneration = 0;
   private lifecycleGeneration = 0;
   private localHandoffRetryAvailable = false;
+  private pageSessionOwner: string | null = null;
 
   private closed = false;
 
@@ -274,6 +280,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       }
       return Promise.reject(new Error('Connection already in progress for another session'));
     }
+
+    this._claimPageSessionOwner(target);
 
     if (this._connected && this.connectTarget === target && this.ws) {
       this._stopHeartbeat();
@@ -802,6 +810,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     this._settlePending({ kind: 'reject', error: new Error('Client disconnected'), force: true });
 
+    this._releasePageSessionOwner();
     this._closeCurrentSocketForHandoff('Client disconnect');
 
     this._connected = false;
@@ -809,6 +818,35 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this.connectPromise = null;
     this.lastInitAck = null;
     this.emit('disconnected', 'Client initiated disconnect');
+  }
+
+  private _claimPageSessionOwner(sessionId: string | null): void {
+    if (!sessionId) return;
+
+    if (this.pageSessionOwner && this.pageSessionOwner !== sessionId) {
+      this._releasePageSessionOwner();
+    }
+
+    const previous = pageSessionOwners.get(sessionId);
+    if (previous && previous !== this) {
+      logger.info('BrowserClient', 'Handing off same-page session owner', {
+        sessionId,
+      });
+      previous.disconnect();
+    }
+
+    pageSessionOwners.set(sessionId, this);
+    this.pageSessionOwner = sessionId;
+  }
+
+  private _releasePageSessionOwner(): void {
+    if (
+      this.pageSessionOwner &&
+      pageSessionOwners.get(this.pageSessionOwner) === this
+    ) {
+      pageSessionOwners.delete(this.pageSessionOwner);
+    }
+    this.pageSessionOwner = null;
   }
 
   private _closeCurrentSocketForHandoff(reason: string): void {
