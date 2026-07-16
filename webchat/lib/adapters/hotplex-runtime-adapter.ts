@@ -70,6 +70,7 @@ import {
 import {
     completeStreamingAssistant,
     createPendingAssistantMessage,
+    isVisibleAdapterMessage,
     matchesActiveInput,
     removePendingAssistant,
     updatePendingAssistant,
@@ -1987,14 +1988,7 @@ export function useHotPlexRuntime({
                 (m): m is HotPlexMessage =>
                     !!m && (m.role === "user" || m.role === "assistant"),
             )
-            .filter(
-                (m) =>
-                    !m.parts.every(
-                        (p) =>
-                            p.type === "context-usage" ||
-                            p.type === "turn-summary",
-                    ),
-            )
+            .filter(isVisibleAdapterMessage)
             .filter((m) => {
                 // Layer 1: exact ID dedup
                 if (seenIds.has(m.id)) return false;
