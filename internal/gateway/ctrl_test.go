@@ -182,6 +182,41 @@ func TestHandleInput_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestHandleInput_BlankContentIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "empty", content: ""},
+		{name: "spaces", content: "   "},
+		{name: "tabs", content: "\t\t"},
+		{name: "newlines", content: "\n\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			handler, mgr, _, _ := newHandlerWithRealStore(t)
+			sid := "sess_blank_" + tt.name
+			_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+			require.NoError(t, err)
+
+			w := new(mockWorkerForHandler)
+			w.On("Terminate", mock.Anything).Return(nil).Maybe()
+			require.NoError(t, mgr.AttachWorker(context.Background(), sid, w))
+
+			require.NoError(t, handler.handleInput(context.Background(), inputEnvelope(sid, tt.content)))
+			w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+
+			info, err := mgr.Get(context.Background(), sid)
+			require.NoError(t, err)
+			require.Equal(t, events.StateCreated, info.State)
+		})
+	}
+}
+
 func TestHandleInput_SessionNotFound(t *testing.T) {
 	t.Parallel()
 	store := new(mockStore)
