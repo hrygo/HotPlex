@@ -64,13 +64,27 @@ func (a *sessionAccumulator) mergePerTurnStats(data events.DoneData) {
 	// cache_read_input_tokens are separate additive fields (Anthropic API).
 	// Total input = input_tokens + cache_creation_input_tokens + cache_read_input_tokens.
 	if usage, ok := data.Stats["usage"].(map[string]any); ok {
-		input := events.ToInt64(usage["input_tokens"]) +
-			events.ToInt64(usage["cache_creation_input_tokens"]) +
-			events.ToInt64(usage["cache_read_input_tokens"])
-		a.TotalInput += input
-		a.TotalOutput += events.ToInt64(usage["output_tokens"])
-		a.TotalCacheWrite += events.ToInt64(usage["cache_creation_input_tokens"])
-		a.TotalCacheRead += events.ToInt64(usage["cache_read_input_tokens"])
+		inputTokens := events.ToInt64(usage["input_tokens"])
+		if inputTokens == 0 {
+			inputTokens = events.ToInt64(usage["inputTokens"])
+		}
+		cacheWrite := events.ToInt64(usage["cache_creation_input_tokens"])
+		if cacheWrite == 0 {
+			cacheWrite = events.ToInt64(usage["cacheCreationInputTokens"])
+		}
+		cacheRead := events.ToInt64(usage["cache_read_input_tokens"])
+		if cacheRead == 0 {
+			cacheRead = events.ToInt64(usage["cacheReadInputTokens"])
+		}
+		outputTokens := events.ToInt64(usage["output_tokens"])
+		if outputTokens == 0 {
+			outputTokens = events.ToInt64(usage["outputTokens"])
+		}
+
+		a.TotalInput += inputTokens + cacheWrite + cacheRead
+		a.TotalOutput += outputTokens
+		a.TotalCacheWrite += cacheWrite
+		a.TotalCacheRead += cacheRead
 	} else if tokens, ok := data.Stats["tokens"].(map[string]any); ok {
 		// OpenCode format: input/cache_read/cache_write are separate additive fields.
 		input := events.ToInt64(tokens["input"]) +

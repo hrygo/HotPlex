@@ -159,17 +159,12 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       </AnimatePresence>
 
       <div className="composer-wrapper px-4 pb-12">
-        {(conn === 'disconnected' || conn === 'reconnecting') && (
-          <div className="max-w-3xl mx-auto mb-3 flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-coral)]/10 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] text-[11px] font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse" />
-            {t(conn === 'reconnecting' ? 'status.reconnecting_banner' : 'status.disconnected_banner')}
-          </div>
-        )}
         <ThreadComposer
           skills={skills}
           isRunning={isRunning}
           isStoppingProp={isStoppingProp}
           disabled={conn === 'already_connected'}
+          connectionState={conn}
         />
         <div className="mt-2 flex justify-between items-center max-w-3xl mx-auto px-2">
           <div className="flex gap-4">
@@ -200,9 +195,10 @@ interface ThreadComposerProps {
   isRunning: boolean;
   isStoppingProp?: boolean;
   disabled?: boolean;
+  connectionState?: ConnectionState;
 }
 
-const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp, disabled }: ThreadComposerProps) {
+const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, isStoppingProp, disabled, connectionState }: ThreadComposerProps) {
   const { t } = useTranslation('chat');
   const [localText, setLocalText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -247,32 +243,42 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
         {menuOpen && <CommandMenu isOpen={menuOpen} inputValue={localText} onSelect={handleSelectCommand} onClose={() => setMenuOpen(false)} skills={skills} />}
       </AnimatePresence>
       <div className="relative">
-        <div className="absolute bottom-full left-0 right-0 z-20 mb-3 flex items-center justify-between px-1">
-          {/* Left Side: Agent Skills */}
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar animate-fadeIn max-w-[70%]">
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 shadow-sm whitespace-nowrap">
-              <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">{t('label.agent_skills')}</span>
-              <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
+        <div className="absolute bottom-full left-0 right-0 z-20 mb-3 flex flex-col gap-2.5">
+          {/* Reconnecting / Disconnected Banner */}
+          {(connectionState === 'disconnected' || connectionState === 'reconnecting') && (
+            <div className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-coral)]/10 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] text-[11px] font-medium w-full shadow-sm animate-fadeIn">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse" />
+              {t(connectionState === 'reconnecting' ? 'status.reconnecting_banner' : 'status.disconnected_banner')}
             </div>
-            {skills?.slice(0, 3).map(skill => (
-              <div key={skill.name} className="px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--text-muted)] whitespace-nowrap hover:border-[var(--text-faint)] transition-colors cursor-default">
-                {skill.name}
-              </div>
-            ))}
-            {skills && skills.length > 3 && (
-              <div className="px-1 py-1 text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-tighter">
-                +{skills.length - 3}
-              </div>
-            )}
-          </div>
+          )}
 
-          {/* Right Side: Scroll to Bottom */}
-          <ThreadPrimitive.ScrollToBottom className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-glass)] border border-[var(--border-subtle)] backdrop-blur-md shadow-[var(--shadow-sm)] text-[var(--text-muted)] hover:text-[var(--accent-gold)] hover:border-[var(--accent-gold)]/30 hover:bg-[var(--bg-hover)] transition-all active:scale-95 group/scroll whitespace-nowrap">
-            <svg className="w-3.5 h-3.5 animate-bounce-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-            </svg>
-            <span className="text-[10px] font-bold uppercase tracking-widest">{t('label.latest_messages')}</span>
-          </ThreadPrimitive.ScrollToBottom>
+          <div className="flex items-center justify-between px-1">
+            {/* Left Side: Agent Skills */}
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar animate-fadeIn max-w-[70%]">
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 shadow-sm whitespace-nowrap">
+                <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">{t('label.agent_skills')}</span>
+                <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
+              </div>
+              {skills?.slice(0, 3).map(skill => (
+                <div key={skill.name} className="px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--text-muted)] whitespace-nowrap hover:border-[var(--text-faint)] transition-colors cursor-default">
+                  {skill.name}
+                </div>
+              ))}
+              {skills && skills.length > 3 && (
+                <div className="px-1 py-1 text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-tighter">
+                  +{skills.length - 3}
+                </div>
+              )}
+            </div>
+
+            {/* Right Side: Scroll to Bottom */}
+            <ThreadPrimitive.ScrollToBottom className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-glass)] border border-[var(--border-subtle)] backdrop-blur-md shadow-[var(--shadow-sm)] text-[var(--text-muted)] hover:text-[var(--accent-gold)] hover:border-[var(--accent-gold)]/30 hover:bg-[var(--bg-hover)] transition-all active:scale-95 group/scroll whitespace-nowrap">
+              <svg className="w-3.5 h-3.5 animate-bounce-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+              <span className="text-[10px] font-bold uppercase tracking-widest">{t('label.latest_messages')}</span>
+            </ThreadPrimitive.ScrollToBottom>
+          </div>
         </div>
 
         <ComposerPrimitive.Root className="composer-root">

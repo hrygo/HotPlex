@@ -1,6 +1,9 @@
 package events
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 func IntFloat(v any) int {
 	f, _ := v.(float64)
@@ -8,7 +11,7 @@ func IntFloat(v any) int {
 }
 
 // ToInt64 converts any numeric value to int64.
-// Handles float64, int, int32, int64, and json.Number.
+// Handles float64, int, int32, int64, json.Number, string, and uints.
 func ToInt64(v any) int64 {
 	switch n := v.(type) {
 	case float64:
@@ -19,6 +22,24 @@ func ToInt64(v any) int64 {
 		return int64(n)
 	case int64:
 		return n
+	case uint:
+		return int64(n)
+	case uint32:
+		return int64(n)
+	case uint64:
+		return int64(n)
+	case string:
+		var i int64
+		// try integer parsing
+		if _, err := fmt.Sscanf(n, "%d", &i); err == nil {
+			return i
+		}
+		// try float parsing
+		var f float64
+		if _, err := fmt.Sscanf(n, "%f", &f); err == nil {
+			return int64(f)
+		}
+		return 0
 	case json.Number:
 		i, _ := n.Int64()
 		return i
