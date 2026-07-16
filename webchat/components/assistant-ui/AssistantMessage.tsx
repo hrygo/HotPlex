@@ -217,20 +217,20 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
       <div className="flex-shrink-0 relative">
         {isStreaming && (
           <>
-            <div className="absolute inset-0 rounded-[var(--radius-md)] bg-[var(--accent-gold)]/10 animate-avatar-ripple-1 -z-10" />
-            <div className="absolute inset-0 rounded-[var(--radius-md)] bg-[var(--accent-gold)]/10 animate-avatar-ripple-2 -z-10" />
+            <div className="absolute inset-0 rounded-[var(--radius-md)] border border-transparent animate-avatar-ripple-1 -z-10" />
+            <div className="absolute inset-0 rounded-[var(--radius-md)] border border-transparent animate-avatar-ripple-2 -z-10" />
           </>
         )}
-        <div className={`w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border shadow-sm flex items-center justify-center relative overflow-hidden transition-all duration-500 ${isStreaming ? "border-[var(--accent-gold)]/40 shadow-[0_0_15px_rgba(251,191,36,0.25)] scale-[1.02]" : "border-[var(--border-subtle)]"}`}>
+        <div className={`w-9 h-9 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border shadow-sm flex items-center justify-center relative overflow-hidden transition-all duration-500 ${isStreaming ? "border-[var(--accent-gold)]/60 shadow-[0_0_20px_rgba(251,191,36,0.4)] scale-[1.04]" : "border-[var(--border-subtle)]"}`}>
           {isStreaming ? (
-            <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/20 via-indigo-500/5 to-transparent animate-gradient-shift" />
+            <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/40 via-purple-600/30 to-[var(--accent-emerald)]/20 animate-gradient-shift" />
           ) : (
             <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-gold)]/5 to-transparent" />
           )}
           {isStreaming && (
-            <div className="absolute inset-[1px] rounded-[calc(var(--radius-md)-1px)] border border-white/5 bg-transparent" />
+            <div className="absolute inset-[1px] rounded-[calc(var(--radius-md)-1px)] border border-white/10 bg-transparent" />
           )}
-          <BrandIcon size={24} className={`transition-all duration-500 relative z-10 ${isStreaming ? "opacity-100 scale-105 filter drop-shadow-[0_0_4px_rgba(251,191,36,0.5)] animate-avatar-breath" : "opacity-80"}`} />
+          <BrandIcon size={24} className={`transition-all duration-500 relative z-10 ${isStreaming ? "opacity-100 scale-105 filter drop-shadow-[0_0_6px_rgba(251,191,36,0.65)] animate-avatar-breath" : "opacity-80"}`} />
         </div>
       </div>
 
