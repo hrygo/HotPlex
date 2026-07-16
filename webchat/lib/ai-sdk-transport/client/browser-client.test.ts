@@ -312,6 +312,47 @@ describe("BrowserHotPlexClient connection handoff", () => {
         replacement.disconnect();
         activeSocket.finishClose();
     });
+
+    it("settles a failed reconnect flight before starting the next attempt", async () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+            reconnect: {
+                enabled: true,
+                maxAttempts: 3,
+                baseDelayMs: 10,
+                maxDelayMs: 10,
+            },
+        });
+
+        const initialConnect = client.connect("session-reconnect-flight");
+        await Promise.resolve();
+        const initialSocket = ControlledWebSocket.instances[0];
+        initialSocket.open();
+        initialSocket.message(initAck("session-reconnect-flight"));
+        await initialConnect;
+
+        initialSocket.finishClose(1006, "network lost");
+        await vi.advanceTimersByTimeAsync(10);
+        expect(ControlledWebSocket.instances).toHaveLength(2);
+
+        const failedReconnectSocket = ControlledWebSocket.instances[1];
+        failedReconnectSocket.open();
+        failedReconnectSocket.finishClose(1006, "handshake lost");
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(10);
+        expect(ControlledWebSocket.instances).toHaveLength(3);
+
+        const recoveredSocket = ControlledWebSocket.instances[2];
+        recoveredSocket.open();
+        recoveredSocket.message(initAck("session-reconnect-flight"));
+        await Promise.resolve();
+        expect(client.connected).toBe(true);
+        client.disconnect();
+        recoveredSocket.finishClose();
+    });
 });
 
 describe("BrowserHotPlexClient interaction acknowledgements", () => {

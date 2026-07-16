@@ -900,7 +900,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       try {
         await this.connect(this._sessionId);
       } catch {
-        this._handleClose(4001, 'Reconnect failed');
+        // A socket close during the handshake already schedules the next
+        // attempt. Only synthesize a close when connect() failed without a
+        // close event (for example, the WebSocket constructor threw).
+        if (this._reconnecting && !this.reconnectTimer) {
+          this._handleClose(4001, 'Reconnect failed');
+        }
       }
     }, delay);
   }
@@ -926,13 +931,16 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       }
     }
 
+    if (!wasConnected && this._connecting && this.pendingConnectReject) {
+      // Every failed handshake must settle its single-flight promise. During
+      // automatic reconnect the close path continues below to schedule the
+      // next attempt; the timer catch sees that timer and does not duplicate it.
+      this._connecting = false;
+      this.pendingConnectReject(new Error(`WebSocket closed during handshake: ${reason}`));
+      this.pendingConnectReject = null;
+    }
+
     if (!wasConnected && !this._reconnecting) {
-      // Connection closed before or during handshake — reject pending connect
-      if (this._connecting && this.pendingConnectReject) {
-        this._connecting = false;
-        this.pendingConnectReject(new Error(`WebSocket closed during handshake: ${reason}`));
-        this.pendingConnectReject = null;
-      }
       return;
     }
 
