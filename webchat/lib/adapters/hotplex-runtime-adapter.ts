@@ -152,7 +152,7 @@ const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [];
  * Converts HotPlex message to assistant-ui ThreadMessageLike format.
  * Handles both old format (content: string) and new format (parts: MessagePart[]).
  */
-function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
+export function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
     // Filter out ToolSummaryPart, ContextUsagePart, and TurnSummaryPart — not recognized by assistant-ui's ThreadMessageLike type
     const parts = message.parts ?? [];
     const content = parts.filter(
@@ -183,11 +183,13 @@ function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
         createdAt: message.createdAt,
         attachments: [] as const,
         metadata: {
-            ...(contextUsagePart
-                ? { contextUsage: contextUsagePart.data }
-                : {}),
-            ...(turnSummaryPart ? { turnSummary: turnSummaryPart.data } : {}),
-            ...(message.progress ? { progress: message.progress } : {}),
+            custom: {
+                ...(contextUsagePart
+                    ? { contextUsage: contextUsagePart.data }
+                    : {}),
+                ...(turnSummaryPart ? { turnSummary: turnSummaryPart.data } : {}),
+                ...(message.progress ? { progress: message.progress } : {}),
+            },
         } satisfies Record<string, unknown>,
     } as ThreadMessageLike & {
         status?: { type: "running" } | { type: "complete"; reason: string };
@@ -1284,7 +1286,7 @@ export function useHotPlexRuntime({
             if (!matchesActiveInput(activeInputMessageIdRef.current, data.client_message_id)) {
                 return;
             }
-            if (data.status === "delivered") {
+            if (data.status === "accepted" || data.status === "delivered") {
                 setMessages((prev) =>
                     updatePendingAssistant(
                         prev,
