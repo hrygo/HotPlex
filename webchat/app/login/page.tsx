@@ -40,6 +40,7 @@ function InnerLoginPage() {
 
   useEffect(() => {
     if (authErrorParam) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(getErrorMessage(authErrorParam));
     }
   }, [authErrorParam, t]);

@@ -180,9 +180,8 @@ jobs:
           COVERAGE_FILE="coverage.out"
           [ -n "$SHARD" ] && COVERAGE_FILE="coverage-${SHARD}.out"
 
-          # shuffle omitted in CI: pre-existing test ordering deps cause flakes (#908 follow-up)
           # shellcheck disable=SC2086,SC2046
-          go test -race -count=1 -timeout=10m \
+          go test -short -race -count=1 -shuffle=on -timeout=10m \
             -coverprofile="$COVERAGE_FILE" -covermode=atomic $TEST_PKGS
 
       - name: Display coverage

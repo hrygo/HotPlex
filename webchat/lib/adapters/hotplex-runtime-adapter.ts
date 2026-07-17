@@ -1636,7 +1636,9 @@ export function useHotPlexRuntime({
         client.on("toolResult", handleToolResult);
         const handleState = (data: { state: string }) => {
             onSessionStateChangeRef.current?.(data.state);
-            if (data.state === "running") turnActiveRef.current = true;
+            const turnIsRunning = data.state === "running";
+            turnActiveRef.current = turnIsRunning;
+            setIsRunning(turnIsRunning);
         };
         client.on("state", handleState);
 
@@ -2097,16 +2099,21 @@ export function useHotPlexRuntime({
         ) {
             return;
         }
-        const item = queueStore.peekDispatchable(sid);
-        if (!item || !queueStore.markSending(sid, item.id)) return;
+        const items = queueStore.popAllDispatchable(sid);
+        if (items.length === 0) return;
 
         drainInFlightRef.current = true;
+        const mergedText = items.map((item) => item.text).join("\n\n");
         try {
-            await dispatchInput(item.text, item.id);
+            await dispatchInput(mergedText);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            if (!failActiveQueueDispatchRef.current("send", message)) {
-                queueStore.markFailed(sid, item.id, "send", message);
+            logger.error("RuntimeAdapter", "Failed to send merged queued items", { error: message });
+            for (const item of items) {
+                const result = queueStore.enqueue(sid, item.text);
+                if (result.ok && result.item) {
+                    queueStore.markFailed(sid, result.item.id, "send", message);
+                }
             }
         } finally {
             drainInFlightRef.current = false;
@@ -2258,8 +2265,7 @@ export function useHotPlexRuntime({
             const sid = sessionIdRef.current;
             if (
                 turnActiveRef.current ||
-                stoppingRef.current ||
-                (sid ? queueStore.getSnapshot(sid).length > 0 : false)
+                stoppingRef.current
             ) {
                 const result = enqueueFollowUp(textContent);
                 if (!result.ok && result.reason === "limit") {

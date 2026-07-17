@@ -224,6 +224,15 @@ export class FollowUpQueueStore {
         });
     }
 
+    popAllDispatchable(sessionId: string): readonly FollowUpQueueItem[] {
+        const queue = this.getSnapshot(sessionId);
+        const dispatchable = queue.filter((item) => item.status === "queued");
+        if (dispatchable.length === 0) return EMPTY_QUEUE;
+        const remaining = queue.filter((item) => item.status !== "queued");
+        this.setQueue(sessionId, remaining);
+        return dispatchable;
+    }
+
     clearSession(sessionId: string): void {
         if (!this.queues.has(sessionId)) return;
         this.queues.delete(sessionId);

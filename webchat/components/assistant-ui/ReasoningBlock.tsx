@@ -12,6 +12,7 @@ export function ReasoningBlock({ text, isStreaming }: { text: string; isStreamin
 
   useEffect(() => {
     if (!hasInteracted) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExpanded(!!isStreaming);
     }
   }, [isStreaming, hasInteracted]);
