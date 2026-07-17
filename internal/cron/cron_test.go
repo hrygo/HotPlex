@@ -153,7 +153,7 @@ func TestScheduler_TriggerJob(t *testing.T) {
 	// TriggerJob should not block (starts goroutine).
 	require.NoError(t, s.TriggerJob(context.Background(), job))
 	// Give goroutine a moment to start.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 }
 
 func TestScheduler_CollectDue(t *testing.T) {

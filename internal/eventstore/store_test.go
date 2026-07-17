@@ -3,6 +3,7 @@ package eventstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -327,11 +328,10 @@ func TestCollector_DropNonStorable(t *testing.T) {
 	// Non-storable event should be silently dropped
 	collector.Capture("sess1", 1, events.Kind("non_storable_type"), json.RawMessage(`{}`), "outbound", SourceNormal)
 
-	// Wait briefly to ensure it's processed (or not)
-	time.Sleep(200 * time.Millisecond)
-
-	_, err := store.QueryBySession(context.Background(), "sess1", 0, CursorLatest, 10)
-	require.ErrorIs(t, err, ErrNotFound)
+	require.Eventually(t, func() bool {
+		_, err := store.QueryBySession(context.Background(), "sess1", 0, CursorLatest, 10)
+		return errors.Is(err, ErrNotFound)
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestSqliteTx_DoubleRelease(t *testing.T) {

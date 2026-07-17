@@ -132,7 +132,7 @@ func TestWebhookSink_QueueFullDrops(t *testing.T) {
 	// Server that never responds quickly → queue backs up. Use a server that
 	// sleeps so the single delivery goroutine stays busy.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(500 * time.Millisecond)
+		<-time.After(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

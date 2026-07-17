@@ -72,6 +72,7 @@ func TestOpenCodeServerWorker_ConnBeforeStart(t *testing.T) {
 func TestOpenCodeServerWorker_HealthBeforeStart(t *testing.T) {
 	t.Parallel()
 	w := New()
+	w.singleton = nil
 
 	h := w.Health()
 	require.Equal(t, worker.TypeOpenCodeSrv, h.Type)
@@ -290,6 +291,7 @@ func TestOpenCodeServerWorker_WaitWithoutStart(t *testing.T) {
 	t.Parallel()
 
 	w := New()
+	w.singleton = nil
 	_, err := w.Wait()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not started")

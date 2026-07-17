@@ -162,7 +162,7 @@ func TestReadOutput_ContextCancelled(t *testing.T) {
 	w.testConn = mc
 
 	w.readLineFn = func() (string, error) {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 		return "", io.EOF
 	}
 

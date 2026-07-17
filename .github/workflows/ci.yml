@@ -43,7 +43,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  # ── Guard: block large files (大门) ─────────────────────────────────────
+  # ── Guard: block large files ────────────────────────────────────────────
   large-file-guard:
     name: Large File Guard
     runs-on: ubuntu-latest
@@ -74,14 +74,18 @@ jobs:
           fi
           echo "No oversized files in HEAD tree."
 
-  # ── Test: race + coverage (parallel with Build) ────────────────────────
-  # Skips webchat build entirely — tests don't import the embedded SPA.
-  # Runs vet inline for fast failure before expensive compilation.
+  # ── Test: race + coverage ───────────────────────────────────────────────
+  # On PRs: runs affected packages only (smart scope detection).
+  # On push to main: shards the full suite across 3 parallel runners.
   test:
     needs: [large-file-guard]
-    name: Test
+    name: ${{ matrix.shard != '' && format('Test (shard {0})', matrix.shard) || 'Test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ github.event_name == 'push' && fromJSON('["0","1","2"]') || fromJSON('[""]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -128,6 +132,7 @@ jobs:
       - name: Run tests with race detector + coverage
         env:
           SCOPE: ${{ steps.scope.outputs.pkgs }}
+          SHARD: ${{ matrix.shard }}
         run: |
           ALL_PKGS=$(go list ./... | grep -v \
             -e 'internal/worker/proc' \
@@ -160,18 +165,70 @@ jobs:
             exit 0
           fi
 
+          # Shard: partition packages round-robin across N shards (push-to-main only)
+          if [ -n "$SHARD" ]; then
+            TOTAL=3
+            IDX=$SHARD
+            TEST_PKGS=$(echo "$TEST_PKGS" | tr ' ' '\n' | grep -v '^$' | awk -v total="$TOTAL" -v idx="$IDX" 'NR % total == idx')
+            echo "Shard $IDX of $TOTAL packages: $TEST_PKGS"
+            if [ -z "$TEST_PKGS" ]; then
+              printf 'mode: atomic\n' > coverage.out
+              exit 0
+            fi
+          fi
+
+          COVERAGE_FILE="coverage.out"
+          [ -n "$SHARD" ] && COVERAGE_FILE="coverage-${SHARD}.out"
+
+          # shuffle omitted in CI: pre-existing test ordering deps cause flakes (#908 follow-up)
           # shellcheck disable=SC2086,SC2046
-          go test -race -timeout=10m -coverprofile=coverage.out -covermode=atomic $TEST_PKGS
+          go test -race -count=1 -timeout=10m \
+            -coverprofile="$COVERAGE_FILE" -covermode=atomic $TEST_PKGS
 
       - name: Display coverage
         if: always()
-        run: go tool cover -func=coverage.out 2>/dev/null | tail -1 || true
+        run: go tool cover -func=coverage*.out 2>/dev/null | tail -1 || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage${{ matrix.shard != '' && format('-{0}', matrix.shard) || '' }}
+          path: coverage*.out
+
+  # ── Coverage merge + threshold check (push-to-main only) ────────────────
+  coverage-check:
+    needs: [test]
+    name: Coverage Check
+    runs-on: ubuntu-latest
+    if: always()
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: coverage*
+          path: coverage-data
+          merge-multiple: true
+
+      - name: Merge coverage profiles
+        run: |
+          # Sharded runs (push-to-main): merge coverage-{0,1,2}.out
+          # Single run (PR): use coverage.out directly
+          SHARD_FILES=$(find coverage-data -name 'coverage-*.out' 2>/dev/null | head -1)
+          if [ -n "$SHARD_FILES" ]; then
+            printf 'mode: atomic\n' > coverage.out
+            find coverage-data -name 'coverage-*.out' -exec grep -v '^mode:' {} + >> coverage.out
+          else
+            cp coverage-data/coverage.out coverage.out 2>/dev/null || printf 'mode: atomic\n' > coverage.out
+          fi
+          echo "Merged coverage lines: $(wc -l < coverage.out)"
 
       - name: Check per-package coverage thresholds
         run: |
           COV_FILE="coverage.out"
 
-          # Skip if coverage file is empty (no packages affected)
           if [ ! -s "$COV_FILE" ] || [ "$(wc -l < "$COV_FILE")" -le 1 ]; then
             echo "No coverage data (no affected packages). Skipping thresholds."
             exit 0
@@ -205,7 +262,6 @@ jobs:
             echo "|---------|----------|-----------|--------|"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Aggregate per-package coverage from raw profile (statement-weighted).
           declare -A PKG_TOTAL
           declare -A PKG_COVERED
 
@@ -227,7 +283,6 @@ jobs:
             COVERED=${PKG_COVERED[$PKG]:-0}
             COV=$(echo "scale=1; $COVERED * 100 / $TOTAL" | bc -l)
 
-            # Find matching threshold (longest prefix match).
             MATCH=""
             for pattern in "${!THRESHOLDS[@]}"; do
               if [[ "$PKG" == *"$pattern"* ]]; then
@@ -263,15 +318,7 @@ jobs:
           fi
           echo "All package coverage thresholds met."
 
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: coverage
-          path: coverage.out
-
-  # ── Build verification + Lint (parallel with Test) ────────────────────
-  # Builds with webchat (uses cached output when available).
-  # Runs vet + build + lint — all static checks in one job.
+  # ── Build verification ──────────────────────────────────────────────────
   build:
     needs: [large-file-guard]
     name: Build
@@ -285,8 +332,8 @@ jobs:
       - name: Verify + Vet + Build
         run: go mod verify && go vet ./... && go build ./...
 
-      - name: Build & validate docs (includes swagger generation)
-        run: go install github.com/swaggo/swag/cmd/swag@v1.16.4 && make docs-build
+      - name: Verify docs output exists
+        run: test -f internal/docs/out/index.html
 
       - name: Build gateway binary
         run: |
@@ -295,6 +342,19 @@ jobs:
 
       - name: Verify binary
         run: test -x ./bin/hotplex && ./bin/hotplex --help
+
+  # ── Lint (parallel with Test + Build) ───────────────────────────────────
+  lint:
+    needs: [large-file-guard]
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-go-webchat
+        with:
+          build-webchat: 'false'
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9.2.0

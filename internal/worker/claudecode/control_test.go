@@ -39,7 +39,7 @@ func TestControlHandlerSendControlRequest(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 		data := lb.Bytes()
 		var req map[string]any
 		require.NoError(t, json.Unmarshal(data, &req))

@@ -220,7 +220,7 @@ func TestCall_ContextCancel(t *testing.T) {
 	go c.readLoop(ctx)
 
 	// Cancel before any response arrives.
-	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	go func() { time.Sleep(30 * time.Millisecond); cancel() }()
 
 	_, err := c.call(ctx, "test/method", nil)
 	require.Error(t, err)
