@@ -698,6 +698,37 @@ describe("BrowserHotPlexClient input retry identity", () => {
         expect(() => client.sendInput("second")).not.toThrow();
     });
 
+    it("releases an unknown tombstone only for an explicit user retry", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            ws: { readyState: number };
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal.ws = { readyState: 1 };
+        const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const pending = client.sendInputAsync("first");
+        const clientMessageId = send.mock.calls[0][0].id;
+        route(client, envelope(EventKind.InputAck, {
+            client_message_id: clientMessageId,
+            execution_id: "exec-1",
+            status: "unknown",
+            error_code: "EXECUTION_TIMEOUT",
+        }));
+
+        await expect(pending).rejects.toThrow("EXECUTION_TIMEOUT");
+        expect(() => client.sendInput("automatic retry")).toThrow("Input already pending");
+        expect(client.acknowledgeUnknownInputForRetry()).toBe(true);
+        expect(client.acknowledgeUnknownInputForRetry()).toBe(false);
+        expect(() => client.sendInput("explicit retry")).not.toThrow();
+    });
+
     it("clears pendingInput on a delivered acknowledgement so a subsequent send works", () => {
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
@@ -831,7 +862,7 @@ describe("BrowserHotPlexClient input retry identity", () => {
         await expect(pending).rejects.toThrow("link lost");
     });
 
-    it("clears and resolves pending input immediately when sendControl('stop') is called", async () => {
+    it("keeps pending input until stop reaches a terminal done event", async () => {
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
@@ -852,9 +883,137 @@ describe("BrowserHotPlexClient input retry identity", () => {
         const pending = client.sendInputAsync("hello");
         expect(internal.pendingInput).not.toBeNull();
 
-        client.sendControl("stop");
+        const stopped = client.stopCurrentTurn();
 
+        expect(internal.pendingInput).not.toBeNull();
+        expect(() => client.sendInput("too early")).toThrow("Input already pending");
+
+        route(client, envelope(EventKind.Done, {
+            success: true,
+            reason: "stopped_by_user",
+        }));
+
+        await expect(stopped).resolves.toMatchObject({
+            reason: "stopped_by_user",
+        });
         expect(internal.pendingInput).toBeNull();
         await expect(pending).resolves.toBeUndefined();
+    });
+
+    it("coalesces repeated stop requests and accepts natural completion", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            ws: { readyState: number } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1 };
+        const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const first = client.stopCurrentTurn();
+        const second = client.stopCurrentTurn();
+
+        expect(second).toBe(first);
+        expect(send).toHaveBeenCalledTimes(1);
+        route(client, envelope(EventKind.Done, { success: true, reason: "completed" }));
+
+        await expect(first).resolves.toMatchObject({ reason: "completed" });
+        await expect(second).resolves.toMatchObject({ reason: "completed" });
+    });
+
+    it("keeps waiting for done when an unrelated gateway error arrives", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            ws: { readyState: number } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1 };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const stopped = client.stopCurrentTurn();
+        let settled = false;
+        void stopped.finally(() => {
+            settled = true;
+        });
+        route(client, envelope(EventKind.Error, {
+            code: "WORKER_COMMAND_FAILED",
+            message: "unrelated worker command failed",
+        }));
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        route(client, envelope(EventKind.Done, { success: true, reason: "completed" }));
+        await expect(stopped).resolves.toMatchObject({ reason: "completed" });
+    });
+
+    it("rejects a stop waiter on timeout without releasing the active input", async () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            pendingInput: unknown;
+            ws: { readyState: number } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1 };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const pending = client.sendInputAsync("hello");
+        void pending.catch(() => undefined);
+        const stopped = client.stopCurrentTurn(500);
+        const rejected = expect(stopped).rejects.toThrow("Stop timeout");
+
+        await vi.advanceTimersByTimeAsync(500);
+
+        await rejected;
+        expect(internal.pendingInput).not.toBeNull();
+        expect(() => client.sendInput("too early")).toThrow("Input already pending");
+        route(client, envelope(EventKind.Done, { success: true }));
+        await expect(pending).resolves.toBeUndefined();
+    });
+
+    it("rejects a stop waiter when the client disconnects", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1, CONNECTING: 0 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            ws: { readyState: number; close: () => void } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1, close: vi.fn() };
+        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+
+        const stopped = client.stopCurrentTurn();
+        client.disconnect();
+
+        await expect(stopped).rejects.toThrow("Client disconnected");
     });
 });

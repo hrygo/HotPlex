@@ -197,6 +197,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   // A tombstoned (unknown-outcome) input blocks new sends for at most this long
   // before being force-cleared, so an ambiguous outcome can never lock the chat.
   private static readonly TOMBSTONE_GRACE_MS = 120_000;
+  private static readonly STOP_SETTLE_TIMEOUT_MS = 10_000;
 
   private pendingInput: {
     content: string;
@@ -208,6 +209,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   } | null = null;
   private inputSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private inputTombstoneTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingStop: {
+    promise: Promise<DoneData>;
+    resolve: (data: DoneData) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
   private pendingConnectReject: ((err: Error) => void) | null = null;
   private connectPromise: Promise<InitAckData> | null = null;
   private connectTarget: string | null = null;
@@ -588,10 +595,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         break;
       }
 
-      case EventKind.Done:
-        this.emit('done', event.data as DoneData, env);
+      case EventKind.Done: {
+        const doneData = event.data as DoneData;
+        this.emit('done', doneData, env);
+        this._settleStop({ kind: 'resolve', data: doneData });
         this._settlePending({ kind: 'resolve' });
         break;
+      }
 
       case EventKind.MessageDelta:
         this.emit('delta', event.data as MessageDeltaData, env);
@@ -738,6 +748,21 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     return pending.clientMessageId;
   }
 
+  /**
+   * Release an unknown-outcome tombstone only after the user explicitly asks
+   * to retry. This is deliberately separate from sendInput so automatic paths
+   * cannot bypass the duplicate-side-effect guard.
+   */
+  acknowledgeUnknownInputForRetry(): boolean {
+    if (!this.pendingInput?.tombstone) return false;
+    this._settlePending({
+      kind: 'reject',
+      error: new Error('Unknown input explicitly released for retry'),
+      force: true,
+    });
+    return true;
+  }
+
   async sendInputAsync(content: string): Promise<void> {
     if (this.pendingInput) {
       throw new Error('Input already pending');
@@ -784,9 +809,38 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   sendControl(action: 'terminate' | 'delete' | 'stop'): void {
     const env = createControlEnvelope(this._sessionId!, action);
     this._send(env);
-    if (action === 'stop') {
-      this._settlePending({ kind: 'resolve' });
+  }
+
+  /**
+   * Stop the active turn and wait for its terminal Done event. Concurrent calls
+   * share one waiter, so a double click cannot send duplicate stop frames or
+   * race multiple follow-up dispatches.
+   */
+  stopCurrentTurn(
+    timeoutMs = BrowserHotPlexClient.STOP_SETTLE_TIMEOUT_MS,
+  ): Promise<DoneData> {
+    if (this.pendingStop) return this.pendingStop.promise;
+
+    let resolve!: (data: DoneData) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<DoneData>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    const timer = setTimeout(() => {
+      this._settleStop({ kind: 'reject', error: new Error('Stop timeout') });
+    }, timeoutMs);
+    this.pendingStop = { promise, resolve, reject, timer };
+
+    try {
+      this.sendControl('stop');
+    } catch (error) {
+      this._settleStop({
+        kind: 'reject',
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
     }
+    return promise;
   }
 
   sendWorkerCommand(command: typeof WorkerStdioCommand[keyof typeof WorkerStdioCommand], args?: string, extra?: Record<string, unknown>): void {
@@ -809,6 +863,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
 
     this._settlePending({ kind: 'reject', error: new Error('Client disconnected'), force: true });
+    this._settleStop({ kind: 'reject', error: new Error('Client disconnected') });
 
     this._releasePageSessionOwner();
     this._closeCurrentSocketForHandoff('Client disconnect');
@@ -996,11 +1051,28 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       this._reconnecting = false;
       this._clearInputTimers();
       this._settlePending({ kind: 'reject', error: new Error('Reconnect failed'), force: true });
+      this._settleStop({ kind: 'reject', error: new Error('Reconnect failed') });
       this.emit('reconnect_failed', this.reconnectAttempt);
     } else if (!this.shouldReconnect || this.closed) {
       this._clearInputTimers();
       this._settlePending({ kind: 'reject', error: new Error(reason || 'Disconnected'), force: true });
+      this._settleStop({ kind: 'reject', error: new Error(reason || 'Disconnected') });
       this.emit('disconnected', reason);
+    }
+  }
+
+  private _settleStop(outcome:
+    | { kind: 'resolve'; data: DoneData }
+    | { kind: 'reject'; error: Error },
+  ): void {
+    const pending = this.pendingStop;
+    if (!pending) return;
+    this.pendingStop = null;
+    clearTimeout(pending.timer);
+    if (outcome.kind === 'resolve') {
+      pending.resolve(outcome.data);
+    } else {
+      pending.reject(outcome.error);
     }
   }
 

@@ -5,7 +5,14 @@
  * This is the core integration layer that bridges the two systems.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 import type {
     ExternalStoreAdapter,
     ThreadMessageLike,
@@ -65,8 +72,11 @@ import type { HotPlexMessage } from "@/lib/types/message";
 import {
     appendTextDelta,
     appendReasoningDelta,
-    concatTextParts,
 } from "@/lib/adapters/merge-parts";
+import {
+    patchAuthoritativeAssistantContent,
+    selectAuthoritativeAssistantContent,
+} from "@/lib/adapters/reconcile-turn";
 import {
     completeStreamingAssistant,
     createPendingAssistantMessage,
@@ -75,6 +85,11 @@ import {
     removePendingAssistant,
     updatePendingAssistant,
 } from "@/lib/adapters/pending-assistant";
+import {
+    FollowUpQueueStore,
+    type FollowUpQueueControls,
+    type FollowUpQueueErrorKind,
+} from "@/lib/adapters/follow-up-queue";
 
 // Re-export for consumers
 export type { HotPlexMessage };
@@ -93,21 +108,21 @@ type ThreadSuggestion = { title: string; label: string; prompt: string };
 
 export type InteractionKind = "permission" | "question" | "elicitation";
 export type InteractionStatus =
-  | "pending"
-  | "submitting"
-  | "resolved"
-  | "rejected"
-  | "expired"
-  | "failed";
+    | "pending"
+    | "submitting"
+    | "resolved"
+    | "rejected"
+    | "expired"
+    | "failed";
 
 export interface InteractionState {
-  kind: InteractionKind;
-  requestId: string;
-  status: InteractionStatus;
-  createdAt: number;
-  expiresAt?: number;
-  response?: any;
-  error?: string;
+    kind: InteractionKind;
+    requestId: string;
+    status: InteractionStatus;
+    createdAt: number;
+    expiresAt?: number;
+    response?: any;
+    error?: string;
 }
 
 // ============================================================================
@@ -137,6 +152,8 @@ export interface UseHotPlexRuntimeConfig {
     onSessionStateChange?: (state: string) => void;
     /** Custom welcome suggestions shown when thread is empty. */
     suggestions?: readonly ThreadSuggestion[];
+    /** Page-scoped queue store that survives keyed session runtime remounts. */
+    followUpQueueStore?: FollowUpQueueStore;
 }
 
 // Content-signature prefix length for dedup — covers most short/medium responses.
@@ -152,7 +169,9 @@ const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [];
  * Converts HotPlex message to assistant-ui ThreadMessageLike format.
  * Handles both old format (content: string) and new format (parts: MessagePart[]).
  */
-export function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLike {
+export function convertToThreadMessage(
+    message: HotPlexMessage,
+): ThreadMessageLike {
     // Filter out ToolSummaryPart, ContextUsagePart, and TurnSummaryPart — not recognized by assistant-ui's ThreadMessageLike type
     const parts = message.parts ?? [];
     const content = parts.filter(
@@ -187,7 +206,9 @@ export function convertToThreadMessage(message: HotPlexMessage): ThreadMessageLi
                 ...(contextUsagePart
                     ? { contextUsage: contextUsagePart.data }
                     : {}),
-                ...(turnSummaryPart ? { turnSummary: turnSummaryPart.data } : {}),
+                ...(turnSummaryPart
+                    ? { turnSummary: turnSummaryPart.data }
+                    : {}),
                 ...(message.progress ? { progress: message.progress } : {}),
             },
         } satisfies Record<string, unknown>,
@@ -278,6 +299,7 @@ export function useHotPlexRuntime({
     onSkillsChange,
     onSessionStateChange,
     suggestions: configSuggestions,
+    followUpQueueStore,
 }: UseHotPlexRuntimeConfig = {}): ExternalStoreAdapter<HotPlexMessage> {
     // State
     const [messages, setMessages] = useState<HotPlexMessage[]>([]);
@@ -285,6 +307,20 @@ export function useHotPlexRuntime({
     const [historyHasMore, setHistoryHasMore] = useState(true);
     const [connectionState, setConnectionState] =
         useState<ConnectionState>("disconnected");
+    const ownedQueueStoreRef = useRef<FollowUpQueueStore | null>(null);
+    if (!ownedQueueStoreRef.current) {
+        ownedQueueStoreRef.current = new FollowUpQueueStore();
+    }
+    const queueStore = followUpQueueStore ?? ownedQueueStoreRef.current;
+    const getQueueSnapshot = useCallback(
+        () => queueStore.getSnapshot(sessionId),
+        [queueStore, sessionId],
+    );
+    const queuedItems = useSyncExternalStore(
+        queueStore.subscribe,
+        getQueueSnapshot,
+        getQueueSnapshot,
+    );
 
     // One-time cleanup of orphaned localStorage keys from removed message cache
     useEffect(() => {
@@ -306,6 +342,48 @@ export function useHotPlexRuntime({
     const historyLoadingRef = useRef(false);
     const sessionIdRef = useRef(sessionId);
     const sessionAlreadyConnectedRef = useRef(false);
+    const turnActiveRef = useRef(false);
+    const drainInFlightRef = useRef(false);
+    const scheduleQueueDrainRef = useRef<() => void>(() => undefined);
+    const activeQueueDispatchRef = useRef<{
+        sessionId: string;
+        itemId: string;
+        userMessageId: string;
+        assistantMessageId: string;
+        clientMessageId?: string;
+        delivered: boolean;
+        outcomeUnknown?: boolean;
+        text: string;
+    } | null>(null);
+    const failActiveQueueDispatchRef = useRef<
+        (kind: FollowUpQueueErrorKind, message: string) => boolean
+    >(() => false);
+
+    failActiveQueueDispatchRef.current = (kind, message) => {
+        const active = activeQueueDispatchRef.current;
+        if (!active || active.delivered) return false;
+        queueStore.markFailed(active.sessionId, active.itemId, kind, message);
+        if (kind === "unknown") {
+            active.outcomeUnknown = true;
+            turnActiveRef.current = false;
+            setIsRunning(false);
+            return true;
+        }
+        activeQueueDispatchRef.current = null;
+        turnActiveRef.current = false;
+        pendingAssistantIdRef.current = null;
+        activeAssistantIdRef.current = null;
+        activeInputMessageIdRef.current = null;
+        setIsRunning(false);
+        setMessages((previous) =>
+            previous.filter(
+                (messageItem) =>
+                    messageItem.id !== active.userMessageId &&
+                    messageItem.id !== active.assistantMessageId,
+            ),
+        );
+        return true;
+    };
 
     // Welcome suggestions — shown when thread is empty (use prop or default list)
     const suggestions: readonly ThreadSuggestion[] =
@@ -330,9 +408,9 @@ export function useHotPlexRuntime({
     const interactionMapRef = useRef<
         Map<string, { type: "permission" | "question" | "elicitation" }>
     >(new Map());
-    const interactionAckTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
-        new Map(),
-    );
+    const interactionAckTimersRef = useRef<
+        Map<string, ReturnType<typeof setTimeout>>
+    >(new Map());
 
     // Cache min turn ID for cursor-based pagination (avoid O(n) scan on each load)
     const minIdRef = useRef<number>(0);
@@ -429,7 +507,6 @@ export function useHotPlexRuntime({
                 ]);
             });
         return () => controller.abort();
-         
     }, [sessionId]);
 
     // Initialize WebSocket client
@@ -479,6 +556,7 @@ export function useHotPlexRuntime({
         // Track the streaming fallback message ID (created by delta/reasoning before messageStart).
         // Used by handleMessage to adopt the fallback instead of creating a duplicate (#331).
         let streamingFallbackId: string | null = null;
+        const processedDoneEventIds = new Set<string>();
 
         // Append delta content to the last text part of the last assistant message
         const appendDelta = (content: string) => {
@@ -532,6 +610,7 @@ export function useHotPlexRuntime({
         // Handle reasoning/thinking content (appends to last reasoning part or creates one)
         const handleReasoning = (data: ReasoningData, _env: Envelope) => {
             if (!data) return;
+            turnActiveRef.current = true;
 
             setMessages((prev) => {
                 const pending = updatePendingAssistant(
@@ -540,7 +619,10 @@ export function useHotPlexRuntime({
                     (message) => ({
                         ...message,
                         progress: undefined,
-                        parts: appendReasoningDelta(message.parts, data.content || ""),
+                        parts: appendReasoningDelta(
+                            message.parts,
+                            data.content || "",
+                        ),
                     }),
                 );
                 if (pending !== prev) {
@@ -578,6 +660,7 @@ export function useHotPlexRuntime({
 
         const handleDelta = (data: MessageDeltaData, _env: Envelope) => {
             if (!data) return;
+            turnActiveRef.current = true;
             // Synchronous commit — no RAF batching (see note above appendDelta).
             appendDelta(data.content || "");
         };
@@ -647,7 +730,6 @@ export function useHotPlexRuntime({
                     },
                 ];
             });
-            setIsRunning(false);
         };
 
         const handleToolCall = (data: ToolCallData, _env: Envelope) => {
@@ -710,9 +792,36 @@ export function useHotPlexRuntime({
             });
         };
 
-        const handleDone = (data: DoneData, _env: Envelope) => {
+        const handleDone = (data: DoneData, env: Envelope) => {
+            if (processedDoneEventIds.has(env.id)) return;
+            processedDoneEventIds.add(env.id);
+            if (processedDoneEventIds.size > 256) {
+                const oldest = processedDoneEventIds.values().next().value;
+                if (oldest) processedDoneEventIds.delete(oldest);
+            }
             streamingFallbackId = null;
+            turnActiveRef.current = false;
+            const queuedDispatch = activeQueueDispatchRef.current;
+            const convergedUnknown = queuedDispatch?.outcomeUnknown === true;
+            if (queuedDispatch?.outcomeUnknown) {
+                queueStore.remove(
+                    queuedDispatch.sessionId,
+                    queuedDispatch.itemId,
+                );
+                activeQueueDispatchRef.current = null;
+            } else if (queuedDispatch && !queuedDispatch.delivered) {
+                failActiveQueueDispatchRef.current(
+                    "unknown",
+                    "Turn completed before delivery was confirmed",
+                );
+            } else {
+                activeQueueDispatchRef.current = null;
+            }
             const pendingAssistantID = pendingAssistantIdRef.current;
+            const reconciliationTargetID =
+                queuedDispatch?.assistantMessageId ??
+                pendingAssistantID ??
+                activeAssistantIdRef.current;
             pendingAssistantIdRef.current = null;
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
@@ -724,7 +833,44 @@ export function useHotPlexRuntime({
             }
 
             setMessages((prev) => {
-                const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                if (convergedUnknown) {
+                    const convergenceAssistantID =
+                        queuedDispatch?.assistantMessageId;
+                    const assistantIndex = prev.findIndex(
+                        (message) =>
+                            message.id === convergenceAssistantID &&
+                            message.role === "assistant",
+                    );
+                    if (assistantIndex === -1) return prev;
+                    const message = prev[assistantIndex];
+                    const parts = message.parts.map((part) =>
+                        part.type === "tool-call" &&
+                        (!part.status || part.status.type === "running")
+                            ? {
+                                  ...part,
+                                  status: { type: "complete" as const },
+                              }
+                            : part,
+                    );
+                    if (data?.stats?._session) {
+                        parts.push({
+                            type: "turn-summary" as const,
+                            data: data.stats._session,
+                        });
+                    }
+                    const next = [...prev];
+                    next[assistantIndex] = {
+                        ...message,
+                        status: "complete" as const,
+                        progress: undefined,
+                        parts,
+                    };
+                    return next;
+                }
+                const withoutPending = removePendingAssistant(
+                    prev,
+                    pendingAssistantID,
+                );
                 if (withoutPending !== prev) {
                     return withoutPending;
                 }
@@ -758,17 +904,17 @@ export function useHotPlexRuntime({
                 return prev;
             });
 
-            if (cancelTimeoutRef.current) {
-                clearTimeout(cancelTimeoutRef.current);
-                cancelTimeoutRef.current = null;
-            }
             setIsRunning(false);
             setIsStopping(false);
             stoppingRef.current = false;
+            queueMicrotask(() => scheduleQueueDrainRef.current());
 
             // Fetch skills after the first turn completes (worker conversation is now active)
             // Skip if the turn was stopped by the user, since the worker is detached.
-            if (!skillsFetchedRef.current && data?.reason !== "stopped_by_user") {
+            if (
+                !skillsFetchedRef.current &&
+                data?.reason !== "stopped_by_user"
+            ) {
                 skillsFetchedRef.current = true;
                 try {
                     client.sendWorkerCommand(WorkerStdioCommand.Skills);
@@ -784,7 +930,10 @@ export function useHotPlexRuntime({
             // one cheap REST call). reconcileTurnContent has prefix + length
             // guards that make it a no-op when streaming was complete, so an
             // unconditional trigger is safe and correct.
-            void reconcileTurnContent();
+            void reconcileTurnContent({
+                targetAssistantId: reconciliationTargetID,
+                terminalSeq: env.seq,
+            });
         };
 
         // Re-fetch the authoritative content for the just-completed turn and
@@ -795,21 +944,29 @@ export function useHotPlexRuntime({
         // The trade-off is write latency: captureAssistantTurn enqueues the
         // record on done, but the collector flushes async (~1s batch interval),
         // so the first fetch may miss it. We retry once after a short delay.
-        const reconcileTurnContent = async () => {
+        const reconcileTurnContent = async ({
+            targetAssistantId,
+            terminalSeq,
+            inputContent,
+        }: {
+            targetAssistantId: string | null;
+            terminalSeq?: number;
+            inputContent?: string;
+        }) => {
             const sid = sessionIdRef.current;
-            if (!sid) return;
-            const fetchLastAssistantContent = async (): Promise<string | null> => {
-                // history returns ASC by id; the latest assistant turn (if any)
-                // is the last assistant record in the page. A small limit is
-                // enough — we only need the most recent turn.
-                const res = await getSessionHistory(sid, { limit: 5 });
-                for (let i = res.records.length - 1; i >= 0; i--) {
-                    const rec = res.records[i];
-                    if (rec.role === "assistant" && rec.content) {
-                        return rec.content;
-                    }
+            if (!sid || !targetAssistantId) return;
+            const fetchLastAssistantContent = async (): Promise<
+                string | null
+            > => {
+                const res = await getSessionHistory(sid, { limit: 20 });
+                if (terminalSeq !== undefined) {
+                    return selectAuthoritativeAssistantContent(res.records, {
+                        terminalSeq,
+                    });
                 }
-                return null;
+                return selectAuthoritativeAssistantContent(res.records, {
+                    inputContent: inputContent ?? "",
+                });
             };
             try {
                 let fullText = await fetchLastAssistantContent();
@@ -823,42 +980,17 @@ export function useHotPlexRuntime({
                 }
                 if (!fullText || cancelled) return;
                 const full = fullText; // const for closure narrowing (no `!` needed)
-                setMessages((prev) => {
-                    const last = prev[prev.length - 1];
-                    if (last?.role !== "assistant") return prev;
-                    const currentText = concatTextParts(last.parts);
-                    // The streamed text must be a prefix of the authoritative
-                    // text — deltas are appended sequentially, so a dropped tail
-                    // means the authoritative version is the streamed prefix +
-                    // the missing suffix. If the prefix doesn't match, the
-                    // fetched record belongs to a DIFFERENT turn (collector
-                    // latency exceeded the retry, returning the previous turn's
-                    // record) — refuse to patch rather than overwrite with
-                    // wrong-turn content.
-                    if (currentText.length > 0 && !full.startsWith(currentText)) {
-                        return prev;
-                    }
-                    // Only patch if authoritative is longer (deltas really lost).
-                    if (full.length <= currentText.length) return prev;
-                    // Replace ALL text parts with the single authoritative text,
-                    // keeping the position of the first text part. A streaming
-                    // message can have interleaved [text, tool-call, text] parts
-                    // (text before and after a tool call). Patching only the
-                    // first text part would leave the trailing partial text part
-                    // in place, duplicating content. Collapse all text into one.
-                    const firstTextIdx = last.parts.findIndex((p) => p.type === "text");
-                    const nonTextParts: MessagePart[] = last.parts.filter((p) => p.type !== "text");
-                    const insertIdx = firstTextIdx === -1 ? 0 : firstTextIdx;
-                    const parts = [...nonTextParts];
-                    parts.splice(insertIdx, 0, { type: "text", text: full });
-                    return [...prev.slice(0, -1), { ...last, parts }];
-                });
-            } catch (err) {
-                logger.warn(
-                    "RuntimeAdapter",
-                    "Reconcile turn content failed",
-                    { error: String(err) },
+                setMessages((previous) =>
+                    patchAuthoritativeAssistantContent(
+                        previous,
+                        targetAssistantId,
+                        full,
+                    ),
                 );
+            } catch (err) {
+                logger.warn("RuntimeAdapter", "Reconcile turn content failed", {
+                    error: String(err),
+                });
             }
         };
 
@@ -874,38 +1006,51 @@ export function useHotPlexRuntime({
                 clearTimeout(timer);
                 interactionAckTimersRef.current.delete(requestId);
             }
-            setMessages((prev) => prev.map((msg) => {
-                if (msg.role !== "assistant") return msg;
-                let found = false;
-                const parts = msg.parts.map((part) => {
-                    if (part.type !== "tool-call" || part.toolCallId !== requestId) {
-                        return part;
-                    }
-                    const interaction = part.args?.interaction;
-                    if (!interaction || (onlySubmitting && interaction.status !== "submitting")) {
-                        return part;
-                    }
-                    found = true;
-                    return {
-                        ...part,
-                        args: {
-                            ...part.args,
-                            interaction: {
-                                ...interaction,
-                                status,
-                                response,
-                                error,
+            setMessages((prev) =>
+                prev.map((msg) => {
+                    if (msg.role !== "assistant") return msg;
+                    let found = false;
+                    const parts = msg.parts.map((part) => {
+                        if (
+                            part.type !== "tool-call" ||
+                            part.toolCallId !== requestId
+                        ) {
+                            return part;
+                        }
+                        const interaction = part.args?.interaction;
+                        if (
+                            !interaction ||
+                            (onlySubmitting &&
+                                interaction.status !== "submitting")
+                        ) {
+                            return part;
+                        }
+                        found = true;
+                        return {
+                            ...part,
+                            args: {
+                                ...part.args,
+                                interaction: {
+                                    ...interaction,
+                                    status,
+                                    response,
+                                    error,
+                                },
                             },
-                        },
-                    };
-                });
-                return found ? { ...msg, parts } : msg;
-            }));
+                        };
+                    });
+                    return found ? { ...msg, parts } : msg;
+                }),
+            );
         };
 
         const handlePermissionResponse = (data: PermissionResponseData) => {
             if (!data?.id) return;
-            updateInteractionState(data.id, data.allowed ? "resolved" : "rejected", data);
+            updateInteractionState(
+                data.id,
+                data.allowed ? "resolved" : "rejected",
+                data,
+            );
             interactionMapRef.current.delete(data.id);
         };
 
@@ -917,7 +1062,11 @@ export function useHotPlexRuntime({
 
         const handleElicitationResponse = (data: ElicitationResponseData) => {
             if (!data?.id) return;
-            updateInteractionState(data.id, data.action === "accept" ? "resolved" : "rejected", data);
+            updateInteractionState(
+                data.id,
+                data.action === "accept" ? "resolved" : "rejected",
+                data,
+            );
             interactionMapRef.current.delete(data.id);
         };
 
@@ -934,8 +1083,9 @@ export function useHotPlexRuntime({
             }
 
             // Mark any submitting interaction as failed if this is an interaction error
-            const isInteractionError = (data?.message || "").includes("worker response failed") || 
-                                       (data?.message || "").includes("invalid response data");
+            const isInteractionError =
+                (data?.message || "").includes("worker response failed") ||
+                (data?.message || "").includes("invalid response data");
             if (isInteractionError) {
                 const reqId = env?.metadata?.interaction_error?.request_id;
                 if (reqId) {
@@ -948,6 +1098,23 @@ export function useHotPlexRuntime({
                 }
             }
 
+            const queuedDispatch = activeQueueDispatchRef.current;
+            if (
+                !isInteractionError &&
+                queuedDispatch &&
+                !queuedDispatch.delivered
+            ) {
+                logger.warn("RuntimeAdapter", "Queued input delivery failed", {
+                    code: data?.code || "unknown",
+                    eventId: env?.id,
+                });
+                failActiveQueueDispatchRef.current(
+                    isBusy ? "busy" : "send",
+                    data?.code || data?.message || "Input delivery failed",
+                );
+                return;
+            }
+
             const isResumeRetry = (data?.code as string) === "RESUME_RETRY";
             const isShutdown = (data?.message || "").includes(
                 "during shutdown",
@@ -956,8 +1123,7 @@ export function useHotPlexRuntime({
                 (data?.code as string) === "SESSION_TERMINATED";
             // CONFIG_INVALID is a user-command rejection (e.g. /cd on a
             // workspace-bound session), not a runtime fault — warn, don't error.
-            const isConfigInvalid =
-                (data?.code as string) === "CONFIG_INVALID";
+            const isConfigInvalid = (data?.code as string) === "CONFIG_INVALID";
 
             // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
             if (isBusy) {
@@ -967,6 +1133,8 @@ export function useHotPlexRuntime({
             // SESSION_TERMINATED is a normal lifecycle event (user cancelled or server stopped).
             // Don't pollute the chat with error messages; just mark the run as stopped.
             if (isTerminated) {
+                turnActiveRef.current = false;
+                activeQueueDispatchRef.current = null;
                 setIsRunning(false);
                 const pendingAssistantID = pendingAssistantIdRef.current;
                 const activeAssistantID = activeAssistantIdRef.current;
@@ -974,11 +1142,17 @@ export function useHotPlexRuntime({
                 activeAssistantIdRef.current = null;
                 activeInputMessageIdRef.current = null;
                 setMessages((prev) => {
-                    const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                    const withoutPending = removePendingAssistant(
+                        prev,
+                        pendingAssistantID,
+                    );
                     if (withoutPending !== prev) {
                         return withoutPending;
                     }
-                    const completed = completeStreamingAssistant(prev, activeAssistantID);
+                    const completed = completeStreamingAssistant(
+                        prev,
+                        activeAssistantID,
+                    );
                     if (completed !== prev) {
                         return completed;
                     }
@@ -1011,6 +1185,7 @@ export function useHotPlexRuntime({
                 logger.info("RuntimeAdapter", "Session terminated", {
                     reason: data?.message,
                 });
+                queueMicrotask(() => scheduleQueueDrainRef.current());
                 return;
             }
 
@@ -1074,6 +1249,8 @@ export function useHotPlexRuntime({
 
             // If it's a fatal error, stop the run and complete the streaming message
             if (!isResumeRetry) {
+                turnActiveRef.current = false;
+                activeQueueDispatchRef.current = null;
                 setIsRunning(false);
                 const pendingAssistantID = pendingAssistantIdRef.current;
                 const activeAssistantID = activeAssistantIdRef.current;
@@ -1082,11 +1259,17 @@ export function useHotPlexRuntime({
                 activeInputMessageIdRef.current = null;
 
                 setMessages((prev) => {
-                    const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                    const withoutPending = removePendingAssistant(
+                        prev,
+                        pendingAssistantID,
+                    );
                     if (withoutPending !== prev) {
                         return withoutPending;
                     }
-                    const completed = completeStreamingAssistant(prev, activeAssistantID);
+                    const completed = completeStreamingAssistant(
+                        prev,
+                        activeAssistantID,
+                    );
                     if (completed !== prev) {
                         return completed;
                     }
@@ -1116,6 +1299,7 @@ export function useHotPlexRuntime({
                     }
                     return prev;
                 });
+                queueMicrotask(() => scheduleQueueDrainRef.current());
             }
 
             let errorMessage = data?.message;
@@ -1172,6 +1356,10 @@ export function useHotPlexRuntime({
 
         const handleDisconnected = (reason: string) => {
             logger.info("RuntimeAdapter", "Disconnected", { reason });
+            failActiveQueueDispatchRef.current(
+                "connection",
+                reason || "Disconnected",
+            );
             for (const requestId of interactionMapRef.current.keys()) {
                 updateInteractionState(
                     requestId,
@@ -1188,7 +1376,10 @@ export function useHotPlexRuntime({
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
             setMessages((prev) => {
-                const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                const withoutPending = removePendingAssistant(
+                    prev,
+                    pendingAssistantID,
+                );
                 return withoutPending !== prev
                     ? withoutPending
                     : completeStreamingAssistant(prev, activeAssistantID);
@@ -1200,6 +1391,10 @@ export function useHotPlexRuntime({
 
         const handleSessionAlreadyConnected = () => {
             sessionAlreadyConnectedRef.current = true;
+            failActiveQueueDispatchRef.current(
+                "connection",
+                "Session is connected elsewhere",
+            );
             setIsRunning(false);
             setConnectionState("already_connected");
         };
@@ -1210,7 +1405,13 @@ export function useHotPlexRuntime({
         };
 
         const handleReconnectFailed = (attempt: number) => {
-            logger.warn("RuntimeAdapter", "Reconnect attempts exhausted", { attempt });
+            logger.warn("RuntimeAdapter", "Reconnect attempts exhausted", {
+                attempt,
+            });
+            failActiveQueueDispatchRef.current(
+                "connection",
+                "Reconnect attempts exhausted",
+            );
             setIsRunning(false);
             const pendingAssistantID = pendingAssistantIdRef.current;
             const activeAssistantID = activeAssistantIdRef.current;
@@ -1218,7 +1419,10 @@ export function useHotPlexRuntime({
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
             setMessages((prev) => {
-                const withoutPending = removePendingAssistant(prev, pendingAssistantID);
+                const withoutPending = removePendingAssistant(
+                    prev,
+                    pendingAssistantID,
+                );
                 return withoutPending !== prev
                     ? withoutPending
                     : completeStreamingAssistant(prev, activeAssistantID);
@@ -1231,6 +1435,7 @@ export function useHotPlexRuntime({
         // causes assistant-ui MessageRepository orphaned-node crash (#331).
         const handleMessageStart = (data: MessageStartData, env: Envelope) => {
             if (!data) return;
+            turnActiveRef.current = true;
             setMessages((prev) => {
                 const pending = updatePendingAssistant(
                     prev,
@@ -1283,8 +1488,46 @@ export function useHotPlexRuntime({
         // / restart), so without this handler the UI would spin forever on a
         // turn whose outcome is ambiguous.
         const handleInputAck = (data: InputAckData) => {
-            if (!matchesActiveInput(activeInputMessageIdRef.current, data.client_message_id)) {
+            const queuedDispatch = activeQueueDispatchRef.current;
+            const matchesQueuedDispatch =
+                queuedDispatch?.clientMessageId === data.client_message_id;
+            if (
+                !matchesActiveInput(
+                    activeInputMessageIdRef.current,
+                    data.client_message_id,
+                ) &&
+                !matchesQueuedDispatch
+            ) {
                 return;
+            }
+            if (queuedDispatch && matchesQueuedDispatch) {
+                if (data.status === "delivered") {
+                    const wasUnknown = queuedDispatch.outcomeUnknown === true;
+                    const deliveredItem = queueStore.markDelivered(
+                        queuedDispatch.sessionId,
+                        data.client_message_id,
+                    );
+                    if (deliveredItem) {
+                        queuedDispatch.delivered = true;
+                        queuedDispatch.outcomeUnknown = false;
+                        if (wasUnknown) {
+                            turnActiveRef.current = true;
+                            setIsRunning(true);
+                        }
+                    }
+                } else if (data.status === "unknown") {
+                    failActiveQueueDispatchRef.current(
+                        "unknown",
+                        data.error_code || "Input outcome is unknown",
+                    );
+                    return;
+                } else if (data.status === "failed") {
+                    failActiveQueueDispatchRef.current(
+                        "send",
+                        data.error_code || "Input delivery failed",
+                    );
+                    return;
+                }
             }
             if (data.status === "accepted" || data.status === "delivered") {
                 setMessages((prev) =>
@@ -1331,6 +1574,53 @@ export function useHotPlexRuntime({
         };
 
         // Subscribe to events
+        const handleConnected = (ack: { state?: string }) => {
+            sessionAlreadyConnectedRef.current = false;
+            setConnectionState("connected");
+            const turnIsRunning = ack.state === "running";
+            turnActiveRef.current = turnIsRunning;
+            setIsRunning(turnIsRunning);
+            if (!turnIsRunning) {
+                let drainDeferredForReconcile = false;
+                // A reconnect can miss the terminal Done after the queued input
+                // was already acknowledged as delivered. The init ACK is the
+                // authoritative session state, so idle completes that local
+                // association and allows the next FIFO item to drain.
+                const deliveredDispatch = activeQueueDispatchRef.current;
+                if (deliveredDispatch?.delivered) {
+                    const pendingAssistantID = pendingAssistantIdRef.current;
+                    const activeAssistantID = activeAssistantIdRef.current;
+                    activeQueueDispatchRef.current = null;
+                    pendingAssistantIdRef.current = null;
+                    activeAssistantIdRef.current = null;
+                    activeInputMessageIdRef.current = null;
+                    setMessages((previous) => {
+                        const completedPending = completeStreamingAssistant(
+                            previous,
+                            pendingAssistantID,
+                        );
+                        return completedPending !== previous
+                            ? completedPending
+                            : completeStreamingAssistant(
+                                  previous,
+                                  activeAssistantID,
+                              );
+                    });
+                    drainDeferredForReconcile = true;
+                    void reconcileTurnContent({
+                        targetAssistantId: deliveredDispatch.assistantMessageId,
+                        inputContent: deliveredDispatch.text,
+                    }).finally(() => scheduleQueueDrainRef.current());
+                }
+                setIsStopping(false);
+                stoppingRef.current = false;
+                if (!drainDeferredForReconcile) {
+                    queueMicrotask(() => scheduleQueueDrainRef.current());
+                }
+            }
+        };
+
+        client.on("connected", handleConnected);
         client.on("delta", handleDelta);
         client.on("message", handleMessage);
         client.on("inputAck", handleInputAck);
@@ -1344,9 +1634,11 @@ export function useHotPlexRuntime({
         client.on("messageStart", handleMessageStart);
         client.on("toolCall", handleToolCall);
         client.on("toolResult", handleToolResult);
-        client.on("state", (data: { state: string }) => {
+        const handleState = (data: { state: string }) => {
             onSessionStateChangeRef.current?.(data.state);
-        });
+            if (data.state === "running") turnActiveRef.current = true;
+        };
+        client.on("state", handleState);
 
         const handleContextUsage = (data: ContextUsageData) => {
             const names = data?.skills?.names ?? [];
@@ -1414,7 +1706,8 @@ export function useHotPlexRuntime({
                                             requestId: data.id,
                                             status: "pending",
                                             createdAt: Date.now(),
-                                            expiresAt: Date.now() + 5 * 60 * 1000,
+                                            expiresAt:
+                                                Date.now() + 5 * 60 * 1000,
                                         },
                                     },
                                     toolCallId: data.id,
@@ -1457,7 +1750,8 @@ export function useHotPlexRuntime({
                                             requestId: data.id,
                                             status: "pending",
                                             createdAt: Date.now(),
-                                            expiresAt: Date.now() + 5 * 60 * 1000,
+                                            expiresAt:
+                                                Date.now() + 5 * 60 * 1000,
                                         },
                                     },
                                     toolCallId: data.id,
@@ -1499,7 +1793,8 @@ export function useHotPlexRuntime({
                                             requestId: data.id,
                                             status: "pending",
                                             createdAt: Date.now(),
-                                            expiresAt: Date.now() + 5 * 60 * 1000,
+                                            expiresAt:
+                                                Date.now() + 5 * 60 * 1000,
                                         },
                                     },
                                     toolCallId: data.id,
@@ -1518,10 +1813,7 @@ export function useHotPlexRuntime({
         setConnectionState("connecting");
         client
             .connect(sessionId)
-            .then(() => {
-                sessionAlreadyConnectedRef.current = false;
-                setConnectionState("connected");
-            })
+            .then(() => undefined)
             .catch((err) => {
                 if (sessionAlreadyConnectedRef.current) {
                     logger.info("RuntimeAdapter", "Session already connected", {
@@ -1554,12 +1846,25 @@ export function useHotPlexRuntime({
             // Mark this effect instance as torn down so async paths
             // (reconcileTurnContent) skip their setMessages after unmount.
             cancelled = true;
+            const activeQueueDispatch = activeQueueDispatchRef.current;
+            if (activeQueueDispatch && !activeQueueDispatch.delivered) {
+                failActiveQueueDispatchRef.current(
+                    "connection",
+                    "Session connection was replaced",
+                );
+            }
+            activeQueueDispatchRef.current = null;
+            turnActiveRef.current = false;
+            client.off("connected", handleConnected);
             client.off("delta", handleDelta);
             client.off("message", handleMessage);
             client.off("inputAck", handleInputAck);
             client.off("done", handleDone);
             client.off("error", handleError);
-            client.off("sessionAlreadyConnected", handleSessionAlreadyConnected);
+            client.off(
+                "sessionAlreadyConnected",
+                handleSessionAlreadyConnected,
+            );
             client.off("disconnected", handleDisconnected);
             client.off("reconnecting", handleReconnecting);
             client.off("reconnect_failed", handleReconnectFailed);
@@ -1567,6 +1872,7 @@ export function useHotPlexRuntime({
             client.off("messageStart", handleMessageStart);
             client.off("toolCall", handleToolCall);
             client.off("toolResult", handleToolResult);
+            client.off("state", handleState);
             client.off("contextUsage", handleContextUsage);
             client.off("skillsList", handleSkillsList);
             client.off("permissionRequest", handlePermissionRequest);
@@ -1607,176 +1913,404 @@ export function useHotPlexRuntime({
         };
     }, []);
 
-    // Handler for new messages (from assistant-ui Composer)
-    // NOTE: reads client.connected directly from ref to avoid stale closure with isConnected state
-    const handleNew = useCallback(async (message: AppendMessage) => {
-        const client = clientRef.current;
-        if (!client) {
-            throw new Error("HotPlex client not initialized.");
-        }
-
-        const textContent = Array.isArray(message.content)
-            ? message.content
-                  .filter(
-                      (part): part is { type: "text"; text: string } =>
-                          part.type === "text",
-                  )
-                  .map((part) => part.text)
-                  .join("")
-            : "";
-        if (!textContent.trim()) {
-            return;
-        }
-
-        const userMessage: HotPlexMessage = {
-            id: `user-${Date.now()}`,
-            role: "user",
-            parts: [{ type: "text", text: textContent }],
-            createdAt: new Date(),
-            status: "complete",
-        };
-        const assistantID = `assistant-local-${Date.now()}`;
-        const pendingAssistant = createPendingAssistantMessage(
-            assistantID,
-            new Date(),
-        );
-        const rollbackOptimisticInput = () => {
-            pendingAssistantIdRef.current = null;
-            activeAssistantIdRef.current = null;
-            activeInputMessageIdRef.current = null;
-            setIsRunning(false);
-            setMessages((prev) =>
-                prev.filter(
-                    (current) =>
-                        current.id !== userMessage.id &&
-                        current.id !== assistantID,
-                ),
+    const dispatchInput = useCallback(
+        async (textContent: string, queueItemId?: string): Promise<string> => {
+            const client = clientRef.current;
+            if (!client) {
+                throw new Error("HotPlex client not initialized.");
+            }
+            const localId =
+                queueItemId ??
+                `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const userMessage: HotPlexMessage = {
+                id: `user-${localId}`,
+                role: "user",
+                parts: [{ type: "text", text: textContent }],
+                createdAt: new Date(),
+                status: "complete",
+            };
+            const assistantID = `assistant-local-${localId}`;
+            const pendingAssistant = createPendingAssistantMessage(
+                assistantID,
+                new Date(),
             );
-        };
-
-        // Insert feedback before reconnecting: WebSocket recovery can take
-        // seconds, but it must not create a blank interval in the thread.
-        pendingAssistantIdRef.current = assistantID;
-        activeAssistantIdRef.current = assistantID;
-        activeInputMessageIdRef.current = null;
-        setMessages((prev) => [...prev, userMessage, pendingAssistant]);
-        setIsRunning(true);
-        startTurn();
-
-        // Handle disconnected state: attempt to reconnect if not already connecting
-        if (!client.connected) {
-            logger.info(
-                "RuntimeAdapter",
-                "Client not connected, attempting reconnect",
-            );
-            try {
-                if (!client.connecting) {
-                    // Don't pass sessionId here — the client internally tracks the latest session ID,
-                    // which may have been updated by a SessionNotFound retry in BrowserHotPlexClient.
-                    client.connect().catch((err) => {
-                        logger.error("RuntimeAdapter", "Auto-connect failed", {
-                            error: String(err),
-                        });
-                    });
+            const rollbackOptimisticInput = () => {
+                if (activeQueueDispatchRef.current?.itemId === queueItemId) {
+                    activeQueueDispatchRef.current = null;
                 }
+                pendingAssistantIdRef.current = null;
+                activeAssistantIdRef.current = null;
+                activeInputMessageIdRef.current = null;
+                turnActiveRef.current = false;
+                setIsRunning(false);
+                setMessages((prev) =>
+                    prev.filter(
+                        (current) =>
+                            current.id !== userMessage.id &&
+                            current.id !== assistantID,
+                    ),
+                );
+            };
 
-                // Wait for connection (up to 30s)
-                await new Promise<void>((resolve, reject) => {
-                    let settled = false;
-                    const settle = (fn: () => void) => {
-                        if (settled) return;
-                        settled = true;
-                        clearTimeout(timeout);
-                        client.off("connected", onConnected);
-                        client.off("disconnected", onDisconnected);
-                        connectionWaitRef.current = null;
-                        fn();
-                    };
+            // Insert feedback before reconnecting: WebSocket recovery can take
+            // seconds, but it must not create a blank interval in the thread.
+            pendingAssistantIdRef.current = assistantID;
+            activeAssistantIdRef.current = assistantID;
+            activeInputMessageIdRef.current = null;
+            turnActiveRef.current = true;
+            if (queueItemId && sessionIdRef.current) {
+                activeQueueDispatchRef.current = {
+                    sessionId: sessionIdRef.current,
+                    itemId: queueItemId,
+                    userMessageId: userMessage.id,
+                    assistantMessageId: assistantID,
+                    delivered: false,
+                    text: textContent,
+                };
+            }
+            setMessages((prev) => [...prev, userMessage, pendingAssistant]);
+            setIsRunning(true);
+            startTurn();
 
-                    const timeout = setTimeout(() => {
-                        settle(() =>
-                            reject(
-                                new Error(
-                                    "Connection timeout. Please check your network.",
-                                ),
-                            ),
-                        );
-                    }, 30000);
-
-                    const onConnected = () => {
-                        settle(() => resolve());
-                    };
-                    const onDisconnected = (reason: string) => {
-                        settle(() =>
-                            reject(new Error(`Connection failed: ${reason}`)),
-                        );
-                    };
-
-                    connectionWaitRef.current = {
-                        timeout,
-                        onConnected,
-                        onDisconnected,
-                    };
-                    client.on("connected", onConnected);
-                    client.on("disconnected", onDisconnected);
-
-                    // Check if it connected while we were setting up listeners
-                    if (client.connected) {
-                        settle(() => resolve());
+            // Handle disconnected state: attempt to reconnect if not already connecting
+            if (!client.connected) {
+                logger.info(
+                    "RuntimeAdapter",
+                    "Client not connected, attempting reconnect",
+                );
+                try {
+                    if (!client.connecting) {
+                        // Don't pass sessionId here — the client internally tracks the latest session ID,
+                        // which may have been updated by a SessionNotFound retry in BrowserHotPlexClient.
+                        client.connect().catch((err) => {
+                            logger.error(
+                                "RuntimeAdapter",
+                                "Auto-connect failed",
+                                {
+                                    error: String(err),
+                                },
+                            );
+                        });
                     }
-                });
+
+                    // Wait for connection (up to 30s)
+                    await new Promise<void>((resolve, reject) => {
+                        let settled = false;
+                        const settle = (fn: () => void) => {
+                            if (settled) return;
+                            settled = true;
+                            clearTimeout(timeout);
+                            client.off("connected", onConnected);
+                            client.off("disconnected", onDisconnected);
+                            connectionWaitRef.current = null;
+                            fn();
+                        };
+
+                        const timeout = setTimeout(() => {
+                            settle(() =>
+                                reject(
+                                    new Error(
+                                        "Connection timeout. Please check your network.",
+                                    ),
+                                ),
+                            );
+                        }, 30000);
+
+                        const onConnected = () => {
+                            settle(() => resolve());
+                        };
+                        const onDisconnected = (reason: string) => {
+                            settle(() =>
+                                reject(
+                                    new Error(`Connection failed: ${reason}`),
+                                ),
+                            );
+                        };
+
+                        connectionWaitRef.current = {
+                            timeout,
+                            onConnected,
+                            onDisconnected,
+                        };
+                        client.on("connected", onConnected);
+                        client.on("disconnected", onDisconnected);
+
+                        // Check if it connected while we were setting up listeners
+                        if (client.connected) {
+                            settle(() => resolve());
+                        }
+                    });
+                } catch (err) {
+                    rollbackOptimisticInput();
+                    throw new Error(
+                        err instanceof Error
+                            ? err.message
+                            : "HotPlex client not connected. Please check your network.",
+                    );
+                }
+            }
+
+            // Send to HotPlex gateway with error handling
+            try {
+                const clientMessageId = client.sendInput(textContent);
+                activeInputMessageIdRef.current = clientMessageId;
+                const activeQueueDispatch = activeQueueDispatchRef.current;
+                if (
+                    queueItemId &&
+                    activeQueueDispatch?.itemId === queueItemId &&
+                    activeQueueDispatch.sessionId === sessionIdRef.current
+                ) {
+                    activeQueueDispatch.clientMessageId = clientMessageId;
+                    if (
+                        !queueStore.attachClientMessageId(
+                            activeQueueDispatch.sessionId,
+                            queueItemId,
+                            clientMessageId,
+                        )
+                    ) {
+                        failActiveQueueDispatchRef.current(
+                            "unknown",
+                            "Queue dispatch correlation was lost",
+                        );
+                        throw new Error("Queue dispatch correlation was lost");
+                    }
+                }
+                return clientMessageId;
             } catch (err) {
                 rollbackOptimisticInput();
-                throw new Error(
-                    err instanceof Error
-                        ? err.message
-                        : "HotPlex client not connected. Please check your network.",
-                );
+                throw err;
             }
-        }
+        },
+        [queueStore, startTurn],
+    );
 
-        // Send to HotPlex gateway with error handling
-        try {
-            activeInputMessageIdRef.current = client.sendInput(textContent);
-        } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            rollbackOptimisticInput();
-            if (errMsg === "Input already pending") {
-                // A previous turn is still in flight (often an unknown-outcome
-                // tombstone). This is not a connection fault.
-                logger.warn("RuntimeAdapter", "sendInput blocked: input already pending");
-                throw new Error(i18n.t("chat:error.input_still_processing"));
-            }
-            logger.error("RuntimeAdapter", "sendInput failed", {
-                error: errMsg,
-            });
-            throw new Error(i18n.t("chat:error.send_failed_connection"));
+    const drainQueue = useCallback(async () => {
+        if (drainInFlightRef.current) return;
+        const sid = sessionIdRef.current;
+        const client = clientRef.current;
+        if (
+            !sid ||
+            !client?.connected ||
+            turnActiveRef.current ||
+            stoppingRef.current ||
+            activeQueueDispatchRef.current
+        ) {
+            return;
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- stable send action; startTurn is a stable callback
+        const item = queueStore.peekDispatchable(sid);
+        if (!item || !queueStore.markSending(sid, item.id)) return;
+
+        drainInFlightRef.current = true;
+        try {
+            await dispatchInput(item.text, item.id);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (!failActiveQueueDispatchRef.current("send", message)) {
+                queueStore.markFailed(sid, item.id, "send", message);
+            }
+        } finally {
+            drainInFlightRef.current = false;
+        }
+    }, [dispatchInput, queueStore]);
+
+    scheduleQueueDrainRef.current = () => {
+        queueMicrotask(() => void drainQueue());
+    };
+
+    const enqueueFollowUp = useCallback(
+        (text: string) => {
+            const sid = sessionIdRef.current;
+            if (!sid) return { ok: false, reason: "blank" } as const;
+            const result = queueStore.enqueue(sid, text);
+            if (result.ok && !turnActiveRef.current && !stoppingRef.current) {
+                scheduleQueueDrainRef.current();
+            }
+            return result;
+        },
+        [queueStore],
+    );
+
+    const updateFollowUp = useCallback(
+        (itemId: string, text: string) => {
+            const sid = sessionIdRef.current;
+            return sid ? queueStore.updateText(sid, itemId, text) : false;
+        },
+        [queueStore],
+    );
+
+    const releaseUnknownQueueDispatch = useCallback((itemId: string) => {
+        const active = activeQueueDispatchRef.current;
+        if (active?.itemId === itemId && active.outcomeUnknown) {
+            activeQueueDispatchRef.current = null;
+            if (pendingAssistantIdRef.current === active.assistantMessageId) {
+                pendingAssistantIdRef.current = null;
+            }
+            if (activeAssistantIdRef.current === active.assistantMessageId) {
+                activeAssistantIdRef.current = null;
+            }
+            activeInputMessageIdRef.current = null;
+            setMessages((previous) =>
+                previous.filter(
+                    (message) =>
+                        message.id !== active.userMessageId &&
+                        message.id !== active.assistantMessageId,
+                ),
+            );
+            clientRef.current?.acknowledgeUnknownInputForRetry();
+        }
     }, []);
+
+    const removeFollowUp = useCallback(
+        (itemId: string) => {
+            const sid = sessionIdRef.current;
+            if (!sid || !queueStore.remove(sid, itemId)) return false;
+            releaseUnknownQueueDispatch(itemId);
+            if (!turnActiveRef.current && !stoppingRef.current) {
+                scheduleQueueDrainRef.current();
+            }
+            return true;
+        },
+        [queueStore, releaseUnknownQueueDispatch],
+    );
+
+    const retryFollowUp = useCallback(
+        (itemId: string) => {
+            const sid = sessionIdRef.current;
+            if (!sid) return false;
+            const item = queueStore
+                .getSnapshot(sid)
+                .find((current) => current.id === itemId);
+            if (!item || item.status !== "failed") return false;
+            if (item.errorKind === "unknown") {
+                releaseUnknownQueueDispatch(itemId);
+            }
+            if (!queueStore.retry(sid, itemId)) return false;
+            scheduleQueueDrainRef.current();
+            return true;
+        },
+        [queueStore, releaseUnknownQueueDispatch],
+    );
 
     const [isStopping, setIsStopping] = useState(false);
     const stoppingRef = useRef(false);
-    const cancelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const sendFollowUpNow = useCallback(
+        async (itemId: string) => {
+            const sid = sessionIdRef.current;
+            const client = clientRef.current;
+            if (!sid || stoppingRef.current) return;
+
+            if (turnActiveRef.current && !client?.connected) {
+                if (queueStore.prepareSendNow(sid, itemId)) {
+                    queueStore.markFailed(
+                        sid,
+                        itemId,
+                        "connection",
+                        "Cannot stop the active turn while disconnected",
+                    );
+                }
+                return;
+            }
+            const item = queueStore
+                .getSnapshot(sid)
+                .find((current) => current.id === itemId);
+            if (!item || !queueStore.prepareSendNow(sid, itemId)) return;
+            if (item.errorKind === "unknown") {
+                releaseUnknownQueueDispatch(itemId);
+            }
+
+            if (!turnActiveRef.current) {
+                scheduleQueueDrainRef.current();
+                return;
+            }
+            if (!client?.connected) return;
+
+            stoppingRef.current = true;
+            setIsStopping(true);
+            try {
+                await client.stopCurrentTurn();
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                queueStore.markFailed(sid, itemId, "stop", message);
+                setIsStopping(false);
+                stoppingRef.current = false;
+            }
+        },
+        [queueStore, releaseUnknownQueueDispatch],
+    );
+
+    // Handler for new messages (from assistant-ui Composer). The custom
+    // composer calls enqueueFollowUp while running because assistant-ui's
+    // external-store runtime intentionally disables its built-in queue.
+    const handleNew = useCallback(
+        async (message: AppendMessage) => {
+            const textContent = Array.isArray(message.content)
+                ? message.content
+                      .filter(
+                          (part): part is { type: "text"; text: string } =>
+                              part.type === "text",
+                      )
+                      .map((part) => part.text)
+                      .join("")
+                : "";
+            if (!textContent.trim()) return;
+            const sid = sessionIdRef.current;
+            if (
+                turnActiveRef.current ||
+                stoppingRef.current ||
+                (sid ? queueStore.getSnapshot(sid).length > 0 : false)
+            ) {
+                const result = enqueueFollowUp(textContent);
+                if (!result.ok && result.reason === "limit") {
+                    throw new Error(i18n.t("chat:follow_up.error.limit"));
+                }
+                return;
+            }
+
+            try {
+                await dispatchInput(textContent);
+            } catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                if (errMsg === "Input already pending") {
+                    // A previous turn is still in flight (often an unknown-outcome
+                    // tombstone). This is not a connection fault.
+                    logger.warn(
+                        "RuntimeAdapter",
+                        "sendInput blocked: input already pending",
+                    );
+                    throw new Error(
+                        i18n.t("chat:error.input_still_processing"),
+                    );
+                }
+                logger.error("RuntimeAdapter", "sendInput failed", {
+                    error: errMsg,
+                });
+                throw new Error(i18n.t("chat:error.send_failed_connection"));
+            }
+        },
+        [dispatchInput, enqueueFollowUp, queueStore],
+    );
 
     const handleCancel = useCallback(async () => {
         if (stoppingRef.current) return;
         stoppingRef.current = true;
         setIsStopping(true);
         const client = clientRef.current;
-        if (client?.connected) {
-            client.sendControl("stop");
+        if (!client?.connected) {
+            setIsStopping(false);
+            stoppingRef.current = false;
+            return;
         }
-        if (cancelTimeoutRef.current) {
-            clearTimeout(cancelTimeoutRef.current);
+        try {
+            await client.stopCurrentTurn();
+        } catch (err) {
+            logger.warn("RuntimeAdapter", "Stop did not reach terminal state", {
+                error: String(err),
+            });
+            setIsStopping(false);
+            stoppingRef.current = false;
         }
-        cancelTimeoutRef.current = setTimeout(() => {
-            if (stoppingRef.current) {
-                setIsRunning(false);
-                setIsStopping(false);
-                stoppingRef.current = false;
-            }
-        }, 2000);
     }, []);
 
     // This is deliberately an explicit one-shot action. A duplicate-session
@@ -1795,9 +2329,13 @@ export function useHotPlexRuntime({
         } catch (err) {
             sessionAlreadyConnectedRef.current = true;
             setConnectionState("already_connected");
-            logger.info("RuntimeAdapter", "Explicit duplicate-session retry failed", {
-                error: String(err),
-            });
+            logger.info(
+                "RuntimeAdapter",
+                "Explicit duplicate-session retry failed",
+                {
+                    error: String(err),
+                },
+            );
         }
     }, []);
 
@@ -1867,7 +2405,10 @@ export function useHotPlexRuntime({
                     if (msg.role !== "assistant") return msg;
                     let found = false;
                     const parts = msg.parts.map((p) => {
-                        if (p.type === "tool-call" && p.toolCallId === toolCallId) {
+                        if (
+                            p.type === "tool-call" &&
+                            p.toolCallId === toolCallId
+                        ) {
                             found = true;
                             const inter = p.args?.interaction;
                             return {
@@ -1897,7 +2438,10 @@ export function useHotPlexRuntime({
                         );
                         break;
                     case "question":
-                        await client.sendQuestionResponse(toolCallId, response.answers ?? {});
+                        await client.sendQuestionResponse(
+                            toolCallId,
+                            response.answers ?? {},
+                        );
                         break;
                     case "elicitation":
                         await client.sendElicitationResponse(
@@ -1911,32 +2455,43 @@ export function useHotPlexRuntime({
                 // WebSocket send only proves that the frame entered the socket.
                 // Stay in submitting until Gateway echoes the correlated response
                 // after the Worker native endpoint accepts it.
-                const existingTimer = interactionAckTimersRef.current.get(toolCallId);
+                const existingTimer =
+                    interactionAckTimersRef.current.get(toolCallId);
                 if (existingTimer) clearTimeout(existingTimer);
                 const timer = setTimeout(() => {
                     interactionAckTimersRef.current.delete(toolCallId);
-                    setMessages((prev) => prev.map((msg) => {
-                        if (msg.role !== "assistant") return msg;
-                        let found = false;
-                        const parts = msg.parts.map((part) => {
-                            if (part.type !== "tool-call" || part.toolCallId !== toolCallId) return part;
-                            const interaction = part.args?.interaction;
-                            if (!interaction || interaction.status !== "submitting") return part;
-                            found = true;
-                            return {
-                                ...part,
-                                args: {
-                                    ...part.args,
-                                    interaction: {
-                                        ...interaction,
-                                        status: "failed" as const,
-                                        error: "Timed out waiting for the Worker to confirm this response",
+                    setMessages((prev) =>
+                        prev.map((msg) => {
+                            if (msg.role !== "assistant") return msg;
+                            let found = false;
+                            const parts = msg.parts.map((part) => {
+                                if (
+                                    part.type !== "tool-call" ||
+                                    part.toolCallId !== toolCallId
+                                )
+                                    return part;
+                                const interaction = part.args?.interaction;
+                                if (
+                                    !interaction ||
+                                    interaction.status !== "submitting"
+                                )
+                                    return part;
+                                found = true;
+                                return {
+                                    ...part,
+                                    args: {
+                                        ...part.args,
+                                        interaction: {
+                                            ...interaction,
+                                            status: "failed" as const,
+                                            error: "Timed out waiting for the Worker to confirm this response",
+                                        },
                                     },
-                                },
-                            };
-                        });
-                        return found ? { ...msg, parts } : msg;
-                    }));
+                                };
+                            });
+                            return found ? { ...msg, parts } : msg;
+                        }),
+                    );
                 }, 15_000);
                 interactionAckTimersRef.current.set(toolCallId, timer);
             } catch (err) {
@@ -1951,7 +2506,10 @@ export function useHotPlexRuntime({
                         if (msg.role !== "assistant") return msg;
                         let found = false;
                         const parts = msg.parts.map((p) => {
-                            if (p.type === "tool-call" && p.toolCallId === toolCallId) {
+                            if (
+                                p.type === "tool-call" &&
+                                p.toolCallId === toolCallId
+                            ) {
                                 found = true;
                                 const inter = p.args?.interaction;
                                 return {
@@ -2040,6 +2598,25 @@ export function useHotPlexRuntime({
         [],
     );
 
+    const followUpQueue = useMemo<FollowUpQueueControls>(
+        () => ({
+            items: queuedItems,
+            enqueue: enqueueFollowUp,
+            updateText: updateFollowUp,
+            remove: removeFollowUp,
+            retry: retryFollowUp,
+            sendNow: sendFollowUpNow,
+        }),
+        [
+            queuedItems,
+            enqueueFollowUp,
+            updateFollowUp,
+            removeFollowUp,
+            retryFollowUp,
+            sendFollowUpNow,
+        ],
+    );
+
     // Stable extras reference — only changes when metrics or history state change
     const extras = useMemo(
         () => ({
@@ -2050,6 +2627,7 @@ export function useHotPlexRuntime({
             isStopping,
             connectionState,
             onRetryConnection: retrySessionConnection,
+            followUpQueue,
         }),
         [
             sessionMetrics,
@@ -2059,6 +2637,7 @@ export function useHotPlexRuntime({
             isStopping,
             connectionState,
             retrySessionConnection,
+            followUpQueue,
         ],
     );
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -150,6 +151,9 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 	}
 
 	content, _ := data["content"].(string)
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
 	if handled, err := h.tryCommandDispatch(ctx, env, content); handled {
 		return err
 	}
