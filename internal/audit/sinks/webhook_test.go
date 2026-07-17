@@ -55,7 +55,8 @@ func TestWebhookSink_DeliversAndSigns(t *testing.T) {
 
 	require.Eventually(t, func() bool { return atomic.LoadInt32(&requests) >= 1 },
 		2*time.Second, 5*time.Millisecond)
-	require.Equal(t, int64(1), s.Delivered())
+	require.Eventually(t, func() bool { return s.Delivered() >= 1 },
+		1*time.Second, 5*time.Millisecond, "delivery counter must reflect async POST success")
 	require.Equal(t, int64(0), s.Failures())
 
 	// Verify body is valid JSON carrying the event.
