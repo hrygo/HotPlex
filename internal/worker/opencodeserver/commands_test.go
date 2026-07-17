@@ -458,16 +458,43 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			wantSuccess: true,
 		},
 		{
-			name: "plan + allowedTools includes read-only + per-tool rules",
-			mode: "plan", allowedTools: []string{"Bash"},
+			name: "plan denies all write-capable tools",
+			mode: "plan",
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				perms := reqBody["permission"].([]any)
-				require.Len(t, perms, 2)
+				// 1 read-allow + 5 write-deny (edit, write, bash, shell, patch)
+				require.Len(t, perms, 6)
 				readRule := perms[0].(map[string]any)
 				require.Equal(t, "read", readRule["permission"])
-				toolRule := perms[1].(map[string]any)
+				require.Equal(t, "allow", readRule["action"])
+				deniedTools := map[string]bool{}
+				for _, p := range perms[1:] {
+					rule := p.(map[string]any)
+					require.Equal(t, "deny", rule["action"], "write tool %s should be denied", rule["permission"])
+					deniedTools[rule["permission"].(string)] = true
+				}
+				for _, tool := range []string{"edit", "write", "bash", "shell", "patch"} {
+					require.True(t, deniedTools[tool], "%s should be denied in plan mode", tool)
+				}
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "plan + allowedTools keeps deny rules and appends tool allows",
+			mode: "plan", allowedTools: []string{"Read"},
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				// 1 read-allow + 5 write-deny + 1 tool-allow
+				require.Len(t, perms, 7)
+				readRule := perms[0].(map[string]any)
+				require.Equal(t, "read", readRule["permission"])
+				for _, p := range perms[1:6] {
+					rule := p.(map[string]any)
+					require.Equal(t, "deny", rule["action"])
+				}
+				toolRule := perms[6].(map[string]any)
 				require.Equal(t, "tool", toolRule["permission"])
-				require.Equal(t, "Bash", toolRule["pattern"])
+				require.Equal(t, "Read", toolRule["pattern"])
 			},
 			wantSuccess: true,
 		},

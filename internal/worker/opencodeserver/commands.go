@@ -232,12 +232,22 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	case "plan":
-		// Read-only allowed + write requires approval.
+		// Read-only: explicitly deny ALL write-capable tools. OCS's permission
+		// system is an opt-in allowlist — when no rule matches a tool call, the
+		// default action is ALLOW (not ask or deny). Simply omitting write
+		// permissions (as the old code did) silently lets edits go through.
+		// Each write tool must be denied individually because the agent can
+		// pivot between them (e.g. use bash when edit is unavailable).
 		rules = []map[string]any{
 			{"permission": "read", "action": "allow", "pattern": "*"},
+			{"permission": "edit", "action": "deny", "pattern": "*"},
+			{"permission": "write", "action": "deny", "pattern": "*"},
+			{"permission": "bash", "action": "deny", "pattern": "*"},
+			{"permission": "shell", "action": "deny", "pattern": "*"},
+			{"permission": "patch", "action": "deny", "pattern": "*"},
 		}
 		if len(allowedTools) > 0 {
-			slog.Warn("opencode: plan mode with allowed_tools may override read-only semantics",
+			slog.Warn("opencode: plan mode with allowed_tools; write-capable tools remain denied",
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	case "acceptEdits":
@@ -247,7 +257,8 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 			{"permission": "edit", "action": "allow", "pattern": "*"},
 		}
 	default:
-		// No rules injected: OCS default (no matching rule → ask → publishes permission.asked).
+		// Unknown mode: no rules injected. Note: OCS defaults to ALLOW when no rule
+		// matches (opt-in allowlist), so this is NOT safe for restricting access.
 		if len(allowedTools) > 0 {
 			slog.Info("opencode: default mode with allowed_tools restricts to tool whitelist",
 				"mode", mode, "allowed_tools", allowedTools)
