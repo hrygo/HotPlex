@@ -53,7 +53,7 @@ HotPlex 使用 `log/slog` JSON Handler 输出结构化日志，兼容 OTel Log D
 
 ## 2. OTel 原生指标体系
 
-HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API 注册 36 个指标，前缀为 `hotplex.`。应用代码零直接依赖 `prometheus/client_golang`。
+HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API 注册 58+ 个指标，前缀为 `hotplex.`。应用代码零直接依赖 `prometheus/client_golang`。
 
 指标通过 OTel Prometheus Exporter 以标准 Prometheus 格式暴露于 `GET /admin/metrics`，同时支持通过 OTLP gRPC 导出到 OTel Collector。
 
@@ -137,7 +137,52 @@ HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API �
 | `hotplex.retry.attempts` | Counter | — | LLM 重试尝试次数 |
 | `hotplex.retry.exhaustion` | Counter | — | 重试耗尽（最终失败）次数 |
 
+### 2.9 Execution & Lease-Repair 指标
+
+Durable ingress 的输入账本、owner lease 续约与终态修复子系统。
+
+| 指标 | 类型 | 标签 | 说明 |
+|------|------|------|------|
+| `hotplex.execution.accept` | Counter | — | 新输入被持久化接受 |
+| `hotplex.execution.duplicate` | Counter | — | 幂等去重（相同 ID + payload） |
+| `hotplex.execution.conflict` | Counter | — | Payload 冲突（相同 ID，不同 hash） |
+| `hotplex.execution.session_busy` | Counter | — | Active gate 拒绝（session 忙于此前 execution） |
+| `hotplex.execution.delivery_outcome` | Counter | `delivery_status` | Worker 投递结果（delivered/unknown/failed） |
+| `hotplex.execution.runtime_outcome` | Counter | `runtime_status` | Worker 运行终态（completed/failed/unknown） |
+| `hotplex.execution.delivery_latency` | Histogram | — | accept 到 delivery outcome 耗时 |
+| `hotplex.execution.runtime_duration` | Histogram | — | Worker turn 执行耗时 |
+| `hotplex.lease.renew_failure` | Counter | — | Owner lease 续约失败 |
+| `hotplex.lease.expired_recovery` | Counter | — | Lease 过期恢复（runtime 置 unknown + fence） |
+| `hotplex.repair.attempts` | Counter | — | 终态修复尝试 |
+| `hotplex.repair.success` | Counter | — | 终态修复成功 |
+| `hotplex.repair.timeout` | Counter | — | 终态修复超时（超过 MaxLifetime 放弃） |
+| `hotplex.repair.dropped` | Counter | — | 终态修复入队失败（回退 lease recovery） |
+
+### 2.10 Turn TTFT 指标
+
+Gateway 收到输入到首个可见 Worker 输出的耗时分段。TTFT 仅使用 Gateway 侧时间戳；
+浏览器绘制时间属于独立客户端遥测，不能与本指标混合。
+
+| 指标 | 类型 | 标签 | 说明 |
+|------|------|------|------|
+| `hotplex.turn.ttft` | Histogram | `worker_type`, `first_output`（reasoning/text） | 输入到首个可见输出的耗时 |
+| `hotplex.turn.first_text_latency` | Histogram | `worker_type` | 输入到首个文本 delta 的耗时 |
+| `hotplex.turn.stage_duration` | Histogram | `worker_type`, `stage`（admission/dispatch/first_output） | 三阶段耗时拆分 |
+| `hotplex.turn.without_output` | Counter | `worker_type`, `terminal_status` | 无可见输出即终止的 turn |
+| `hotplex.worker.empty_success_total` | Counter | `worker_type`, `platform` | 成功但无显示内容和工具调用的 turn（Turn-Integrity） |
+
+### 2.11 Forwarder & Turn-Integrity 诊断指标
+
+| 指标 | 类型 | 标签 | 说明 |
+|------|------|------|------|
+| `hotplex.gateway.forwarder.panics` | Counter | `worker_type` | Worker 事件转发 goroutine 已恢复的 panic |
+| `hotplex.gateway.stale_forwarder_event_total` | Counter | — | `/reset` 后旧 forwarder 观察到的事件（应永不为零） |
+| `hotplex.worker.assistant_snapshot_drift_total` | Counter | — | Full snapshot 非前缀漂移被重新下发 |
+| `hotplex.messaging.platform_terminal_fallback_total` | Counter | — | 平台因空内容发出合成终态回退 |
+
 ---
+
+
 
 ## 3. OpenTelemetry 分布式追踪
 
@@ -237,6 +282,9 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 | WS 连接数 | `hotplex_gateway_connections` | Time series | 连接趋势 |
 | Worker 崩溃率 | `rate(hotplex_worker_crashes_total[5m])` | Time series | 稳定性 |
 | Worker 执行 P99 | `histogram_quantile(0.99, rate(hotplex_worker_execution_duration_bucket[5m]))` | Time series | 性能 |
+| TTFT P95 | `histogram_quantile(0.95, sum by (le, worker_type) (rate(hotplex_turn_ttft_bucket[15m])))` | Time series | 首输出延迟 |
+| TTFT 阶段拆分 | `histogram_quantile(0.95, sum by (le, stage) (rate(hotplex_turn_stage_duration_bucket[15m])))` | Time series | 延迟归因 |
+| 投递成功率 | `sum(rate(hotplex_execution_delivery_outcome_total{delivery_status="delivered"}[5m])) / sum(rate(hotplex_execution_delivery_outcome_total[5m]))` | Stat | 输入可靠性 |
 | Delta 背压丢弃 | `rate(hotplex_gateway_deltas_dropped_total[5m])` | Time series | 流量压力 |
 | Cron 错误率 | `rate(hotplex_cron_errors_total[5m])` | Time series | 定时任务健康 |
 | 错误分类 | `hotplex_gateway_errors_total` | Stacked bar | 错误归因 |
@@ -271,6 +319,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 | PoolDoubleRelease | `increase(hotplex_pool_release_errors_total[1h])` | > 0 | P2 | 代码 Bug 信号 |
 | LLMRetryExhaustion | `rate(hotplex_retry_exhaustion_total[5m])` | > 0 | P1 | LLM 调用不可用 |
 | RepeatedSessionConnectionConflict | `rate(hotplex_gateway_webchat_duplicate_connection_rejected_total[10m])` | 持续 > 0 | P2 | 客户端并发重连或连接切换未排空 |
+| HighDeliveryFailureRate | `rate(hotplex_execution_delivery_outcome_total{delivery_status!="delivered"}[5m]) / rate(hotplex_execution_delivery_outcome_total[5m])` | > 5% | P1 | Worker 投递失败率过高 |
+| HighEmptySuccessTurn | `rate(hotplex_worker_empty_success_total_total[5m]) / rate(hotplex_worker_starts_total[5m])` | > 1% | P2 | 空 success turn 占比异常 |
+| HighLeaseRenewFailure | `rate(hotplex_lease_renew_failure_total[5m])` | 持续 > 0 | P1 | Owner lease 续约持续失败 |
+| HighTTFTP99 | `histogram_quantile(0.99, sum by (le) (rate(hotplex_turn_ttft_bucket[15m])))` | > 30s | P1 | TTFT P99 超过阈值 |
 
 ### SLO 参考
 
@@ -279,3 +331,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 | Session 创建成功率 | `session.start.attempts` vs `session.start.errors` | >= 99.5% |
 | Worker 可用性 | `1 - crashes/starts` | >= 99% |
 | Worker 执行 P99 | `worker.execution.duration` | < 300s |
+| 输入投递成功率 | `execution.delivery_outcome{delivery_status="delivered"}` | >= 99% |
+| Lease 续约成功率 | `lease.renew_failure` 持续为 0 | == 100% |
+| TTFT P95 | `turn.ttft` P95 | < 10s |
