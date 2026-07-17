@@ -3,10 +3,12 @@ package opencodeserver
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -497,4 +499,78 @@ func TestSingletonProcessManager_readStderr(t *testing.T) {
 	output := buf.String()
 	require.Contains(t, output, "err one")
 	require.Contains(t, output, "err two")
+}
+
+func TestSingletonProcessManager_readStderr_FillsRing(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	mgr := NewSingletonProcessManager(log, config.OpenCodeServerConfig{})
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	_, err = io.WriteString(w, "err one\nerr two\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	done := make(chan struct{})
+	go func() {
+		mgr.readStderr(r)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readStderr did not return after stderr was closed")
+	}
+
+	// Ring must capture the same lines that went to the logger, in order.
+	require.Equal(t, []string{"err one", "err two"}, mgr.StderrTail())
+}
+
+func TestSingletonProcessManager_LastExitCode_InitialState(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewSingletonProcessManager(slog.Default(), config.OpenCodeServerConfig{})
+	code, ok := mgr.LastExitCode()
+	require.False(t, ok, "no exit code available before any process has run")
+	require.Equal(t, 0, code)
+}
+
+func TestSingletonProcessManager_StartupFailureError_WithTail(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewSingletonProcessManager(slog.Default(), config.OpenCodeServerConfig{})
+	mgr.stderrRing.Add("line one")
+	mgr.stderrRing.Add("line two")
+
+	err := mgr.startupFailureError("discover port", fmt.Errorf("boom"))
+	s := err.Error()
+	require.Contains(t, s, "discover port")
+	require.Contains(t, s, "boom")
+	require.Contains(t, s, "line one")
+	require.Contains(t, s, "line two")
+}
+
+func TestSingletonProcessManager_StartupFailureError_NoTail(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewSingletonProcessManager(slog.Default(), config.OpenCodeServerConfig{})
+	err := mgr.startupFailureError("spawn", fmt.Errorf("x"))
+	require.Contains(t, err.Error(), "spawn")
+	require.NotContains(t, err.Error(), "recent stderr")
+}
+
+func TestSingletonProcessManager_StartupFailureError_TruncatesLongTail(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewSingletonProcessManager(slog.Default(), config.OpenCodeServerConfig{})
+	mgr.stderrRing.Add(strings.Repeat("a", stderrTailMaxBytes*2))
+
+	err := mgr.startupFailureError("health check", fmt.Errorf("e"))
+	// Error string must be bounded, not carry the full 2x overflow payload.
+	require.Less(t, len(err.Error()), stderrTailMaxBytes*2)
 }
