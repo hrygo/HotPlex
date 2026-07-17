@@ -320,6 +320,40 @@ ACP 专用：映射 `AgentPlanUpdate`，Agent 的计划/任务列表变更通知
 
 ACP 专用：映射 `CurrentModeUpdate`，Agent 执行模式切换通知。
 
+### runtime.execution.started / runtime.execution.completed / runtime.execution.failed（执行生命周期）
+
+三个 additive S→C 事件，通过 `execution_id` 将输入接受 (`input.ack`) 关联到 Worker
+终态结果。旧客户端不识别时静默忽略。
+
+```json
+// runtime.execution.started
+{ "type": "runtime.execution.started", "data": {
+    "execution_id": "exec_<uuid>",
+    "status": "started",
+    "started_at": 1710000000123
+} }
+
+// runtime.execution.completed
+{ "type": "runtime.execution.completed", "data": {
+    "execution_id": "exec_<uuid>",
+    "status": "completed",
+    "started_at": 1710000000123,
+    "finished_at": 1710000012345
+} }
+
+// runtime.execution.failed
+{ "type": "runtime.execution.failed", "data": {
+    "execution_id": "exec_<uuid>",
+    "status": "failed",
+    "error_code": "WORKER_CRASH",
+    "started_at": 1710000000123,
+    "finished_at": 1710000012345
+} }
+```
+
+**时序约束**：`started` 在 `input.ack(delivered)` 之后、`done` 之前发送。
+`completed`/`failed` 在 `done` 之后发送（终态通知，与 run 结果分离）。
+
 ### state（状态变更）
 
 ```json
@@ -499,10 +533,12 @@ Client                          Server
   |--- input(content) ----------->|--- state(running)
   |<-- input.ack(accepted) -------|--- 持久化入口账本
   |<-- input.ack(delivered) ------|--- Worker 接受输入
+  |<-- runtime.execution.started -|-- execution 执行开始
   |                               |--- message.start
   |<-- message.delta * ------------|--- message.delta
   |<-- message.end ---------------|
   |<-- done(success) -------------|--- state(idle)
+  |<-- runtime.execution.completed|-- execution 终态通知
   |                               |
 ```
 
@@ -511,7 +547,7 @@ Client                          Server
 ```
 Client ←→ Server
 
-Input Flow:     input → input.ack(accepted) → input.ack(delivered|unknown|failed) → [tool_call → tool_result]* → [message.delta*] → done
+Input Flow:     input → input.ack(accepted) → input.ack(delivered|unknown|failed) → runtime.execution.started → [tool_call → tool_result]* → [message.delta*] → done → runtime.execution.{completed,failed}
 Control Flow:   control(action) → state(new_state) / error
 Interactive:    permission_request ←→ permission_response
                 question_request ←→ question_response
@@ -523,4 +559,4 @@ Heartbeat:      ping ←→ pong
 
 **必须支持**：`init`、`input`、`control`、`ping`、`init_ack`、`message.delta`、`state`、`error`、`done`、`pong`
 
-**可选扩展**：`input.ack`、`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`
+**可选扩展**：`input.ack`、`runtime.execution.*`、`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`

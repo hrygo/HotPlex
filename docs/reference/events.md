@@ -139,6 +139,31 @@ type InputAckData struct {
 `delivered`、`unknown` 或 `failed`。`unknown` 表示存在重复副作用风险，Gateway
 不会自动重投。重复 Envelope 只返回当前记录，并将 `duplicate` 设为 `true`。
 
+#### `runtime.execution.{started,completed,failed}` — 执行生命周期
+
+三个 S→C additive 事件，通过 `execution_id` 把 `input.ack` 的输入接受关联到 Worker
+终态结果。旧客户端不识别这些 Kind 时静默忽略。
+
+```go
+type RuntimeExecutionData struct {
+    ExecutionID string    `json:"execution_id"`
+    Status      string    `json:"status"`       // started / completed / failed
+    ErrorCode   ErrorCode `json:"error_code,omitempty"`
+    StartedAt   int64     `json:"started_at,omitempty"`   // Unix 毫秒
+    FinishedAt  int64     `json:"finished_at,omitempty"`  // Unix 毫秒
+}
+```
+
+| 事件 | Status | 语义 |
+|------|--------|------|
+| `runtime.execution.started` | `started` | Worker 已接受输入，执行开始 |
+| `runtime.execution.completed` | `completed` | Worker 成功完成此轮执行 |
+| `runtime.execution.failed` | `failed` | Worker 执行失败，`error_code` 提供分类 |
+
+**时序约束**：`runtime.execution.started` 在 `input.ack(delivered)` 之后、`done` 之前
+发送。`runtime.execution.completed` 或 `runtime.execution.failed` 在 `done` 之后
+发送（作为 execution 账本的终态通知，与 run 结果分离）。
+
 #### `state` — 状态变更
 
 ```go

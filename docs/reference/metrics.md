@@ -253,6 +253,87 @@ rate(hotplex_cron_duration_sum[5m]) / rate(hotplex_cron_duration_count[5m])
 | `hotplex.retry.attempts` | Counter | LLM 重试尝试次数 |
 | `hotplex.retry.exhaustion` | Counter | 重试耗尽（最终失败）次数 |
 
+## Execution 指标
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.execution.accept` | Counter | 新输入被持久化接受的次数 |
+| `hotplex.execution.duplicate` | Counter | 幂等去重（相同 Envelope ID + payload 静默抑制） |
+| `hotplex.execution.conflict` | Counter | Payload 冲突（相同 Envelope ID，不同 SHA-256 hash） |
+| `hotplex.execution.session_busy` | Counter | Active gate 拒绝（session 已有 pending/running execution） |
+| `hotplex.execution.delivery_outcome` | Counter | Worker 投递结果，label: `delivery_status`（delivered / unknown / failed） |
+| `hotplex.execution.runtime_outcome` | Counter | Worker 运行终态，label: `runtime_status`（completed / failed / unknown） |
+| `hotplex.execution.delivery_latency` | Histogram | accept 到 delivery outcome 耗时（秒），bounds: 0.01–10 |
+| `hotplex.execution.runtime_duration` | Histogram | Worker turn 执行耗时（秒），bounds: 0.5–300 |
+
+### 常用查询
+
+```promql
+# 投递成功率
+sum(rate(hotplex_execution_delivery_outcome_total{delivery_status="delivered"}[5m]))
+/
+sum(rate(hotplex_execution_delivery_outcome_total[5m]))
+
+# 冲突率（可能为客户端 bug 或重放攻击）
+rate(hotplex_execution_conflict_total[5m])
+
+# Active gate 拒绝率
+rate(hotplex_execution_session_busy_total[5m])
+
+# P95 投递延迟
+histogram_quantile(0.95, rate(hotplex_execution_delivery_latency_bucket[5m]))
+```
+
+## Lease-Repair 指标
+
+Durable ingress 的 owner lease 续约与终态修复子系统。
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.lease.renew_failure` | Counter | Owner lease 续约失败次数 |
+| `hotplex.lease.expired_recovery` | Counter | Lease 过期后恢复（runtime 置为 unknown + 设置 fence） |
+| `hotplex.repair.attempts` | Counter | 终态修复尝试次数 |
+| `hotplex.repair.success` | Counter | 终态修复成功次数 |
+| `hotplex.repair.timeout` | Counter | 终态修复超时（超过 MaxLifetime 放弃） |
+| `hotplex.repair.dropped` | Counter | 终态修复入队失败（队列满，回退 lease recovery） |
+
+### 常用查询
+
+```promql
+# Lease 续约失败率
+rate(hotplex_lease_renew_failure_total[5m])
+
+# 修复成功率
+rate(hotplex_repair_success_total[5m]) / rate(hotplex_repair_attempts_total[5m])
+
+# 修复超时率（indicating systemic Worker stuck）
+rate(hotplex_repair_timeout_total[5m]) / rate(hotplex_repair_attempts_total[5m])
+```
+
+## Turn-Integrity 诊断指标
+
+Turn-Integrity 子系统（Fix E）用于检测和量化空 success turn、stale forwarder
+事件分割、assistant snapshot 漂移以及平台终态回退。
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.worker.empty_success_total` | Counter | 成功但未产出可显示内容和工具调用的 turn，label: `worker_type`, `platform` |
+| `hotplex.gateway.stale_forwarder_event_total` | Counter | `/reset` 替换 Conn 后仍被旧 forwarder 观察到的事件数 |
+| `hotplex.worker.assistant_snapshot_drift_total` | Counter | Full assistant snapshot 非前缀扩展被重新完整下发而非静默吞咽 |
+| `hotplex.messaging.platform_terminal_fallback_total` | Counter | 平台适配器因空内容发出的合成终态消息回退 |
+
+### 常用查询
+
+```promql
+# 空 success turn 占比
+rate(hotplex_worker_empty_success_total_total[5m])
+/
+rate(hotplex_worker_starts_total[5m])
+
+# Stale forwarder 事件（不为零表示冻结绑定未能阻止双消费者）
+rate(hotplex_gateway_stale_forwarder_event_total_total[5m])
+```
+
 ## SLO 参考
 
 | SLO | 指标 | 目标 |
