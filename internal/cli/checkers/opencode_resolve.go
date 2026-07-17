@@ -47,6 +47,7 @@ func (c opencodeResolveChecker) Check(ctx context.Context) cli.Diagnostic {
 			Status:   cli.StatusFail,
 			Message:  "Failed to load config for OCS resolve check",
 			Detail:   err.Error(),
+			FixHint:  "Check your config syntax and HOTPLEX_HOME path, then run `hotplex doctor --fix`.",
 		}
 	}
 	if cfg == nil {
@@ -92,23 +93,27 @@ func (c opencodeResolveChecker) Check(ctx context.Context) cli.Diagnostic {
 		Status:   cli.StatusPass,
 		Message:  sb.String(),
 	}
+	var details []string
 	if !versionOK {
 		diag.Status = cli.StatusWarn
 		out := versionOut
 		if out == "" {
 			out = "(no output)"
 		}
-		diag.Detail = "version probe output: " + out
+		details = append(details, "version probe output: "+out)
 		diag.FixHint = ocsResolveFixHint(runtime.GOOS == "windows")
 	}
 	if kind == "wrapper" {
-		// Wrappers are permitted but can mask the child's native exit code.
 		diag.Status = cli.StatusWarn
-		diag.Detail = "OCS command resolves to a wrapper script (" + resolved +
-			"). Wrappers can remap the child process's native exit code (e.g. 0xC0000142) to a generic value."
+		details = append(details,
+			"OCS command resolves to a wrapper script ("+resolved+
+				"). Wrappers can remap the child process's native exit code (e.g. 0xC0000142) to a generic value.")
 		if diag.FixHint == "" {
 			diag.FixHint = "If startup fails, run `opencode serve --port <unused>` directly under the service account to capture the raw exit code."
 		}
+	}
+	if len(details) > 0 {
+		diag.Detail = strings.Join(details, "; ")
 	}
 	return diag
 }

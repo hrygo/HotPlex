@@ -9,11 +9,11 @@ import (
 func TestFormatExitCode(t *testing.T) {
 	t.Parallel()
 
-	// Windows NT status codes arrive as the raw GetExitCodeProcess DWORD.
-	// Depending on the Go runtime path, the same 0xC0000142 may surface as a
-	// positive int (3221225474) or a sign-extended negative int (-1073741502).
-	// FormatExitCode must normalize both to the same unsigned decimal + hex so
-	// operators read STATUS_DLL_INIT_FAILED consistently regardless of sign.
+	// FormatExitCode reports the exit code as its honest signed Go int (so POSIX
+	// signal death -1 stays -1, not a huge unsigned value) plus the uint32 bit
+	// pattern as 8-digit hex (the reliable cross-platform identifier for Windows
+	// NT statuses like 0xC0000142, which arrive as the positive int 3221225794
+	// via ProcessState.ExitCode() on Windows).
 	tests := []struct {
 		name    string
 		code    int
@@ -23,9 +23,9 @@ func TestFormatExitCode(t *testing.T) {
 		{"zero", 0, "0", "0x00000000"},
 		{"normal exit 1", 1, "1", "0x00000001"},
 		{"SIGTERM 143", 143, "143", "0x0000008F"},
-		{"killed sentinel -1", -1, "4294967295", "0xFFFFFFFF"},
+		{"POSIX signal death -1", -1, "-1", "0xFFFFFFFF"},
 		{"STATUS_DLL_INIT_FAILED positive int", 3221225794, "3221225794", "0xC0000142"},
-		{"STATUS_DLL_INIT_FAILED negative int", -1073741502, "3221225794", "0xC0000142"},
+		{"STATUS_DLL_INIT_FAILED sign-extended", -1073741502, "-1073741502", "0xC0000142"},
 	}
 
 	for _, tt := range tests {

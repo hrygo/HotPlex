@@ -277,7 +277,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 				if entry.Name != "" {
 					botDir := filepath.Join(appCfg.AgentConfig.ConfigDir, string(pt), entry.Name)
 					if _, err := os.Stat(botDir); os.IsNotExist(err) && agentconfig.HasGlobalFiles(appCfg.AgentConfig.ConfigDir) {
-						log.Warn("agent-config: global files found but no bot-level directory",
+						log.Debug("agent-config: global files found but no bot-level directory",
 							"platform", pt,
 							"bot", entry.Name,
 							"bot_dir", botDir)

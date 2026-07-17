@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -573,4 +574,28 @@ func TestSingletonProcessManager_StartupFailureError_TruncatesLongTail(t *testin
 	err := mgr.startupFailureError("health check", fmt.Errorf("e"))
 	// Error string must be bounded, not carry the full 2x overflow payload.
 	require.Less(t, len(err.Error()), stderrTailMaxBytes*2)
+}
+
+func TestTruncateTailBytes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ascii returns exactly maxBytes", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "cdef", truncateTailBytes("abcdef", 4))
+	})
+
+	t.Run("short string returns whole", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "abc", truncateTailBytes("abc", 99))
+	})
+
+	t.Run("never splits a multibyte rune", func(t *testing.T) {
+		t.Parallel()
+		// Force a cut inside the last 3-byte CJK rune '世' (E4 B8 96).
+		s := strings.Repeat("a", stderrTailMaxBytes-1) + "世b"
+		got := truncateTailBytes(s, stderrTailMaxBytes)
+		require.True(t, utf8.ValidString(got), "result split a rune: %q", got)
+		require.True(t, strings.HasSuffix(s, got), "result must be a suffix")
+		require.LessOrEqual(t, len(got), stderrTailMaxBytes)
+	})
 }

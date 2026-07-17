@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -230,7 +231,12 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 
 	// Phase 1: AEP init handshake — read the first message.
 	if err := c.performInit(auth, sm); err != nil {
-		c.log.Warn("gateway: init handshake failed", "session_id", c.sessionID, "err", err)
+		// Demote to DEBUG for duplicate WS owner (resolveSession already logged a WARN).
+		if strings.Contains(err.Error(), "already has an active") {
+			c.log.Debug("gateway: init handshake failed", "session_id", c.sessionID, "err", err)
+		} else {
+			c.log.Warn("gateway: init handshake failed", "session_id", c.sessionID, "err", err)
+		}
 		return
 	}
 

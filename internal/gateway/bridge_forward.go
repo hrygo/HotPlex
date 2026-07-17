@@ -905,6 +905,17 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			}
 			return
 		}
+		// P0 guard: if the session was deleted and re-created (same deterministic ID)
+		// with a new worker, this stale forwardEvents goroutine must not produce side
+		// effects (captureSyntheticEvent, sendError) that would allocate seq numbers
+		// from the new session's seqGen, causing UNIQUE constraint violations on the
+		// events table. The worker CAS check reliably detects re-creation because
+		// DeletePhysical sets ms.worker = nil before the new session's AttachWorker.
+		if currentWorker := b.sm.GetWorker(p.sessionID); currentWorker != w {
+			lg.Debug("bridge: worker replaced, skipping stale forwarder cleanup",
+				"session_id", p.sessionID, "worker_type", workerType)
+			return
+		}
 	}
 
 	// Suppress user-facing errors when:
@@ -941,21 +952,12 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		}
 		if hasRaw {
 			metricAttrs = append(metricAttrs,
-				attribute.String("raw_exit_code", rawDec),
-				attribute.String("raw_exit_code_hex", rawHex))
+				attribute.String("raw_exit_code", rawDec))
 		}
 		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(metricAttrs...))
 
-		if hasRaw {
-			b.sendError(p.sessionID, events.ErrCodeWorkerCrash,
-				"worker crashed (exit code %d, raw %s %s)", exitCode, rawDec, rawHex)
-		} else {
-			b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
-		}
+		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
 		syntheticMsg := fmt.Sprintf("Worker crashed with exit code %d", exitCode)
-		if hasRaw {
-			syntheticMsg = fmt.Sprintf("Worker crashed with exit code %d (raw %s %s)", exitCode, rawDec, rawHex)
-		}
 		b.captureSyntheticEvent(syntheticTurnParams{
 			SessionID:  p.sessionID,
 			Reason:     "worker_crash",

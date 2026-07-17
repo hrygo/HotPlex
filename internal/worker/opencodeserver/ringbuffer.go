@@ -49,3 +49,18 @@ func (r *ringBuffer) Lines() []string {
 	}
 	return out
 }
+
+// Reset clears all buffered lines, reusing the underlying storage. Called at
+// the start of each singleton lifecycle so a new crash's stderr tail is not
+// contaminated by the previous lifecycle's lines. Reusing storage (rather than
+// reassigning the field) also keeps the pointer stable so readStderr never
+// races a concurrent field swap.
+func (r *ringBuffer) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.buf {
+		r.buf[i] = ""
+	}
+	r.head = 0
+	r.n = 0
+}

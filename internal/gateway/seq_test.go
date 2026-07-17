@@ -147,6 +147,80 @@ func TestHub_ForgetSeqAllowsFreshHydration(t *testing.T) {
 	require.Equal(t, int64(21), h.NextSeq("s1"))
 }
 
+// mockSeqFlusher records FlushSession calls for test assertions.
+type mockSeqFlusher struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (m *mockSeqFlusher) FlushSession(sessionID string) error {
+	m.mu.Lock()
+	m.calls = append(m.calls, sessionID)
+	m.mu.Unlock()
+	return nil
+}
+
+// TestHub_EnsureSeqHydratedWaitsForConcurrentProducer verifies the write-lock
+// fence: EnsureSeqHydrated blocks behind a concurrent seq operation (RLock)
+// and only proceeds after the producer releases. Without the write-lock fence,
+// hydration could read LatestSeq while an old forwarder is still allocating
+// seqs, leading to a stale counter and UNIQUE constraint violations (issue #894).
+func TestHub_EnsureSeqHydratedWaitsForConcurrentProducer(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	h.SetSeqHydrator(&mockSeqHydrator{seq: 100})
+
+	releaseProducer, ok := h.BeginSeqOperation("s1")
+	require.True(t, ok)
+
+	hydrated := make(chan error, 1)
+	go func() {
+		hydrated <- h.EnsureSeqHydrated("s1")
+	}()
+
+	require.Never(t, func() bool {
+		select {
+		case <-hydrated:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	releaseProducer()
+	require.NoError(t, <-hydrated)
+	require.Equal(t, int64(101), h.NextSeq("s1"))
+}
+
+// TestHub_EnsureSeqHydratedCallsFlusherBeforeHydrate verifies that EnsureSeqHydrated
+// drains the collector flush before reading LatestSeq. Without this, events whose
+// seq was already allocated but not yet committed to the DB would be invisible,
+// causing the new counter to collide with in-flight seqs (issue #894).
+func TestHub_EnsureSeqHydratedCallsFlusherBeforeHydrate(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	hydrator := &mockSeqHydrator{seq: 50}
+	flusher := &mockSeqFlusher{}
+	h.SetSeqHydrator(hydrator)
+	h.SetSeqFlusher(flusher)
+
+	require.NoError(t, h.EnsureSeqHydrated("s1"))
+
+	flusher.mu.Lock()
+	require.Contains(t, flusher.calls, "s1")
+	flusher.mu.Unlock()
+
+	require.Equal(t, int64(51), h.NextSeq("s1"))
+
+	// Second call skips both flusher and hydrator (already initialized).
+	hydrator.err = errors.New("should not be called")
+	require.NoError(t, h.EnsureSeqHydrated("s1"))
+	require.Equal(t, 1, hydrator.calls)
+	flusher.mu.Lock()
+	require.Len(t, flusher.calls, 1)
+	flusher.mu.Unlock()
+}
+
 func TestHub_ReleaseSeqWaitsForDurableProducer(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)

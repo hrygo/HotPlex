@@ -13,6 +13,13 @@ type SeqHydrator interface {
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
 }
 
+// SeqFlusher drains pending collector writes for a session so LatestSeq is
+// accurate before SeqGen hydration. Set by gateway_run.go when the collector
+// is available; nil when eventstore is disabled.
+type SeqFlusher interface {
+	FlushSession(sessionID string) error
+}
+
 // SeqGen generates monotonically increasing sequence numbers per session.
 // Uses sync.Map + per-session atomic.Int64 to eliminate cross-session contention.
 type SeqGen struct {

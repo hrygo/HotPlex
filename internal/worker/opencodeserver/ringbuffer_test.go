@@ -53,6 +53,23 @@ func TestRingBuffer(t *testing.T) {
 	})
 }
 
+func TestRingBuffer_Reset(t *testing.T) {
+	t.Parallel()
+
+	rb := newRingBuffer(3)
+	rb.Add("a")
+	rb.Add("b")
+	require.Equal(t, []string{"a", "b"}, rb.Lines())
+
+	rb.Reset()
+	require.Nil(t, rb.Lines(), "must be empty immediately after reset")
+
+	// Buffer must be reusable: head/n reset so new writes lay out in order.
+	rb.Add("c")
+	rb.Add("d")
+	require.Equal(t, []string{"c", "d"}, rb.Lines())
+}
+
 func TestRingBuffer_Concurrent(t *testing.T) {
 	t.Parallel()
 	rb := newRingBuffer(100)

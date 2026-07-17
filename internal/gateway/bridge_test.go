@@ -1026,3 +1026,103 @@ func TestResetSession_NoUpdater_NoReload(t *testing.T) {
 	// No crash, no panic — worker without SystemPromptUpdater is silently skipped.
 	sm.AssertExpectations(t)
 }
+
+// ─── Tests for the worker-binding guard in handleWorkerExit ──────────────────
+
+// TestBridge_HandleWorkerExit_StaleForwarderAfterRecreate verifies that when a
+// session is deleted and re-created with a new worker (same deterministic ID),
+// the old forwarder's handleWorkerExit returns early without producing side
+// effects (error events, synthetic events, worker cleanup) that would otherwise
+// use the new session's seqGen and cause UNIQUE constraint violations on the
+// events table.
+func TestBridge_HandleWorkerExit_StaleForwarderAfterRecreate(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess_recreated"
+
+	oldWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		exitCode:   1,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope, 1)},
+	}
+	oldWorker.stopped.Store(false)
+
+	newWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+	}
+
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	// Session exists (re-created) and is running, not terminated.
+	sm.On("Get", sessionID).Return(&session.SessionInfo{
+		ID: sessionID, State: events.StateRunning,
+	}, nil)
+	// GetWorker returns the NEW worker, not the old crashed one.
+	sm.On("GetWorker", sessionID).Return(newWorker)
+
+	h := newTestHub(t)
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h, SM: sm})
+
+	params := workerExitParams{
+		sessionID:    sessionID,
+		workerType:   worker.TypeClaudeCode,
+		doneReceived: false,
+		startTime:    time.Now(),
+		flog:         slog.Default(),
+		opts:         forwardOpts{retryDepth: 2}, // Skip fallback for cleaner test
+	}
+
+	// Must not panic, and must skip sendError/captureSyntheticEvent/cleanup.
+	b.handleWorkerExit(oldWorker, params)
+
+	sm.AssertExpectations(t)
+
+	// Verify no accumulator was created for the stale forwarder.
+	b.accumMu.RLock()
+	_, hasAccum := b.accum[sessionID]
+	b.accumMu.RUnlock()
+	assert.False(t, hasAccum, "stale forwarder must not create accumulator")
+}
+
+// TestBridge_HandleWorkerExit_StaleForwarderAfterDelete verifies that when a
+// session has been physically deleted (no re-creation), the old forwarder's
+// handleWorkerExit returns early without side effects.
+func TestBridge_HandleWorkerExit_StaleForwarderAfterDelete(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "sess_deleted"
+
+	oldWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		exitCode:   1,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope, 1)},
+	}
+	oldWorker.stopped.Store(false)
+
+	sm := new(mockBridgeSM)
+	sm.Test(t)
+
+	// Session was deleted — Get returns error.
+	sm.On("Get", sessionID).Return(nil, session.ErrSessionNotFound)
+	// GetWorker returns nil because session no longer exists in the map.
+	sm.On("GetWorker", sessionID).Return(nil)
+
+	h := newTestHub(t)
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h, SM: sm})
+
+	params := workerExitParams{
+		sessionID:    sessionID,
+		workerType:   worker.TypeClaudeCode,
+		doneReceived: false,
+		startTime:    time.Now(),
+		flog:         slog.Default(),
+		opts:         forwardOpts{retryDepth: 2},
+	}
+
+	// Must not panic, and must skip error/capture/cleanup.
+	b.handleWorkerExit(oldWorker, params)
+
+	sm.AssertExpectations(t)
+}

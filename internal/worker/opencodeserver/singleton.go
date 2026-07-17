@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -282,6 +283,20 @@ func (s *SingletonProcessManager) StderrTail() []string {
 // attached to startup-failure errors, preventing a runaway log line.
 const stderrTailMaxBytes = 2048
 
+// truncateTailBytes returns the last maxBytes bytes of s, backed up to a UTF-8
+// rune boundary if the byte cut would split a multi-byte rune. Safe for
+// arbitrary stderr content (CJK, emoji, localized panic output).
+func truncateTailBytes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	start := len(s) - maxBytes
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
+}
+
 // startupFailureError wraps err with the failing startup phase and a bounded
 // tail of recent stderr so operators can diagnose OCS startup failures
 // (spawn / discover port / health check) without grepping the gateway log at
@@ -293,7 +308,7 @@ func (s *SingletonProcessManager) startupFailureError(phase string, err error) e
 	}
 	summary := strings.Join(tail, "\n")
 	if len(summary) > stderrTailMaxBytes {
-		summary = summary[len(summary)-stderrTailMaxBytes:]
+		summary = truncateTailBytes(summary, stderrTailMaxBytes)
 	}
 	return fmt.Errorf("opencode-server-singleton: %s: %w (recent stderr: %s)", phase, err, summary)
 }
@@ -302,7 +317,9 @@ func (s *SingletonProcessManager) startupFailureError(phase string, err error) e
 func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error {
 	s.state = stateStarting
 	s.converter.Reset()
-	s.stderrRing = newRingBuffer(stderrRingCapacity) // reset tail for this lifecycle
+	s.stderrRing.Reset() // clear previous lifecycle's tail (pointer stays stable → no race with readStderr)
+	s.lastExitCode = 0   // clear stale exit code from a previous lifecycle
+	s.hasExitCode = false
 
 	// Allocate an ephemeral port.
 	port, err := s.allocatePort()
@@ -362,11 +379,12 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 	// Discover actual port from stdout (opencode serve prints it).
 	actualPort, err := s.discoverPort(stdout, s.cfg.ReadyTimeout)
 	if err != nil {
+		pid := s.proc.PID() // capture before Kill sets proc=nil
 		_ = s.proc.Kill()
 		s.proc = nil
 		s.state = stateIdle
 		s.log.Warn("opencode-server-singleton: startup phase failed", "phase", "discover_port",
-			"resolved_executable", resolved, "pid", s.proc.PID(), "error", err)
+			"resolved_executable", resolved, "pid", pid, "error", err)
 		return s.startupFailureError("discover port", err)
 	}
 
@@ -513,7 +531,7 @@ func (s *SingletonProcessManager) monitorProcess() {
 		return
 	}
 	code, _ := pm.Wait()
-	decCode, hexCode := proc.FormatExitCode(code)
+	_, hexCode := proc.FormatExitCode(code)
 
 	s.mu.Lock()
 	s.lastExitCode = code
@@ -538,12 +556,12 @@ func (s *SingletonProcessManager) monitorProcess() {
 	// Notify crash subscribers if process died unexpectedly while sessions are active.
 	if wasRunning && refs > 0 {
 		s.log.Warn("opencode-server-singleton: process crashed",
-			"exit_code", decCode, "exit_code_hex", hexCode, "refs", refs)
+			"exit_code", code, "exit_code_hex", hexCode, "refs", refs)
 		close(s.crashCh)
 		s.crashCh = make(chan struct{}) // new channel for next lifecycle
 	} else {
 		s.log.Info("opencode-server-singleton: process exited",
-			"exit_code", decCode, "exit_code_hex", hexCode, "refs", refs)
+			"exit_code", code, "exit_code_hex", hexCode, "refs", refs)
 	}
 	s.mu.Unlock()
 
@@ -568,6 +586,16 @@ func (s *SingletonProcessManager) startIdleDrainLocked() {
 
 		if s.refs == 0 && s.state == stateRunning && s.pgid > 0 {
 			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
+			// Cancel the SSE reader context BEFORE killing the process so the
+			// reader sees ctx.Done() before the transport error (~40ms race)
+			// and exits cleanly instead of logging a WARN reconnect attempt
+			// against a dead process. monitorProcess also cancels sseCancel
+			// in the normal exit path (it guards with nil check, so a double
+			// cancel is harmless). See B4 in PR #891.
+			if s.sseCancel != nil {
+				s.sseCancel()
+				s.sseCancel = nil
+			}
 			// Hold s.mu during the kill to close the TOCTOU window where a
 			// concurrent Acquire could grab the doomed process and hand the
 			// caller a httpAddr about to die. We call package-level

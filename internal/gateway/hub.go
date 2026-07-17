@@ -122,6 +122,10 @@ type Hub struct {
 	// seqHydrator reads persisted event seqs to seed SeqGen on reconnect
 	// (issue #879). nil when eventstore is disabled — SeqGen then restarts at 1.
 	seqHydrator SeqHydrator
+	// seqFlusher drains pending collector writes before reading LatestSeq
+	// during hydration (issue #894: stale LatestSeq on async capture flush).
+	// nil when eventstore is disabled — hydration skips the flush.
+	seqFlusher SeqFlusher
 
 	// Shutdown signals.
 	ctx    context.Context
@@ -771,16 +775,31 @@ func (h *Hub) SetSeqSessionExists(check func(sessionID string) bool) {
 	h.seqSessionExists = check
 }
 
+// SetSeqFlusher injects the collector flush used to drain pending writes
+// before reading LatestSeq during hydration. Called once at gateway startup
+// after the collector is created; nil when eventstore is disabled.
+func (h *Hub) SetSeqFlusher(sf SeqFlusher) {
+	h.seqFlusher = sf
+}
+
 // EnsureSeqHydrated seeds the SeqGen counter for sessionID from persisted
 // events on first use. A database error is fatal to the handshake: falling
 // back to 1 could collide with durable history and make the collector reject
 // the entire batch. MUST run before the first NextSeq for a session.
+//
+// Uses a write-lock fence (instead of BeginSeqOperation's RLock) to act as a
+// full barrier: all concurrent seq producers and ReleaseSeq must complete
+// before LatestSeq is read. An optional SeqFlusher drains the collector's
+// async captureC first, preventing stale-LatestSeq races where an allocated
+// seq is in-flight but not yet visible in the DB (issue #894).
 func (h *Hub) EnsureSeqHydrated(sessionID string) error {
-	releaseSeq, ok := h.BeginSeqOperation(sessionID)
-	if !ok {
+	barrier := h.seqBarrier(sessionID)
+	barrier.Lock()
+	defer barrier.Unlock()
+
+	if h.seqSessionExists != nil && !h.seqSessionExists(sessionID) {
 		return fmt.Errorf("gateway: session released: %s", sessionID)
 	}
-	defer releaseSeq()
 
 	if h.seqHydrator == nil {
 		return nil
@@ -788,6 +807,16 @@ func (h *Hub) EnsureSeqHydrated(sessionID string) error {
 	if h.seqGen.Initialized(sessionID) {
 		return nil
 	}
+
+	// Flush the collector's async captureC before reading LatestSeq so that
+	// events whose seq was already allocated but not yet committed to the DB
+	// are visible before we seed the new counter.
+	if h.seqFlusher != nil {
+		if err := h.seqFlusher.FlushSession(sessionID); err != nil {
+			return fmt.Errorf("gateway: flush before hydrate seq for session %s: %w", sessionID, err)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(h.ctx, 3*time.Second)
 	defer cancel()
 	latest, err := h.seqHydrator.LatestSeq(ctx, sessionID)
