@@ -467,7 +467,7 @@ func TestReadGlobalSSE_UnsubscribeDuringDispatch(t *testing.T) {
 		fmt.Fprint(rw, evt)
 		flusher.Flush()
 
-		time.Sleep(100 * time.Millisecond) // server-side pacing between events
+		time.Sleep(10 * time.Millisecond) // minimal pacing between events
 
 		evt2 := ocsEvent(t, "message.part.delta", map[string]any{
 			"sessionID": "ses_1",
@@ -597,10 +597,20 @@ func TestReadGlobalSSE_MaxReconnects_Stops(t *testing.T) {
 	_ = s.Subscribe("ses_1")
 
 	// Goroutine exits quickly: cancelled ctx + 3 instant reconnects.
-	go s.readGlobalSSE(ctx)
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		s.readGlobalSSE(ctx)
+	}()
 
-	// Wait for goroutine to exit.
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-doneCh:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 50*time.Millisecond, "readGlobalSSE should exit after max reconnects")
 
 	restore()
 	sseMaxReconnects = 50 // restore default
@@ -628,13 +638,24 @@ func TestReadGlobalSSE_ContextCancel_Stops(t *testing.T) {
 	ch := s.Subscribe("ses_1")
 
 	ctx, cancel := context.WithCancel(t.Context())
-	go s.readGlobalSSE(ctx)
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		s.readGlobalSSE(ctx)
+	}()
 
 	got := collectN(t, ch, 1)
 	require.Equal(t, "hi", got[0].Event.Data.(events.MessageDeltaData).Content)
 
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-doneCh:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 50*time.Millisecond, "readGlobalSSE should exit after context cancel")
 }
 
 func TestReadGlobalSSE_Backpressure_DropOnFull(t *testing.T) {
@@ -809,7 +830,11 @@ func TestForwardBusEvents_ContextCancel_Stops(t *testing.T) {
 	w, busCh := newWorkerWithBusCh(t)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	go w.forwardBusEvents(ctx, "ses_test", busCh)
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		w.forwardBusEvents(ctx, "ses_test", busCh)
+	}()
 
 	env := events.NewEnvelope("id1", "ses_test", 1, events.MessageDelta,
 		events.MessageDeltaData{Content: "hi"})
@@ -819,7 +844,14 @@ func TestForwardBusEvents_ContextCancel_Stops(t *testing.T) {
 	require.Equal(t, "hi", got[0].Event.Data.(events.MessageDeltaData).Content)
 
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-doneCh:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 50*time.Millisecond, "forwardBusEvents should exit after context cancel")
 }
 
 func TestForwardBusEvents_ConnNil_Stops(t *testing.T) {
@@ -829,7 +861,11 @@ func TestForwardBusEvents_ConnNil_Stops(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	go w.forwardBusEvents(ctx, "ses_test", busCh)
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		w.forwardBusEvents(ctx, "ses_test", busCh)
+	}()
 
 	env := events.NewEnvelope("id1", "ses_test", 1, events.MessageDelta,
 		events.MessageDeltaData{Content: "first"})
@@ -845,7 +881,14 @@ func TestForwardBusEvents_ConnNil_Stops(t *testing.T) {
 		events.MessageDeltaData{Content: "after_nil"})
 	busCh <- env2
 
-	time.Sleep(300 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-doneCh:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 50*time.Millisecond, "forwardBusEvents should exit when conn is nil")
 }
 
 // ─── Subscribe / Unsubscribe Tests ────────────────────────────────────────────

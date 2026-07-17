@@ -1577,46 +1577,48 @@ export function useHotPlexRuntime({
         const handleConnected = (ack: { state?: string }) => {
             sessionAlreadyConnectedRef.current = false;
             setConnectionState("connected");
-            const turnIsRunning = ack.state === "running";
-            turnActiveRef.current = turnIsRunning;
-            setIsRunning(turnIsRunning);
-            if (!turnIsRunning) {
-                let drainDeferredForReconcile = false;
-                // A reconnect can miss the terminal Done after the queued input
-                // was already acknowledged as delivered. The init ACK is the
-                // authoritative session state, so idle completes that local
-                // association and allows the next FIFO item to drain.
-                const deliveredDispatch = activeQueueDispatchRef.current;
-                if (deliveredDispatch?.delivered) {
-                    const pendingAssistantID = pendingAssistantIdRef.current;
-                    const activeAssistantID = activeAssistantIdRef.current;
-                    activeQueueDispatchRef.current = null;
-                    pendingAssistantIdRef.current = null;
-                    activeAssistantIdRef.current = null;
-                    activeInputMessageIdRef.current = null;
-                    setMessages((previous) => {
-                        const completedPending = completeStreamingAssistant(
-                            previous,
-                            pendingAssistantID,
-                        );
-                        return completedPending !== previous
-                            ? completedPending
-                            : completeStreamingAssistant(
-                                  previous,
-                                  activeAssistantID,
-                              );
-                    });
-                    drainDeferredForReconcile = true;
-                    void reconcileTurnContent({
-                        targetAssistantId: deliveredDispatch.assistantMessageId,
-                        inputContent: deliveredDispatch.text,
-                    }).finally(() => scheduleQueueDrainRef.current());
-                }
-                setIsStopping(false);
-                stoppingRef.current = false;
-                if (!drainDeferredForReconcile) {
-                    queueMicrotask(() => scheduleQueueDrainRef.current());
-                }
+            
+            // Decouple turn active state from connection session state.
+            // On connection/reconnection, the turn is idle by default until/unless
+            // incoming stream events or local dispatches happen.
+            turnActiveRef.current = false;
+            setIsRunning(false);
+
+            let drainDeferredForReconcile = false;
+            // A reconnect can miss the terminal Done after the queued input
+            // was already acknowledged as delivered. The init ACK is the
+            // authoritative session state, so idle completes that local
+            // association and allows the next FIFO item to drain.
+            const deliveredDispatch = activeQueueDispatchRef.current;
+            if (deliveredDispatch?.delivered) {
+                const pendingAssistantID = pendingAssistantIdRef.current;
+                const activeAssistantID = activeAssistantIdRef.current;
+                activeQueueDispatchRef.current = null;
+                pendingAssistantIdRef.current = null;
+                activeAssistantIdRef.current = null;
+                activeInputMessageIdRef.current = null;
+                setMessages((previous) => {
+                    const completedPending = completeStreamingAssistant(
+                        previous,
+                        pendingAssistantID,
+                    );
+                    return completedPending !== previous
+                        ? completedPending
+                        : completeStreamingAssistant(
+                              previous,
+                              activeAssistantID,
+                          );
+                });
+                drainDeferredForReconcile = true;
+                void reconcileTurnContent({
+                    targetAssistantId: deliveredDispatch.assistantMessageId,
+                    inputContent: deliveredDispatch.text,
+                }).finally(() => scheduleQueueDrainRef.current());
+            }
+            setIsStopping(false);
+            stoppingRef.current = false;
+            if (!drainDeferredForReconcile) {
+                queueMicrotask(() => scheduleQueueDrainRef.current());
             }
         };
 
@@ -1636,7 +1638,6 @@ export function useHotPlexRuntime({
         client.on("toolResult", handleToolResult);
         const handleState = (data: { state: string }) => {
             onSessionStateChangeRef.current?.(data.state);
-            if (data.state === "running") turnActiveRef.current = true;
         };
         client.on("state", handleState);
 
@@ -2097,16 +2098,21 @@ export function useHotPlexRuntime({
         ) {
             return;
         }
-        const item = queueStore.peekDispatchable(sid);
-        if (!item || !queueStore.markSending(sid, item.id)) return;
+        const items = queueStore.popAllDispatchable(sid);
+        if (items.length === 0) return;
 
         drainInFlightRef.current = true;
+        const mergedText = items.map((item) => item.text).join("\n\n");
         try {
-            await dispatchInput(item.text, item.id);
+            await dispatchInput(mergedText);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            if (!failActiveQueueDispatchRef.current("send", message)) {
-                queueStore.markFailed(sid, item.id, "send", message);
+            logger.error("RuntimeAdapter", "Failed to send merged queued items", { error: message });
+            for (const item of items) {
+                const result = queueStore.enqueue(sid, item.text);
+                if (result.ok && result.item) {
+                    queueStore.markFailed(sid, result.item.id, "send", message);
+                }
             }
         } finally {
             drainInFlightRef.current = false;
@@ -2258,8 +2264,7 @@ export function useHotPlexRuntime({
             const sid = sessionIdRef.current;
             if (
                 turnActiveRef.current ||
-                stoppingRef.current ||
-                (sid ? queueStore.getSnapshot(sid).length > 0 : false)
+                stoppingRef.current
             ) {
                 const result = enqueueFollowUp(textContent);
                 if (!result.ok && result.reason === "limit") {

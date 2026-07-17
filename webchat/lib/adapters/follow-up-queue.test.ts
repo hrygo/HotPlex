@@ -189,4 +189,25 @@ describe("FollowUpQueueStore", () => {
         store.enqueue("session-a", "first");
         expect(store.getSnapshot("session-a")).not.toBe(empty);
     });
+
+    it("pops all queued/dispatchable items and leaves other items intact", () => {
+        const store = createStore();
+        const first = store.enqueue("session-a", "first");
+        const second = store.enqueue("session-a", "second");
+        const third = store.enqueue("session-a", "third");
+        if (!first.ok || !second.ok || !third.ok) throw new Error("enqueue failed");
+
+        // Mark second as failed
+        store.markFailed("session-a", second.item.id, "connection", "offline");
+
+        // Pop all dispatchable items
+        const popped = store.popAllDispatchable("session-a");
+        expect(popped.map((item) => item.text)).toEqual(["first", "third"]);
+
+        // Verify remaining queue contains only the failed item
+        const remaining = store.getSnapshot("session-a");
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0]?.id).toBe(second.item.id);
+        expect(remaining[0]?.status).toBe("failed");
+    });
 });

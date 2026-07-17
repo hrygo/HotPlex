@@ -77,10 +77,11 @@ func TestWatcher_Reload_And_ConfigStore(t *testing.T) {
 	require.Equal(t, "127.0.0.1:9999", store.Load().Gateway.Addr)
 
 	// Verify observers notified
-	time.Sleep(100 * time.Millisecond) // Observers run in goroutines
-	mu.Lock()
-	require.True(t, reloaded)
-	mu.Unlock()
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return reloaded
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestDiffConfigs_Precision(t *testing.T) {
@@ -173,10 +174,11 @@ func TestWatcher_Rollback_Triggers_Store(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:8081", store.Load().Gateway.Addr)
 
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	require.True(t, rolledBack)
-	mu.Unlock()
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return rolledBack
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestConfigStore_Concurrency(t *testing.T) {

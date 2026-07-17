@@ -204,8 +204,9 @@ func TestAdminDualWrite_GetNotAudited(t *testing.T) {
 
 	// No slog audit, no user_activity row.
 	require.NotContains(t, logBuf.String(), "admin_audit")
-	time.Sleep(80 * time.Millisecond) // let any spurious flush settle
-	require.Empty(t, query())
+	require.Never(t, func() bool { return len(query()) > 0 },
+		200*time.Millisecond, 10*time.Millisecond,
+		"no spurious flush should appear for GET requests")
 }
 
 // TestAdminDualWrite_NilCollectorSlogOnly verifies that when no collector is

@@ -162,9 +162,6 @@ export function Thread({ skills, hasMore, connectionState: conn, onLoadHistory, 
       </AnimatePresence>
 
       <div className="composer-wrapper px-4 pb-12">
-        {followUpQueue && (
-          <FollowUpQueue queue={followUpQueue} isStopping={isStoppingProp} />
-        )}
         <ThreadComposer
           skills={skills}
           isRunning={isRunning}
@@ -264,10 +261,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     aui.composer().setText("");
   }, [aui, followUpQueue, localText, t]);
 
-  const queueing =
-    isRunning ||
-    !!isStoppingProp ||
-    (followUpQueue?.items.length ?? 0) > 0;
+  const queueing = isRunning || !!isStoppingProp;
   const handleComposerKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       !queueing ||
@@ -294,6 +288,11 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse" />
               {t(connectionState === 'reconnecting' ? 'status.reconnecting_banner' : 'status.disconnected_banner')}
             </div>
+          )}
+
+          {/* Follow Up Queue */}
+          {followUpQueue && (
+            <FollowUpQueue queue={followUpQueue} isStopping={isStoppingProp} />
           )}
 
           <div className="flex items-center justify-between px-1">

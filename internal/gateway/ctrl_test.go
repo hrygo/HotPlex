@@ -873,3 +873,44 @@ func TestHandleInput_NormalTextNotCommand(t *testing.T) {
 	_ = handler.Handle(context.Background(), inputEnvelope(sid, "hello world"))
 	// Normal text should attempt worker delivery; no crash and no command parsing.
 }
+
+func TestHandleInput_AutoResumeActiveSessionLackingWorkerBinding(t *testing.T) {
+	t.Parallel()
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+	const sid = "sess_autoresume_active"
+
+	// Create an active session in StateIdle
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	err = mgr.Transition(context.Background(), sid, events.StateRunning)
+	require.NoError(t, err)
+	err = mgr.Transition(context.Background(), sid, events.StateIdle)
+	require.NoError(t, err)
+
+	// Verify that the worker is NOT attached to the session manager, and there is no worker run binding
+	require.Nil(t, mgr.GetWorker(sid))
+
+	// Create the bridge and mock worker
+	mockWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+	}
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: mgr})
+	b.SetWorkerFactory(&mockBridgeWorkerFactory{workers: []*mockBridgeWorker{mockWorker}})
+	handler.bridge = b
+
+	// Verify that CurrentWorkerBinding returns false initially
+	_, _, ok := b.CurrentWorkerBinding(sid)
+	require.False(t, ok)
+
+	// Handle input: this should trigger auto-resume since session is active but has no worker binding
+	env := inputEnvelope(sid, "hello")
+	env.OwnerID = "user1"
+	err = handler.Handle(context.Background(), env)
+	require.NoError(t, err)
+
+	// Verify that the worker is now attached and active worker run binding is present
+	require.NotNil(t, mgr.GetWorker(sid))
+	_, _, ok = b.CurrentWorkerBinding(sid)
+	require.True(t, ok)
+}

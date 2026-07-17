@@ -182,17 +182,17 @@ dev-build:
 
 test:
 	@echo "$(CYAN)Testing...$(RESET)"
-	@GORACE="history_size=5" go test -race -timeout 15m ./...
+	@GORACE="history_size=5" go test -race -count=1 -shuffle=on -timeout 15m ./...
 	@echo "  $(GREEN)✓ Tests passed$(RESET)"
 
 test-short:
 	@echo "$(CYAN)Testing...$(RESET)"
-	@GORACE="history_size=5" go test -short -race -timeout 5m ./...
+	@GORACE="history_size=5" go test -short -race -count=1 -shuffle=on -timeout 5m ./...
 	@echo "  $(GREEN)✓ Tests passed$(RESET)"
 
 coverage:
 	@echo "$(CYAN)Generating coverage report...$(RESET)"
-	@go test -timeout=15m -coverprofile=coverage.out -covermode=atomic \
+	@go test -count=1 -timeout=15m -coverprofile=coverage.out -covermode=atomic \
 		$$(go list ./... | grep -v -e 'internal/worker/proc' -e 'internal/worker/pi' -e 'cmd/hotplex')
 	@echo ""
 	@echo "$(BOLD)Per-package coverage:$(RESET)"

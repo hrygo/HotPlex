@@ -64,7 +64,18 @@ export function patchAuthoritativeAssistantContent(
         (message) =>
             message.id === targetAssistantId && message.role === "assistant",
     );
-    if (targetIndex === -1) return messages as HotPlexMessage[];
+    if (targetIndex === -1) {
+        return [
+            ...messages,
+            {
+                id: targetAssistantId,
+                role: "assistant",
+                parts: [{ type: "text", text: fullText }],
+                createdAt: new Date(),
+                status: "complete",
+            },
+        ];
+    }
 
     const target = messages[targetIndex];
     const currentText = concatTextParts(target.parts);

@@ -9,6 +9,7 @@ export function useInteractionTimeout(
 
   useEffect(() => {
     if (initialStatus !== "pending" || !expiresAt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTimeLeft(null);
       return;
     }

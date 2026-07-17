@@ -250,7 +250,7 @@ func TestVerify_Stream_ThenFollowUpTable(t *testing.T) {
 	_, _, _ = client.StopStreamContext(ctx, channel, streamTS)
 	t.Logf("Stream stopped")
 
-	time.Sleep(500 * time.Millisecond)
+	<-time.After(500 * time.Millisecond)
 
 	// Phase 4: Follow-up PostMessage with proper DataTableBlock
 	table := buildTestTable()

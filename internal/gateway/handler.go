@@ -415,12 +415,36 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 
 	var w worker.Worker
 	workerRunID := ""
-	if h.bridge != nil && h.executionStore != nil {
+	if h.bridge != nil {
 		var ok bool
 		w, workerRunID, ok = h.bridge.CurrentWorkerBinding(env.SessionID)
+		if !ok && si.State.IsActive() && h.bridge.sm != nil {
+			h.log.Info("gateway: auto-resuming active session lacking worker binding", "session_id", env.SessionID, "state", si.State)
+			resumeCtx, resumeCancel := context.WithTimeout(ctx, 30*time.Second)
+			resumeErr := h.bridge.ResumeSession(resumeCtx, env.SessionID, si.WorkDir)
+			resumeCancel()
+			if resumeErr != nil {
+				h.log.Warn("gateway: auto-resume failed for active session lacking worker binding", "session_id", env.SessionID, "err", resumeErr)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "session resume failed: %v", resumeErr)
+			}
+			// Refresh session info after successful resume
+			var getErr error
+			si, getErr = h.sm.Get(ctx, env.SessionID)
+			if getErr != nil {
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				finishOutcome(execution.StatusFailed, events.ErrCodeSessionNotFound)
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after resume")
+			}
+			w, workerRunID, ok = h.bridge.CurrentWorkerBinding(env.SessionID)
+		}
 		if !ok {
-			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker run identity unavailable")
+			if h.executionStore != nil {
+				finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker run identity unavailable")
+			}
+			w = h.sm.GetWorker(env.SessionID)
 		}
 	} else {
 		w = h.sm.GetWorker(env.SessionID)

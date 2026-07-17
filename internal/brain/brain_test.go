@@ -75,6 +75,10 @@ func TestConfig_DefaultValues(t *testing.T) {
 }
 
 func TestGlobalBrain_Access(t *testing.T) {
+	oldBrain := globalBrain
+	t.Cleanup(func() { globalBrain = oldBrain })
+	globalBrain = nil
+
 	assert.Nil(t, Global(), "global brain should be nil initially")
 
 	mockBrain := &mockBrain{}
@@ -94,6 +98,9 @@ func (m *mockBrain) ChatWithOptions(ctx context.Context, prompt string, opts Cha
 }
 
 func TestTimeoutApplication(t *testing.T) {
+	oldBrain := globalBrain
+	t.Cleanup(func() { globalBrain = oldBrain })
+
 	mockBrain := &slowMockBrain{}
 	SetGlobal(mockBrain)
 

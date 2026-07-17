@@ -189,8 +189,8 @@ func TestChatQueue_TaskExecution(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
-	require.True(t, executed.Load())
+	require.Eventually(t, func() bool { return executed.Load() },
+		500*time.Millisecond, 10*time.Millisecond)
 }
 
 func TestChatQueue_TaskError(t *testing.T) {
@@ -202,8 +202,6 @@ func TestChatQueue_TaskError(t *testing.T) {
 		return io.ErrUnexpectedEOF
 	})
 	require.NoError(t, err)
-
-	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChatQueue_AbortNonexistentChat(t *testing.T) {

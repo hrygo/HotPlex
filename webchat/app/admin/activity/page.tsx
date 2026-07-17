@@ -124,6 +124,7 @@ export default function AdminActivityPage() {
 
   // Reset page when filter search params change (avoid out-of-bounds offset queries)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentPage(1);
   }, [userId, principalUserId, actionPrefix, outcome, platform, from, to]);
 

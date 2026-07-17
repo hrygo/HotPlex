@@ -11,6 +11,7 @@ export function useLanguage() {
   useEffect(() => {
     if (i18n.language) {
       document.documentElement.lang = i18n.language;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocale(i18n.language as AppLocale);
     }
   }, [i18n.language]);

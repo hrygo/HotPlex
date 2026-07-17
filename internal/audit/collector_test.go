@@ -647,7 +647,7 @@ func TestCollector_ConcurrentGcNoBusyLock(t *testing.T) {
 	}
 
 	// Let the load run for a short window, then signal stop and wait.
-	time.Sleep(300 * time.Millisecond)
+	<-time.After(300 * time.Millisecond)
 	close(stopC)
 	wg.Wait()
 	gcWg.Wait()

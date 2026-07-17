@@ -33,15 +33,10 @@ func TestChatQueue_SerializesPerChat(t *testing.T) {
 	}
 
 	// Wait for all tasks to complete.
-	time.Sleep(200 * time.Millisecond)
-
-	mu.Lock()
-	require.Len(t, order, 3)
-	mu.Unlock()
-
-	// Counter should reach 3 (tasks serialized).
 	require.Eventually(t, func() bool {
-		return counter.Load() == 3
+		mu.Lock()
+		defer mu.Unlock()
+		return len(order) == 3 && counter.Load() == 3
 	}, 500*time.Millisecond, 10*time.Millisecond)
 }
 
@@ -55,12 +50,12 @@ func TestChatQueue_ParallelizesAcrossChats(t *testing.T) {
 	// Enqueue 2 tasks for 2 different chats simultaneously.
 	require.NoError(t, q.Enqueue("chat_A", func(context.Context) error {
 		counter.Add(1)
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		return nil
 	}))
 	require.NoError(t, q.Enqueue("chat_B", func(context.Context) error {
 		counter.Add(1)
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		return nil
 	}))
 

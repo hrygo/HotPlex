@@ -139,8 +139,9 @@ func TestEmitAuditConfigChange_NoChangeNoop(t *testing.T) {
 	cb(base, base) // identical audit section
 
 	// Give the collector a moment, then assert nothing was enqueued.
-	time.Sleep(50 * time.Millisecond)
-	require.Equal(t, int64(0), collector.Enqueued(), "no row should be enqueued when audit config is unchanged")
+	require.Never(t, func() bool { return collector.Enqueued() != 0 },
+		200*time.Millisecond, 10*time.Millisecond,
+		"no row should be enqueued when audit config is unchanged")
 }
 
 // TestEmitAuditConfigChange_PartialChange verifies that when only one audit
