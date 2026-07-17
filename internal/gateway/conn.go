@@ -1094,6 +1094,13 @@ func (c *Conn) Close() error {
 	return c.wc.Close()
 }
 
+// Closed reports whether the connection is closed.
+func (c *Conn) Closed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 func (c *Conn) sendError(code events.ErrorCode, msg string) {
 	env := events.NewEnvelope(aep.NewID(), c.sessionID, c.hub.NextSeq(c.sessionID), events.Error, events.ErrorData{
 		Code:    code,

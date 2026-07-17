@@ -222,6 +222,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private connectionGeneration = 0;
   private lifecycleGeneration = 0;
   private localHandoffRetryAvailable = false;
+  private sessionAlreadyConnectedRetryCount = 0;
   private pageSessionOwner: string | null = null;
 
   private closed = false;
@@ -274,6 +275,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   connect(sessionId?: string): Promise<InitAckData> {
     this.closed = false;
     this.shouldReconnect = true;
+    this.sessionAlreadyConnectedRetryCount = 0;
     const id = sessionId || this._sessionId || undefined;
     const target = id ?? null;
 
@@ -444,18 +446,22 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         }
 
         if (ackData.code === ErrorCode.SessionAlreadyConnected &&
-            this.localHandoffRetryAvailable) {
-          this.localHandoffRetryAvailable = false;
+            this.sessionAlreadyConnectedRetryCount < 1) {
+          this.sessionAlreadyConnectedRetryCount++;
           const retryId = connectionSessionId || session_id || undefined;
-          logger.info('BrowserClient', 'Retrying local WebSocket handoff conflict', {
+          const delay = this.localHandoffRetryAvailable ? LOCAL_HANDOFF_RETRY_DELAY_MS : 500;
+          this.localHandoffRetryAvailable = false;
+
+          logger.info('BrowserClient', 'Retrying WebSocket connection conflict', {
             sessionId: retryId,
+            delay,
           });
-          this._closeCurrentSocketForHandoff('Local handoff retry');
+          this._closeCurrentSocketForHandoff('Conflict retry');
           this._doConnect(
             retryId,
             false,
             lifecycleGeneration,
-            LOCAL_HANDOFF_RETRY_DELAY_MS,
+            delay,
           ).then(resolve, reject);
           return;
         }
@@ -497,6 +503,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       this._connecting = false;
       this._reconnecting = false;
       this.localHandoffRetryAvailable = false;
+      this.sessionAlreadyConnectedRetryCount = 0;
       this.reconnectAttempt = 0;
       this.pendingConnectReject = null;
       this.lastInitAck = ackData;

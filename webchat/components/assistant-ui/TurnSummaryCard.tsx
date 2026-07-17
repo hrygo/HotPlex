@@ -1,6 +1,8 @@
 'use client';
 
+import React from 'react';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import type { TurnSessionStats } from '@/lib/ai-sdk-transport/client/types';
 
 type Severity = 'comfortable' | 'moderate' | 'high' | 'critical';
@@ -57,6 +59,7 @@ const severityConfig: Record<Severity, { color: string; bg: string; border: stri
 };
 
 export function TurnSummaryCard({ data: rawData }: { data: TurnSessionStats }) {
+  const { t } = useTranslation('chat');
   console.log("TurnSummaryCard stats data:", rawData);
   const data = (rawData || {}) as any;
 
@@ -65,29 +68,84 @@ export function TurnSummaryCard({ data: rawData }: { data: TurnSessionStats }) {
   const severity = getSeverity(pct);
   const cfg = severityConfig[severity];
 
-  const parts: string[] = [];
+  const items: React.ReactNode[] = [];
 
   const modelName = data.model_name ?? data.modelName;
-  if (modelName) parts.push(modelName);
-  if (pct > 0 && contextWindow > 0) {
-    parts.push(`${Math.round(pct)}%`);
+  if (modelName) {
+    items.push(
+      <span key="model" className="font-semibold text-[var(--text-primary)]">
+        {modelName}
+      </span>
+    );
   }
+
+  if (pct > 0 && contextWindow > 0) {
+    items.push(
+      <span key="pct" className="font-mono text-[var(--text-secondary)]">
+        {Math.round(pct)}%
+      </span>
+    );
+  }
+
   const inputTok = data.turn_input_tok ?? data.turnInputTok ?? data.total_input_tok ?? data.totalInputTok ?? 0;
   const outputTok = data.turn_output_tok ?? data.turnOutputTok ?? data.total_output_tok ?? data.totalOutputTok ?? 0;
   if (inputTok > 0 || outputTok > 0) {
-    parts.push(`📥 ${formatTokens(inputTok)} · 📤 ${formatTokens(outputTok)}`);
+    items.push(
+      <span key="tokens" className="inline-flex items-center gap-2">
+        <span
+          className="inline-flex items-center gap-0.5 text-sky-600 dark:text-sky-400 font-medium"
+          title={t('label.input_tokens')}
+        >
+          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 5L5 19M5 19h10M5 19V9" />
+          </svg>
+          <span>{formatTokens(inputTok)}</span>
+        </span>
+        <span className="text-[var(--text-faint)] select-none">/</span>
+        <span
+          className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-medium"
+          title={t('label.output_tokens')}
+        >
+          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 19L19 5M19 5H9M19 5v10" />
+          </svg>
+          <span>{formatTokens(outputTok)}</span>
+        </span>
+      </span>
+    );
   }
+
   const durationMs = data.turn_duration_ms ?? data.turnDurationMs ?? 0;
   if (durationMs > 0) {
-    parts.push(`⏱️ ${formatDuration(durationMs)}`);
+    items.push(
+      <span key="duration" className="inline-flex items-center gap-1" title={t('label.duration')}>
+        <svg className="w-3 h-3 text-[var(--text-muted)] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span>{formatDuration(durationMs)}</span>
+      </span>
+    );
   }
+
   const gitBranch = data.git_branch ?? data.gitBranch;
   if (gitBranch) {
-    parts.push(`🌿 ${gitBranch}`);
+    items.push(
+      <span key="branch" className="inline-flex items-center gap-1 text-[var(--text-muted)]" title={t('label.git_branch')}>
+        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <line x1="6" x2="6" y1="3" y2="15" />
+          <circle cx="18" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <path d="M18 9a9 9 0 0 1-9 9" />
+        </svg>
+        <span>{gitBranch}</span>
+      </span>
+    );
   }
+
   const toolCallCount = data.tool_call_count ?? data.toolCallCount ?? 0;
   if (toolCallCount > 0) {
-    let toolStr = `🛠 ${toolCallCount}`;
+    let toolStr = `${toolCallCount}`;
     const toolNames = data.tool_names ?? data.toolNames;
     if (toolNames && Object.keys(toolNames).length > 0) {
       const names = Object.entries(toolNames)
@@ -95,13 +153,27 @@ export function TurnSummaryCard({ data: rawData }: { data: TurnSessionStats }) {
         .join(', ');
       toolStr += ` (${names})`;
     }
-    parts.push(toolStr);
+    items.push(
+      <span key="tools" className="inline-flex items-center gap-1" title={t('label.tool_calls')}>
+        <svg className="w-3 h-3 text-[var(--text-muted)] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+        <span>{toolStr}</span>
+      </span>
+    );
   }
+
   const costVal = data.turn_cost_usd ?? data.turnCostUsd ?? data.turnCostUSD ?? data.total_cost_usd ?? data.totalCostUsd ?? data.totalCostUSD ?? 0;
   const cost = costVal ? formatCost(costVal) : '';
-  if (cost) parts.push(cost);
+  if (cost) {
+    items.push(
+      <span key="cost" className="inline-flex items-center gap-1 text-[var(--accent-emerald)] font-medium" title={t('label.cost')}>
+        <span>{cost}</span>
+      </span>
+    );
+  }
 
-  if (parts.length === 0) return null;
+  if (items.length === 0) return null;
 
   return (
     <motion.div
@@ -128,9 +200,14 @@ export function TurnSummaryCard({ data: rawData }: { data: TurnSessionStats }) {
           </div>
         </div>
       )}
-      <span className="text-[10px] font-mono text-[var(--text-secondary)]">
-        {parts.join(' · ')}
-      </span>
+      <div className="text-[10px] font-mono text-[var(--text-secondary)] flex items-center gap-2 flex-wrap">
+        {items.map((item, index) => (
+          <React.Fragment key={index}>
+            {index > 0 && <span className="text-[var(--text-faint)] select-none">·</span>}
+            {item}
+          </React.Fragment>
+        ))}
+      </div>
     </motion.div>
   );
 }

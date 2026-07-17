@@ -38,7 +38,13 @@
     "thought_process": "思考过程",
     "agent_skills": "Agent Skills",
     "latest_messages": "最新消息",
-    "code": "代码"
+    "code": "代码",
+    "input_tokens": "输入 Token",
+    "output_tokens": "输出 Token",
+    "duration": "运行时长",
+    "git_branch": "Git 分支",
+    "tool_calls": "工具调用次数",
+    "cost": "预估费用"
   },
   "placeholder": {
     "workspace_name": "我的项目",

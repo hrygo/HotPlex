@@ -175,6 +175,33 @@ func TestHub_WebChatOwner_OnlyCurrentConnectionCanRelease(t *testing.T) {
 	require.False(t, h.IsWebChatOwner("sess_owner", c2))
 }
 
+func TestHub_WebChatOwner_ReplaceClosedOwner(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn1, server1 := newTestWSConnPair(t)
+	conn2, server2 := newTestWSConnPair(t)
+	t.Cleanup(func() {
+		_ = conn1.Close()
+		_ = server1.Close()
+		_ = conn2.Close()
+		_ = server2.Close()
+	})
+
+	c1 := newConn(h, conn1, "sess_owner_replace", nil)
+	c2 := newConn(h, conn2, "sess_owner_replace", nil)
+
+	require.True(t, h.TryAcquireWebChatOwner("sess_owner_replace", c1))
+	require.False(t, h.TryAcquireWebChatOwner("sess_owner_replace", c2))
+
+	// Close c1
+	require.NoError(t, c1.Close())
+
+	// c2 should be able to acquire ownership
+	require.True(t, h.TryAcquireWebChatOwner("sess_owner_replace", c2))
+	require.True(t, h.IsWebChatOwner("sess_owner_replace", c2))
+	require.False(t, h.IsWebChatOwner("sess_owner_replace", c1))
+}
+
 func TestHub_WebChatOwner_ConcurrentAcquireHasOneWinner(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)

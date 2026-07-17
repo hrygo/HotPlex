@@ -38,7 +38,13 @@
     "thought_process": "THOUGHT PROCESS",
     "agent_skills": "Agent Skills",
     "latest_messages": "Latest Messages",
-    "code": "code"
+    "code": "code",
+    "input_tokens": "Input Tokens",
+    "output_tokens": "Output Tokens",
+    "duration": "Duration",
+    "git_branch": "Git Branch",
+    "tool_calls": "Tool Calls",
+    "cost": "Estimated Cost"
   },
   "placeholder": {
     "workspace_name": "My Project",

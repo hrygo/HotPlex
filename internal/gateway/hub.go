@@ -248,8 +248,15 @@ func (h *Hub) UnregisterConn(conn *Conn) {
 func (h *Hub) TryAcquireWebChatOwner(sessionID string, conn *Conn) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, exists := h.webchatOwners[sessionID]; exists {
-		return false
+	if existing, exists := h.webchatOwners[sessionID]; exists {
+		if !existing.Closed() {
+			return false
+		}
+		h.log.Info("gateway: replacing closed WebChat owner connection",
+			"session_id", sessionID,
+			"old_conn_id", existing.connID,
+			"new_conn_id", conn.connID,
+		)
 	}
 	h.webchatOwners[sessionID] = conn
 	return true
