@@ -186,7 +186,11 @@ jobs:
 
       - name: Display coverage
         if: always()
-        run: go tool cover -func=coverage*.out 2>/dev/null | tail -1 || true
+        run: |
+          for f in coverage*.out; do
+            go tool cover -func="$f" 2>/dev/null | tail -1 || true
+            break
+          done
 
       - uses: actions/upload-artifact@v7
         if: always()
@@ -218,7 +222,7 @@ jobs:
           SHARD_FILES=$(find coverage-data -name 'coverage-*.out' 2>/dev/null | head -1)
           if [ -n "$SHARD_FILES" ]; then
             printf 'mode: atomic\n' > coverage.out
-            find coverage-data -name 'coverage-*.out' -exec grep -v '^mode:' {} + >> coverage.out
+            find coverage-data -name 'coverage-*.out' -exec grep -h -v '^mode:' {} + >> coverage.out
           else
             cp coverage-data/coverage.out coverage.out 2>/dev/null || printf 'mode: atomic\n' > coverage.out
           fi
