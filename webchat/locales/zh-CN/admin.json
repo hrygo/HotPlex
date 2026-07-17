@@ -364,9 +364,9 @@
     "modes": {
       "default": "默认 (工作区)",
       "workspace": "工作区",
-      "auto_edit": "自动编辑",
+      "auto_edit": "自动模式",
       "read_only": "只读",
-      "bypass": "旁路 (Bypass)"
+      "bypass": "最高权限 (Bypass)"
     },
     "table": {
       "owner": "所有者",
