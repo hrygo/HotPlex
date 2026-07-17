@@ -1,7 +1,8 @@
 ---
 name: hotplex-issue-manager
 description: HotPlex issue 批量管理与合并 PR 交付。将分散的 GitHub issues 转化为一个合并 PR——对传统一个-issue-一个-PR 工作流的刻意替代，减少合并冲突和审查疲劳。覆盖 issue 优先级排列、批量修复规划与实施、ROI 计算。
-compatibility: Requires gh CLI, Go 1.26+, golangci-lint, make
+metadata:
+  compatibility: Requires gh CLI, Go 1.26+, golangci-lint, make
 ---
 
 # HotPlex Issue Manager

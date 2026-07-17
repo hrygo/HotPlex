@@ -4,63 +4,8 @@ description: HotPlex 架构深度审计。覆盖架构分析、SOLID/DRY 合规�
 ---
 
 # 架构深度分析器
-
-## 为什么使用此 skill？
-
-架构分析是复杂且易出错的工作 — 容易遗漏重要问题、产生误报、或浪费时间在低价值发现上。此 skill 通过以下方式解决这些问题：
-
-**渐进式分析** — 每次 2-3 个方面，避免信息过载，让每个发现都经过深思熟虑
-**智能优先级** — 自动优先分析最少审计模块，确保覆盖均衡
-**置信度 + ROI 分诊** — 过滤误报和低价值发现，只创建高影响力 issue
-**存量 Issue 审计** — 当 open issues 超过阈值时，自动切换为审计模式：核实、关闭、更正
-**持久化进度** — 跨会话追踪，支持 `/loop` 连续执行，不会丢失工作
-**HotPlex 专用优化** — 针对 Gateway 多层架构的特殊模式定制
-**Subagent 上下文隔离** — 深度分析在独立 subagent 中执行，主会话只处理 JSON 结果，每模块上下文消耗降低 97%
-
-**核心设计**：每次调用 = **一个分析周期**在**一个模块**上覆盖**2-3 个方面**。专为 `/loop` 设计 — 重复调用在 4 个深度阶段中渐进覆盖所有模块 × 所有方面。
-
-**状态持久化在** `.claude/arch-analysis/progress.json` — 跨会话重启存活，启用 `/loop` 连续性。
-
-### 为什么使用 /loop？
-
-**手动执行的问题**：
-- 需要记住调用 skill 数十次
-- 容易丢失分析进度
-- 难以跟踪覆盖哪些模块
-- 容易过早停止
-
-**使用 /loop 的好处**：
-- **自动化**：设置后无需干预，持续分析所有模块
-- **持久化**：进度文件保存状态，中断后可以恢复
-- **可视化**：每次调用显示覆盖矩阵，清楚看到进度
-- **均衡覆盖**：智能优先级确保最少分析的模块优先处理
-
-**推荐 /loop 设置**：
-```bash
-/loop 10m /hotplex-arch-analyzer
-```
-
-这每 10 分钟运行一次分析，适合大型代码库的渐进式分析。调整间隔基于代码库大小和分析深度需求。
-
----
-
-## 如何阅读本文档
-
-本文档使用渐进式信息披露 — 快速开始只需阅读工作流概览和步骤 1-3。详细参考材料（模块发现、分析方面、进度文件模式）在后面供需要时查阅。
-
-**快速路径**（新用户）：
-1. 阅读工作流概览
-2. 理解步骤 1-3（加载进度、选择模块、选择方面）
-3. 跳到步骤 5（Issue 模板）开始使用
-
-**深度路径**（经验用户）：
-1. 完整阅读所有步骤
-2. 参考常见陷阱故障排除
-3. 自定义模块发现和方面选择逻辑
-
----
-
 ## 工作流概览
+每次调用 = **一个分析周期**在**一个模块**上覆盖**2-3 个方面**。专为 `/loop` 设计：`/loop 10m /hotplex-arch-analyzer`。深度分析在独立 subagent 中执行，主会话只处理 JSON 结果（上下文隔离）。状态持久化在 `.claude/arch-analysis/progress.json`，跨会话存活。
 
 每次调用遵循两种模式之一，由**步骤 1.5（模式检测）**决定：
 
@@ -487,49 +432,6 @@ Issue 编号: <ISSUE_NUMBER>
 
 父模块（`messaging`、`worker`、`cli`）获得自己的分析通过，涵盖共享代码（bridge、接口、基本类型）。
 
-### 标准模块列表（HotPlex）
-
-```
-internal/gateway     — WebSocket hub, conn, handler, bridge, LLM retry, API
-internal/session     — 状态机, store, pool, key derivation
-internal/messaging   — 平台适配器, bridge, interaction, toolfmt, sanitize, dedup, gate
-  internal/messaging/slack    — Slack Socket Mode 适配器
-  internal/messaging/feishu   — 飞书 WS 适配器 + STT + 卡片模板
-  internal/messaging/yuanxin  — 元芯平台适配器
-  internal/messaging/stt      — 语音转文字（独立 STT 模块）
-  internal/messaging/tts      — 文字转语音（Edge-TTS / FFmpeg Opus 转换）
-internal/worker      — 共享接口 + Worker 注册表 + 跨平台进程管理
-  internal/worker/claudecode    — Claude Code stdio 适配器
-  internal/worker/codexcli      — Codex CLI 适配器 (exec + app-server 双模式)
-  internal/worker/opencodeserver — OCS 单例进程 + HTTP/SSE 适配器
-  internal/worker/acp           — ACP 通用适配器（JSON-RPC 2.0 over stdio）
-  internal/worker/proc          — 跨平台进程生命周期（PGID/Job Object）
-internal/brain       — LLM 客户端装饰器链、意图路由、上下文压缩、安全审计
-  internal/brain/llm  — OpenAI/Anthropic 客户端 + retry/cache/ratelimit/circuit
-internal/config      — Viper 配置 + 热重载 + 继承 + 审计/回滚
-internal/agentconfig — B/C 通道组装、配置加载
-internal/security    — API Key 认证、Bot ID、SSRF 防护、路径安全
-internal/admin       — Admin API 处理器、Bot 状态
-internal/cron        — 定时任务调度、SQLite 持久化、Worker 执行、结果投递
-internal/eventstore  — 会话事件持久化 + delta 聚合
-internal/cli         — Cobra CLI 入口、doctor、onboard、cron CRUD
-  internal/cli/checkers — 诊断检查器注册表
-  internal/cli/cron     — cron 子命令 CRUD
-  internal/cli/slack    — Slack CLI 子命令
-internal/skills      — Skills 发现
-internal/metrics     — Prometheus 指标
-internal/tracing     — OpenTelemetry 设置
-internal/service     — 跨平台系统服务（systemd/launchd/SCM）
-internal/updater     — 自更新（GitHub API、sha256 校验、原子替换）
-internal/docs        — 自托管文档门户（Markdown → HTML → go:embed）
-internal/webchat     — 嵌入式 Next.js SPA（go:embed）
-internal/sqlutil     — SQLite 驱动（modernc.org/sqlite，纯 Go）+ PostgreSQL 驱动（jackc/pgx/v5）
-internal/assets      — 静态资源嵌入
-pkg/events           — AEP 包络 + 事件类型
-pkg/aep              — AEP v1 编解码
-cmd/hotplex          — Cobra CLI 入口点
-```
-
 ---
 
 ## 分析方面
@@ -563,18 +465,6 @@ cmd/hotplex          — Cobra CLI 入口点
 | 10 | **可观测性** | 结构化日志缺口、指标覆盖、跟踪跨度 |
 | 11 | **可测试性** | DI 覆盖、可模拟性、错误路径的测试缺口 |
 | 12 | **代码质量** | 圈复杂度、上帝对象、死代码、命名一致性 |
-
-### 为什么这个顺序？
-
-**阶段 1（架构与设计）优先**：因为结构性问题影响所有后续代码。在修复 SOLID/DRY 违规后再优化性能，避免在错误设计上浪费时间。
-
-**阶段 2（可靠性）其次**：并发和错误处理问题是常见的生产故障根源。修复它们可以提高系统稳定性。
-
-**阶段 3（性能与规模）第三**：只有在架构稳定和可靠性问题解决后才优化。过早优化是万恶之源。
-
-**阶段 4（安全与质量）最后**：这些是"卫生因素" — 重要但通常不阻塞功能。在最后阶段确保代码库健康。
-
-**为什么每次 2-3 个方面**：更多方面会导致表面分析。更少方面虽然深度更好，但需要更多调用才能覆盖。2-3 个方面是深度和速度的最佳平衡。
 
 ---
 
