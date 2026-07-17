@@ -17,7 +17,8 @@
     "disable": "Disable",
     "approve": "Approve",
     "reject": "Reject",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "clear": "Clear"
   },
   "status": {
     "loading": "Loading...",

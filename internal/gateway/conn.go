@@ -335,13 +335,17 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 			}
 		}
 
-		if isInteraction {
+		// Handle interaction responses, user inputs, and worker commands asynchronously
+		// to prevent blocking the WebSocket ReadPump loop on long-running worker tasks.
+		isAsync := isInteraction || env.Event.Type == events.Input || env.Event.Type == events.WorkerCmd
+
+		if isAsync {
 			go func(e *events.Envelope, s trace.Span) {
 				defer s.End()
 				if err := handler.Handle(context.Background(), e); err != nil {
 					s.RecordError(err)
 					s.SetStatus(codes.Error, err.Error())
-					c.log.Warn("gateway: handle interaction response async error", "err", err, "session_id", c.sessionID)
+					c.log.Warn("gateway: handle async error", "event_type", e.Event.Type, "err", err, "session_id", c.sessionID)
 				} else {
 					s.SetStatus(codes.Ok, "")
 				}

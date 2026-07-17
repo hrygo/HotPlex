@@ -438,7 +438,9 @@
       "from": "开始时间",
       "to": "结束时间",
       "from_short": "从",
-      "to_short": "至"
+      "to_short": "至",
+      "pick_user": "选择用户",
+      "search_user": "搜索用户名或显示名..."
     },
     "hints": {
       "user_id_tooltip": "通信平台分配给该用户的原始账号 ID，例如飞书里的 ou_xxxx，Slack 里的 Uxxxx 等。",

@@ -79,10 +79,20 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		if w == nil {
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop: no active worker")
 		}
+
+		var workerRunID string
+		if h.bridge != nil {
+			_, workerRunID, _ = h.bridge.CurrentWorkerBinding(env.SessionID)
+		}
+
 		if err := w.StopCurrentTurn(ctx); err != nil {
 			h.log.Warn("gateway: stop current turn failed", "session_id", env.SessionID, "err", err)
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop failed: %v", err)
 		}
+
+		// Finish the pending execution runtime immediately when stopped.
+		h.finishRuntimeOnStop(ctx, env.SessionID, workerRunID, env.OwnerID)
+
 		// Send done confirmation to the client.
 		doneEnv := events.NewEnvelope(
 			aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID),

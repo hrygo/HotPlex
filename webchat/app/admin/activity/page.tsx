@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -11,6 +11,7 @@ import { OUTCOME_STATUS_MAP } from '@/components/admin/activity/outcome-map';
 import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 import { useAdminUI } from '@/context/admin-ui-context';
 import { downloadActivity, listActivity, listActivityStats, type ActivityFilters } from '@/lib/api/admin-activity';
+import { adminListUsers, type User } from '@/lib/api/auth';
 import type { ActivityStats, AuditActivity } from '@/lib/types/admin';
 import { formatDateTime, formatRelative } from '@/lib/utils/format-time';
 import { useTranslation } from 'react-i18next';
@@ -97,8 +98,14 @@ export default function AdminActivityPage() {
   const [exporting, setExporting] = useState<'json' | 'csv' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drawerRow, setDrawerRow] = useState<AuditActivity | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedField, setCopiedField] = useState('');
   const [identityLinks, setIdentityLinks] = useState<Record<string, any>>({});
+
+  // User picker state for user_id filter
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [showUserPicker, setShowUserPicker] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const userPickerRef = useRef<HTMLDivElement>(null);
 
   const messageContent = useMemo(() => {
     if (!drawerRow || !drawerRow.detail_json) return '';
@@ -112,6 +119,7 @@ export default function AdminActivityPage() {
   }, [drawerRow]);
 
   const [userId, setUserId] = useState('');
+  const [selectedUserLabel, setSelectedUserLabel] = useState('');
   const [principalUserId, setPrincipalUserId] = useState('');
   const [actionPrefix, setActionPrefix] = useState('');
   const [outcome, setOutcome] = useState<OutcomeFilter>('');
@@ -164,6 +172,27 @@ export default function AdminActivityPage() {
     load();
   }, [load]);
 
+  // Fetch all users once for the user picker dropdown
+  useEffect(() => {
+    const controller = new AbortController();
+    adminListUsers(1000, 0, controller.signal)
+      .then((res) => setAllUsers(res.users ?? []))
+      .catch(() => {}); // ignore errors — picker is optional
+    return () => controller.abort();
+  }, []);
+
+  // Close user picker on outside click
+  useEffect(() => {
+    if (!showUserPicker) return;
+    const onClick = (e: MouseEvent) => {
+      if (userPickerRef.current && !userPickerRef.current.contains(e.target as Node)) {
+        setShowUserPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [showUserPicker]);
+
   // Esc closes the drawer (matches the sessions page pattern).
   useEffect(() => {
     if (!drawerRow) return;
@@ -186,11 +215,11 @@ export default function AdminActivityPage() {
     }
   };
 
-  const copyJson = async (row: AuditActivity) => {
+  const copyText = async (text: string, field: string) => {
     try {
-      await navigator.clipboard.writeText(row.detail_json || '');
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(''), 1500);
     } catch {
       showToast(t('activity.error.export_failed'), 'error');
     }
@@ -336,21 +365,98 @@ export default function AdminActivityPage() {
 
         {/* Filters */}
         <div className="mb-6 p-4 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]/40 backdrop-blur-sm grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3">
-          <div className="relative group flex items-center">
+          <div className="relative group flex items-center" ref={userPickerRef}>
             <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
+              value={selectedUserLabel || userId}
+              onChange={(e) => {
+                setUserId(e.target.value);
+                setSelectedUserLabel('');
+                if (e.target.value.length > 0) setShowUserPicker(true);
+              }}
+              onFocus={() => { if (allUsers.length > 0) setShowUserPicker(true); }}
               placeholder={t('activity.filters.user_id')}
-              className="w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 backdrop-blur-sm pl-3 pr-8 py-2 text-xs text-[var(--text-primary)] outline-none transition-all focus:border-[var(--accent-gold)] focus:ring-2 focus:ring-[var(--accent-gold)]/20"
+              className="w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 backdrop-blur-sm pl-3 pr-16 py-2 text-xs text-[var(--text-primary)] outline-none transition-all focus:border-[var(--accent-gold)] focus:ring-2 focus:ring-[var(--accent-gold)]/20"
             />
-            <div className="absolute right-2.5 text-[var(--text-faint)] hover:text-[var(--text-secondary)] cursor-help">
+            {selectedUserLabel && (
+              <button
+                type="button"
+                onClick={() => { setUserId(''); setSelectedUserLabel(''); }}
+                className="absolute right-8 text-[var(--text-faint)] hover:text-[var(--text-primary)] transition-colors"
+                title={tCommon('action.clear')}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowUserPicker((v) => !v)}
+              className="absolute right-2.5 text-[var(--text-faint)] hover:text-[var(--text-secondary)] transition-colors"
+              title={t('activity.filters.pick_user')}
+            >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
               </svg>
-            </div>
-            <div className="absolute z-30 bottom-full left-0 mb-2 hidden group-hover:block w-64 p-3 bg-[var(--bg-surface)]/95 backdrop-blur-sm border border-[var(--border-subtle)] rounded-lg shadow-xl text-[11px] text-[var(--text-secondary)] leading-normal pointer-events-none transition-all duration-200">
-              {t('activity.hints.user_id_tooltip')}
-            </div>
+            </button>
+            {/* User picker dropdown */}
+            {showUserPicker && allUsers.length > 0 && (
+              <div className="absolute z-40 top-full left-0 mt-1 w-full max-h-64 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-sm shadow-xl">
+                <div className="sticky top-0 p-1.5 bg-[var(--bg-surface)]/95 backdrop-blur-sm border-b border-[var(--border-subtle)]/50">
+                  <input
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder={t('activity.filters.search_user')}
+                    className="w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-hover)]/40 px-2.5 py-1.5 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent-gold)]/40"
+                    autoFocus
+                  />
+                </div>
+                {allUsers
+                  .filter((u) => {
+                    if (!userSearch.trim()) return true;
+                    const q = userSearch.toLowerCase();
+                    return (
+                      (u.display_name || '').toLowerCase().includes(q) ||
+                      u.username.toLowerCase().includes(q) ||
+                      u.id.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        setUserId(u.id);
+                        setSelectedUserLabel(u.display_name || u.username);
+                        setShowUserPicker(false);
+                        setUserSearch('');
+                      }}
+                      className="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-[var(--bg-hover)]/60 transition-colors border-b border-[var(--border-subtle)]/20 last:border-b-0"
+                    >
+                      <div className="w-5 h-5 rounded-full bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 flex items-center justify-center shrink-0">
+                        <span className="text-[9px] font-bold text-[var(--accent-gold)] uppercase">
+                          {(u.display_name || u.username || '?')[0]}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-[var(--text-primary)] truncate">
+                          {u.display_name || u.username}
+                        </div>
+                        <div className="text-[10px] font-mono text-[var(--text-faint)] truncate">
+                          {u.username} · {truncate(u.id, 16)}
+                        </div>
+                      </div>
+                      <span className={`text-[9px] px-1 py-0.5 rounded border leading-none font-medium ${
+                        u.role === 'admin'
+                          ? 'bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] border-[var(--accent-gold)]/20'
+                          : 'bg-[var(--bg-hover)]/60 text-[var(--text-faint)] border-[var(--border-subtle)]/40'
+                      }`}>
+                        {u.role}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
           <div className="relative group flex items-center">
             <input
@@ -629,16 +735,10 @@ export default function AdminActivityPage() {
                         action={
                           <button
                             type="button"
-                            onClick={async () => {
-                              try {
-                                await navigator.clipboard.writeText(messageContent);
-                                setCopied(true);
-                                setTimeout(() => setCopied(false), 1500);
-                              } catch {}
-                            }}
+                            onClick={() => copyText(messageContent, 'content')}
                             className="text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:underline"
                           >
-                            {copied ? t('activity.drawer.copied') : tCommon('action.copy')}
+                            {copiedField === 'content' ? t('activity.drawer.copied') : tCommon('action.copy')}
                           </button>
                         }
                       >
@@ -659,7 +759,7 @@ export default function AdminActivityPage() {
                           <KV label={t('activity.drawer.field.principal')} value={identityLinks[drawerRow.user_id].principal_user_id || identityLinks[drawerRow.user_id].PrincipalUserID || '—'} mono />
                         </>
                       )}
-                      <KV label={t('activity.table.user')} value={drawerRow.user_id} mono copyable onCopy={() => copyJson(drawerRow)} />
+                      <KV label={t('activity.table.user')} value={drawerRow.user_id} mono copyable />
                       <KV label={t('activity.drawer.field.type')} value={drawerRow.user_id_type} />
                       <KV label={t('activity.table.platform')} value={drawerRow.platform} />
                     </DrawerSection>
@@ -700,10 +800,10 @@ export default function AdminActivityPage() {
                         drawerRow.detail_json && drawerRow.detail_json !== '{}' && (
                           <button
                             type="button"
-                            onClick={() => copyJson(drawerRow)}
+                            onClick={() => copyText(drawerRow.detail_json || '', 'json')}
                             className="text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:underline"
                           >
-                            {copied ? t('activity.drawer.copied') : t('activity.drawer.copy_json')}
+                            {copiedField === 'json' ? t('activity.drawer.copied') : t('activity.drawer.copy_json')}
                           </button>
                         )
                       }
@@ -867,7 +967,6 @@ function KV({
   mono,
   link,
   copyable,
-  onCopy,
   hint,
 }: {
   label: string;
@@ -875,10 +974,19 @@ function KV({
   mono?: boolean;
   link?: string;
   copyable?: boolean;
-  onCopy?: () => void;
   hint?: string;
 }) {
   const { t } = useTranslation('common');
+  const [kvCopied, setKvCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setKvCopied(true);
+      setTimeout(() => setKvCopied(false), 1500);
+    } catch {}
+  };
+
   return (
     <div className="flex items-center justify-between gap-4 py-1 border-b border-[var(--border-subtle)]/30 last:border-b-0 transition-all hover:bg-[var(--bg-hover)]/[0.04] -mx-2 px-2 rounded-[var(--radius-sm)]">
       <span className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-wider shrink-0 min-w-[95px] text-left">{label}</span>
@@ -895,8 +1003,8 @@ function KV({
           )}
           {hint && <span className="text-[9px] text-[var(--text-faint)] italic shrink-0">({hint})</span>}
           {copyable && (
-            <button type="button" onClick={onCopy} className="shrink-0 text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:underline ml-1">
-              {t('action.copy')}
+            <button type="button" onClick={handleCopy} className="shrink-0 text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:underline ml-1">
+              {kvCopied ? t('action.copied') : t('action.copy')}
             </button>
           )}
         </div>

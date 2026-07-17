@@ -438,7 +438,9 @@
       "from": "From",
       "to": "To",
       "from_short": "From",
-      "to_short": "To"
+      "to_short": "To",
+      "pick_user": "Pick user",
+      "search_user": "Search by username or display name..."
     },
     "hints": {
       "user_id_tooltip": "The raw account ID assigned by the communication platform, e.g. ou_xxxx on Feishu or Uxxxx on Slack.",

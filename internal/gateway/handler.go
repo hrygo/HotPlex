@@ -694,6 +694,48 @@ func (h *Handler) finishRuntimeWithoutDispatch(ctx context.Context, record *exec
 	})
 }
 
+func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunID, ownerID string) {
+	if h.executionStore == nil {
+		return
+	}
+	rec, err := h.executionStore.OpenBySession(ctx, sessionID)
+	if err != nil {
+		return
+	}
+
+	rtStatus := execution.RuntimeFailed
+	eventKind := events.RuntimeExecutionFailed
+	errorCode := string(events.ErrCodeSessionTerminated)
+
+	err = h.executionStore.FinishRuntime(
+		context.WithoutCancel(ctx), rec.ExecutionID, workerRunID, rtStatus, errorCode,
+	)
+	if err != nil {
+		h.log.Warn("gateway: finish runtime on stop failed, enqueuing repair", "err", err, "session_id", sessionID, "execution_id", rec.ExecutionID)
+		if h.repairer != nil {
+			h.repairer.Enqueue(execution.RepairIntent{
+				ExecutionID: rec.ExecutionID,
+				WorkerRunID: workerRunID,
+				Kind:        execution.RepairRuntime,
+				Status:      string(rtStatus),
+				ErrorCode:   errorCode,
+			})
+		}
+	}
+
+	seq := h.hub.NextSeq(sessionID)
+	if seq == 0 {
+		return
+	}
+	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, seq, eventKind, events.RuntimeExecutionData{
+		ExecutionID: rec.ExecutionID,
+		Status:      string(rtStatus),
+		ErrorCode:   events.ErrorCode(errorCode),
+	})
+	rtEnv.OwnerID = ownerID
+	_ = h.hub.SendToSession(ctx, rtEnv)
+}
+
 func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, record *execution.Record, duplicate bool) {
 	if h.hub == nil || record == nil {
 		return

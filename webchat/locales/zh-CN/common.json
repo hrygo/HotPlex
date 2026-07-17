@@ -17,7 +17,8 @@
     "disable": "禁用",
     "approve": "同意",
     "reject": "拒绝",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "clear": "清除"
   },
   "status": {
     "loading": "加载中...",

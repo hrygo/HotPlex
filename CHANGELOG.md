@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.36.2] - 2026-07-17
+
+### Summary
+
+v1.36.2 是一次 patch 版本更新，修复了 Gateway Core 的两个执行流可靠性问题。`control.stop` 现在会正确关闭 execution runtime 并通知客户端，避免 runtime 泄露和状态不一致。WebSocket ReadPump 增加了 `Input` 和 `WorkerCmd` 事件的异步处理，防止长时间运行的 Worker 任务阻塞事件循环。
+
+### Fixed
+
+- **Gateway Core**: `control.stop` 现在正确关闭 execution runtime — 新增 `finishRuntimeOnStop` 在停止 Worker turn 时立即结束 runtime 记录，发送 `RuntimeExecutionFailed` 事件到客户端，并在 store 写入失败时通过 repairer 异步修复。(commands.go, handler.go)
+- **Gateway Core**: WebSocket ReadPump 对 `Input` 和 `WorkerCmd` 事件增加异步 goroutine 处理，防止长时间 Worker 任务阻塞事件循环导致后续消息延迟或连接超时。(conn.go)
+
 ## [1.36.1] - 2026-07-17
 
 ### Summary
