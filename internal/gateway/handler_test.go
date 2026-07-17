@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -520,6 +522,103 @@ func TestHandleWorkerCommand(t *testing.T) {
 			tt.run(t)
 		})
 	}
+}
+
+// TestHandleWorkerCommand_Clear_ReconcilesGatewayState verifies that a
+// successful worker-level /clear reconciles gateway state: the client must
+// receive a terminal `done` event (otherwise the webchat spinner stays on) and
+// the in-flight execution runtime must be finalized (otherwise the next input
+// is rejected with SESSION_BUSY). Regression for "✅ 会话已清空" shown while the
+// session stays blocked.
+func TestHandleWorkerCommand_Clear_ReconcilesGatewayState(t *testing.T) {
+	t.Parallel()
+
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+	ctx := context.Background()
+	const sid = "sess_clear_reconcile"
+
+	_, err := mgr.Create(ctx, sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(ctx, sid, events.StateRunning))
+
+	w := &mockCommanderWorker{}
+	require.NoError(t, mgr.AttachWorker(ctx, sid, w))
+
+	// Wire a real execution store (sharing the session migrations) so a genuine
+	// in-flight runtime can be finalized by the gateway.
+	execStore := newTestExecutionStore(t, sid)
+	rec, _, err := execStore.Accept(ctx, execution.AcceptRequest{
+		SessionID:       sid,
+		ClientMessageID: "msg-clear",
+		PayloadHash:     "h",
+		OwnerInstanceID: "gw-test",
+		WorkerRunID:     "run-clear",
+	})
+	require.NoError(t, err)
+	require.NoError(t, execStore.MarkRunning(ctx, rec.ExecutionID, "gw-test", "run-clear"))
+	handler.executionStore = execStore
+
+	// Capture envelopes sent to the client.
+	pc := &mockPlatformConn{}
+	hub.JoinPlatformSession(sid, pc)
+
+	env := &events.Envelope{
+		SessionID: sid,
+		OwnerID:   "user1",
+		Event: events.Event{
+			Type: events.WorkerCmd,
+			Data: events.WorkerCommandData{Command: events.StdioClear},
+		},
+	}
+
+	require.NoError(t, handler.handleWorkerCommand(ctx, env))
+	require.True(t, w.clearCalled, "worker Clear() must be invoked")
+
+	// 1) A terminal done event must be sent so the client clears isRunning.
+	require.Eventually(t, func() bool {
+		for _, e := range pc.envelopes() {
+			if e.Event.Type == events.Done {
+				if d, ok := e.Event.Data.(events.DoneData); ok && d.Reason == "cleared_by_user" {
+					return true
+				}
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond, "expected a done event with reason cleared_by_user")
+
+	// 2) The in-flight execution runtime must be finalized, so the next input
+	//    is not rejected with SESSION_BUSY.
+	_, err = execStore.ActiveBySession(ctx, sid)
+	require.ErrorIs(t, err, execution.ErrNotFound, "active runtime should be finalized after /clear")
+}
+
+// newTestExecutionStore builds a real execution.Store backed by a session
+// SQLite store (which runs the execution_inputs migration) on a temp db. The
+// given session is upserted so the execution_inputs FK constraint holds.
+func newTestExecutionStore(t *testing.T, sessionID string) execution.Store {
+	t.Helper()
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DB.Path = filepath.Join(t.TempDir(), "clear_exec.db")
+	cfg.DB.SQLite.Path = cfg.DB.Path
+	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+	sessionStore, err := session.NewSQLiteStore(ctx, cfg, writeMu)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sessionStore.Close() })
+
+	now := time.Now()
+	require.NoError(t, sessionStore.Upsert(ctx, &session.SessionInfo{
+		ID:         sessionID,
+		UserID:     "user1",
+		WorkerType: "claude_code",
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}))
+
+	store, err := execution.NewSQLStore(ctx, sessionStore.DB(), dbutil.DialectSQLite, writeMu, slog.Default())
+	require.NoError(t, err)
+	return store
 }
 
 func TestHandleWorkerCommandSessionNotFound(t *testing.T) {

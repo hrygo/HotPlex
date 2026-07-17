@@ -157,6 +157,13 @@ func (h *Handler) handlePassthroughCommand(ctx context.Context, env *events.Enve
 			if err := commander.Clear(ctx); err != nil {
 				return h.sendErrorf(ctx, env, classifyWorkerError(err), "clear: %v", err)
 			}
+			// The worker cleared its context, but the gateway still holds an
+			// active execution runtime and the client is still showing the
+			// running spinner. Reconcile so the session is usable again:
+			// finalize the in-flight execution (otherwise the next input is
+			// rejected with SESSION_BUSY) and emit a terminal done event (so
+			// the client clears isRunning).
+			h.reconcileAfterClear(ctx, env.SessionID, env.OwnerID)
 			h.sendCommandFeedback(ctx, env.SessionID, "✅ 会话已清空，新会话已创建")
 			return nil
 		case events.StdioRewind:
@@ -178,6 +185,35 @@ func (h *Handler) handlePassthroughCommand(ctx context.Context, env *events.Enve
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "%s: %v", cmd, err)
 	}
 	return nil
+}
+
+// reconcileAfterClear finalizes the in-flight execution runtime and emits a
+// terminal done event after a successful worker-level /clear. Without this the
+// client keeps the running spinner and the next input is rejected with
+// SESSION_BUSY, even though the worker context was already cleared.
+func (h *Handler) reconcileAfterClear(ctx context.Context, sessionID, ownerID string) {
+	var workerRunID string
+	if h.bridge != nil {
+		if _, runID, ok := h.bridge.CurrentWorkerBinding(sessionID); ok {
+			workerRunID = runID
+		}
+	}
+	// Fall back to the recorded run ID when the binding is unavailable (e.g.
+	// cleared), so finishRuntimeOnStop can still finalize the active runtime.
+	if workerRunID == "" && h.executionStore != nil {
+		if rec, err := h.executionStore.OpenBySession(ctx, sessionID); err == nil {
+			workerRunID = rec.WorkerRunID
+		}
+	}
+	h.finishRuntimeOnStop(ctx, sessionID, workerRunID, ownerID)
+
+	doneEnv := events.NewEnvelope(
+		aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+		events.Done, events.DoneData{Reason: "cleared_by_user"},
+	)
+	if err := h.hub.SendToSession(ctx, doneEnv); err != nil {
+		h.log.Warn("gateway: clear done send failed", "session_id", sessionID, "err", err)
+	}
 }
 
 func (h *Handler) sendCommandFeedback(ctx context.Context, sessionID, msg string) {

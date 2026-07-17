@@ -94,7 +94,7 @@ func TestMultiBotConfig_NoConfigPath(t *testing.T) {
 
 func TestMultiBotConfig_ValidSingleBot(t *testing.T) {
 	dir := t.TempDir()
-	configPath = dir + "/config.yaml"
+	withConfigPath(t, dir+"/config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`
 messaging:
   slack:
@@ -113,7 +113,7 @@ messaging:
 
 func TestMultiBotConfig_DuplicateName(t *testing.T) {
 	dir := t.TempDir()
-	configPath = dir + "/config.yaml"
+	withConfigPath(t, dir+"/config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`
 messaging:
   slack:
@@ -135,7 +135,7 @@ messaging:
 
 func TestMultiBotConfig_MissingCredentials(t *testing.T) {
 	dir := t.TempDir()
-	configPath = dir + "/config.yaml"
+	withConfigPath(t, dir+"/config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`
 messaging:
   feishu:
@@ -154,7 +154,7 @@ messaging:
 
 func TestMultiBotConfig_ExceedsLimit(t *testing.T) {
 	dir := t.TempDir()
-	configPath = dir + "/config.yaml"
+	withConfigPath(t, dir+"/config.yaml")
 
 	var botLines strings.Builder
 	for i := range 11 {

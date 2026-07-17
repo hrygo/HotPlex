@@ -77,8 +77,7 @@ func TestReplaceYAMLValue(t *testing.T) {
 
 func TestFixConfigValues(t *testing.T) {
 	dir := t.TempDir()
-	configPath = filepath.Join(dir, "config.yaml")
-	defer func() { configPath = "" }()
+	withConfigPath(t, filepath.Join(dir, "config.yaml"))
 
 	cfgContent := "gateway:\n  addr: \":99999\"\nadmin:\n  enabled: true\n  addr: \":88888\"\ndb:\n  path: \"\"\n"
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgContent), 0o600))

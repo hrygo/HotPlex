@@ -11,22 +11,33 @@ import (
 	"github.com/hrygo/hotplex/internal/cli"
 )
 
-// resetConfigPath is a helper that resets the package-level configPath after a test.
+// withConfigPath sets the package-level configPath for the duration of the test
+// and restores the original value in t.Cleanup. Tests using it cannot use
+// t.Parallel because configPath is a package-level mutable variable shared
+// with checkers in other files.
+func withConfigPath(t *testing.T, path string) {
+	t.Helper()
+	orig := configPath
+	SetConfigPath(path)
+	t.Cleanup(func() { configPath = orig })
+}
+
+// resetConfigPath is a compatibility helper that sets configPath to "".
+// Prefer withConfigPath for new tests — it saves and restores the original value.
 func resetConfigPath() { SetConfigPath("") }
 
-// Tests using SetConfigPath cannot use t.Parallel because configPath is a
-// package-level mutable variable shared with checkers in other files.
-
 func TestSetConfigPath(t *testing.T) {
+	orig := configPath
+	defer func() { configPath = orig }()
+
 	SetConfigPath("/some/path/config.yaml")
 	require.Equal(t, "/some/path/config.yaml", configPath)
-	resetConfigPath()
+	SetConfigPath("")
 	require.Equal(t, "", configPath)
 }
 
 func TestConfigExists_Missing(t *testing.T) {
-	defer resetConfigPath()
-	SetConfigPath("/nonexistent/config.yaml")
+	withConfigPath(t, "/nonexistent/config.yaml")
 
 	c := configExistsChecker{}
 	d := c.Check(context.Background())
@@ -40,8 +51,7 @@ func TestConfigExists_Present(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("key: val\n"), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configExistsChecker{}
 	d := c.Check(context.Background())
@@ -51,8 +61,7 @@ func TestConfigExists_Present(t *testing.T) {
 }
 
 func TestConfigExists_EmptyPath(t *testing.T) {
-	defer resetConfigPath()
-	SetConfigPath("")
+	withConfigPath(t, "")
 
 	c := configExistsChecker{}
 	d := c.Check(context.Background())
@@ -65,8 +74,7 @@ func TestConfigExists_FixFunc(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configExistsChecker{}
 	d := c.Check(context.Background())
@@ -87,8 +95,7 @@ func TestConfigSyntax_Invalid(t *testing.T) {
 	path := filepath.Join(dir, "bad.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("invalid: [yaml: {\n"), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configSyntaxChecker{}
 	d := c.Check(context.Background())
@@ -111,8 +118,7 @@ db:
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configSyntaxChecker{}
 	d := c.Check(context.Background())
@@ -121,8 +127,7 @@ db:
 }
 
 func TestConfigSyntax_EmptyPath(t *testing.T) {
-	defer resetConfigPath()
-	SetConfigPath("")
+	withConfigPath(t, "")
 
 	c := configSyntaxChecker{}
 	d := c.Check(context.Background())
@@ -143,8 +148,7 @@ db:
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configValuesChecker{}
 	d := c.Check(context.Background())
@@ -162,8 +166,7 @@ func TestConfigValues_ValidPorts(t *testing.T) {
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configValuesChecker{}
 	d := c.Check(context.Background())
@@ -184,8 +187,7 @@ db:
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configValuesChecker{}
 	d := c.Check(context.Background())
@@ -243,7 +245,8 @@ func TestConfigEnvVars_Present(t *testing.T) {
 }
 
 func TestConfigEnvVars_FixFunc(t *testing.T) {
-	// t.Setenv + os.Chdir — cannot use t.Parallel.
+	// t.Setenv + os.Chdir + configPath — cannot use t.Parallel.
+	withConfigPath(t, "")
 	dir := t.TempDir()
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
@@ -277,8 +280,7 @@ db:
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
@@ -289,7 +291,6 @@ db:
 
 func TestConfigRequired_AllPresent(t *testing.T) {
 	// t.Setenv — cannot use t.Parallel.
-	// config file. The checker calls config.Load.
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -300,8 +301,7 @@ func TestConfigRequired_AllPresent(t *testing.T) {
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
@@ -310,8 +310,7 @@ func TestConfigRequired_AllPresent(t *testing.T) {
 }
 
 func TestConfigRequired_EmptyPath(t *testing.T) {
-	defer resetConfigPath()
-	SetConfigPath("")
+	withConfigPath(t, "")
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
@@ -332,8 +331,7 @@ func TestConfigRequired_FeishuMultiBotAllPresent(t *testing.T) {
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  feishu:\n    enabled: true\n    bots:\n      - name: hephaestus\n        app_id: \"cli_a954eab23678dbb5\"\n        app_secret: \"${BOT1_SECRET}\"\n      - name: bailaoban\n        app_id: \"cli_a934ebe1a2b81bb3\"\n        app_secret: \"${BOT2_SECRET}\"\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
@@ -352,8 +350,7 @@ func TestConfigRequired_FeishuMultiBotMissingCredential(t *testing.T) {
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  feishu:\n    enabled: true\n    bots:\n      - name: hephaestus\n        app_id: \"cli_a954eab23678dbb5\"\n      - name: bailaoban\n        app_id: \"cli_a934ebe1a2b81bb3\"\n        app_secret: \"secret2\"\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
@@ -376,8 +373,7 @@ func TestConfigRequired_SlackMultiBotAllPresent(t *testing.T) {
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n    bots:\n      - name: primary\n        bot_token: \"${SLACK_BOT1_TOKEN}\"\n        app_token: \"${SLACK_BOT1_APP}\"\n      - name: secondary\n        bot_token: \"${SLACK_BOT2_TOKEN}\"\n        app_token: \"${SLACK_BOT2_APP}\"\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
@@ -397,8 +393,7 @@ func TestConfigRequired_SlackMultiBotMissingCredential(t *testing.T) {
 	content := "gateway:\n  addr: \":8888\"\nadmin:\n  addr: \":9999\"\n  enabled: true\ndb:\n  path: \"" + filepath.Join(dbDir, "test.db") + "\"\nmessaging:\n  slack:\n    enabled: true\n    bots:\n      - name: primary\n        bot_token: \"${SLACK_BOT1_TOKEN}\"\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	defer resetConfigPath()
-	SetConfigPath(path)
+	withConfigPath(t, path)
 
 	c := configRequiredChecker{}
 	d := c.Check(context.Background())
