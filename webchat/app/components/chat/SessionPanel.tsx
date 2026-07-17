@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
     formatRelativeTime,
     stateLabel,
@@ -301,7 +302,7 @@ export function SessionPanel({
             {/* Admin Entry — admin-only (spec G1, issue #788) */}
             {currentUserRole === "admin" && (
                 <div className="mt-auto flex-shrink-0 border-t border-[var(--border-subtle)] p-3">
-                    <a
+                    <Link
                         href="/admin"
                         className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all duration-200 group/admin"
                         title={t("chat:action.admin_dashboard")}
@@ -312,6 +313,7 @@ export function SessionPanel({
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
+                                // eslint-disable-next-line react/no-danger-with-children
                             >
                                 <path
                                     strokeLinecap="round"
@@ -335,7 +337,7 @@ export function SessionPanel({
                                 {t("chat:label.admin_subtitle")}
                             </span>
                         </div>
-                    </a>
+                    </Link>
                 </div>
             )}
         </div>

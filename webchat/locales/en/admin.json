@@ -364,7 +364,7 @@
     "modes": {
       "default": "Default (workspace)",
       "workspace": "Workspace",
-      "auto_edit": "Auto Edit",
+      "auto_edit": "Auto Mode",
       "read_only": "Read Only",
       "bypass": "Bypass"
     },

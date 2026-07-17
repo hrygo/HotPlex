@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.36.0] - 2026-07-17
+
+### Summary
+
+v1.36.0 是一次 minor 版本更新，核心是 **WebChat 可编辑后续消息队列** 的落地。新增页面级、按会话隔离的 FIFO 队列，支持对排队输入进行编辑、删除、重试与立即发送，并在 ACK、重连与终态事件的竞态下完成对账，不持久化 prompt 内容。同时修复了 OpenCode Server 异常退出未恢复与 Turn Summary token 丢失的稳定性问题（#904），并统一了权限模式标签文案（"Auto Edit"→"Auto Mode"、bypass→"最高权限"）。
+
+### Added
+
+- **WebChat UI**: 可编辑后续消息队列 — 页面级、按会话隔离的 FIFO 队列，支持编辑、删除、重试与立即发送；跨 ACK/重连/终态事件竞态完成对账，不持久化 prompt 内容。(#905)
+
+### Changed
+
+- **WebChat UI**: 统一权限模式标签文案 — "Auto Edit" 改为 "Auto Mode"，bypass 档位中文改为"最高权限"，跨 UI 组件与 en/zh-CN i18n 同步。
+- **WebChat UI**: SessionPanel 管理入口由原生 `<a>` 改为 Next.js `<Link>`，走客户端路由避免整页刷新。
+
+### Fixed
+
+- **Worker**: Recover OpenCode Server 异常退出与 Turn Summary token 丢失 — 避免 OCS 进程退出后会话卡死，并补齐 Turn Summary 的 token 字段解析。(#904)
+
 ## [1.35.1] - 2026-07-16
 
 ### Summary

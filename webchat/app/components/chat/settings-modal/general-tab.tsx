@@ -24,7 +24,7 @@ const WORKER_OPTIONS: { value: string; label: string }[] = [
 // directly so the chosen blast radius is explicit, not inherited.
 const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
   { value: 'workspace', label: 'Workspace — Edits within workspace (default)' },
-  { value: 'auto-edit', label: 'Auto Edit — Auto-approve edits' },
+  { value: 'auto-edit', label: 'Auto Mode — Auto-approve edits' },
   { value: 'bypass', label: 'Bypass — Full access' },
   { value: 'read-only', label: 'Read Only — Plan only' },
 ];

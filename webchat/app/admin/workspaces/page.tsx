@@ -64,7 +64,7 @@ function WorkspaceRow({
     switch (val) {
       case '': return t('admin:workspaces.modes.default', { defaultValue: 'Default (workspace)' });
       case 'workspace': return t('admin:workspaces.modes.workspace', { defaultValue: 'Workspace' });
-      case 'auto-edit': return t('admin:workspaces.modes.auto_edit', { defaultValue: 'Auto Edit' });
+      case 'auto-edit': return t('admin:workspaces.modes.auto_edit', { defaultValue: 'Auto Mode' });
       case 'read-only': return t('admin:workspaces.modes.read_only', { defaultValue: 'Read Only' });
       case 'bypass': return t('admin:workspaces.modes.bypass', { defaultValue: 'Bypass' });
       default: return val;

@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -17,6 +18,11 @@ func setupIntegrationBrain(t *testing.T) Brain {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+	// These tests issue real LLM API calls and must never run in the default
+	// suite (make test / CI / shuffle). Opt in explicitly with a real key.
+	if os.Getenv("HOTPLEX_BRAIN_INTEGRATION") != "1" {
+		t.Skip("skipping integration test (set HOTPLEX_BRAIN_INTEGRATION=1 with a real API key to enable)")
 	}
 
 	// Save and restore global brain state.

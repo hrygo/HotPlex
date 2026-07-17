@@ -209,7 +209,7 @@
     "permission": {
       "default": "Default (workspace)",
       "workspace": "Workspace — Edits within workspace (default)",
-      "auto-edit": "Auto Edit — Auto-approve edits",
+      "auto-edit": "Auto Mode — Auto-approve edits",
       "bypass": "Bypass — Full access",
       "read-only": "Read Only — Plan only"
     }

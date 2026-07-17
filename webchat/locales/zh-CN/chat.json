@@ -36,7 +36,7 @@
     "last_login": "最后登录",
     "you": "你自己",
     "thought_process": "思考过程",
-    "agent_skills": "智能体技能",
+    "agent_skills": "Agent Skills",
     "latest_messages": "最新消息",
     "code": "代码"
   },
@@ -209,8 +209,8 @@
     "permission": {
       "default": "默认（workspace）",
       "workspace": "工作区限制（Workspace） — 仅能在工作区范围内修改文件（默认）",
-      "auto-edit": "自动编辑（Auto Edit） — 自动审批所有代码修改",
-      "bypass": "全通行（Bypass） — 完整命令行与文件访问权限",
+      "auto-edit": "自动模式（Auto Mode） — 自动审批所有代码修改",
+      "bypass": "最高权限（Bypass） — 完整命令行与文件访问权限",
       "read-only": "只读模式（Read Only） — 仅出具规划，不修改文件"
     }
   },
