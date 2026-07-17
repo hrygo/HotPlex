@@ -216,6 +216,20 @@ type ResetGenerationer interface {
 	LoadResetGeneration() int64
 }
 
+// RawExitCoder is an optional interface for workers whose Wait() returns a
+// normalized exit code that differs from the raw OS exit code of their runtime.
+// The Bridge uses it in crash diagnostics to surface the original code (e.g. a
+// Windows NT status like 0xC0000142 STATUS_DLL_INIT_FAILED) alongside the
+// normalized value, without changing Wait()'s contract.
+//
+// Workers whose Wait() already returns the raw process exit code (Claude Code,
+// Codex CLI, ACP) do NOT implement this — for them the normalized value already
+// is the raw value. Only workers that normalize (the OCS singleton maps every
+// crash to 1) implement it.
+type RawExitCoder interface {
+	RawExitCode() (code int, ok bool)
+}
+
 // WorkerSessionIDHandler is an optional interface for workers that manage
 // their own internal session IDs separate from the Gateway session ID.
 // Bridge detects implementations via type assertion and uses them to

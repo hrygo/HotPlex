@@ -76,8 +76,6 @@ func Init(ctx context.Context, log *slog.Logger, cfg Config) func(context.Contex
 		))
 
 		log.Info("observability: initialized",
-			"service", cfg.ServiceName,
-			"version", cfg.ServiceVersion,
 			"environment", cfg.Environment,
 			"sample_rate", cfg.SampleRate,
 		)

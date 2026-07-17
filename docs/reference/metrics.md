@@ -71,7 +71,7 @@ histogram_quantile(0.99, rate(hotplex_session_start_duration_bucket[5m]))
 |------|------|------|
 | `hotplex.worker.starts` | Counter | Worker 启动次数，label: `worker_type`, `result` |
 | `hotplex.worker.execution.duration` | Histogram | Worker 执行时长，label: `worker_type` |
-| `hotplex.worker.crashes` | Counter | Worker 崩溃次数，label: `worker_type`, `exit_code` |
+| `hotplex.worker.crashes` | Counter | Worker 崩溃次数，label: `worker_type`, `exit_code`, `raw_exit_code` |
 | `hotplex.worker.memory.bytes` | ObservableGauge | Worker 估算内存，label: `worker_type` |
 | `hotplex.worker.creation.duration` | Histogram | Worker 进程创建耗时 |
 

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"runtime/debug"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -61,6 +63,14 @@ type SingletonProcessManager struct {
 	converter *Converter
 
 	idleTimer *time.Timer
+
+	// Crash diagnostics (issue #900): preserve the raw OS exit code and a
+	// bounded stderr tail so operators can distinguish a Windows NT status
+	// (e.g. 0xC0000142 STATUS_DLL_INIT_FAILED) from the normalized Worker
+	// exit code (1) surfaced to the Bridge. Guarded by s.mu.
+	lastExitCode int
+	hasExitCode  bool
+	stderrRing   *ringBuffer
 }
 
 type singletonState int
@@ -74,6 +84,10 @@ const (
 
 // portRegex matches "opencode server listening on http://127.0.0.1:PORT".
 var portRegex = regexp.MustCompile(`listening on http://[\d.]+:(\d+)`)
+
+// stderrRingCapacity bounds how many recent stderr lines are retained for
+// startup-failure diagnostics.
+const stderrRingCapacity = 64
 
 // NewSingletonProcessManager creates a new singleton process manager.
 func NewSingletonProcessManager(log *slog.Logger, cfg config.OpenCodeServerConfig) *SingletonProcessManager {
@@ -90,6 +104,7 @@ func NewSingletonProcessManager(log *slog.Logger, cfg config.OpenCodeServerConfi
 		crashCh:     make(chan struct{}),
 		subscribers: make(map[string]chan *events.Envelope),
 		converter:   NewConverter(),
+		stderrRing:  newRingBuffer(stderrRingCapacity),
 	}
 }
 
@@ -248,11 +263,63 @@ func (s *SingletonProcessManager) PID() int {
 
 // --- internal ---
 
+// LastExitCode returns the raw OS exit code of the most recent singleton
+// process and whether one has been observed. The Bridge reads this via the
+// RawExitCoder interface to tell a Windows NT status (e.g. 0xC0000142) apart
+// from the normalized Worker exit code (1).
+func (s *SingletonProcessManager) LastExitCode() (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastExitCode, s.hasExitCode
+}
+
+// StderrTail returns a snapshot of the most recent captured stderr lines, for
+// attaching to startup-failure diagnostics.
+func (s *SingletonProcessManager) StderrTail() []string {
+	return s.stderrRing.Lines()
+}
+
+// stderrTailMaxBytes bounds the total byte length of the stderr summary
+// attached to startup-failure errors, preventing a runaway log line.
+const stderrTailMaxBytes = 2048
+
+// truncateTailBytes returns the last maxBytes bytes of s, backed up to a UTF-8
+// rune boundary if the byte cut would split a multi-byte rune. Safe for
+// arbitrary stderr content (CJK, emoji, localized panic output).
+func truncateTailBytes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	start := len(s) - maxBytes
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
+}
+
+// startupFailureError wraps err with the failing startup phase and a bounded
+// tail of recent stderr so operators can diagnose OCS startup failures
+// (spawn / discover port / health check) without grepping the gateway log at
+// the exact timestamp.
+func (s *SingletonProcessManager) startupFailureError(phase string, err error) error {
+	tail := s.StderrTail()
+	if len(tail) == 0 {
+		return fmt.Errorf("opencode-server-singleton: %s: %w", phase, err)
+	}
+	summary := strings.Join(tail, "\n")
+	if len(summary) > stderrTailMaxBytes {
+		summary = truncateTailBytes(summary, stderrTailMaxBytes)
+	}
+	return fmt.Errorf("opencode-server-singleton: %s: %w (recent stderr: %s)", phase, err, summary)
+}
+
 // startProcessLocked starts the opencode serve process. Caller must hold s.mu.
 func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error {
 	s.state = stateStarting
 	s.converter.Reset()
-	s.log.Info("opencode-server-singleton: starting opencode serve process")
+	s.stderrRing.Reset() // clear previous lifecycle's tail (pointer stays stable → no race with readStderr)
+	s.lastExitCode = 0   // clear stale exit code from a previous lifecycle
+	s.hasExitCode = false
 
 	// Allocate an ephemeral port.
 	port, err := s.allocatePort()
@@ -275,6 +342,20 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 	fullArgs = append(fullArgs, parts[1:]...)
 	fullArgs = append(fullArgs, args...)
 
+	// Resolve the actual executable path so a Windows wrapper (.cmd shim) is
+	// distinguishable from a native .exe in crash diagnostics. LookPath failure
+	// is non-fatal — proc.Start will surface the real spawn error.
+	resolved, lookErr := exec.LookPath(binary)
+	if lookErr != nil {
+		resolved = binary
+	}
+	commandSummary := binary + " " + strings.Join(fullArgs, " ")
+	s.log.Info("opencode-server-singleton: startup phase",
+		"phase", "spawn",
+		"resolved_executable", resolved,
+		"command", commandSummary,
+		"port", port)
+
 	env := s.buildEnv()
 	s.proc = proc.New(proc.Opts{Logger: s.log})
 
@@ -282,7 +363,9 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 	if err != nil {
 		s.proc = nil
 		s.state = stateIdle
-		return fmt.Errorf("opencode-server-singleton: start process: %w", err)
+		s.log.Warn("opencode-server-singleton: startup phase failed", "phase", "spawn",
+			"resolved_executable", resolved, "error", err)
+		return s.startupFailureError("spawn", err)
 	}
 	_ = stdin
 
@@ -290,28 +373,39 @@ func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error 
 	// are captured in the gateway log instead of trapped in the pipe.
 	go s.readStderr(stderr)
 
+	s.log.Info("opencode-server-singleton: startup phase",
+		"phase", "discover_port", "resolved_executable", resolved, "pid", s.proc.PID())
+
 	// Discover actual port from stdout (opencode serve prints it).
 	actualPort, err := s.discoverPort(stdout, s.cfg.ReadyTimeout)
 	if err != nil {
+		pid := s.proc.PID() // capture before Kill sets proc=nil
 		_ = s.proc.Kill()
 		s.proc = nil
 		s.state = stateIdle
-		return fmt.Errorf("opencode-server-singleton: discover port: %w", err)
+		s.log.Warn("opencode-server-singleton: startup phase failed", "phase", "discover_port",
+			"resolved_executable", resolved, "pid", pid, "error", err)
+		return s.startupFailureError("discover port", err)
 	}
 
 	s.httpAddr = fmt.Sprintf("http://127.0.0.1:%d", actualPort)
-	s.log.Info("opencode-server-singleton: process started", "addr", s.httpAddr)
 
 	// Wait for /health endpoint.
+	s.log.Info("opencode-server-singleton: startup phase",
+		"phase", "health_check", "addr", s.httpAddr, "pid", s.proc.PID())
 	if err := s.waitForHealth(ctx); err != nil {
 		_ = s.proc.Kill()
 		s.proc = nil
 		s.state = stateIdle
-		return fmt.Errorf("opencode-server-singleton: health check: %w", err)
+		s.log.Warn("opencode-server-singleton: startup phase failed", "phase", "health_check",
+			"resolved_executable", resolved, "addr", s.httpAddr, "error", err)
+		return s.startupFailureError("health check", err)
 	}
 
 	s.state = stateRunning
 	s.pgid = s.proc.PGID()
+	s.log.Info("opencode-server-singleton: startup phase",
+		"phase", "running", "addr", s.httpAddr, "pid", s.proc.PID())
 
 	// Monitor process exit in background.
 	go s.monitorProcess()
@@ -389,7 +483,9 @@ func (s *SingletonProcessManager) readStderr(stderr *os.File) {
 	// OCS stack traces can exceed the default 64 KiB limit; raise the cap.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		s.log.Warn("opencode-server-singleton: stderr", "line", scanner.Text())
+		line := scanner.Text()
+		s.stderrRing.Add(line)
+		s.log.Warn("opencode-server-singleton: stderr", "line", line)
 	}
 }
 
@@ -435,8 +531,11 @@ func (s *SingletonProcessManager) monitorProcess() {
 		return
 	}
 	code, _ := pm.Wait()
+	_, hexCode := proc.FormatExitCode(code)
 
 	s.mu.Lock()
+	s.lastExitCode = code
+	s.hasExitCode = true
 	wasRunning := s.state == stateRunning
 	refs := s.refs
 	// Guard against overwriting stateStopped set by Shutdown: once stopped,
@@ -456,11 +555,13 @@ func (s *SingletonProcessManager) monitorProcess() {
 
 	// Notify crash subscribers if process died unexpectedly while sessions are active.
 	if wasRunning && refs > 0 {
-		s.log.Warn("opencode-server-singleton: process crashed", "exit_code", code, "refs", refs)
+		s.log.Warn("opencode-server-singleton: process crashed",
+			"exit_code", code, "exit_code_hex", hexCode, "refs", refs)
 		close(s.crashCh)
 		s.crashCh = make(chan struct{}) // new channel for next lifecycle
 	} else {
-		s.log.Info("opencode-server-singleton: process exited", "exit_code", code, "refs", refs)
+		s.log.Info("opencode-server-singleton: process exited",
+			"exit_code", code, "exit_code_hex", hexCode, "refs", refs)
 	}
 	s.mu.Unlock()
 
@@ -485,6 +586,16 @@ func (s *SingletonProcessManager) startIdleDrainLocked() {
 
 		if s.refs == 0 && s.state == stateRunning && s.pgid > 0 {
 			s.log.Info("opencode-server-singleton: idle drain expired, killing process")
+			// Cancel the SSE reader context BEFORE killing the process so the
+			// reader sees ctx.Done() before the transport error (~40ms race)
+			// and exits cleanly instead of logging a WARN reconnect attempt
+			// against a dead process. monitorProcess also cancels sseCancel
+			// in the normal exit path (it guards with nil check, so a double
+			// cancel is harmless). See B4 in PR #891.
+			if s.sseCancel != nil {
+				s.sseCancel()
+				s.sseCancel = nil
+			}
 			// Hold s.mu during the kill to close the TOCTOU window where a
 			// concurrent Acquire could grab the doomed process and hand the
 			// caller a httpAddr about to die. We call package-level

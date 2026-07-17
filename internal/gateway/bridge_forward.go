@@ -18,6 +18,7 @@ import (
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/internal/worker/proc"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 
@@ -773,6 +774,24 @@ type workerExitParams struct {
 	lastInput string
 }
 
+// rawExitCodeFields extracts the raw OS exit code from workers that implement
+// worker.RawExitCoder, formatted as unsigned decimal and hex. Returns ok=false
+// for workers whose Wait() already returns the raw code (no separate value to
+// report). Used in crash diagnostics to distinguish a normalized exit code
+// (OCS maps every crash to 1) from the underlying OS code (e.g. 0xC0000142).
+func (b *Bridge) rawExitCodeFields(w worker.Worker) (dec, hex string, ok bool) {
+	rc, isRaw := w.(worker.RawExitCoder)
+	if !isRaw {
+		return "", "", false
+	}
+	code, has := rc.RawExitCode()
+	if !has {
+		return "", "", false
+	}
+	dec, hex = proc.FormatExitCode(code)
+	return dec, hex, true
+}
+
 // handleWorkerExit processes worker exit after the recv channel closes.
 // It determines the exit code, attempts crash recovery, sends error events,
 // and performs cleanup.
@@ -886,6 +905,17 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			}
 			return
 		}
+		// P0 guard: if the session was deleted and re-created (same deterministic ID)
+		// with a new worker, this stale forwardEvents goroutine must not produce side
+		// effects (captureSyntheticEvent, sendError) that would allocate seq numbers
+		// from the new session's seqGen, causing UNIQUE constraint violations on the
+		// events table. The worker CAS check reliably detects re-creation because
+		// DeletePhysical sets ms.worker = nil before the new session's AttachWorker.
+		if currentWorker := b.sm.GetWorker(p.sessionID); currentWorker != w {
+			lg.Debug("bridge: worker replaced, skipping stale forwarder cleanup",
+				"session_id", p.sessionID, "worker_type", workerType)
+			return
+		}
 	}
 
 	// Suppress user-facing errors when:
@@ -903,15 +933,35 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			"session_id", p.sessionID, "worker_type", workerType)
 	} else if exitCode != 0 && exitCode != -1 {
 		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
-		lg.Warn("bridge: worker exited with non-zero code, sending crash error",
-			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode,
-			"duration", time.Since(p.startTime).Round(time.Millisecond), "turn_count", acc.TurnCount.Load())
-		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(attribute.String("worker_type", string(workerType)), attribute.String("exit_code", fmt.Sprintf("%d", exitCode))))
+		rawDec, rawHex, hasRaw := b.rawExitCodeFields(w)
+		crashAttrs := []any{
+			"session_id", p.sessionID,
+			"worker_type", workerType,
+			"exit_code", exitCode,
+			"duration", time.Since(p.startTime).Round(time.Millisecond),
+			"turn_count", acc.TurnCount.Load(),
+		}
+		if hasRaw {
+			crashAttrs = append(crashAttrs, "raw_exit_code", rawDec, "raw_exit_code_hex", rawHex)
+		}
+		lg.Warn("bridge: worker exited with non-zero code, sending crash error", crashAttrs...)
+
+		metricAttrs := []attribute.KeyValue{
+			attribute.String("worker_type", string(workerType)),
+			attribute.String("exit_code", fmt.Sprintf("%d", exitCode)),
+		}
+		if hasRaw {
+			metricAttrs = append(metricAttrs,
+				attribute.String("raw_exit_code", rawDec))
+		}
+		observability.WorkerCrashes().Add(context.TODO(), 1, metric.WithAttributes(metricAttrs...))
+
 		b.sendError(p.sessionID, events.ErrCodeWorkerCrash, "worker crashed (exit code %d)", exitCode)
+		syntheticMsg := fmt.Sprintf("Worker crashed with exit code %d", exitCode)
 		b.captureSyntheticEvent(syntheticTurnParams{
 			SessionID:  p.sessionID,
 			Reason:     "worker_crash",
-			Message:    fmt.Sprintf("Worker crashed with exit code %d", exitCode),
+			Message:    syntheticMsg,
 			Source:     eventstore.SourceCrash,
 			Platform:   p.sessPlatform,
 			Owner:      p.sessOwner,

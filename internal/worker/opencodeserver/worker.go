@@ -422,6 +422,16 @@ func (w *Worker) Wait() (int, error) {
 	}
 }
 
+// RawExitCode reports the singleton process's raw OS exit code for Bridge
+// crash diagnostics. Implements worker.RawExitCoder. See Wait() for why the
+// normalized code (0/1) and the raw code differ for the shared OCS singleton.
+func (w *Worker) RawExitCode() (int, bool) {
+	if w.singleton == nil {
+		return 0, false
+	}
+	return w.singleton.LastExitCode()
+}
+
 // Conn returns the HTTP-based session connection.
 func (w *Worker) Conn() worker.SessionConn {
 	w.Mu.Lock()

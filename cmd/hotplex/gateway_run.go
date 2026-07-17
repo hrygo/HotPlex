@@ -370,6 +370,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	hub.SetSeqSessionExists(func(sessionID string) bool {
 		return sm.IsSeqActive(context.Background(), sessionID)
 	})
+	// Drain the collector before hydrating SeqGen on reconnect so LatestSeq
+	// includes events that were allocated seqs but not yet committed (issue #894).
+	if stores.collector != nil {
+		hub.SetSeqFlusher(stores.collector)
+	}
 	sm.OnRuntimeRelease = func(ctx context.Context, sessionID string) {
 		err := hub.ReleaseSeq(sessionID, func() error {
 			// A zero value means no durable sequence was allocated; remove a
