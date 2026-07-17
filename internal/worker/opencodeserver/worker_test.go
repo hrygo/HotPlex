@@ -713,3 +713,28 @@ func TestWait_CrashSub_NotRecovered(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, code, "Wait should return 1 when singleton has NOT recovered")
 }
+
+func TestInput_QuestionResponse_WithProjectDir(t *testing.T) {
+	t.Parallel()
+
+	var receivedPath string
+	var receivedQuery string
+	w, _ := newWorkerWithMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	})
+
+	w.httpConn.projectDir = "/test/workspace"
+
+	md := map[string]any{
+		"question_response": map[string]any{
+			"id":      "q_789",
+			"answers": map[string]string{"q1": "yes"},
+		},
+	}
+	err := w.Input(context.Background(), "", md)
+	require.NoError(t, err)
+	require.Equal(t, "/question/q_789/reply", receivedPath)
+	require.Equal(t, "directory=%2Ftest%2Fworkspace", receivedQuery)
+}

@@ -731,6 +731,7 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session wo
 		recvCh:       make(chan *events.Envelope, recvChannelSize),
 		log:          w.Log,
 		systemPrompt: systemPrompt,
+		projectDir:   session.ProjectDir,
 	}
 
 	// Parse AllowedModels[0] → "provider/model" or plain "model".
@@ -970,6 +971,7 @@ func deleteOCSSession(ctx context.Context, sessionID, httpAddr string, client *h
 func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 	w.Mu.Lock()
 	addr := w.httpAddr
+	conn := w.httpConn
 	w.Mu.Unlock()
 
 	body, err := json.Marshal(payload)
@@ -977,8 +979,17 @@ func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 		return fmt.Errorf("opencodeserver: marshal payload: %w", err)
 	}
 
-	url := addr + path
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	var projectDir string
+	if conn != nil {
+		projectDir = conn.projectDir
+	}
+
+	u := addr + path
+	if projectDir != "" {
+		u += "?directory=" + url.QueryEscape(projectDir)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("opencodeserver: create request: %w", err)
 	}
@@ -1058,6 +1069,7 @@ type conn struct {
 	recvCh       chan *events.Envelope
 	log          *slog.Logger
 	systemPrompt string
+	projectDir   string
 
 	allowedModel *ocsModelRef   // parsed from SessionInfo.AllowedModels[0]
 	jsonSchema   map[string]any // parsed from SessionInfo.JSONSchema
