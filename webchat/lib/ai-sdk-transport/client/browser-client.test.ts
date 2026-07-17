@@ -444,6 +444,7 @@ describe("BrowserHotPlexClient duplicate session rejection", () => {
         });
         const internal = client as unknown as {
             shouldReconnect: boolean;
+            sessionAlreadyConnectedRetryCount: number;
             _handleMessage(
                 value: Envelope,
                 resolve: (value: unknown) => void,
@@ -457,6 +458,7 @@ describe("BrowserHotPlexClient duplicate session rejection", () => {
         client.on("sessionAlreadyConnected", duplicate);
         client.on("error", genericError);
 
+        internal.sessionAlreadyConnectedRetryCount = 2;
         internal._handleMessage(
             envelope(EventKind.InitAck, {
                 code: ErrorCode.SessionAlreadyConnected,

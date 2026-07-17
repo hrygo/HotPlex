@@ -6,8 +6,27 @@ import (
 )
 
 func IntFloat(v any) int {
-	f, _ := v.(float64)
-	return int(f)
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case uint:
+		return int(n)
+	case uint32:
+		return int(n)
+	case uint64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	default:
+		return 0
+	}
 }
 
 // ToInt64 converts any numeric value to int64.

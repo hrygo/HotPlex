@@ -37,7 +37,7 @@ func TestIntFloat(t *testing.T) {
 		{
 			name:     "non-float int",
 			input:    123,
-			expected: 0,
+			expected: 123,
 		},
 		{
 			name:     "non-float string",

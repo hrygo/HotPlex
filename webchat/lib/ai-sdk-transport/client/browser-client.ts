@@ -446,10 +446,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         }
 
         if (ackData.code === ErrorCode.SessionAlreadyConnected &&
-            this.sessionAlreadyConnectedRetryCount < 1) {
+            this.sessionAlreadyConnectedRetryCount < 2) {
           this.sessionAlreadyConnectedRetryCount++;
           const retryId = connectionSessionId || session_id || undefined;
-          const delay = this.localHandoffRetryAvailable ? LOCAL_HANDOFF_RETRY_DELAY_MS : 500;
+          let delay = this.localHandoffRetryAvailable ? LOCAL_HANDOFF_RETRY_DELAY_MS : 500;
+          if (this.sessionAlreadyConnectedRetryCount > 1) {
+            delay = 1000;
+          }
           this.localHandoffRetryAvailable = false;
 
           logger.info('BrowserClient', 'Retrying WebSocket connection conflict', {

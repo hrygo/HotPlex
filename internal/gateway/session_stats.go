@@ -210,6 +210,27 @@ func (a *sessionAccumulator) mergeContextUsage(cu *events.ContextUsageData) {
 	if cu.Model != "" && a.ModelName == "" {
 		a.ModelName = shortModelName(cu.Model)
 	}
+	for _, cat := range cu.Categories {
+		name := strings.ToLower(cat.Name)
+		switch {
+		case strings.Contains(name, "input"):
+			if cat.Tokens > 0 {
+				a.TotalInput = int64(cat.Tokens)
+			}
+		case strings.Contains(name, "output"):
+			if cat.Tokens > 0 {
+				a.TotalOutput = int64(cat.Tokens)
+			}
+		case strings.Contains(name, "cache read") || strings.Contains(name, "cache_read"):
+			if cat.Tokens > 0 {
+				a.TotalCacheRead = int64(cat.Tokens)
+			}
+		case strings.Contains(name, "cache write") || strings.Contains(name, "cache_write"):
+			if cat.Tokens > 0 {
+				a.TotalCacheWrite = int64(cat.Tokens)
+			}
+		}
+	}
 }
 
 // computeContextPct returns context window usage percentage (0-100).

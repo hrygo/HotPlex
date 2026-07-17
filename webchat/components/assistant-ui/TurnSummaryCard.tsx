@@ -91,22 +91,21 @@ export function TurnSummaryCard({ data: rawData }: { data: TurnSessionStats }) {
   const outputTok = data.turn_output_tok ?? data.turnOutputTok ?? data.total_output_tok ?? data.totalOutputTok ?? 0;
   if (inputTok > 0 || outputTok > 0) {
     items.push(
-      <span key="tokens" className="inline-flex items-center gap-2">
+      <span key="tokens" className="inline-flex items-center gap-1.5">
         <span
-          className="inline-flex items-center gap-0.5 text-sky-600 dark:text-sky-400 font-medium"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-xs)] text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-900/30 font-medium"
           title={t('label.input_tokens')}
         >
-          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+          <svg className="w-3 h-3 flex-shrink-0 text-sky-600 dark:text-sky-400" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 5L5 19M5 19h10M5 19V9" />
           </svg>
           <span>{formatTokens(inputTok)}</span>
         </span>
-        <span className="text-[var(--text-faint)] select-none">/</span>
         <span
-          className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-medium"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-xs)] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/30 font-medium"
           title={t('label.output_tokens')}
         >
-          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+          <svg className="w-3 h-3 flex-shrink-0 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 19L19 5M19 5H9M19 5v10" />
           </svg>
           <span>{formatTokens(outputTok)}</span>
