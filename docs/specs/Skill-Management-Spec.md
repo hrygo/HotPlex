@@ -1,6 +1,6 @@
 # Skill 管理 — HTTP API 与 zip 上传
 
-**状态**: Draft · **日期**: 2026-07-17 · **关联**: [Admin-Workspace-PermissionMode-Management-Spec.md](./Admin-Workspace-PermissionMode-Management-Spec.md)、[ACP-Worker-Spec.md](./ACP-Worker-Spec.md) · **版本目标**: TBD
+**状态**: Draft · **日期**: 2026-07-17 · **跟踪 issue**: #910 · **关联**: [Admin-Workspace-PermissionMode-Management-Spec.md](./Admin-Workspace-PermissionMode-Management-Spec.md)、[ACP-Worker-Spec.md](./ACP-Worker-Spec.md) · **版本目标**: TBD
 
 ---
 
