@@ -105,4 +105,29 @@ describe("turn reconciliation", () => {
         expect(patched[1]).toBe(messages[1]);
         expect(patched[1]?.parts).toEqual([]);
     });
+
+    it("appends a new assistant message if the target id is not found", () => {
+        const messages: HotPlexMessage[] = [
+            {
+                id: "user-1",
+                role: "user",
+                parts: [{ type: "text", text: "hello" }],
+                createdAt: new Date(1),
+                status: "complete",
+            },
+        ];
+
+        const patched = patchAuthoritativeAssistantContent(
+            messages,
+            "assistant-target",
+            "hello back",
+        );
+
+        expect(patched).toHaveLength(2);
+        expect(patched[0]).toBe(messages[0]);
+        expect(patched[1]?.id).toBe("assistant-target");
+        expect(patched[1]?.role).toBe("assistant");
+        expect(patched[1]?.parts).toEqual([{ type: "text", text: "hello back" }]);
+        expect(patched[1]?.status).toBe("complete");
+    });
 });
