@@ -380,9 +380,11 @@
     "key_count": "{{count}} key",
     "key_count_plural": "{{count}} keys",
     "loading": "Loading API keys...",
+    "search_no_results": "No API keys matching \"{{query}}\"",
     "action": {
       "create": "Create Key",
-      "create_first": "Create First Key"
+      "create_first": "Create First Key",
+      "clear_search": "Clear search"
     },
     "validation": {
       "user_id_required": "User ID is required",
@@ -417,7 +419,8 @@
     },
     "placeholder": {
       "user_id": "e.g. alice",
-      "description": "Optional description"
+      "description": "Optional description",
+      "search": "Search by user ID or description..."
     }
   },
   "activity": {

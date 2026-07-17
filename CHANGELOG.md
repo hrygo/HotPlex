@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.36.1] - 2026-07-17
+
+### Summary
+
+v1.36.1 是一次 patch 版本更新，聚焦于 **OCS singleton 崩溃可观测性** 与 **WebChat 连接稳定性**。修复了 Windows 下 OCS 崩溃丢失原始退出码、race 与 nil deref 的 P0 缺陷，并为 Bridge 增加原始退出码 hex 日志、指标与 stderr 摘要。WebChat 修复了断连重连时因死 owner 阻塞的 session orphaned 问题，并增强了客户端重连重试逻辑。管理后台新增 API Keys 搜索筛选功能。
+
+### Fixed
+
+- **Worker**: 保留 OCS singleton 崩溃的原始退出码（十进制 + `0x%08X` hex），兼容 Windows NT status 正/负两种 int 表示；ringBuffer 保留 64 行 stderr，启动失败附加有界摘要；`RawExitCoder` 可选接口透传原始退出码到 Bridge 日志/指标/用户消息，不破坏 `Wait()` 归一化契约。(#911)
+- **Worker**: 修复 OCS singleton 的 P0 panic（`discover_port` 阶段 `s.proc` nil deref）、`stderrRing` 数据 race、跨生命周期 `lastExitCode` 误归因、POSIX `-1`（信号终止）丢失、UTF-8 mid-rune 截断。(#911)
+- **Gateway Core**: `TryAcquireWebChatOwner` 允许已关闭的 owner 连接被替换，修复浏览器 WS 断连后重连的 session orphaned 问题。(#911)
+
+### Added
+
+- **WebChat UI**: 管理后台 API Keys 页面新增搜索筛选（按 user_id / description / api_key 实时过滤），支持搜索无结果提示与清除搜索按钮；中英文双语 i18n。
+- **CLI**: doctor 新增 `opencode_server_resolve` checker，检测命令解析、native vs wrapper(`.cmd`/`.bat`/`.ps1`/`.sh`)、`--version` 探测与平台现场采集提示。(#911)
+
+### Changed
+
+- **WebChat UI**: TurnSummaryCard 以 SVG 图标替换 emoji 文本并添加 i18n tooltip；flex-wrap 布局替代 `join('·')`。
+- **WebChat UI**: `SessionAlreadyConnected` 重试逻辑增强——以计数器替代一次性 guard，允许无 handoff 时也重试一次，延迟自适应。（handoff 1500ms / 普通冲突 500ms）
+- **Docs**: 新增 `troubleshooting-ocs-windows.md` 运维 runbook（`0xC0000142`、Event Viewer、ProcMon、服务账户、EDR 验证）。(#911)
+- **Infrastructure**: 优化 4 个 skill（arch-analyzer/release/update/issue-manager）共精简 689 行，提取 troubleshooting 到独立文件。(#912)
+
 ## [1.36.0] - 2026-07-17
 
 ### Summary
