@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Workspace } from '@/lib/api/workspaces';
 import { listSkills, installWorkspaceSkill, deleteWorkspaceSkill, type Skill } from '@/lib/api/skills';
 import { TabPanel } from './tab-panel';
@@ -47,6 +48,10 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
   // Upload dialog form states
   const [file, setFile] = useState<File | null>(null);
   const [replace, setReplace] = useState(false);
+  // In-dialog error for the upload flow. Rendered inside the modal so failures
+  // are seen immediately — the top-of-tab status banner sits *behind* the open
+  // modal overlay and would hide install errors from the user.
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -89,6 +94,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
   useEffect(() => {
     isMounted.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
     load();
     return () => {
       isMounted.current = false;
@@ -99,17 +105,21 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
   const onPickFile = (f: File | null) => {
     if (f && !/\.zip$/i.test(f.name)) {
-      showStatus('error', t('settings.skills.error.not_zip', { defaultValue: 'Only .zip files are accepted' }));
+      // Surface the rejection inside the dialog — the top banner is hidden
+      // behind the open modal overlay.
+      setUploadError(t('settings.skills.error.not_zip', { defaultValue: 'Only .zip files are accepted' }));
       return;
     }
+    setUploadError(null);
     setFile(f);
   };
 
   const handleUpload = async () => {
     if (!file) {
-      showStatus('error', t('settings.skills.error.no_file', { defaultValue: 'Please select a zip file' }));
+      setUploadError(t('settings.skills.error.no_file', { defaultValue: 'Please select a zip file' }));
       return;
     }
+    setUploadError(null);
     try {
       setUploading(true);
       const res = await installWorkspaceSkill(workspace.id, file, replace);
@@ -118,6 +128,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
       setShowUpload(false);
       setFile(null);
       setReplace(false);
+      setUploadError(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       if (res.warning) {
@@ -144,11 +155,11 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
           errMsg = t('settings.skills.error.already_exists', { defaultValue: 'Skill already exists — enable "Replace existing" to overwrite.' });
         } else if (msg.includes('SKILL_NOT_FOUND') || msg.includes('not found')) {
           errMsg = t('settings.skills.error.not_found', { defaultValue: 'Skill not found.' });
-        } else {
-          errMsg = msg;
         }
+        // Any unmatched code (e.g. INTERNAL) or raw technical string must never
+        // leak to the user — keep the friendly install_failed default instead.
       }
-      showStatus('error', errMsg);
+      setUploadError(errMsg);
     } finally {
       if (isMounted.current) setUploading(false);
     }
@@ -165,14 +176,11 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
     } catch (err) {
       if (isMounted.current) {
         let errMsg = t('settings.skills.error.delete_failed', { defaultValue: 'Delete failed' });
-        if (err instanceof Error) {
-          const msg = err.message;
-          if (msg.includes('SKILL_NOT_FOUND') || msg.includes('not found')) {
-            errMsg = t('settings.skills.error.not_found', { defaultValue: 'Skill not found.' });
-          } else {
-            errMsg = msg;
-          }
+        if (err instanceof Error && (err.message.includes('SKILL_NOT_FOUND') || err.message.includes('not found'))) {
+          errMsg = t('settings.skills.error.not_found', { defaultValue: 'Skill not found.' });
         }
+        // Unmatched codes fall back to the friendly delete_failed default — the
+        // raw backend code/message is never surfaced.
         showStatus('error', errMsg);
       }
     } finally {
@@ -187,6 +195,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
     setShowUpload(false);
     setFile(null);
     setReplace(false);
+    setUploadError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -209,17 +218,14 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
     );
   }
 
-  // Pagination calculations
-  const totalPages = Math.ceil(skills.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
+  // Pagination — clamp the active page at render time so a shrinking list
+  // (e.g. after a delete) never strands the view on a now-empty page. Derived
+  // state, not an effect: an effect placed after the loading/error early
+  // returns would violate the Rules of Hooks and crash the tab.
+  const totalPages = Math.max(1, Math.ceil(skills.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
   const paginatedSkills = skills.slice(startIndex, startIndex + pageSize);
-
-  useEffect(() => {
-    const maxPage = Math.max(1, Math.ceil(skills.length / pageSize));
-    if (currentPage > maxPage) {
-      setCurrentPage(maxPage);
-    }
-  }, [skills.length, currentPage]);
 
   return (
     <TabPanel>
@@ -318,19 +324,19 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
           <div className="flex items-center justify-between pt-4 border-t border-[var(--border-subtle)] mt-4">
             <button
               type="button"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              onClick={() => setCurrentPage(Math.max(1, safePage - 1))}
               className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
               {t('settings.skills.pagination.prev', { defaultValue: 'Previous' })}
             </button>
             <span className="text-[10px] font-mono text-[var(--text-muted)] font-bold">
-              {currentPage} / {totalPages}
+              {safePage} / {totalPages}
             </span>
             <button
               type="button"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))}
               className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
             >
               {t('settings.skills.pagination.next', { defaultValue: 'Next' })}
@@ -339,8 +345,11 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         )}
       </section>
 
-      {/* Upload Dialog Modal Overlay */}
-      {showUpload && (
+      {/* Upload Dialog Modal Overlay — portaled to <body>: the settings content
+          card has `overflow-hidden backdrop-blur-md`, and backdrop-filter makes
+          it the containing block for `fixed` descendants, so an in-place overlay
+          would be positioned/clipped to the card instead of the viewport. */}
+      {showUpload && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={closeUpload}>
           <div
             className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 rounded-xl shadow-2xl"
@@ -396,6 +405,21 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
               />
               {t('settings.skills.dialog.replace', { defaultValue: 'Replace existing same-name skill' })}
             </label>
+
+            {/* Inline install error — shown here (not the top banner) so it is
+                visible while the dialog is open. */}
+            {uploadError && (
+              <div
+                role="alert"
+                className="mt-4 flex items-start gap-2 rounded-lg border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] px-3 py-2.5 text-xs font-medium text-[var(--accent-coral)] animate-fade-in-up"
+              >
+                <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span className="min-w-0 break-words">{uploadError}</span>
+              </div>
+            )}
+
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
@@ -417,11 +441,12 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* Delete Confirmation Modal Overlay */}
-      {deleteTarget && (
+      {/* Delete Confirmation Modal Overlay — portaled for the same reason. */}
+      {deleteTarget && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>
           <div
             className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 rounded-xl shadow-2xl"
@@ -463,7 +488,8 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </TabPanel>
   );
