@@ -241,7 +241,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.Log.Debug("opencodeserver: start step 4 - session created", "ocs_session_id", sessionID)
 
-	w.initSessionConn(ctx, sessionID, session)
+	if err := w.initSessionConn(ctx, sessionID, session); err != nil {
+		w.releaseOnce.Do(func() { w.singleton.Release() })
+		return fmt.Errorf("opencodeserver: initialize session: %w", err)
+	}
 	// Persist OCS session ID immediately so resume can find it even if
 	// release() races with the persistWorkerSessionID in bridge.
 	w.SetWorkerSessionID(sessionID)
@@ -345,7 +348,10 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 		if exists {
 			w.Log.Info("opencodeserver: resuming existing OCS session",
 				"ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
-			w.initSessionConn(ctx, ocsSessionID, session)
+			if err := w.initSessionConn(ctx, ocsSessionID, session); err != nil {
+				w.release()
+				return fmt.Errorf("opencodeserver: initialize resumed session: %w", err)
+			}
 			w.SetWorkerSessionID(ocsSessionID)
 			w.startSSE(ocsSessionID)
 			w.Log.Debug("opencodeserver: resume completed (reused session)")
@@ -363,7 +369,10 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 		return fmt.Errorf("opencodeserver: resume create session: %w", err)
 	}
 
-	w.initSessionConn(ctx, newSessionID, session)
+	if err := w.initSessionConn(ctx, newSessionID, session); err != nil {
+		w.releaseOnce.Do(func() { w.singleton.Release() })
+		return fmt.Errorf("opencodeserver: initialize resumed session: %w", err)
+	}
 	w.SetWorkerSessionID(newSessionID)
 	w.startSSE(newSessionID)
 	w.Log.Debug("opencodeserver: resume completed (fresh session)")
@@ -758,8 +767,7 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session wo
 	w.httpConn = c
 }
 
-func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) {
-	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt, session)
+func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) error {
 	w.cmd = &ServerCommander{
 		client:        w.client,
 		baseURL:       w.httpAddr,
@@ -768,12 +776,15 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 		projectDir:    session.ProjectDir,
 	}
 	if err := w.applyPermissions(ctx, session); err != nil {
-		w.Log.Warn("opencodeserver: failed to set permissions", "session_id", serverSessionID, "err", err)
+		w.cmd = nil
+		return fmt.Errorf("apply session permissions: %w", err)
 	}
+	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt, session)
 	w.Mu.Lock()
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
 	w.Mu.Unlock()
+	return nil
 }
 
 // ocsSessionExists checks whether a session exists on the OpenCode server

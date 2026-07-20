@@ -50,6 +50,31 @@ func TestOpenCodeServerWorker_New(t *testing.T) {
 	require.Nil(t, w.httpConn)
 }
 
+func TestOpenCodeServerWorker_InitSessionConnFailsClosedWhenPermissionSetupFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch, r.Method)
+		require.Equal(t, "/session/ocs-session-1", r.URL.Path)
+		rw.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	w := New()
+	w.httpAddr = server.URL
+	w.client = server.Client()
+	w.singleton = NewSingletonProcessManager(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config.OpenCodeServerConfig{},
+	)
+
+	err := w.initSessionConn(context.Background(), "ocs-session-1", worker.SessionInfo{
+		UserID:         "test-user",
+		PermissionMode: worker.PermissionModeReadOnly,
+	})
+
+	require.ErrorContains(t, err, "opencode set permission")
+	require.Nil(t, w.httpConn, "permission setup failure must not leave a usable connection")
+}
+
 func TestOpenCodeServerWorker_EnvBlocklist(t *testing.T) {
 	t.Parallel()
 	w := New()

@@ -232,12 +232,12 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	case "plan":
-		// Read-only: OCS allows unmatched permissions by default. Deny every
-		// capability first, then selectively enable the built-in read-only
-		// operations. This also keeps custom tools, MCP tools, and subagents
-		// from creating a write-capable bypass.
+		// Read-only: OCS allows unmatched permissions by default. Ask before every
+		// capability, then selectively enable built-in read-only operations. Writes
+		// therefore become permission requests instead of bypassing the workspace
+		// policy or being silently rejected without an approval card.
 		rules = []map[string]any{
-			{"permission": "*", "action": "deny", "pattern": "*"},
+			{"permission": "*", "action": "ask", "pattern": "*"},
 			{"permission": "read", "action": "allow", "pattern": "*"},
 			{"permission": "glob", "action": "allow", "pattern": "*"},
 			{"permission": "grep", "action": "allow", "pattern": "*"},
@@ -264,8 +264,8 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	}
-	// Apply allowed tools whitelist outside plan mode. Plan mode starts from a
-	// deny-all baseline, so a caller-supplied allow rule could reopen writes.
+	// Apply allowed tools whitelist outside plan mode. Plan mode starts from an
+	// ask-all baseline, so a caller-supplied allow rule could reopen automatic writes.
 	if mode != "plan" {
 		for _, tool := range allowedTools {
 			rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})

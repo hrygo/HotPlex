@@ -458,18 +458,18 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			wantSuccess: true,
 		},
 		{
-			name: "plan denies by default and ignores write-capable allowedTools",
+			name: "plan asks by default and ignores write-capable allowedTools",
 			mode: "plan", allowedTools: []string{"Read", "Bash", "Write", "custom_write"},
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				perms := reqBody["permission"].([]any)
 				require.NotEmpty(t, perms)
 
 				// OpenCode allows unmatched permissions by default, so the first
-				// rule must deny every capability before known read-only operations
+				// rule must ask before every capability while known read-only operations
 				// are selectively re-enabled.
 				defaultRule := perms[0].(map[string]any)
 				require.Equal(t, "*", defaultRule["permission"])
-				require.Equal(t, "deny", defaultRule["action"])
+				require.Equal(t, "ask", defaultRule["action"])
 				require.Equal(t, "*", defaultRule["pattern"])
 
 				allowed := map[string]bool{}
