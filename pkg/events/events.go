@@ -570,7 +570,8 @@ type SkillsListData struct {
 type SkillEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Source      string `json:"source"`
+	Source      string `json:"source"`            // "global" (home) or "project" (workspace/workDir)
+	Managed     bool   `json:"managed,omitempty"` // issue #910: true = in .agents/skills (UI-manageable)
 }
 
 // SessionState represents the state of a session.

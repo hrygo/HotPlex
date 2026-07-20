@@ -116,6 +116,10 @@ func setupRoutes(
 	if deps.AuditCollector != nil {
 		adminAPI.SetAuditCollector(deps.AuditCollector)
 	}
+	// Skill management API (issue #910): global skill CRUD via /admin/api/skills.
+	if deps.SkillsLocator != nil {
+		adminAPI.SetSkillsLocator(deps.SkillsLocator)
+	}
 
 	if cfg.Admin.RateLimitEnabled {
 		limiter := admin.NewRateLimiter(cfg.Admin.RequestsPerSec, cfg.Admin.Burst)
@@ -216,6 +220,12 @@ func setupRoutes(
 	// /api/workspaces with Authenticator + CSRF, not admin scope).
 	adminMux.HandleFunc("GET /admin/workspaces", adminAPI.HandleListAdminWorkspaces)
 	adminMux.HandleFunc("PATCH /admin/workspaces/{id}", adminAPI.HandleUpdateAdminWorkspacePermissionMode)
+
+	// Skill management API (issue #910): global skill list/install/read/delete.
+	adminMux.HandleFunc("GET /admin/api/skills", adminAPI.HandleListSkills)
+	adminMux.HandleFunc("POST /admin/api/skills", adminAPI.HandleInstallSkill)
+	adminMux.HandleFunc("GET /admin/api/skills/{name}", adminAPI.HandleGetSkill)
+	adminMux.HandleFunc("DELETE /admin/api/skills/{name}", adminAPI.HandleDeleteSkill)
 
 	// Documentation
 	if resolved := security.ResolveCSP(security.DefaultDocsCSP, cfg.Security.CSP); security.IsPermissiveCSP(resolved) {
@@ -326,6 +336,23 @@ func setupRoutes(
 		mux.Handle("GET /api/workspaces/{id}", corsMw(http.HandlerFunc(wsHandlers.Get)))
 		mux.Handle("PATCH /api/workspaces/{id}", corsMw(csrfMw(http.HandlerFunc(wsHandlers.Update))))
 		mux.Handle("DELETE /api/workspaces/{id}", corsMw(csrfMw(http.HandlerFunc(wsHandlers.Delete))))
+
+		// Skill management API (issue #910): user-facing merged list + workspace
+		// skill CRUD. Write routes (POST/DELETE) mount csrfMw for the same
+		// SameSite=None cookie CSRF reason /api/workspaces does; GETs pass through.
+		skillHandlers := gateway.NewSkillHandlers(deps.SkillsLocator, deps.WorkspaceStore, auth, log)
+		if deps.AuditCollector != nil {
+			skillHandlers.SetAuditCollector(deps.AuditCollector)
+		}
+		mux.Handle("GET /api/skills", corsMw(http.HandlerFunc(skillHandlers.ListMerged)))
+		mux.Handle("GET /api/skills/{name}", corsMw(http.HandlerFunc(skillHandlers.GetMerged)))
+		mux.Handle("POST /api/workspaces/{wid}/skills", corsMw(csrfMw(http.HandlerFunc(skillHandlers.InstallWorkspace))))
+		mux.Handle("GET /api/workspaces/{wid}/skills/{name}", corsMw(http.HandlerFunc(skillHandlers.GetWorkspace)))
+		mux.Handle("DELETE /api/workspaces/{wid}/skills/{name}", corsMw(csrfMw(http.HandlerFunc(skillHandlers.DeleteWorkspace))))
+		mux.Handle("OPTIONS /api/skills", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/skills/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/workspaces/{wid}/skills", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/workspaces/{wid}/skills/{name}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 
 		// OPTIONS preflight handlers for Workspaces API
 		mux.Handle("OPTIONS /api/workspaces", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))

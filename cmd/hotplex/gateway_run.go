@@ -203,6 +203,8 @@ type GatewayDeps struct {
 	// Audit subsystem (issue #833 P1). Nil when audit.enabled=false.
 	AuditCollector *audit.Collector
 	AuditStore     audit.Store
+	// SkillsLocator serves the skill management HTTP API (issue #910).
+	SkillsLocator *skills.Locator
 	// Durable ingress reliability closure (spec 2026-07-14).
 	OwnerInstanceID string
 	LeaseManager    *execution.LeaseManager
@@ -774,6 +776,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		DevMode:         devMode,
 		AuditCollector:  auditCollector,
 		AuditStore:      auditStore,
+		SkillsLocator:   skillsLocator,
 		OwnerInstanceID: ownerInstanceID,
 		LeaseManager:    leaseMgr,
 		Repairer:        repairer,

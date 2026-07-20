@@ -72,6 +72,68 @@ func (l *Locator) List(_ context.Context, homeDir, workDir string) ([]Skill, err
 	return skills, nil
 }
 
+// ListMerged 合并全局（homeDir 范围）与多个 workspace 的 skill 列表，去重
+// （workspace project 覆盖 global 同名）。workDirs 为空或全空时仅返回 global。
+//
+// 用于 GET /api/skills：一个用户可能拥有多个 workspace，此方法把它们的 managed
+// skill 合并进全局视图。各 workDir 仍走各自的 TTL 缓存；写入后由调用方 Invalidate。
+func (l *Locator) ListMerged(_ context.Context, homeDir string, workDirs []string) ([]Skill, error) {
+	seen := make(map[string]int) // name → result index
+	var result []Skill
+	add := func(s Skill) {
+		if idx, ok := seen[s.Name]; ok {
+			// project 覆盖 global（与 dedup 一致）；同名 project 取先到者。
+			if s.Source == SourceProject && result[idx].Source == SourceGlobal {
+				result[idx] = s
+			}
+		} else {
+			seen[s.Name] = len(result)
+			result = append(result, s)
+		}
+	}
+
+	if homeDir != "" {
+		if g, err := l.List(context.Background(), homeDir, ""); err == nil {
+			for _, s := range g {
+				add(s)
+			}
+		}
+	}
+	for _, wd := range workDirs {
+		if wd == "" {
+			continue
+		}
+		ss, err := l.List(context.Background(), homeDir, wd)
+		if err != nil {
+			continue
+		}
+		for _, s := range ss {
+			if s.Source == SourceProject { // global 已由上面加入
+				add(s)
+			}
+		}
+	}
+	return result, nil
+}
+
+// Invalidate drops the cached skills for a single workDir. Call after a
+// workspace-scoped CRUD so the next List re-scans the filesystem instead of
+// serving a stale merged list. Safe to call for a workDir that was never cached.
+func (l *Locator) Invalidate(workDir string) {
+	l.mu.Lock()
+	delete(l.cache, workDir)
+	l.mu.Unlock()
+}
+
+// InvalidateAll drops every cached entry. Call after a global-scoped CRUD — a
+// global skill change invalidates the merged list (global + workspace) of every
+// workspace, so a single Invalidate(workDir) is not enough.
+func (l *Locator) InvalidateAll() {
+	l.mu.Lock()
+	l.cache = make(map[string]*cacheEntry)
+	l.mu.Unlock()
+}
+
 // Close stops the background sweep goroutine.
 // It is safe to call multiple times (uses sync.Once).
 func (l *Locator) Close() {

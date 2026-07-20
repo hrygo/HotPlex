@@ -226,6 +226,7 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 			Name:        s.Name,
 			Description: s.Description,
 			Source:      s.Source,
+			Managed:     s.Managed,
 		}
 	}
 

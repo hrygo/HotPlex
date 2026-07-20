@@ -16,6 +16,7 @@ import (
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
+	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/web"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -130,6 +131,7 @@ type AdminAPI struct {
 	startedAt        time.Time
 	activityService  *ActivityService // Optional: enables /admin/activity + /admin/users/{id}/activity (issue #833)
 	auditCollector   *audit.Collector // Optional: emits system.audit_export meta-audit rows (issue #833)
+	skillsLocator    *skills.Locator  // Optional: enables /admin/api/skills global skill management (issue #910)
 }
 
 type Deps struct {
@@ -194,6 +196,10 @@ func New(deps Deps) *AdminAPI {
 	}
 	return a
 }
+
+// SetSkillsLocator 注入 skill 定位器，启用 /admin/api/skills 全局 skill 管理
+// （issue #910）。nil 时 skill 端点返回 503。
+func (a *AdminAPI) SetSkillsLocator(l *skills.Locator) { a.skillsLocator = l }
 
 func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

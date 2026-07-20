@@ -299,6 +299,97 @@
                 }
             }
         },
+        "/admin/api/skills": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Returns every skill under the global .agents/.claude/.hotplex dirs. Requires admin:read.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "List global skills (admin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Upload a skill zip into ~/.agents/skills. Use ?replace=true to overwrite. Requires admin:write.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Install global skill (admin)",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "skill zip archive",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "overwrite existing same-name skill",
+                        "name": "replace",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.skillInstallResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "SKILL_INVALID_ZIP / SKILL_INVALID_FORMAT / SKILL_FILE_TYPE_BLOCKED",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "SKILL_ALREADY_EXISTS",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/bots": {
             "get": {
                 "security": [
@@ -3750,6 +3841,38 @@
                 "content": {
                     "type": "string",
                     "example": "You are a helpful assistant."
+                }
+            }
+        },
+        "admin.skillInstallResponse": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "managed": {
+                    "description": ".agents/skills 可写区",
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "description": "\"global\"",
+                    "type": "string"
+                },
+                "warning": {
+                    "description": "workspace 同名遮蔽全局时非空",
+                    "type": "string"
                 }
             }
         },

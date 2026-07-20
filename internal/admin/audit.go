@@ -39,6 +39,9 @@ const (
 	AuditIdentityLinkCreate            = "audit.identity_link.create"
 	AuditIdentityLinkDelete            = "audit.identity_link.delete"
 	AuditAuthDenied                    = "auth.denied"
+	AuditSkillCreate                   = "skill.create" // issue #910 global skill install
+	AuditSkillUpdate                   = "skill.update" // ?replace=true 覆盖
+	AuditSkillDelete                   = "skill.delete"
 
 	// AuditResult* — stable "result" field values. Reuse instead of literals so
 	// dashboard filters stay correct (issue #788 review P3).
@@ -107,10 +110,27 @@ func adminActionFor(method, path string) string {
 		return botAction(method)
 	case strings.Contains(path, "/sessions"):
 		return sessionAction(method)
+	case strings.Contains(path, "/skills"):
+		return skillAction(method)
 	case strings.Contains(path, "/workspaces"):
 		return workspaceAction(method)
 	}
 	return method + " " + path
+}
+
+// skillAction 覆盖 /admin/api/skills 全局 skill 写（issue #910）。GET 不审计
+// （isWriteMethod 为 false）。POST 区分 create vs update 由 routes 层 ?replace
+// 决定，这里按 method 取语义动作；replace=true 的 POST 在 handler 内覆盖同名。
+func skillAction(method string) string {
+	switch method {
+	case http.MethodPost:
+		return AuditSkillCreate
+	case http.MethodDelete:
+		return AuditSkillDelete
+	case http.MethodPatch, http.MethodPut:
+		return AuditSkillUpdate
+	}
+	return "skill." + strings.ToLower(method)
 }
 
 func auditIdentityLinkAction(method string) string {
