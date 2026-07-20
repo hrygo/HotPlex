@@ -527,10 +527,18 @@ func TestHandleInput_ControlCommand_SendsDeliveredAck(t *testing.T) {
 	env := inputEnvelopeWithOwner(sid, "user1", "/help")
 	require.NoError(t, handler.handleInput(context.Background(), env))
 
-	// The first envelope must be the delivered InputAck.
-	ack := readNextEnvelope(t, serverConn)
-	require.Equal(t, events.InputAck, ack.Event.Type)
-	ackData, ok := ack.Event.Data.(map[string]any)
+	// We expect to receive both the help message (events.Message) and the delivered InputAck.
+	// Order is determined by queue scheduling, so we check both.
+	var ackEnv *events.Envelope
+	for i := 0; i < 2; i++ {
+		e := readNextEnvelope(t, serverConn)
+		if e.Event.Type == events.InputAck {
+			ackEnv = &e
+			break
+		}
+	}
+	require.NotNil(t, ackEnv, "Should receive InputAck")
+	ackData, ok := ackEnv.Event.Data.(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, string(events.ExecutionStatusDelivered), ackData["status"])
 	require.NotEmpty(t, ackData["client_message_id"])

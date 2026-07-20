@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.37.0] - 2026-07-20
+
+### Summary
+
+v1.37.0 是一次 minor 版本更新，核心是 **Skill 管理功能** 的落地与 **OCS read-only 权限绕过** 的安全修复。新增页面级 Skill 管理 HTTP API（用户全局 / workspace / admin 三层共 8 端点）与 webchat 管理界面，支持 zip 上传并经 zip-slip / 解压炸弹 / 越权五重安全管线校验。同时修复了 OpenCode Server Worker 在 read-only（plan）模式下未拦截文件写入的严重权限绕过缺陷，收紧 workspace 边界与审批链路。
+
+### Added
+
+- **Skills Management**: 完整的 Skill 管理 HTTP API 与 webchat UI — 用户全局、workspace、admin 三层共 8 个端点（查询 / 安装 / 读取 / 删除）；支持 zip 包上传安装，经 zip-slip、解压炸弹（≤20MB zip / ≤50MB 解压 / ≤5MB 单文件 / ≤500 entry / >100× 压缩率拒绝）、恶意 entry（symlink/device 过滤）、越权（非 owner → 403）、name 注入五重安全管线；scanner 区分 managed（`.agents`）与 external（`.claude` / `.hotplex`）skill，支持 global + 多 workspace 合并查询与同名遮蔽告警。(#915)
+- **WebChat UI**: admin 全局 Skill 管理页与 workspace Skill 管理页，含上传组件、只读外部 skill 标注、admin-nav 入口，中英文 i18n 同步。(#915)
+
+### Fixed
+
+- **Worker (OCS)**: read-only（plan）模式未拦截文件写入 — 根因是 OCS 权限系统为 opt-in allowlist，未匹配规则时默认 ALLOW；原代码仅注入 `read: allow` 致使 `edit`/`write`/`bash`/`shell`/`patch` 全部直接放行。修复方案：plan 模式改为 `*:ask` 通配基线 + 选择性 allow 只读工具，写入操作变为审批请求而非静默放行；新增 workspace 工作区边界（`external_directory` 在 workspace 层 ask、auto-edit 层 allow）；plan 模式忽略 `allowed_tools` 防止 caller-supplied allow 规则重开写入；首启即应用 workspace 权限上限（同步 `si.WorkspaceID`）；权限应用失败不再静默（`initSessionConn` 返 error）；命令失败不误发 delivered ack。(#913)
+- **WebChat UI**: 权限审批卡结构化渲染 — 解析权限工具参数（JSON string / object / array 三种形态），分区块展示 command / action / target / reason / 允许目录 / 允许模式，取代原始 JSON dump。(#913)
+
 ## [1.36.2] - 2026-07-17
 
 ### Summary

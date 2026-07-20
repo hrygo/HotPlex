@@ -138,7 +138,7 @@ func TestAuthenticateRequest(t *testing.T) {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
 
-			userID, _, err := auth.AuthenticateRequest(req)
+			userID, _, _, err := auth.AuthenticateRequest(req)
 			if tt.wantErr {
 				require.Error(t, err)
 				require.Equal(t, ErrUnauthorized, err)
@@ -222,7 +222,7 @@ func TestAuthenticateRequest_BotIDFromRequest(t *testing.T) {
 		req.Header.Set("X-API-Key", apiKey)
 		req.Header.Set("X-Bot-ID", "bot_001")
 
-		userID, botID, err := auth.AuthenticateRequest(req)
+		userID, botID, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "api_user", userID)
 		require.Equal(t, "bot_001", botID)
@@ -233,7 +233,7 @@ func TestAuthenticateRequest_BotIDFromRequest(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test?bot_id=bot_002", nil)
 		req.Header.Set("X-API-Key", apiKey)
 
-		_, botID, err := auth.AuthenticateRequest(req)
+		_, botID, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "bot_002", botID)
 	})
@@ -243,7 +243,7 @@ func TestAuthenticateRequest_BotIDFromRequest(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.Header.Set("X-API-Key", apiKey)
 
-		_, botID, err := auth.AuthenticateRequest(req)
+		_, botID, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Empty(t, botID)
 	})
@@ -537,7 +537,7 @@ func TestAuthenticator_WithResolver_AuthenticateRequest(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-API-Key", "sk-alice")
 
-	userID, _, err := auth.AuthenticateRequest(req)
+	userID, _, _, err := auth.AuthenticateRequest(req)
 	require.NoError(t, err)
 	require.Equal(t, "alice", userID)
 }
@@ -554,7 +554,7 @@ func TestAuthenticator_ResolverWithBotIDHeader(t *testing.T) {
 	req.Header.Set("X-API-Key", apiKey)
 	req.Header.Set("X-Bot-ID", "bot-007")
 
-	userID, botID, err := auth.AuthenticateRequest(req)
+	userID, botID, _, err := auth.AuthenticateRequest(req)
 	require.NoError(t, err)
 	require.Equal(t, "alice-resolved", userID, "resolver userID should override default")
 	require.Equal(t, "bot-007", botID, "X-Bot-ID header should be extracted")
@@ -632,7 +632,7 @@ func TestAddKey_AuthenticateRequest(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-API-Key", "hpk_abc123")
 
-	userID, _, err := auth.AuthenticateRequest(req)
+	userID, _, _, err := auth.AuthenticateRequest(req)
 	require.NoError(t, err)
 	require.Equal(t, "api_user", userID)
 }
@@ -753,12 +753,12 @@ func TestAuthenticator_DisabledUser(t *testing.T) {
 	// 2. AuthenticateRequest (API Key)
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-API-Key", "sk-test")
-	_, _, err := auth.AuthenticateRequest(req)
+	_, _, _, err := auth.AuthenticateRequest(req)
 	require.ErrorIs(t, err, ErrUnauthorized, "disabled user request should be unauthorized")
 
 	reqActive := httptest.NewRequest("GET", "/test", nil)
 	reqActive.Header.Set("X-API-Key", "sk-active")
-	uidRes, _, err := auth.AuthenticateRequest(reqActive)
+	uidRes, _, _, err := auth.AuthenticateRequest(reqActive)
 	require.NoError(t, err)
 	require.Equal(t, "active_uid", uidRes)
 
@@ -777,7 +777,7 @@ func TestAuthenticator_DisabledUser(t *testing.T) {
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.AddCookie(cookies1[0])
 
-	_, _, err = auth.AuthenticateRequest(r2)
+	_, _, _, err = auth.AuthenticateRequest(r2)
 	require.ErrorIs(t, err, ErrUnauthorized, "disabled user cookie authentication should fail")
 
 	w2 := httptest.NewRecorder()
@@ -789,7 +789,7 @@ func TestAuthenticator_DisabledUser(t *testing.T) {
 	r4 := httptest.NewRequest("GET", "/", nil)
 	r4.AddCookie(cookies2[0])
 
-	uidRes, _, err = auth.AuthenticateRequest(r4)
+	uidRes, _, _, err = auth.AuthenticateRequest(r4)
 	require.NoError(t, err)
 	require.Equal(t, "active_uid", uidRes)
 }
@@ -1021,7 +1021,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		req.Header.Set("X-API-Key", "any-key")
 		req.RemoteAddr = "192.168.1.1:12345"
 		req.Header.Set("User-Agent", "test-ua/1.0")
-		uid, _, err := auth.AuthenticateRequest(req)
+		uid, _, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "anonymous", uid)
 		// Dev mode = auth disabled, no credential exchange → no auth.* row.
@@ -1036,7 +1036,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/admin/keys", nil)
 		req.RemoteAddr = "10.0.0.1:9999"
-		_, _, err := auth.AuthenticateRequest(req)
+		_, _, _, err := auth.AuthenticateRequest(req)
 		require.ErrorIs(t, err, ErrUnauthorized)
 		require.Equal(t, int64(1), ac.Enqueued())
 	})
@@ -1050,7 +1050,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/test", nil)
 		req.Header.Set("X-API-Key", "wrong-key")
 		req.RemoteAddr = "10.0.0.2:8080"
-		_, _, err := auth.AuthenticateRequest(req)
+		_, _, _, err := auth.AuthenticateRequest(req)
 		require.ErrorIs(t, err, ErrUnauthorized)
 		require.Equal(t, int64(1), ac.Enqueued())
 	})
@@ -1064,7 +1064,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/test", nil)
 		req.Header.Set("X-API-Key", "secret")
 		req.RemoteAddr = "10.0.0.3:7070"
-		uid, _, err := auth.AuthenticateRequest(req)
+		uid, _, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "api_user", uid)
 		require.Equal(t, int64(1), ac.Enqueued())
@@ -1076,7 +1076,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/api/test", nil)
 		req.Header.Set("X-API-Key", "secret")
-		uid, _, err := auth.AuthenticateRequest(req)
+		uid, _, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "api_user", uid)
 	})
@@ -1100,7 +1100,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		req.AddCookie(w.Result().Cookies()[0])
 		req.RemoteAddr = "192.168.1.1:12345"
 
-		uid, _, err := auth.AuthenticateRequest(req)
+		uid, _, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "user-uuid-123", uid)
 
@@ -1128,7 +1128,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/test", nil)
 		req.Header.Set("X-API-Key", "sk-alice")
 		req.RemoteAddr = "10.0.0.3:7070"
-		uid, _, err := auth.AuthenticateRequest(req)
+		uid, _, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "alice-uuid", uid)
 
@@ -1160,7 +1160,7 @@ func TestAuthenticateRequest_AuditEvents(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/test", nil)
 		req.Header.Set("X-API-Key", "secret")
 		req.RemoteAddr = "10.0.0.4:7070"
-		uid, _, err := auth.AuthenticateRequest(req)
+		uid, _, _, err := auth.AuthenticateRequest(req)
 		require.NoError(t, err)
 		require.Equal(t, "api_user", uid)
 

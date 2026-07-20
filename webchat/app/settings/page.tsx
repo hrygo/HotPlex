@@ -11,9 +11,10 @@ import { GeneralTab } from '@/app/components/chat/settings-modal/general-tab';
 import { AIConfigTab } from '@/app/components/chat/settings-modal/ai-config-tab';
 import { ProfileTab } from '@/app/components/chat/settings-modal/profile-tab';
 import { MembersTab } from '@/app/components/chat/settings-modal/members-tab';
+import { SkillsTab } from '@/app/components/chat/settings-modal/skills-tab';
 import { useTranslation } from 'react-i18next';
 
-type TabId = 'general' | 'ai' | 'profile' | 'members';
+type TabId = 'general' | 'ai' | 'skills' | 'profile' | 'members';
 
 export default function SettingsPage() {
   const { t } = useTranslation(['chat', 'auth', 'common']);
@@ -58,7 +59,7 @@ export default function SettingsPage() {
   // non-admin while on Members) so the panel never renders empty.
   useEffect(() => {
     const hasTab = (id: TabId) =>
-      id === 'general' || id === 'ai' || id === 'profile' ||
+      id === 'general' || id === 'ai' || id === 'skills' || id === 'profile' ||
       (id === 'members' && currentUser?.role === 'admin');
     if (!hasTab(activeTab)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- fall back when active tab left the list
@@ -89,6 +90,15 @@ export default function SettingsPage() {
           icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+          ),
+        },
+        {
+          id: 'skills' as TabId,
+          label: t('chat:settings.tab.skills', { defaultValue: 'Skills' }),
+          icon: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
             </svg>
           ),
         },
@@ -145,6 +155,10 @@ export default function SettingsPage() {
     ai: {
       title: t('chat:settings.heading.ai.title', { defaultValue: 'AI Configuration' }),
       description: t('chat:settings.heading.ai.desc', { defaultValue: 'Configure your preferred worker engines and custom prompt rules.' }),
+    },
+    skills: {
+      title: t('chat:settings.heading.skills.title', { defaultValue: 'Workspace Skills' }),
+      description: t('chat:settings.heading.skills.desc', { defaultValue: 'Manage custom skills installed in this workspace. Global skills are read-only.' }),
     },
     profile: {
       title: t('chat:settings.heading.profile.title', { defaultValue: 'Personal Profile' }),
@@ -277,13 +291,16 @@ export default function SettingsPage() {
                   {activeTab === 'ai' && workspace && (
                     <AIConfigTab workspace={workspace} onUpdated={handleWorkspaceUpdated} />
                   )}
+                  {activeTab === 'skills' && workspace && (
+                    <SkillsTab workspace={workspace} />
+                  )}
                   {activeTab === 'profile' && currentUser && <ProfileTab user={currentUser} />}
                   {activeTab === 'members' && currentUser?.role === 'admin' && (
                     <MembersTab currentUser={currentUser} />
                   )}
 
                   {/* Workspace fallback warning */}
-                  {(activeTab === 'general' || activeTab === 'ai') && !workspace && (
+                  {(activeTab === 'general' || activeTab === 'ai' || activeTab === 'skills') && !workspace && (
                     <div className="text-center py-6">
                       <div className="w-10 h-10 rounded-full bg-[rgba(244,63,94,0.1)] border border-[rgba(244,63,94,0.2)] flex items-center justify-center mx-auto mb-3">
                         <svg className="w-5 h-5 text-[var(--accent-coral)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

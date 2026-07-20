@@ -136,7 +136,8 @@
       "general": "General",
       "ai": "AI Config",
       "members": "Members",
-      "profile": "Profile"
+      "profile": "Profile",
+      "skills": "Skills"
     },
     "heading": {
       "general": {
@@ -154,6 +155,10 @@
       "members": {
         "title": "Member Management",
         "desc": "Invite new users, manage active team accounts, and update permissions."
+      },
+      "skills": {
+        "title": "Workspace Skills",
+        "desc": "Manage custom skills installed in this workspace. Global skills are read-only."
       }
     },
     "action": {
@@ -218,6 +223,46 @@
       "auto-edit": "Auto Mode — Auto-approve edits",
       "bypass": "Bypass — Full access",
       "read-only": "Read Only — Plan only"
+    },
+    "skills": {
+      "label": {
+        "managed": "Managed",
+        "external": "External (read-only)"
+      },
+      "action": {
+        "upload": "Upload Skill",
+        "delete": "Delete",
+        "install": "Install"
+      },
+      "empty": {
+        "title": "No skills installed in this workspace",
+        "desc": "Upload a skill .zip to install it into this workspace's skills directory."
+      },
+      "dialog": {
+        "upload_title": "Upload Workspace Skill",
+        "upload_desc": "Select a .zip whose root has SKILL.md (or a single top-level dir containing it). Aligned with agentskills.io.",
+        "replace": "Replace existing same-name skill",
+        "uploading": "Uploading..."
+      },
+      "toast": {
+        "installed": "Skill installed successfully",
+        "installed_warning": "Installed — {{warning}}",
+        "deleted": "Skill deleted successfully"
+      },
+      "confirm": {
+        "delete_title": "Delete Workspace Skill",
+        "delete_body": "Delete skill \"{{name}}\"? This removes it from the workspace skills directory and cannot be undone."
+      },
+      "title": {
+        "list": "Installed Skills"
+      },
+      "error": {
+        "not_zip": "Only .zip files are accepted",
+        "no_file": "Please select a zip file",
+        "already_exists": "Skill already exists — enable \"Replace existing\" to overwrite",
+        "install_failed": "Install failed",
+        "delete_failed": "Delete failed"
+      }
     }
   },
   "context": {

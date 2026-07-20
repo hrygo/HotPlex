@@ -37,7 +37,7 @@ func (h *WorkspaceHandlers) currentUser(r *http.Request) (string, bool) {
 	// the REST session API and the WS upgrade path. Aligning workspace REST on
 	// the same chain makes workspace a cross-channel tenant anchor: the same
 	// users.id owns workspaces regardless of entry channel.
-	uid, _, err := h.auth.AuthenticateRequest(r)
+	uid, _, _, err := h.auth.AuthenticateRequest(r)
 	if err != nil {
 		return "", false
 	}

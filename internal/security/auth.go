@@ -151,8 +151,8 @@ func ExtractClientIP(r *http.Request) string {
 var ErrUnauthorized = errors.New("security: unauthorized")
 
 // AuthenticateRequest validates the request's API key.
-// Returns the user ID, bot ID (from X-Bot-ID header or bot_id query param), and any error.
-func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, error) {
+// Returns the user ID, bot ID, authentication platform, and any error.
+func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, string, error) {
 	ip := ExtractClientIP(r)
 	ua := r.UserAgent()
 	path := r.URL.Path
@@ -175,12 +175,12 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 				// the request performs (message/session/tool/admin). The actual
 				// login is audited at the credential-exchange boundary in the
 				// Login/OAuth handlers (auth.login).
-				return uid, botID, nil
+				return uid, botID, audit.PlatformWebChat, nil
 			}
 		}
 		a.EmitAuthEvent(audit.ActionAuthDenied, audit.OutcomeDenied, audit.AnonymousUserID,
 			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
-		return "", "", ErrUnauthorized
+		return "", "", "", ErrUnauthorized
 	}
 
 	// Dev mode: no keys configured — allow all.
@@ -189,7 +189,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		a.mu.RUnlock()
 		botID := BotIDFromRequest(r)
 		// No credentials were exchanged (auth is disabled), so no auth.* row.
-		return "anonymous", botID, nil
+		return "anonymous", botID, audit.PlatformAPI, nil
 	}
 
 	// Snapshot resolver/idp under lock, then release before any external lookup.
@@ -199,7 +199,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 		a.mu.RUnlock()
 		a.EmitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
 			audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
-		return "", "", ErrUnauthorized
+		return "", "", "", ErrUnauthorized
 	}
 	a.mu.RUnlock()
 
@@ -211,7 +211,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 			// a presented-credential rejection, not a missing-credential denial.
 			a.EmitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeFailure, audit.AnonymousUserID,
 				audit.PlatformAPI, audit.UserIDTypeAnonymous, ip, ua, path, method)
-			return "", "", ErrUnauthorized
+			return "", "", "", ErrUnauthorized
 		}
 	}
 
@@ -225,7 +225,7 @@ func (a *Authenticator) AuthenticateRequest(r *http.Request) (string, string, er
 	}
 	a.EmitAuthEvent(audit.ActionAuthAPIKeyUsed, audit.OutcomeSuccess, uid,
 		audit.PlatformAPI, successIDType, ip, ua, path, method)
-	return uid, botID, nil
+	return uid, botID, audit.PlatformAPI, nil
 }
 
 // AuthenticateActiveCookie authenticates a cookie-bearing request and rejects
@@ -423,7 +423,7 @@ func BotIDFromRequest(r *http.Request) string {
 // Middleware returns an HTTP middleware that enforces authentication.
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _, err := a.AuthenticateRequest(r)
+		_, _, _, err := a.AuthenticateRequest(r)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return

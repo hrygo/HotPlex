@@ -55,13 +55,13 @@ func NewSkillHandlers(locator *skills.Locator, wsStore session.UserWorkspaceStor
 // SetAuditCollector 注入审计收集器（nil 关闭审计，no-op）。
 func (h *SkillHandlers) SetAuditCollector(c *audit.Collector) { h.auditCollector = c }
 
-func (h *SkillHandlers) requireAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
-	uid, _, err := h.auth.AuthenticateRequest(r)
+func (h *SkillHandlers) requireAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	uid, _, platform, err := h.auth.AuthenticateRequest(r)
 	if err != nil {
 		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
-		return "", false
+		return "", "", false
 	}
-	return uid, true
+	return uid, platform, true
 }
 
 func (h *SkillHandlers) isAdmin(r *http.Request, uid string) bool {
@@ -118,7 +118,7 @@ func (h *SkillHandlers) ownerWorkDirs(ctx context.Context, uid string) []string 
 
 // ListMerged: GET /api/skills — 合并 global + 用户所有 workspace + 外部只读（spec §5）。
 func (h *SkillHandlers) ListMerged(w http.ResponseWriter, r *http.Request) {
-	uid, ok := h.requireAuth(w, r)
+	uid, _, ok := h.requireAuth(w, r)
 	if !ok {
 		return
 	}
@@ -134,7 +134,7 @@ func (h *SkillHandlers) ListMerged(w http.ResponseWriter, r *http.Request) {
 // GetMerged: GET /api/skills/{name} — 合并列表中该 skill 的元信息（覆盖胜出 scope）。
 // 完整 body 由 scoped 详情端点（workspace / admin）提供。
 func (h *SkillHandlers) GetMerged(w http.ResponseWriter, r *http.Request) {
-	uid, ok := h.requireAuth(w, r)
+	uid, _, ok := h.requireAuth(w, r)
 	if !ok {
 		return
 	}
@@ -154,36 +154,36 @@ func (h *SkillHandlers) GetMerged(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorizeWorkspace 校验鉴权 + workspace 归属（spec §3.4 owner 校验闸）。
-func (h *SkillHandlers) authorizeWorkspace(w http.ResponseWriter, r *http.Request) (*session.Workspace, string, bool) {
-	uid, ok := h.requireAuth(w, r)
+func (h *SkillHandlers) authorizeWorkspace(w http.ResponseWriter, r *http.Request) (*session.Workspace, string, string, bool) {
+	uid, platform, ok := h.requireAuth(w, r)
 	if !ok {
-		return nil, "", false
+		return nil, "", "", false
 	}
 	if h.wsStore == nil {
 		writeAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "workspace store not configured")
-		return nil, "", false
+		return nil, "", "", false
 	}
 	ws, err := h.wsStore.GetWorkspaceByID(r.Context(), r.PathValue("wid"))
 	if err != nil {
 		writeAppError(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace not found")
-		return nil, "", false
+		return nil, "", "", false
 	}
 	if ws.OwnerUserID != uid && !h.isAdmin(r, uid) {
 		writeAppError(w, http.StatusForbidden, "WORKSPACE_FORBIDDEN", "not your workspace")
-		return nil, "", false
+		return nil, "", "", false
 	}
-	return ws, uid, true
+	return ws, uid, platform, true
 }
 
 // InstallWorkspace: POST /api/workspaces/{wid}/skills — zip 上传安装（?replace=true 覆盖）。
 func (h *SkillHandlers) InstallWorkspace(w http.ResponseWriter, r *http.Request) {
-	ws, uid, ok := h.authorizeWorkspace(w, r)
+	ws, uid, platform, ok := h.authorizeWorkspace(w, r)
 	if !ok {
 		return
 	}
 	zr, closer, ok := h.parseSkillUpload(w, r)
 	if !ok {
-		h.auditSkill(r, uid, "skill.install", audit.OutcomeFailure)
+		h.auditSkill(r, uid, platform, "skill.install", audit.OutcomeFailure)
 		return
 	}
 	defer closer() // f 供 zip.Reader 作 ReaderAt，Install 消费完方可 Close（spec review P2#1）
@@ -191,16 +191,17 @@ func (h *SkillHandlers) InstallWorkspace(w http.ResponseWriter, r *http.Request)
 	res, err := h.locator.Install(r.Context(), skills.ScopeWorkspace, ws.WorkDir, h.homeDir(), zr, replace)
 	if err != nil {
 		h.writeSkillError(w, err, "install")
-		h.auditSkill(r, uid, "skill.install", audit.OutcomeFailure)
+		h.auditSkill(r, uid, platform, "skill.install", audit.OutcomeFailure)
 		return
 	}
-	h.auditSkill(r, uid, "skill.install", audit.OutcomeSuccess)
+	h.auditSkill(r, uid, platform, "skill.install", audit.OutcomeSuccess)
 	respondJSON(w, res)
 }
 
 // GetWorkspace: GET /api/workspaces/{wid}/skills/{name} — workspace scope skill 详情。
+// func (h *SkillHandlers) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 func (h *SkillHandlers) GetWorkspace(w http.ResponseWriter, r *http.Request) {
-	ws, _, ok := h.authorizeWorkspace(w, r)
+	ws, _, _, ok := h.authorizeWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -214,16 +215,16 @@ func (h *SkillHandlers) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 
 // DeleteWorkspace: DELETE /api/workspaces/{wid}/skills/{name} — 移除 workspace skill。
 func (h *SkillHandlers) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
-	ws, uid, ok := h.authorizeWorkspace(w, r)
+	ws, uid, platform, ok := h.authorizeWorkspace(w, r)
 	if !ok {
 		return
 	}
 	if err := h.locator.Delete(r.Context(), skills.ScopeWorkspace, ws.WorkDir, r.PathValue("name")); err != nil {
 		h.writeSkillError(w, err, "delete")
-		h.auditSkill(r, uid, "skill.delete", audit.OutcomeFailure)
+		h.auditSkill(r, uid, platform, "skill.delete", audit.OutcomeFailure)
 		return
 	}
-	h.auditSkill(r, uid, "skill.delete", audit.OutcomeSuccess)
+	h.auditSkill(r, uid, platform, "skill.delete", audit.OutcomeSuccess)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -273,12 +274,7 @@ func (h *SkillHandlers) writeSkillError(w http.ResponseWriter, err error, action
 
 // auditSkill 记录 workspace skill 写操作到 tamper-evident user_activity（spec §3.5）。
 // IP/UserAgent 与同包 GatewayAPI 会话删除、admin enqueueAdminActivity 对齐（spec review P2#2）。
-//
-// TODO(#910 review P2#3): Platform 硬编码 WebChat，API-key 调用者的 skill 写入被
-// 误标。正确做法是让 AuthenticateRequest 返回认证路径（cookie→WebChat /
-// api-key→PlatformAPI）并在 auditSkill 传入；该签名变更跨切面（security.Authenticator
-// 所有调用方），留待后续单独 PR 统一，本 PR 不塞入。
-func (h *SkillHandlers) auditSkill(r *http.Request, uid, action, outcome string) {
+func (h *SkillHandlers) auditSkill(r *http.Request, uid, platform, action, outcome string) {
 	if h.auditCollector == nil {
 		return
 	}
@@ -287,7 +283,7 @@ func (h *SkillHandlers) auditSkill(r *http.Request, uid, action, outcome string)
 		Ts:           time.Now().UnixMilli(),
 		UserID:       uid,
 		UserIDType:   audit.UserIDTypeRegistered,
-		Platform:     audit.PlatformWebChat,
+		Platform:     platform,
 		Action:       action,
 		ResourceType: "skill",
 		Outcome:      outcome,

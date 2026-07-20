@@ -136,7 +136,8 @@
       "general": "常规",
       "ai": "AI 配置",
       "members": "成员",
-      "profile": "个人资料"
+      "profile": "个人资料",
+      "skills": "技能"
     },
     "heading": {
       "general": {
@@ -154,6 +155,10 @@
       "members": {
         "title": "成员管理",
         "desc": "邀请新成员、管理已启用的团队账号并更新权限。"
+      },
+      "skills": {
+        "title": "工作区技能",
+        "desc": "管理此工作区下安装的自定义技能。全局技能是只读的。"
       }
     },
     "action": {
@@ -173,7 +178,7 @@
       "workspace_name": "工作区的显示名称，用于工作区切换栏及页眉。",
       "worker_preference": "选择在此工作区中启动新会话时使用的 Agent 程序。已有会话将保留其当前的引擎配置。",
       "permission_mode": "控制新会话的“爆炸半径”：Agent 在编辑文件或运行命令时的自动化审批强度。仅对新会话生效，已有会话保持不变。",
-      "working_directory": "CLI 代理 Agent 在本地读取、写入和执行文件时的工作目录。会话执行时继承此设置，无法在单次会话中单独更改。",
+      "working_directory": "CLI 代理 Agent 在本地读取、写入 and 执行文件时的工作目录。会话执行时继承此设置，无法在单次会话中单独更改。",
       "no_active_workspace": "此标签页需要有处于激活状态的工作区连接。返回聊天页面选择或创建一个工作区。"
     },
     "success": {
@@ -218,6 +223,46 @@
       "auto-edit": "自动模式（Auto Mode） — 自动审批所有代码修改",
       "bypass": "最高权限（Bypass） — 完整命令行与文件访问权限",
       "read-only": "只读模式（Read Only） — 仅出具规划，不修改文件"
+    },
+    "skills": {
+      "label": {
+        "managed": "可管理",
+        "external": "外部（只读）"
+      },
+      "action": {
+        "upload": "上传技能",
+        "delete": "删除",
+        "install": "安装"
+      },
+      "empty": {
+        "title": "此工作区未安装任何自定义技能",
+        "desc": "上传技能 .zip 包，将其安装到此工作区的技能目录中。"
+      },
+      "dialog": {
+        "upload_title": "上传工作区技能",
+        "upload_desc": "选择一个根目录下含有 SKILL.md 的 .zip 包（或包含该文件的单个顶层目录）。",
+        "replace": "覆盖同名技能",
+        "uploading": "正在上传..."
+      },
+      "toast": {
+        "installed": "技能安装成功",
+        "installed_warning": "已安装 — {{warning}}",
+        "deleted": "技能删除成功"
+      },
+      "confirm": {
+        "delete_title": "删除工作区技能",
+        "delete_body": "确认删除技能 \"{{name}}\" 吗？此操作将从工作区技能目录中移除该技能，且无法撤销。"
+      },
+      "title": {
+        "list": "已安装技能"
+      },
+      "error": {
+        "not_zip": "仅接受 .zip 格式文件",
+        "no_file": "请选择一个 zip 文件",
+        "already_exists": "技能已存在 — 勾选“覆盖同名技能”以替换现有技能",
+        "install_failed": "安装失败",
+        "delete_failed": "删除失败"
+      }
     }
   },
   "context": {

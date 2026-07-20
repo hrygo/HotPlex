@@ -76,7 +76,7 @@ func respondJSON(w http.ResponseWriter, v any) {
 // authorizeSession performs auth + path ID extraction + session lookup + ownership check.
 // Returns (sessionID, sessionInfo, ok). If ok is false, an HTTP error has been written.
 func (g *GatewayAPI) authorizeSession(w http.ResponseWriter, r *http.Request) (string, *session.SessionInfo, bool) {
-	userID, _, err := g.auth.AuthenticateRequest(r)
+	userID, _, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
 		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
 		return "", nil, false
@@ -122,7 +122,7 @@ func (g *GatewayAPI) authorizeSession(w http.ResponseWriter, r *http.Request) (s
 // @Failure      500  {object}  admin.ErrorResponse  "Internal error"
 // @Router       /api/sessions [get]
 func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
-	userID, _, err := g.auth.AuthenticateRequest(r)
+	userID, _, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
 		g.log.Warn("gateway: list sessions auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
@@ -189,7 +189,7 @@ func (g *GatewayAPI) ListSessions(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object}  admin.ErrorResponse  "Failed to create session"
 // @Router       /api/sessions [post]
 func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
-	userID, botID, err := g.auth.AuthenticateRequest(r)
+	userID, botID, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
 		g.log.Warn("gateway: create session auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
@@ -692,7 +692,7 @@ type WorkerInstallationStatus struct {
 // @Failure      401  {object}  admin.ErrorResponse  "Unauthorized"
 // @Router       /api/workers [get]
 func (g *GatewayAPI) ListWorkers(w http.ResponseWriter, r *http.Request) {
-	_, _, err := g.auth.AuthenticateRequest(r)
+	_, _, _, err := g.auth.AuthenticateRequest(r)
 	if err != nil {
 		g.log.Warn("gateway: list workers auth failed", "method", r.Method, "path", r.URL.Path, "err", err)
 		writeAppError(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")

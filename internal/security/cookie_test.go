@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 )
 
@@ -219,14 +220,15 @@ func TestAuthenticateRequestCookie(t *testing.T) {
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.AddCookie(cookies[0])
 
-	uid, botID, err2 := auth.AuthenticateRequest(r2)
+	uid, botID, platform, err2 := auth.AuthenticateRequest(r2)
 	require.NoError(t, err2)
 	require.Equal(t, "cookie_user", uid)
 	require.Empty(t, botID)
+	require.Equal(t, audit.PlatformWebChat, platform)
 
 	// Request without any auth should fail.
 	r3 := httptest.NewRequest("GET", "/", nil)
-	_, _, err3 := auth.AuthenticateRequest(r3)
+	_, _, _, err3 := auth.AuthenticateRequest(r3)
 	require.ErrorIs(t, err3, ErrUnauthorized)
 }
 
@@ -250,10 +252,11 @@ func TestCookieAuthWithBotID(t *testing.T) {
 	r2 := httptest.NewRequest("GET", "/?bot_id=U12345", nil)
 	r2.AddCookie(cookies[0])
 
-	uid, botID, err2 := auth.AuthenticateRequest(r2)
+	uid, botID, platform, err2 := auth.AuthenticateRequest(r2)
 	require.NoError(t, err2)
 	require.Equal(t, "cookie_user", uid)
 	require.Equal(t, "U12345", botID)
+	require.Equal(t, audit.PlatformWebChat, platform)
 }
 
 func TestCookieAuthSameSiteConfig(t *testing.T) {
