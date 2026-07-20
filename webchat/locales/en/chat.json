@@ -225,6 +225,9 @@
       "read-only": "Read Only — Plan only"
     },
     "skills": {
+      "title": {
+        "list": "Installed Skills"
+      },
       "label": {
         "managed": "Managed",
         "external": "External (read-only)"

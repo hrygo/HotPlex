@@ -225,6 +225,9 @@
       "read-only": "只读模式（Read Only） — 仅出具规划，不修改文件"
     },
     "skills": {
+      "title": {
+        "list": "已安装技能"
+      },
       "label": {
         "managed": "可管理",
         "external": "外部（只读）"

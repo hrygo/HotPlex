@@ -217,68 +217,73 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         </div>
       )}
 
-      {/* Header and Upload Action */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest">
-          {t('settings.skills.title.list', { defaultValue: 'Installed Skills' })}
-        </h3>
-        <button
-          type="button"
-          onClick={() => setShowUpload(true)}
-          className="rounded-lg bg-[var(--accent-gold)] px-3 py-1.5 text-xs font-medium text-[var(--bg-surface)] hover:opacity-90 cursor-pointer shadow-sm active:scale-[0.98] transition-all"
-        >
-          {t('settings.skills.action.upload', { defaultValue: 'Upload Skill' })}
-        </button>
-      </div>
+      {/* Header and Upload Action wrapped in a section to align layout */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[10px] font-mono font-bold text-[var(--text-faint)] uppercase tracking-widest">
+            {t('settings.skills.title.list', { defaultValue: 'Installed Skills' })}
+          </h3>
+          <button
+            type="button"
+            onClick={() => setShowUpload(true)}
+            className="px-3 py-1.5 rounded-lg bg-[var(--accent-gold)] text-black text-[10px] font-bold hover:bg-[var(--accent-gold-bright)] transition-all cursor-pointer shadow-sm flex items-center gap-1 active:scale-[0.98]"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            {t('settings.skills.action.upload', { defaultValue: 'Upload Skill' })}
+          </button>
+        </div>
 
-      {/* Skill List */}
-      <div className="space-y-2">
-        {skills.map((s) => {
-          // A skill is deletable if it is project-scoped (workspace) and managed.
-          const isDeletable = s.source === 'project' && s.managed;
+        {/* Skill List */}
+        <div className="space-y-2">
+          {skills.map((s) => {
+            // A skill is deletable if it is project-scoped (workspace) and managed.
+            const isDeletable = s.source === 'project' && s.managed;
 
-          return (
-            <div
-              key={`${s.source}/${s.name}`}
-              className="flex items-center justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-default)] transition-colors"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="truncate text-sm font-bold text-[var(--text-primary)]">{s.name}</span>
-                  <Badge
-                    kind={s.managed ? 'managed' : 'external'}
-                    label={s.managed ? t('settings.skills.label.managed') : t('settings.skills.label.external')}
-                  />
-                  <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
-                    {s.source === 'project' ? t('chat:settings.label.active_workspace') : t('chat:settings.group.personal')}
-                  </span>
+            return (
+              <div
+                key={`${s.source}/${s.name}`}
+                className="flex items-center justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-default)] transition-colors"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="truncate text-sm font-bold text-[var(--text-primary)]">{s.name}</span>
+                    <Badge
+                      kind={s.managed ? 'managed' : 'external'}
+                      label={s.managed ? t('settings.skills.label.managed') : t('settings.skills.label.external')}
+                    />
+                    <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+                      {s.source === 'project' ? t('chat:settings.label.active_workspace') : t('chat:settings.group.personal')}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed">{s.description}</p>
                 </div>
-                <p className="mt-1 text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed">{s.description}</p>
+                {isDeletable && (
+                  <button
+                    type="button"
+                    disabled={actionLoading === s.name}
+                    onClick={() => setDeleteTarget(s.name)}
+                    className="ml-3 shrink-0 rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] hover:border-[var(--accent-coral)]/30 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98]"
+                  >
+                    {t('settings.skills.action.delete', { defaultValue: 'Delete' })}
+                  </button>
+                )}
               </div>
-              {isDeletable && (
-                <button
-                  type="button"
-                  disabled={actionLoading === s.name}
-                  onClick={() => setDeleteTarget(s.name)}
-                  className="ml-3 shrink-0 rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] hover:border-[var(--accent-coral)]/30 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98]"
-                >
-                  {t('settings.skills.action.delete', { defaultValue: 'Delete' })}
-                </button>
-              )}
+            );
+          })}
+          {skills.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
+              <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">
+                {t('settings.skills.empty.title', { defaultValue: 'No skills installed in this workspace' })}
+              </p>
+              <p className="text-xs text-[var(--text-faint)] max-w-sm">
+                {t('settings.skills.empty.desc', { defaultValue: 'Upload a skill .zip to install it into this workspace\'s skills directory.' })}
+              </p>
             </div>
-          );
-        })}
-        {skills.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-[var(--border-subtle)] rounded-lg bg-[var(--bg-elevated)]/10">
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">
-              {t('settings.skills.empty.title', { defaultValue: 'No skills installed in this workspace' })}
-            </p>
-            <p className="text-xs text-[var(--text-faint)] max-w-sm">
-              {t('settings.skills.empty.desc', { defaultValue: 'Upload a skill .zip to install it into this workspace\'s skills directory.' })}
-            </p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </section>
 
       {/* Upload Dialog Modal Overlay */}
       {showUpload && (
