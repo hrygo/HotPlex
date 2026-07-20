@@ -3,7 +3,8 @@
  *
  * /api/skills — merged list (global + caller's workspaces + external read-only),
  * each entry carrying `managed` (true = under .agents/skills, UI-manageable).
- * /api/workspaces/{wid}/skills — workspace-scoped skill CRUD (zip install).
+ * /api/workspaces/{wid}/skills — workspace-scoped skill list (only skills installed
+ *   under that workspace's .agents/skills; issue #918) + zip install CRUD.
  *
  * Auth: same cookie/api-key channel as the rest of the user REST API (client.ts).
  */
@@ -44,6 +45,23 @@ export interface SkillInstallResult {
 export async function listSkills(signal?: AbortSignal): Promise<SkillListResponse> {
   const res = await fetch(`${BASE}/api/skills`, { headers: withAuth(), ...authOpts(), signal });
   if (!res.ok) throw new Error(await extractApiError(res, `listSkills failed: ${res.status}`));
+  return res.json();
+}
+
+// listWorkspaceSkills lists ONLY the skills installed under a workspace's
+// .agents/skills (issue #918) — no global, no .claude read-only, no other
+// workspaces. Used by the workspace Settings → Skills tab so its management
+// surface scopes strictly to that workspace's installed skills.
+export async function listWorkspaceSkills(
+  workspaceId: string,
+  signal?: AbortSignal,
+): Promise<SkillListResponse> {
+  const res = await fetch(`${BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/skills`, {
+    headers: withAuth(),
+    ...authOpts(),
+    signal,
+  });
+  if (!res.ok) throw new Error(await extractApiError(res, `listWorkspaceSkills failed: ${res.status}`));
   return res.json();
 }
 

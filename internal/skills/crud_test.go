@@ -272,3 +272,104 @@ func TestLocator_Install_ConcurrentReplaceIsSerialized(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 }
+
+// ─── ListWorkspaceInstalled（issue #918：workspace-only 列表）───────────────
+
+// writeReadonlySkill 在 dir/.claude/skills/<name> 落一个只读（非 managed）skill。
+func writeReadonlySkill(t *testing.T, dir, name string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude", "skills", name), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, ".claude", "skills", name, "SKILL.md"),
+		[]byte("---\nname: "+name+"\ndescription: read only\n---\n"), 0o644))
+}
+
+func TestLocator_ListWorkspaceInstalled_OnlyWorkspaceManaged(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	homeDir := t.TempDir()
+	workDir := t.TempDir()
+
+	// 全局 managed skill（home/.agents/skills）——必须被排除。
+	_, err := l.Install(context.Background(), ScopeGlobal, homeDir, "",
+		makeZip(t, map[string]string{"SKILL.md": "---\nname: glob\ndescription: g\n---\n"}), false)
+	require.NoError(t, err)
+	// workspace managed skill（workDir/.agents/skills）——唯一应返回者。
+	_, err = l.Install(context.Background(), ScopeWorkspace, workDir, homeDir,
+		makeZip(t, map[string]string{"SKILL.md": validFM}), false)
+	require.NoError(t, err)
+	// workspace 只读 skill（workDir/.claude/skills）——必须被排除。
+	writeReadonlySkill(t, workDir, "ro-skill")
+
+	got, err := l.ListWorkspaceInstalled(context.Background(), workDir)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "仅返回 workspace 安装的受管 skill")
+	require.Equal(t, "my-skill", got[0].Name)
+	require.True(t, got[0].Managed)
+	require.Equal(t, SourceProject, got[0].Source)
+}
+
+func TestLocator_ListWorkspaceInstalled_ExcludesOtherWorkspace(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	wsA, wsB := t.TempDir(), t.TempDir()
+	_, err := l.Install(context.Background(), ScopeWorkspace, wsA, "",
+		makeZip(t, map[string]string{"SKILL.md": validFM}), false)
+	require.NoError(t, err)
+
+	got, err := l.ListWorkspaceInstalled(context.Background(), wsB)
+	require.NoError(t, err)
+	require.Empty(t, got, "其他 workspace 的 skill 不得出现")
+}
+
+func TestLocator_ListWorkspaceInstalled_EmptyOrMissingDir(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	// 空 workDir（无 .agents/skills）→ 空切片、无错误（非 nil，JSON 序列化为 []）。
+	got, err := l.ListWorkspaceInstalled(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+
+	// 空 workDir 字符串 → 空切片、无错误。
+	got, err = l.ListWorkspaceInstalled(context.Background(), "")
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+func TestLocator_ListWorkspaceInstalled_InvalidatedByWrite(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	workDir := t.TempDir()
+	// 预热 workspace-installed 缓存（空）。
+	_, err := l.ListWorkspaceInstalled(context.Background(), workDir)
+	require.NoError(t, err)
+	require.Contains(t, l.cache, wsInstalledCacheKey(workDir))
+
+	// workspace 写（Install）经 Invalidate 同步失效该键。
+	_, err = l.Install(context.Background(), ScopeWorkspace, workDir, "",
+		makeZip(t, map[string]string{"SKILL.md": validFM}), false)
+	require.NoError(t, err)
+	_, cached := l.cache[wsInstalledCacheKey(workDir)]
+	require.False(t, cached, "Install 必须失效 workspace-installed 缓存键")
+
+	// 再次列表反映最新（不返回陈旧空列表）。
+	got, err := l.ListWorkspaceInstalled(context.Background(), workDir)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "my-skill", got[0].Name)
+
+	// Delete 同样失效该键。
+	require.NoError(t, l.Delete(context.Background(), ScopeWorkspace, workDir, "my-skill"))
+	got, err = l.ListWorkspaceInstalled(context.Background(), workDir)
+	require.NoError(t, err)
+	require.Empty(t, got)
+}

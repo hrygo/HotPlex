@@ -346,6 +346,7 @@ func setupRoutes(
 		}
 		mux.Handle("GET /api/skills", corsMw(http.HandlerFunc(skillHandlers.ListMerged)))
 		mux.Handle("GET /api/skills/{name}", corsMw(http.HandlerFunc(skillHandlers.GetMerged)))
+		mux.Handle("GET /api/workspaces/{wid}/skills", corsMw(http.HandlerFunc(skillHandlers.ListWorkspace)))
 		mux.Handle("POST /api/workspaces/{wid}/skills", corsMw(csrfMw(http.HandlerFunc(skillHandlers.InstallWorkspace))))
 		mux.Handle("GET /api/workspaces/{wid}/skills/{name}", corsMw(http.HandlerFunc(skillHandlers.GetWorkspace)))
 		mux.Handle("DELETE /api/workspaces/{wid}/skills/{name}", corsMw(csrfMw(http.HandlerFunc(skillHandlers.DeleteWorkspace))))

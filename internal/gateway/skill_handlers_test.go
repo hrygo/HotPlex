@@ -252,3 +252,94 @@ func TestSkillHandlers_GetMerged_NotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 	require.Contains(t, w.Body.String(), "SKILL_NOT_FOUND")
 }
+
+// ─── ListWorkspace（issue #918：workspace-only 列表端点）────────────────────
+
+func listWorkspaceReq(wid, cookie string) *http.Request {
+	req := skillReq(http.MethodGet, "/api/workspaces/"+wid+"/skills", cookie, nil, "")
+	req.SetPathValue("wid", wid)
+	return req
+}
+
+func TestSkillHandlers_ListWorkspace_OnlyWorkspaceSkills(t *testing.T) {
+	t.Parallel()
+	sh, workDir, home, cookie := newSkillHandlersEnv(t)
+
+	// 全局 managed skill —— 不得出现在 workspace 列表。
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".agents", "skills", "glob"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".agents", "skills", "glob", "SKILL.md"),
+		[]byte("---\nname: glob\ndescription: a global skill\n---\n"), 0o644))
+	// workspace 只读 skill（.claude）—— 不得出现。
+	require.NoError(t, os.MkdirAll(filepath.Join(workDir, ".claude", "skills", "ro-skill"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, ".claude", "skills", "ro-skill", "SKILL.md"),
+		[]byte("---\nname: ro-skill\ndescription: read only\n---\n"), 0o644))
+	// workspace 安装的 managed skill —— 唯一应返回者。
+	require.Equal(t, http.StatusOK, installWorkspace(t, sh, cookie, map[string]string{"SKILL.md": testSkillFM}, false).Code)
+
+	w := httptest.NewRecorder()
+	sh.ListWorkspace(w, listWorkspaceReq("ws-skill", cookie))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "my-skill")
+	require.Contains(t, w.Body.String(), `"total":1`)
+	require.NotContains(t, w.Body.String(), "glob", "全局 skill 不得混入 workspace 列表")
+	require.NotContains(t, w.Body.String(), "ro-skill", ".claude 只读 skill 不得混入 workspace 列表")
+}
+
+func TestSkillHandlers_ListWorkspace_Empty(t *testing.T) {
+	t.Parallel()
+	sh, _, _, cookie := newSkillHandlersEnv(t)
+	w := httptest.NewRecorder()
+	sh.ListWorkspace(w, listWorkspaceReq("ws-skill", cookie))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"skills":[]`)
+	require.Contains(t, w.Body.String(), `"total":0`)
+}
+
+func TestSkillHandlers_ListWorkspace_RequiresAuth(t *testing.T) {
+	t.Parallel()
+	sh, _, _, _ := newSkillHandlersEnv(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-skill/skills", nil) // 无 cookie
+	req.SetPathValue("wid", "ws-skill")
+	w := httptest.NewRecorder()
+	sh.ListWorkspace(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestSkillHandlers_ListWorkspace_NotOwner(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.createUser(t, "alice", "alicepass", "user")
+	aliceCookie := env.loginAs(t, "alice", "alicepass", http.StatusOK)
+
+	ws := &session.Workspace{ID: "ws-skill", OwnerUserID: "u-admin", Name: "test-ws", WorkDir: t.TempDir(), Status: "active"}
+	require.NoError(t, env.store.CreateWorkspace(context.Background(), ws, 1700000000))
+
+	locator := skills.NewLocator(slog.Default(), time.Minute)
+	t.Cleanup(locator.Close)
+	sh := NewSkillHandlers(locator, env.store, env.auth, slog.Default())
+	sh.homeFn = func() string { return t.TempDir() }
+
+	w := httptest.NewRecorder()
+	sh.ListWorkspace(w, listWorkspaceReq("ws-skill", aliceCookie))
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "WORKSPACE_FORBIDDEN")
+}
+
+func TestSkillHandlers_ListWorkspace_AdminMayListOthersWorkspace(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	env.createUser(t, "bob", "bobpass", "user")
+	ws := &session.Workspace{ID: "ws-bob", OwnerUserID: "u-bob", Name: "bob-ws", WorkDir: t.TempDir(), Status: "active"}
+	require.NoError(t, env.store.CreateWorkspace(context.Background(), ws, 1700000000))
+
+	locator := skills.NewLocator(slog.Default(), time.Minute)
+	t.Cleanup(locator.Close)
+	sh := NewSkillHandlers(locator, env.store, env.auth, slog.Default())
+	sh.homeFn = func() string { return t.TempDir() }
+
+	adminCookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+	w := httptest.NewRecorder()
+	sh.ListWorkspace(w, listWorkspaceReq("ws-bob", adminCookie))
+	require.Equal(t, http.StatusOK, w.Code, "admin 应可列任意 workspace skill")
+	require.Contains(t, w.Body.String(), `"total":0`)
+}
