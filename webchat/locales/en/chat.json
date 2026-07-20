@@ -251,7 +251,10 @@
     "search": { "loading": "Searching..." },
     "list": { "loading": "Listing directory..." },
     "todo": { "loading": "Retrieving latest tasks..." },
-    "filediff": { "loading": "Synthesizing file patch..." },
+    "filediff": {
+      "loading": "Synthesizing file patch...",
+      "unknown_file": "unknown file"
+    },
     "interaction": {
       "timeout": "Expires in {{seconds}}s",
       "permission": {
@@ -263,7 +266,14 @@
         "submitting": "Submitting approval...",
         "failed": "Submission failed: {{error}}",
         "approve": "Approve",
-        "reject": "Reject"
+        "reject": "Reject",
+        "command_to_execute": "Command to Execute",
+        "action": "Action",
+        "target": "Target",
+        "reason": "Reason",
+        "allowed_directories": "Allowed Directories",
+        "allowed_patterns": "Allowed Patterns",
+        "additional_parameters": "Additional Parameters"
       },
       "question": {
         "title": "Input Request",
