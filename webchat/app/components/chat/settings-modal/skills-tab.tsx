@@ -224,9 +224,16 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                     errMsg = t("settings.skills.error.not_found", {
                         defaultValue: "Skill not found.",
                     });
+                } else {
+                    // Only unexpected errors belong in the console. Known SKILL_*
+                    // validation codes are user-input issues already surfaced in the
+                    // dialog — logging them as console errors is just noise.
+                    console.error(err);
                 }
                 // Any unmatched code (e.g. INTERNAL) or raw technical string must never
                 // leak to the user — keep the friendly install_failed default instead.
+            } else {
+                console.error(err);
             }
             setUploadError(errMsg);
         } finally {
