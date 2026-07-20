@@ -958,7 +958,7 @@ Gateway 返回 `skills_list` 事件：
     "type": "skills_list",
     "data": {
       "skills": [
-        { "name": "brainstorming", "description": "Collaborative design brainstorming", "source": "global" },
+        { "name": "brainstorming", "description": "Collaborative design brainstorming", "source": "global", "managed": true },
         { "name": "systematic-debugging", "description": "Structured bug diagnosis", "source": "project" }
       ],
       "total": 2
@@ -974,6 +974,7 @@ Gateway 返回 `skills_list` 事件：
 | `name`        | string   | Skill 名称，全局唯一标识                |
 | `description` | string   | Skill 功能描述                          |
 | `source`      | string   | 来源：`global`（用户级）或 `project`（项目级） |
+| `managed`     | bool     | `true` = 在 `.agents/skills`（UI 可安装/删除）；`omitempty` 时省略 = 只读外部 skill（`.claude`/`.hotplex`），issue #910 |
 
 **完成后 Gateway 自动发送 `done` 事件**，客户端应据此清除 `isRunning` 状态。
 

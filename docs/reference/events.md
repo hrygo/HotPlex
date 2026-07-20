@@ -429,6 +429,13 @@ type SkillsListData struct {
     Total  int          `json:"total"`
     Filter string       `json:"filter,omitempty"`
 }
+
+type SkillEntry struct {
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    Source      string `json:"source"`            // "global"（home）或 "project"（workspace/workDir）
+    Managed     bool   `json:"managed,omitempty"` // issue #910：true = 在 .agents/skills（UI 可管理/可写）
+}
 ```
 
 #### `worker_command` — Worker stdio 命令触发
