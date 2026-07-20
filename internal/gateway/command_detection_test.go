@@ -536,6 +536,28 @@ func TestHandleInput_ControlCommand_SendsDeliveredAck(t *testing.T) {
 	require.NotEmpty(t, ackData["client_message_id"])
 }
 
+func TestHandleInput_FailedControlCommand_DoesNotSendDeliveredAck(t *testing.T) {
+	t.Parallel()
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_ctrl_ack_failure"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	clientConn, serverConn := newTestWSConnPair(t)
+	t.Cleanup(func() { clientConn.Close() })
+	hub.JoinSession(sid, newConn(hub, clientConn, sid, nil))
+
+	// A non-owner cannot reset the session. The client must receive the failed
+	// outcome, rather than a synthetic delivered acknowledgement.
+	env := inputEnvelopeWithOwner(sid, "other-user", "/reset")
+	require.Error(t, handler.handleInput(context.Background(), env))
+
+	got := readNextEnvelope(t, serverConn)
+	require.Equal(t, events.Error, got.Event.Type)
+}
+
 func TestHandleInput_HelpCommand_WithWhitespace(t *testing.T) {
 	t.Parallel()
 	handler, mgr, hub, _ := newHandlerWithRealStore(t)

@@ -458,43 +458,30 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			wantSuccess: true,
 		},
 		{
-			name: "plan denies all write-capable tools",
-			mode: "plan",
+			name: "plan denies by default and ignores write-capable allowedTools",
+			mode: "plan", allowedTools: []string{"Read", "Bash", "Write", "custom_write"},
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				perms := reqBody["permission"].([]any)
-				// 1 read-allow + 5 write-deny (edit, write, bash, shell, patch)
-				require.Len(t, perms, 6)
-				readRule := perms[0].(map[string]any)
-				require.Equal(t, "read", readRule["permission"])
-				require.Equal(t, "allow", readRule["action"])
-				deniedTools := map[string]bool{}
+				require.NotEmpty(t, perms)
+
+				// OpenCode allows unmatched permissions by default, so the first
+				// rule must deny every capability before known read-only operations
+				// are selectively re-enabled.
+				defaultRule := perms[0].(map[string]any)
+				require.Equal(t, "*", defaultRule["permission"])
+				require.Equal(t, "deny", defaultRule["action"])
+				require.Equal(t, "*", defaultRule["pattern"])
+
+				allowed := map[string]bool{}
 				for _, p := range perms[1:] {
 					rule := p.(map[string]any)
-					require.Equal(t, "deny", rule["action"], "write tool %s should be denied", rule["permission"])
-					deniedTools[rule["permission"].(string)] = true
+					require.Equal(t, "allow", rule["action"])
+					allowed[rule["permission"].(string)] = true
 				}
-				for _, tool := range []string{"edit", "write", "bash", "shell", "patch"} {
-					require.True(t, deniedTools[tool], "%s should be denied in plan mode", tool)
+				for _, permission := range []string{"read", "glob", "grep", "list", "lsp", "webfetch", "websearch"} {
+					require.True(t, allowed[permission], "%s should remain available in plan mode", permission)
 				}
-			},
-			wantSuccess: true,
-		},
-		{
-			name: "plan + allowedTools keeps deny rules and appends tool allows",
-			mode: "plan", allowedTools: []string{"Read"},
-			checkBody: func(t *testing.T, reqBody map[string]any) {
-				perms := reqBody["permission"].([]any)
-				// 1 read-allow + 5 write-deny + 1 tool-allow
-				require.Len(t, perms, 7)
-				readRule := perms[0].(map[string]any)
-				require.Equal(t, "read", readRule["permission"])
-				for _, p := range perms[1:6] {
-					rule := p.(map[string]any)
-					require.Equal(t, "deny", rule["action"])
-				}
-				toolRule := perms[6].(map[string]any)
-				require.Equal(t, "tool", toolRule["permission"])
-				require.Equal(t, "Read", toolRule["pattern"])
+				require.False(t, allowed["tool"], "allowed_tools must not reopen write-capable tools in plan mode")
 			},
 			wantSuccess: true,
 		},

@@ -161,7 +161,9 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		// InputAck/Done/Error — without this synthetic "delivered" ack the UI
 		// stays frozen for up to the 5-minute settle timeout after commands
 		// like /reset that only emit a State event.
-		h.ackControlCommand(ctx, env)
+		if err == nil {
+			h.ackControlCommand(ctx, env)
+		}
 		return err
 	}
 

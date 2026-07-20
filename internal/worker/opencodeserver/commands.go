@@ -232,22 +232,22 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	case "plan":
-		// Read-only: explicitly deny ALL write-capable tools. OCS's permission
-		// system is an opt-in allowlist — when no rule matches a tool call, the
-		// default action is ALLOW (not ask or deny). Simply omitting write
-		// permissions (as the old code did) silently lets edits go through.
-		// Each write tool must be denied individually because the agent can
-		// pivot between them (e.g. use bash when edit is unavailable).
+		// Read-only: OCS allows unmatched permissions by default. Deny every
+		// capability first, then selectively enable the built-in read-only
+		// operations. This also keeps custom tools, MCP tools, and subagents
+		// from creating a write-capable bypass.
 		rules = []map[string]any{
+			{"permission": "*", "action": "deny", "pattern": "*"},
 			{"permission": "read", "action": "allow", "pattern": "*"},
-			{"permission": "edit", "action": "deny", "pattern": "*"},
-			{"permission": "write", "action": "deny", "pattern": "*"},
-			{"permission": "bash", "action": "deny", "pattern": "*"},
-			{"permission": "shell", "action": "deny", "pattern": "*"},
-			{"permission": "patch", "action": "deny", "pattern": "*"},
+			{"permission": "glob", "action": "allow", "pattern": "*"},
+			{"permission": "grep", "action": "allow", "pattern": "*"},
+			{"permission": "list", "action": "allow", "pattern": "*"},
+			{"permission": "lsp", "action": "allow", "pattern": "*"},
+			{"permission": "webfetch", "action": "allow", "pattern": "*"},
+			{"permission": "websearch", "action": "allow", "pattern": "*"},
 		}
 		if len(allowedTools) > 0 {
-			slog.Warn("opencode: plan mode with allowed_tools; write-capable tools remain denied",
+			slog.Warn("opencode: ignoring allowed_tools in plan mode to preserve read-only access",
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	case "acceptEdits":
@@ -264,9 +264,12 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	}
-	// Apply allowed tools whitelist across all modes.
-	for _, tool := range allowedTools {
-		rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
+	// Apply allowed tools whitelist outside plan mode. Plan mode starts from a
+	// deny-all baseline, so a caller-supplied allow rule could reopen writes.
+	if mode != "plan" {
+		for _, tool := range allowedTools {
+			rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
+		}
 	}
 	slog.Info("opencode: applying permission rules to session", "session_id", c.getSessionID(), "mode", mode, "rules", rules)
 	if err := c.doPatch(ctx, "/session/"+url.PathEscape(c.getSessionID()), map[string]any{"permission": rules}); err != nil {
