@@ -52,6 +52,10 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
   const abortRef = useRef<AbortController | null>(null);
   const isMounted = useRef(false);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
+
   const showStatus = (type: 'success' | 'error' | 'warning', text: string) => {
     if (!isMounted.current) return;
     setStatusMsg({ type, text });
@@ -126,18 +130,25 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
       }
     } catch (err) {
       if (!isMounted.current) return;
-      const status = (err as any).status;
-      if (status === 409) {
-        showStatus(
-          'error',
-          t('settings.skills.error.already_exists', { defaultValue: 'Skill already exists — enable "Replace existing" to overwrite' })
-        );
-      } else {
-        showStatus(
-          'error',
-          err instanceof Error ? err.message : t('settings.skills.error.install_failed', { defaultValue: 'Install failed' })
-        );
+      console.error(err);
+      let errMsg = t('settings.skills.error.install_failed', { defaultValue: 'Install failed' });
+      if (err instanceof Error) {
+        const msg = err.message;
+        if (msg.includes('SKILL_INVALID_ZIP') || msg.includes('invalid zip archive')) {
+          errMsg = t('settings.skills.error.invalid_zip', { defaultValue: 'Invalid zip archive. Please ensure the file is not corrupted.' });
+        } else if (msg.includes('SKILL_FILE_TYPE_BLOCKED') || msg.includes('file type blocked')) {
+          errMsg = t('settings.skills.error.file_type_blocked', { defaultValue: 'Contains blocked file types.' });
+        } else if (msg.includes('SKILL_INVALID_FORMAT') || msg.includes('invalid format') || msg.includes('no SKILL.md found') || msg.includes('missing frontmatter') || msg.includes('no SKILL.md in')) {
+          errMsg = t('settings.skills.error.invalid_format', { defaultValue: 'Invalid skill format. Ensure root contains a valid SKILL.md file with YAML frontmatter.' });
+        } else if (msg.includes('SKILL_ALREADY_EXISTS') || msg.includes('already exists')) {
+          errMsg = t('settings.skills.error.already_exists', { defaultValue: 'Skill already exists — enable "Replace existing" to overwrite.' });
+        } else if (msg.includes('SKILL_NOT_FOUND') || msg.includes('not found')) {
+          errMsg = t('settings.skills.error.not_found', { defaultValue: 'Skill not found.' });
+        } else {
+          errMsg = msg;
+        }
       }
+      showStatus('error', errMsg);
     } finally {
       if (isMounted.current) setUploading(false);
     }
@@ -153,10 +164,16 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
       }
     } catch (err) {
       if (isMounted.current) {
-        showStatus(
-          'error',
-          err instanceof Error ? err.message : t('settings.skills.error.delete_failed', { defaultValue: 'Delete failed' })
-        );
+        let errMsg = t('settings.skills.error.delete_failed', { defaultValue: 'Delete failed' });
+        if (err instanceof Error) {
+          const msg = err.message;
+          if (msg.includes('SKILL_NOT_FOUND') || msg.includes('not found')) {
+            errMsg = t('settings.skills.error.not_found', { defaultValue: 'Skill not found.' });
+          } else {
+            errMsg = msg;
+          }
+        }
+        showStatus('error', errMsg);
       }
     } finally {
       if (isMounted.current) {
@@ -191,6 +208,18 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
       </div>
     );
   }
+
+  // Pagination calculations
+  const totalPages = Math.ceil(skills.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const paginatedSkills = skills.slice(startIndex, startIndex + pageSize);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(skills.length / pageSize));
+    if (currentPage > maxPage) {
+      setCurrentPage(maxPage);
+    }
+  }, [skills.length, currentPage]);
 
   return (
     <TabPanel>
@@ -237,7 +266,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
         {/* Skill List */}
         <div className="space-y-2">
-          {skills.map((s) => {
+          {paginatedSkills.map((s) => {
             // A skill is deletable if it is project-scoped (workspace) and managed.
             const isDeletable = s.source === 'project' && s.managed;
 
@@ -283,34 +312,81 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
             </div>
           )}
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-4 border-t border-[var(--border-subtle)] mt-4">
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+            >
+              {t('settings.skills.pagination.prev', { defaultValue: 'Previous' })}
+            </button>
+            <span className="text-[10px] font-mono text-[var(--text-muted)] font-bold">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+            >
+              {t('settings.skills.pagination.next', { defaultValue: 'Next' })}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Upload Dialog Modal Overlay */}
       {showUpload && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300" onClick={closeUpload}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={closeUpload}>
           <div
-            className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-glass)] backdrop-blur-xl p-6 rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] transform scale-100 transition-all duration-300 hover:border-[var(--accent-gold)]/20"
+            className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 rounded-xl shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Glow highlight */}
-            <div className="absolute -inset-px -z-10 rounded-[var(--radius-lg)] opacity-10 blur-sm bg-[var(--accent-gold)]" />
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-[var(--text-primary)]">
+                {t('settings.skills.dialog.upload_title', { defaultValue: 'Upload Workspace Skill' })}
+              </h2>
+              <button
+                onClick={closeUpload}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                aria-label={t('common:action.close')}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-              {t('settings.skills.dialog.upload_title', { defaultValue: 'Upload Workspace Skill' })}
-            </h2>
-            <p className="mt-2 text-xs text-[var(--text-muted)] leading-relaxed">
+            <p className="text-xs text-[var(--text-muted)] leading-relaxed">
               {t('settings.skills.dialog.upload_desc', { defaultValue: 'Select a .zip whose root has SKILL.md (or a single top-level dir containing it). Aligned with agentskills.io.' })}
             </p>
+
             <div className="mt-4">
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".zip"
                 onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
-                className="block w-full text-xs text-[var(--text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-[var(--accent-gold)] file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-[var(--bg-surface)] hover:file:opacity-90 file:cursor-pointer"
+                className="hidden"
               />
-              {file && <p className="mt-2 text-xs text-[var(--text-secondary)] font-mono">{file.name}</p>}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-hover)] px-3 py-2 text-[10px] font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)] transition-all cursor-pointer"
+                >
+                  {t('settings.skills.action.choose_file', { defaultValue: 'Choose File' })}
+                </button>
+                <span className="text-[10px] font-mono text-[var(--text-secondary)] truncate flex-1">
+                  {file ? file.name : t('settings.skills.placeholder.no_file', { defaultValue: 'No file chosen (.zip)' })}
+                </span>
+              </div>
             </div>
+
             <label className="mt-4 flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -324,7 +400,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
               <button
                 type="button"
                 onClick={closeUpload}
-                className="px-4 py-2 text-xs font-medium rounded-[var(--radius-md)] border border-[var(--border-default)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-medium rounded-md border border-[var(--border-default)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
               >
                 {t('common:action.cancel', { defaultValue: 'Cancel' })}
               </button>
@@ -332,8 +408,9 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                 type="button"
                 onClick={handleUpload}
                 disabled={uploading || !file}
-                className="px-4 py-2 text-xs font-semibold rounded-[var(--radius-md)] bg-[var(--accent-gold)] text-[var(--text-contrast)] hover:bg-[var(--accent-gold-bright)] transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                className="px-4 py-2 text-xs font-semibold rounded-md bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm flex items-center gap-1.5 cursor-pointer"
               >
+                {uploading && <div className="w-3 h-3 border-2 border-t-transparent border-black rounded-full animate-spin" />}
                 {uploading
                   ? t('settings.skills.dialog.uploading', { defaultValue: 'Uploading…' })
                   : t('settings.skills.action.install', { defaultValue: 'Install' })}
@@ -345,14 +422,11 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
       {/* Delete Confirmation Modal Overlay */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300" onClick={() => setDeleteTarget(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>
           <div
-            className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-glass)] backdrop-blur-xl p-6 rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] transform scale-100 transition-all duration-300 hover:border-[var(--accent-coral)]/30"
+            className="relative w-full max-w-md border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 rounded-xl shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Glow highlight */}
-            <div className="absolute -inset-px -z-10 rounded-[var(--radius-lg)] opacity-10 blur-sm bg-[var(--accent-coral)]" />
-
             <div className="flex items-start gap-4">
               {/* Warning Indicator */}
               <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-white/5 border border-white/10">
@@ -376,14 +450,14 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 text-xs font-medium rounded-[var(--radius-md)] border border-[var(--border-default)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-medium rounded-md border border-[var(--border-default)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
               >
                 {t('common:action.cancel', { defaultValue: 'Cancel' })}
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(deleteTarget)}
-                className="px-4 py-2 text-xs font-semibold rounded-[var(--radius-md)] bg-[var(--accent-coral)] text-white hover:bg-[var(--accent-coral)]/90 transition-all shadow-sm cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold rounded-md bg-[var(--accent-coral)] text-white hover:bg-[var(--accent-coral)]/90 transition-all shadow-sm cursor-pointer"
               >
                 {t('common:action.delete', { defaultValue: 'Delete' })}
               </button>

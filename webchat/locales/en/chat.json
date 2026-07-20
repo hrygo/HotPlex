@@ -235,7 +235,15 @@
       "action": {
         "upload": "Upload Skill",
         "delete": "Delete",
-        "install": "Install"
+        "install": "Install",
+        "choose_file": "Choose File"
+      },
+      "placeholder": {
+        "no_file": "No file chosen (.zip)"
+      },
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
       },
       "empty": {
         "title": "No skills installed in this workspace",
@@ -261,7 +269,11 @@
         "no_file": "Please select a zip file",
         "already_exists": "Skill already exists — enable \"Replace existing\" to overwrite",
         "install_failed": "Install failed",
-        "delete_failed": "Delete failed"
+        "delete_failed": "Delete failed",
+        "invalid_zip": "Invalid zip archive. Please ensure the file is not corrupted.",
+        "file_type_blocked": "The archive contains blocked file types.",
+        "invalid_format": "Invalid skill format. Please ensure that the root (or single top-level directory) contains a valid SKILL.md file with correct YAML frontmatter (name & description).",
+        "not_found": "Skill not found."
       }
     }
   },
