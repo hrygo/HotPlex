@@ -50,6 +50,62 @@ func TestOpenCodeServerWorker_New(t *testing.T) {
 	require.Nil(t, w.httpConn)
 }
 
+func TestOpenCodeServerWorker_InitSessionConnFailsClosedWhenPermissionSetupFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch, r.Method)
+		require.Equal(t, "/session/ocs-session-1", r.URL.Path)
+		rw.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	w := New()
+	w.httpAddr = server.URL
+	w.client = server.Client()
+	w.singleton = NewSingletonProcessManager(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		config.OpenCodeServerConfig{},
+	)
+
+	err := w.initSessionConn(context.Background(), "ocs-session-1", worker.SessionInfo{
+		UserID:         "test-user",
+		PermissionMode: worker.PermissionModeReadOnly,
+	})
+
+	require.ErrorContains(t, err, "opencode set permission")
+	require.Nil(t, w.httpConn, "permission setup failure must not leave a usable connection")
+}
+
+func TestOpenCodeServerWorker_ApplyPermissionsPreservesUnifiedTier(t *testing.T) {
+	t.Parallel()
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch, r.Method)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		rw.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	w := New()
+	w.cmd = &ServerCommander{
+		client:    server.Client(),
+		baseURL:   server.URL,
+		sessionID: "ocs-session-1",
+	}
+
+	err := w.applyPermissions(t.Context(), worker.SessionInfo{PermissionMode: worker.PermissionModeAutoEdit})
+	require.NoError(t, err)
+	perms := got["permission"].([]any)
+	for _, p := range perms {
+		rule := p.(map[string]any)
+		if rule["permission"] == "external_directory" {
+			require.Equal(t, "allow", rule["action"])
+			return
+		}
+	}
+	t.Fatal("missing external_directory rule")
+}
+
 func TestOpenCodeServerWorker_EnvBlocklist(t *testing.T) {
 	t.Parallel()
 	w := New()
@@ -712,4 +768,29 @@ func TestWait_CrashSub_NotRecovered(t *testing.T) {
 	code, err := w.Wait()
 	require.NoError(t, err)
 	require.Equal(t, 1, code, "Wait should return 1 when singleton has NOT recovered")
+}
+
+func TestInput_QuestionResponse_WithProjectDir(t *testing.T) {
+	t.Parallel()
+
+	var receivedPath string
+	var receivedQuery string
+	w, _ := newWorkerWithMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	})
+
+	w.httpConn.projectDir = "/test/workspace"
+
+	md := map[string]any{
+		"question_response": map[string]any{
+			"id":      "q_789",
+			"answers": map[string]string{"q1": "yes"},
+		},
+	}
+	err := w.Input(context.Background(), "", md)
+	require.NoError(t, err)
+	require.Equal(t, "/question/q_789/reply", receivedPath)
+	require.Equal(t, "directory=%2Ftest%2Fworkspace", receivedQuery)
 }

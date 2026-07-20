@@ -214,6 +214,7 @@ func (c *ServerCommander) setModel(_ context.Context, body map[string]any) (map[
 
 func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string]any) (map[string]any, error) {
 	mode, _ := body["mode"].(string)
+	permissionTier, _ := body["permission_tier"].(string)
 
 	// Extract AllowedTools for B3-2 绕行: convert tool whitelist to OCS permission rules.
 	allowedTools, _ := body["allowed_tools"].([]string)
@@ -232,30 +233,55 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	case "plan":
-		// Read-only allowed + write requires approval.
+		// Read-only: OCS allows unmatched permissions by default. Ask before every
+		// capability, then selectively enable built-in read-only operations. Writes
+		// therefore become permission requests instead of bypassing the workspace
+		// policy or being silently rejected without an approval card.
 		rules = []map[string]any{
+			{"permission": "*", "action": "ask", "pattern": "*"},
 			{"permission": "read", "action": "allow", "pattern": "*"},
+			{"permission": "glob", "action": "allow", "pattern": "*"},
+			{"permission": "grep", "action": "allow", "pattern": "*"},
+			{"permission": "list", "action": "allow", "pattern": "*"},
+			{"permission": "lsp", "action": "allow", "pattern": "*"},
+			{"permission": "webfetch", "action": "allow", "pattern": "*"},
+			{"permission": "websearch", "action": "allow", "pattern": "*"},
 		}
 		if len(allowedTools) > 0 {
-			slog.Warn("opencode: plan mode with allowed_tools may override read-only semantics",
+			slog.Warn("opencode: ignoring allowed_tools in plan mode to preserve read-only access",
 				"mode", mode, "allowed_tools", allowedTools)
 		}
-	case "acceptEdits":
-		// Auto-accept edits + reads; other ops still ask (issue #789 workspace/auto-edit tiers).
+	case "acceptEdits", worker.PermissionModeWorkspace, worker.PermissionModeAutoEdit:
+		// Both tiers auto-accept edits and reads. OpenCode evaluates
+		// external_directory separately before the file tool; its active agent
+		// profile permits that capability unless the session overrides it.
+		// Workspace preserves the boundary, whereas auto-edit deliberately
+		// retains its no-prompt semantics.
+		externalDirectoryAction := "ask"
+		if permissionTier == worker.PermissionModeAutoEdit || mode == worker.PermissionModeAutoEdit {
+			// auto-edit is intentionally broader than workspace: it is the
+			// user-selected no-prompt tier across all Worker implementations.
+			externalDirectoryAction = "allow"
+		}
 		rules = []map[string]any{
 			{"permission": "read", "action": "allow", "pattern": "*"},
 			{"permission": "edit", "action": "allow", "pattern": "*"},
+			{"permission": "external_directory", "action": externalDirectoryAction, "pattern": "*"},
 		}
 	default:
-		// No rules injected: OCS default (no matching rule → ask → publishes permission.asked).
+		// Unknown mode: no rules injected. Note: OCS defaults to ALLOW when no rule
+		// matches (opt-in allowlist), so this is NOT safe for restricting access.
 		if len(allowedTools) > 0 {
 			slog.Info("opencode: default mode with allowed_tools restricts to tool whitelist",
 				"mode", mode, "allowed_tools", allowedTools)
 		}
 	}
-	// Apply allowed tools whitelist across all modes.
-	for _, tool := range allowedTools {
-		rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
+	// Apply allowed tools whitelist outside plan mode. Plan mode starts from an
+	// ask-all baseline, so a caller-supplied allow rule could reopen automatic writes.
+	if mode != "plan" {
+		for _, tool := range allowedTools {
+			rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
+		}
 	}
 	slog.Info("opencode: applying permission rules to session", "session_id", c.getSessionID(), "mode", mode, "rules", rules)
 	if err := c.doPatch(ctx, "/session/"+url.PathEscape(c.getSessionID()), map[string]any{"permission": rules}); err != nil {

@@ -155,6 +155,15 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		return nil
 	}
 	if handled, err := h.tryCommandDispatch(ctx, env, content); handled {
+		// Control/help/worker commands bypass the durable execution path, so
+		// no InputAck or Done is ever sent. The webchat client locks
+		// pendingInput on every sendInput and only releases on a terminal
+		// InputAck/Done/Error — without this synthetic "delivered" ack the UI
+		// stays frozen for up to the 5-minute settle timeout after commands
+		// like /reset that only emit a State event.
+		if err == nil {
+			h.ackControlCommand(ctx, env)
+		}
 		return err
 	}
 
@@ -643,6 +652,28 @@ func clientMessageID(env *events.Envelope) string {
 		return env.ID
 	}
 	return aep.NewID()
+}
+
+// ackControlCommand sends a synthetic "delivered" InputAck for an input that
+// was intercepted as a control/help/worker command instead of being routed to
+// the durable execution pipeline. The webchat client arms a pending-input lock
+// on every sendInput that only clears on a terminal InputAck/Done/Error; without
+// this ack the UI locks for the full settle timeout (5 min) after commands like
+// /reset that emit only a State event.
+func (h *Handler) ackControlCommand(ctx context.Context, env *events.Envelope) {
+	if h.hub == nil {
+		return
+	}
+	ack := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.InputAck, events.InputAckData{
+		ClientMessageID: clientMessageID(env),
+		ExecutionID:     "cmd-" + env.ID,
+		Status:          events.ExecutionStatusDelivered,
+	})
+	ack.Priority = events.PriorityControl
+	ack.OwnerID = env.OwnerID
+	if err := h.hub.SendToSession(context.WithoutCancel(ctx), ack); err != nil {
+		h.log.Warn("gateway: control command ack failed", "err", err, "session_id", env.SessionID)
+	}
 }
 
 func (h *Handler) finishInputExecution(ctx context.Context, record *execution.Record, status execution.Status, code events.ErrorCode) error {

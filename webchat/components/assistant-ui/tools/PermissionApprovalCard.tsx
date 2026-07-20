@@ -1,10 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import type { InteractionState, InteractionStatus } from "@/lib/adapters/hotplex-runtime-adapter";
 import { useInteractionTimeout } from "@/hooks/useInteractionTimeout";
+
+interface ParsedPermissionArgs {
+  command?: string;
+  action?: string;
+  Action?: string;
+  target?: string;
+  Target?: string;
+  reason?: string;
+  Reason?: string;
+  directories?: string[];
+  patterns?: string[];
+  toolAction?: string;
+  toolSummary?: string;
+  [key: string]: any;
+}
+
+function parsePermissionArgs(args: any): ParsedPermissionArgs | null {
+  if (!args) return null;
+  if (Array.isArray(args)) {
+    if (args.length === 1 && typeof args[0] === 'string') {
+      try {
+        const parsed = JSON.parse(args[0]);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      } catch (e) {
+        // Not JSON
+      }
+    }
+  } else if (typeof args === 'string') {
+    try {
+      const parsed = JSON.parse(args);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    } catch (e) {
+      // Not JSON
+    }
+  } else if (typeof args === 'object') {
+    return args;
+  }
+  return null;
+}
 
 interface PermissionApprovalCardProps {
   toolName: string;
@@ -30,8 +73,21 @@ export function PermissionApprovalCard({
   const [reason, setReason] = useState("");
   const isInteractive = activeStatus === "pending" || activeStatus === "failed";
 
+  const parsed = parsePermissionArgs(args);
+
   const title = t("tool.interaction.permission.title", { defaultValue: "Tool Execution Approval" });
-  const descText = description || t("tool.interaction.permission.description", { defaultValue: "Agent requests permission to execute the following tool" });
+  
+  const defaultDesc = t("tool.interaction.permission.description", { defaultValue: "Agent requests permission to execute the following tool" });
+  let descText = description || defaultDesc;
+  if (parsed && (!description || description === defaultDesc)) {
+    if (parsed.toolAction) {
+      descText = parsed.toolAction;
+    } else if (parsed.toolSummary) {
+      descText = parsed.toolSummary;
+    } else if (parsed.reason || parsed.Reason) {
+      descText = parsed.reason || parsed.Reason || defaultDesc;
+    }
+  }
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -87,11 +143,122 @@ export function PermissionApprovalCard({
           <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-3">{descText}</p>
         )}
 
-        {args && Object.keys(args).length > 0 && (
-          <div className="mt-2 text-xs font-mono bg-[var(--bg-base)] border border-[var(--border-subtle)] rounded p-2.5 max-h-[160px] overflow-y-auto custom-scrollbar whitespace-pre-wrap text-[var(--text-primary)]">
-            {JSON.stringify(args, null, 2)}
-          </div>
-        )}
+        {args && Object.keys(args).length > 0 && (() => {
+          if (parsed) {
+            const displayAction = parsed.action || parsed.Action;
+            const displayTarget = parsed.target || parsed.Target;
+            const displayReason = parsed.reason || parsed.Reason;
+            
+            const renderedKeys = new Set([
+              'command', 'action', 'Action', 'target', 'Target', 'reason', 'Reason',
+              'directories', 'patterns', 'toolAction', 'toolSummary'
+            ]);
+            const extraKeys = Object.keys(parsed).filter(
+              k => !renderedKeys.has(k) && parsed[k] !== undefined && parsed[k] !== null
+            );
+
+            return (
+              <div className="mt-2 text-xs space-y-3 font-sans text-[var(--text-secondary)]">
+                {parsed.command && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      {t("tool.interaction.permission.command_to_execute", { defaultValue: "Command to Execute" })}
+                    </div>
+                    <div className="font-mono bg-[var(--bg-base)] border border-[var(--border-subtle)] rounded p-2.5 whitespace-pre-wrap break-all text-[var(--text-primary)]">
+                      <span className="text-[var(--accent-emerald)] select-none mr-1.5">$</span>
+                      {parsed.command}
+                    </div>
+                  </div>
+                )}
+                
+                {displayAction && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      {t("tool.interaction.permission.action", { defaultValue: "Action" })}:
+                    </span>
+                    <span className="font-mono bg-[var(--bg-elevated)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)] text-[var(--text-primary)] font-bold">
+                      {displayAction}
+                    </span>
+                  </div>
+                )}
+
+                {displayTarget && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      {t("tool.interaction.permission.target", { defaultValue: "Target" })}
+                    </div>
+                    <div className="font-mono bg-[var(--bg-base)] border border-[var(--border-subtle)] rounded p-2.5 whitespace-pre-wrap break-all text-[var(--text-primary)]">
+                      {displayTarget}
+                    </div>
+                  </div>
+                )}
+
+                {displayReason && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      {t("tool.interaction.permission.reason", { defaultValue: "Reason" })}
+                    </div>
+                    <p className="text-sm text-[var(--text-primary)] italic">&quot;{displayReason}&quot;</p>
+                  </div>
+                )}
+
+                {parsed.directories && Array.isArray(parsed.directories) && parsed.directories.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      {t("tool.interaction.permission.allowed_directories", { defaultValue: "Allowed Directories" })}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {parsed.directories.map((dir, idx) => (
+                        <span key={idx} className="font-mono text-[11px] bg-[var(--bg-base)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)] text-[var(--text-primary)] break-all">
+                          {dir}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {parsed.patterns && Array.isArray(parsed.patterns) && parsed.patterns.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      {t("tool.interaction.permission.allowed_patterns", { defaultValue: "Allowed Patterns" })}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {parsed.patterns.map((pat, idx) => (
+                        <span key={idx} className="font-mono text-[11px] bg-[var(--bg-base)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)] text-[var(--text-primary)] break-all">
+                          {pat}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {extraKeys.length > 0 && (
+                  <div className="space-y-1 mt-2 border-t border-[var(--border-subtle)] pt-2">
+                    <div className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1">
+                      {t("tool.interaction.permission.additional_parameters", { defaultValue: "Additional Parameters" })}
+                    </div>
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[11px]">
+                      {extraKeys.map(k => (
+                        <React.Fragment key={k}>
+                          <span className="text-[var(--text-faint)]">{k}:</span>
+                          <span className="text-[var(--text-primary)] break-all">
+                            {typeof parsed[k] === 'object' ? JSON.stringify(parsed[k]) : String(parsed[k])}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <div className="mt-2 text-xs font-mono bg-[var(--bg-base)] border border-[var(--border-subtle)] rounded p-2.5 max-h-[160px] overflow-y-auto custom-scrollbar whitespace-pre-wrap text-[var(--text-primary)]">
+              {JSON.stringify(args, null, 2)}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Action Buttons */}

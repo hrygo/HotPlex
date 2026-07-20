@@ -575,6 +575,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       case EventKind.State:
         this._state = (event.data as StateData).state;
         this.emit('state', event.data as StateData, env);
+        // A /reset (or /new) emits State with message "context_reset" instead
+        // of a Done. Release the pending-input lock so the UI does not freeze
+        // waiting for a terminal event that never comes. This is a client-side
+        // safety net; the gateway also sends a synthetic delivered InputAck.
+        if ((event.data as StateData).message === 'context_reset') {
+          this._settlePending({ kind: 'resolve' });
+        }
         break;
 
       case EventKind.InputAck: {

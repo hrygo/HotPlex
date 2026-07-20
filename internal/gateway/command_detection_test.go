@@ -50,6 +50,21 @@ func readNextEnvelope(t *testing.T, serverConn interface {
 	return env
 }
 
+// readNextNonAckEnvelope reads envelopes, skipping InputAck. Control commands
+// now emit a synthetic delivered InputAck before their behavioral response.
+func readNextNonAckEnvelope(t *testing.T, serverConn interface {
+	SetReadDeadline(time.Time) error
+	ReadMessage() (int, []byte, error)
+}) events.Envelope {
+	t.Helper()
+	for {
+		env := readNextEnvelope(t, serverConn)
+		if env.Event.Type != events.InputAck {
+			return env
+		}
+	}
+}
+
 // ─── Help Command Detection ────────────────────────────────────────────────
 
 func TestHandleInput_HelpCommand_QuestionMark(t *testing.T) {
@@ -70,7 +85,7 @@ func TestHandleInput_HelpCommand_QuestionMark(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read the help message from the server side of the WS pair.
-	got := readNextEnvelope(t, serverConn)
+	got := readNextNonAckEnvelope(t, serverConn)
 	require.Equal(t, events.Message, got.Event.Type)
 	msgData, ok := got.Event.Data.(map[string]any)
 	require.True(t, ok)
@@ -94,7 +109,7 @@ func TestHandleInput_HelpCommand_SlashHelp(t *testing.T) {
 	err = handler.handleInput(context.Background(), env)
 	require.NoError(t, err)
 
-	got := readNextEnvelope(t, serverConn)
+	got := readNextNonAckEnvelope(t, serverConn)
 	require.Equal(t, events.Message, got.Event.Type)
 	msgData, ok := got.Event.Data.(map[string]any)
 	require.True(t, ok)
@@ -118,7 +133,7 @@ func TestHandleInput_HelpCommand_DollarHelp(t *testing.T) {
 	err = handler.handleInput(context.Background(), env)
 	require.NoError(t, err)
 
-	got := readNextEnvelope(t, serverConn)
+	got := readNextNonAckEnvelope(t, serverConn)
 	require.Equal(t, events.Message, got.Event.Type)
 }
 
@@ -147,7 +162,7 @@ func TestHandleInput_HelpCommand_DoesNotReachWorker(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read the help message so the WS buffer is drained.
-	_ = readNextEnvelope(t, serverConn)
+	_ = readNextNonAckEnvelope(t, serverConn)
 
 	// Worker.Input must NOT have been called for help command.
 	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
@@ -492,6 +507,57 @@ func TestSanitizeLastInput_CommandWithTrailingPunctuation(t *testing.T) {
 
 // ─── Edge Cases ────────────────────────────────────────────────────────────
 
+// TestHandleInput_ControlCommand_SendsDeliveredAck verifies that a control
+// command (/reset, /gc, /help, etc.) sends a synthetic delivered InputAck so
+// the webchat client releases its pending-input lock. Without this ack the UI
+// freezes after /reset for up to the client's 5-minute settle timeout.
+func TestHandleInput_ControlCommand_SendsDeliveredAck(t *testing.T) {
+	t.Parallel()
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_ctrl_ack"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	clientConn, serverConn := newTestWSConnPair(t)
+	t.Cleanup(func() { clientConn.Close() })
+	hub.JoinSession(sid, newConn(hub, clientConn, sid, nil))
+
+	env := inputEnvelopeWithOwner(sid, "user1", "/help")
+	require.NoError(t, handler.handleInput(context.Background(), env))
+
+	// The first envelope must be the delivered InputAck.
+	ack := readNextEnvelope(t, serverConn)
+	require.Equal(t, events.InputAck, ack.Event.Type)
+	ackData, ok := ack.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, string(events.ExecutionStatusDelivered), ackData["status"])
+	require.NotEmpty(t, ackData["client_message_id"])
+}
+
+func TestHandleInput_FailedControlCommand_DoesNotSendDeliveredAck(t *testing.T) {
+	t.Parallel()
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_ctrl_ack_failure"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	clientConn, serverConn := newTestWSConnPair(t)
+	t.Cleanup(func() { clientConn.Close() })
+	hub.JoinSession(sid, newConn(hub, clientConn, sid, nil))
+
+	// A non-owner cannot reset the session. The client must receive the failed
+	// outcome, rather than a synthetic delivered acknowledgement.
+	env := inputEnvelopeWithOwner(sid, "other-user", "/reset")
+	require.Error(t, handler.handleInput(context.Background(), env))
+
+	got := readNextEnvelope(t, serverConn)
+	require.Equal(t, events.Error, got.Event.Type)
+}
+
 func TestHandleInput_HelpCommand_WithWhitespace(t *testing.T) {
 	t.Parallel()
 	handler, mgr, hub, _ := newHandlerWithRealStore(t)
@@ -509,7 +575,7 @@ func TestHandleInput_HelpCommand_WithWhitespace(t *testing.T) {
 	err = handler.handleInput(context.Background(), env)
 	require.NoError(t, err)
 
-	got := readNextEnvelope(t, serverConn)
+	got := readNextNonAckEnvelope(t, serverConn)
 	require.Equal(t, events.Message, got.Event.Type)
 }
 
@@ -529,7 +595,7 @@ func TestHandleInput_HelpCommand_FullWidthQuestionMark(t *testing.T) {
 	err = handler.handleInput(context.Background(), env)
 	require.NoError(t, err)
 
-	got := readNextEnvelope(t, serverConn)
+	got := readNextNonAckEnvelope(t, serverConn)
 	require.Equal(t, events.Message, got.Event.Type)
 }
 
@@ -554,7 +620,7 @@ func TestHandle_FullDispatch_HelpCommand(t *testing.T) {
 	err = handler.Handle(context.Background(), env)
 	require.NoError(t, err)
 
-	got := readNextEnvelope(t, serverConn)
+	got := readNextNonAckEnvelope(t, serverConn)
 	require.Equal(t, events.Message, got.Event.Type)
 	msgData, ok := got.Event.Data.(map[string]any)
 	require.True(t, ok)

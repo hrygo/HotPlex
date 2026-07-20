@@ -425,11 +425,12 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		mode         string
-		allowedTools []string
-		checkBody    func(*testing.T, map[string]any)
-		wantSuccess  bool
+		name           string
+		mode           string
+		permissionTier string
+		allowedTools   []string
+		checkBody      func(*testing.T, map[string]any)
+		wantSuccess    bool
 	}{
 		{
 			name: "bypassPermissions", mode: "bypassPermissions",
@@ -458,16 +459,67 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			wantSuccess: true,
 		},
 		{
-			name: "plan + allowedTools includes read-only + per-tool rules",
-			mode: "plan", allowedTools: []string{"Bash"},
+			name: "plan asks by default and ignores write-capable allowedTools",
+			mode: "plan", allowedTools: []string{"Read", "Bash", "Write", "custom_write"},
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				perms := reqBody["permission"].([]any)
-				require.Len(t, perms, 2)
-				readRule := perms[0].(map[string]any)
-				require.Equal(t, "read", readRule["permission"])
-				toolRule := perms[1].(map[string]any)
-				require.Equal(t, "tool", toolRule["permission"])
-				require.Equal(t, "Bash", toolRule["pattern"])
+				require.NotEmpty(t, perms)
+
+				// OpenCode allows unmatched permissions by default, so the first
+				// rule must ask before every capability while known read-only operations
+				// are selectively re-enabled.
+				defaultRule := perms[0].(map[string]any)
+				require.Equal(t, "*", defaultRule["permission"])
+				require.Equal(t, "ask", defaultRule["action"])
+				require.Equal(t, "*", defaultRule["pattern"])
+
+				allowed := map[string]bool{}
+				for _, p := range perms[1:] {
+					rule := p.(map[string]any)
+					require.Equal(t, "allow", rule["action"])
+					allowed[rule["permission"].(string)] = true
+				}
+				for _, permission := range []string{"read", "glob", "grep", "list", "lsp", "webfetch", "websearch"} {
+					require.True(t, allowed[permission], "%s should remain available in plan mode", permission)
+				}
+				require.False(t, allowed["tool"], "allowed_tools must not reopen write-capable tools in plan mode")
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "acceptEdits asks before accessing an external directory",
+			mode: "acceptEdits", permissionTier: worker.PermissionModeWorkspace,
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				var externalDirRule map[string]any
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					if rule["permission"] == "external_directory" {
+						externalDirRule = rule
+						break
+					}
+				}
+				require.Equal(t, map[string]any{
+					"permission": "external_directory",
+					"action":     "ask",
+					"pattern":    "*",
+				}, externalDirRule)
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "auto-edit permits an external directory without a prompt",
+			mode: "acceptEdits", permissionTier: worker.PermissionModeAutoEdit,
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					if rule["permission"] == "external_directory" {
+						require.Equal(t, "allow", rule["action"])
+						return
+					}
+				}
+				t.Fatal("missing external_directory rule")
 			},
 			wantSuccess: true,
 		},
@@ -503,6 +555,9 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 			reqBody := map[string]any{"mode": tt.mode}
+			if tt.permissionTier != "" {
+				reqBody["permission_tier"] = tt.permissionTier
+			}
 			if len(tt.allowedTools) > 0 {
 				reqBody["allowed_tools"] = tt.allowedTools
 			}

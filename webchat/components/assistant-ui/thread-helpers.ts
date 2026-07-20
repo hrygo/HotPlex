@@ -27,11 +27,11 @@ export const messageVariants = {
 export function extractCommand(args: any) { return args?.command || args?.Command || ""; }
  
 export function extractFilePath(args: any) { 
-  return args?.file_path || args?.path || args?.target_file || args?.TargetFile || args?.targetFile || args?.AbsolutePath || args?.absolutePath || ""; 
+  return args?.file_path || args?.filePath || args?.filepath || args?.path || args?.target_file || args?.TargetFile || args?.targetFile || args?.AbsolutePath || args?.absolutePath || args?.file || args?.filename || args?.fileName || ""; 
 }
  
 export function extractFileContent(args: any, result: any) { 
-  return args?.content || args?.code || args?.ReplacementContent || args?.CodeContent || (typeof result === "string" ? result : ""); 
+  return args?.content || args?.code || args?.ReplacementContent || args?.CodeContent || args?.replacementContent || args?.codeContent || args?.replacement || args?.text || (typeof result === "string" ? result : ""); 
 }
 
 export interface Suggestion {

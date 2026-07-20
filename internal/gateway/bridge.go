@@ -263,6 +263,12 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 	if p.WorkspaceID != "" {
 		if err := b.sm.SetWorkspaceID(ctx, p.ID, p.WorkspaceID); err != nil {
 			b.log.Warn("bridge: bind workspace failed", "session_id", p.ID, "workspace_id", p.WorkspaceID, "err", err)
+		} else {
+			// CreateWithBot returns a snapshot. SetWorkspaceID persists the binding in
+			// the manager, but it cannot mutate this snapshot. Keep the worker launch
+			// info in sync so the workspace permission ceiling is applied to the first
+			// worker, rather than only to later resumes.
+			si.WorkspaceID = p.WorkspaceID
 		}
 	}
 

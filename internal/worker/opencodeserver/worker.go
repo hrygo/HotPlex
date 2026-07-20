@@ -241,7 +241,10 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.Log.Debug("opencodeserver: start step 4 - session created", "ocs_session_id", sessionID)
 
-	w.initSessionConn(ctx, sessionID, session)
+	if err := w.initSessionConn(ctx, sessionID, session); err != nil {
+		w.releaseOnce.Do(func() { w.singleton.Release() })
+		return fmt.Errorf("opencodeserver: initialize session: %w", err)
+	}
 	// Persist OCS session ID immediately so resume can find it even if
 	// release() races with the persistWorkerSessionID in bridge.
 	w.SetWorkerSessionID(sessionID)
@@ -345,7 +348,10 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 		if exists {
 			w.Log.Info("opencodeserver: resuming existing OCS session",
 				"ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
-			w.initSessionConn(ctx, ocsSessionID, session)
+			if err := w.initSessionConn(ctx, ocsSessionID, session); err != nil {
+				w.release()
+				return fmt.Errorf("opencodeserver: initialize resumed session: %w", err)
+			}
 			w.SetWorkerSessionID(ocsSessionID)
 			w.startSSE(ocsSessionID)
 			w.Log.Debug("opencodeserver: resume completed (reused session)")
@@ -363,7 +369,10 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 		return fmt.Errorf("opencodeserver: resume create session: %w", err)
 	}
 
-	w.initSessionConn(ctx, newSessionID, session)
+	if err := w.initSessionConn(ctx, newSessionID, session); err != nil {
+		w.releaseOnce.Do(func() { w.singleton.Release() })
+		return fmt.Errorf("opencodeserver: initialize resumed session: %w", err)
+	}
 	w.SetWorkerSessionID(newSessionID)
 	w.startSSE(newSessionID)
 	w.Log.Debug("opencodeserver: resume completed (fresh session)")
@@ -638,7 +647,8 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 	mode := permissionModeToOCS(session.PermissionMode)
 
 	body := map[string]any{
-		"mode": mode,
+		"mode":            mode,
+		"permission_tier": session.PermissionMode,
 	}
 
 	// B3-2 绕行: pass AllowedTools so setPermissionMode can generate
@@ -731,6 +741,7 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session wo
 		recvCh:       make(chan *events.Envelope, recvChannelSize),
 		log:          w.Log,
 		systemPrompt: systemPrompt,
+		projectDir:   session.ProjectDir,
 	}
 
 	// Parse AllowedModels[0] → "provider/model" or plain "model".
@@ -757,8 +768,7 @@ func (w *Worker) initHTTPConn(userID, sessionID, systemPrompt string, session wo
 	w.httpConn = c
 }
 
-func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) {
-	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt, session)
+func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, session worker.SessionInfo) error {
 	w.cmd = &ServerCommander{
 		client:        w.client,
 		baseURL:       w.httpAddr,
@@ -767,12 +777,15 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 		projectDir:    session.ProjectDir,
 	}
 	if err := w.applyPermissions(ctx, session); err != nil {
-		w.Log.Warn("opencodeserver: failed to set permissions", "session_id", serverSessionID, "err", err)
+		w.cmd = nil
+		return fmt.Errorf("apply session permissions: %w", err)
 	}
+	w.initHTTPConn(session.UserID, serverSessionID, session.SystemPrompt, session)
 	w.Mu.Lock()
 	w.StartTime = time.Now()
 	w.SetLastIO(w.StartTime)
 	w.Mu.Unlock()
+	return nil
 }
 
 // ocsSessionExists checks whether a session exists on the OpenCode server
@@ -970,6 +983,7 @@ func deleteOCSSession(ctx context.Context, sessionID, httpAddr string, client *h
 func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 	w.Mu.Lock()
 	addr := w.httpAddr
+	conn := w.httpConn
 	w.Mu.Unlock()
 
 	body, err := json.Marshal(payload)
@@ -977,8 +991,17 @@ func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 		return fmt.Errorf("opencodeserver: marshal payload: %w", err)
 	}
 
-	url := addr + path
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	var projectDir string
+	if conn != nil {
+		projectDir = conn.projectDir
+	}
+
+	u := addr + path
+	if projectDir != "" {
+		u += "?directory=" + url.QueryEscape(projectDir)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("opencodeserver: create request: %w", err)
 	}
@@ -1058,6 +1081,7 @@ type conn struct {
 	recvCh       chan *events.Envelope
 	log          *slog.Logger
 	systemPrompt string
+	projectDir   string
 
 	allowedModel *ocsModelRef   // parsed from SessionInfo.AllowedModels[0]
 	jsonSchema   map[string]any // parsed from SessionInfo.JSONSchema

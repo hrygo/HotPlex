@@ -17,7 +17,7 @@ export function FileDiffTool({ toolName, filePath, content, status, onToggle }: 
   const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const lines = content?.split("\n") ?? [];
-  const displayPath = filePath || "unknown file";
+  const displayPath = filePath || t("chat:tool.filediff.unknown_file", { defaultValue: "unknown file" });
 
   return (
     <div className="rounded-[var(--radius-md)] overflow-hidden border border-[var(--border-subtle)] my-6 shadow-[var(--shadow-md)] group/diff">

@@ -81,6 +81,8 @@ Workspace 级 4 档统一权限模式（#789），作为 Workspace 属性持久�
 
 空值（默认）= "Worker 默认"：CC/OCS 应用 `bypass`，Codex/ACP 沿用 operator 配置。
 
+> OpenCode Server 在 `workspace` 档只自动接受 workspace 内的编辑；访问 workspace 外目录时会发起授权请求。`auto-edit` 仍保持无逐项确认的语义。
+
 > `auto-edit` 档要求较新版本的 Claude Code CLI（支持 `--permission-mode auto`）；`hotplex doctor` 的 `worker.claude_auto_mode` 检查项会探测此能力。
 
 ### 运行时切换

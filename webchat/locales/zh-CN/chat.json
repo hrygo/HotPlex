@@ -251,7 +251,10 @@
     "search": { "loading": "搜索中..." },
     "list": { "loading": "列出目录中..." },
     "todo": { "loading": "获取最新任务中..." },
-    "filediff": { "loading": "合成文件补丁中..." },
+    "filediff": {
+      "loading": "合成文件补丁中...",
+      "unknown_file": "未知文件"
+    },
     "interaction": {
       "timeout": "剩余时间 {{seconds}}秒",
       "permission": {
@@ -263,7 +266,14 @@
         "submitting": "正在提交授权...",
         "failed": "提交失败：{{error}}",
         "approve": "允许",
-        "reject": "拒绝"
+        "reject": "拒绝",
+        "command_to_execute": "要执行的命令",
+        "action": "操作",
+        "target": "目标",
+        "reason": "原因",
+        "allowed_directories": "允许的目录",
+        "allowed_patterns": "允许的模式",
+        "additional_parameters": "附加参数"
       },
       "question": {
         "title": "输入请求",
