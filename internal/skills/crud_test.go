@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -223,4 +226,49 @@ func TestLocator_Install_FailureLeavesNoTrace(t *testing.T) {
 	d, statErr := l.Read(context.Background(), ScopeWorkspace, workDir, "my-skill")
 	require.ErrorIs(t, statErr, ErrSkillNotFound)
 	_ = d
+}
+
+// ─── installMu 并发序列化（spec review P1：check-then-rename 竞态）──────────
+
+func TestLocator_Install_ConcurrentReplaceIsSerialized(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	workDir := t.TempDir()
+	// makeZip 用 t.Fatal 必须在主 goroutine 调用；zip.Reader 只读，N 个 goroutine
+	// 共享同一 zr 并发读安全（Install 各自解压到独立 staging，不修改 zr）。
+	zr := makeZip(t, map[string]string{"SKILL.md": validFM})
+
+	const n = 32
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	start := make(chan struct{})
+	wg.Add(n)
+	for i := range n {
+		go func() {
+			defer wg.Done()
+			<-start // 同步起跑，最大化 check-then-rename 竞态窗口
+			_, errs[i] = l.Install(context.Background(), ScopeWorkspace, workDir, "", zr, true)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	// replace=true 并发：installMu 串行化 check-then-rename，每次都允许成功
+	// （先到先装，后到覆盖），无静默丢数据 / ENOTEMPTY 误 500 / race panic。
+	for i, e := range errs {
+		require.NoError(t, e, "goroutine %d", i)
+	}
+
+	// 最终恰好一个 skill 存活且内容完整（无半成品 / 损坏）。
+	d, err := l.Read(context.Background(), ScopeWorkspace, workDir, "my-skill")
+	require.NoError(t, err)
+	require.Equal(t, "my-skill", d.Name)
+	require.Contains(t, d.Body, "# My Skill")
+
+	// 落盘目录唯一（无 staging 残壳、无重复碎片）。
+	entries, err := os.ReadDir(filepath.Join(workDir, ".agents", "skills"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
 }

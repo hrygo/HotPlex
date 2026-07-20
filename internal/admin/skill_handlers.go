@@ -99,10 +99,11 @@ func (a *AdminAPI) HandleInstallSkill(w http.ResponseWriter, r *http.Request) {
 		web.WriteAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "skills not configured")
 		return
 	}
-	zr, ok := parseAdminSkillUpload(w, r)
+	zr, closer, ok := parseAdminSkillUpload(w, r)
 	if !ok {
 		return
 	}
+	defer closer() // f 供 zip.Reader 作 ReaderAt，Install 消费完方可 Close（spec review P2#1）
 	home, err := os.UserHomeDir()
 	if err != nil {
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
@@ -161,25 +162,27 @@ func (a *AdminAPI) HandleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseAdminSkillUpload 解析 multipart zip 上传（MaxBytesReader 兜底 20MB）。
-func parseAdminSkillUpload(w http.ResponseWriter, r *http.Request) (*zip.Reader, bool) {
+// 返回的 closer 必须在调用方消费完 zr（Install 返回）后调用：*os.File 分支下
+// zip.Reader 持有 f 作 ReaderAt，提前 Close 会使 extractZip→ReadAt 读已关闭 fd
+// （spec review P2#1，见 gateway.parseSkillUpload 同名注释）。
+func parseAdminSkillUpload(w http.ResponseWriter, r *http.Request) (*zip.Reader, func(), bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAdminSkillUploadSize)
 	if err := r.ParseMultipartForm(maxAdminSkillUploadSize); err != nil {
 		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "multipart parse failed: "+err.Error())
-		return nil, false
+		return nil, nil, false
 	}
 	f, _, err := r.FormFile("file")
 	if err != nil {
 		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "missing 'file' field")
-		return nil, false
+		return nil, nil, false
 	}
-	defer func() { _ = f.Close() }()
-	// 复用 *os.File ReaderAt 避免 20MB 全量载内存（spec review P2#5）。
 	zr, err := skills.ZipReaderFromFile(f)
 	if err != nil {
+		_ = f.Close()
 		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "invalid zip archive")
-		return nil, false
+		return nil, nil, false
 	}
-	return zr, true
+	return zr, func() { _ = f.Close() }, true
 }
 
 // writeAdminSkillError 映射 skills 包语义错误到 HTTP 错误码（spec §5）。

@@ -89,10 +89,13 @@ func (h *SkillHandlers) ownerWorkDirs(ctx context.Context, uid string) []string 
 		return nil
 	}
 	// 分页拉取全部 workspace（spec review P2#4）：硬编码单页 1000 会静默丢弃
-	// 尾部 workspace 的 skill。每页 500 循环至不足一页；设 5000 硬上限防滥用。
-	const page = 500
+	// 尾部 workspace 的 skill。每页 500 循环至不足一页；设 hardCap 硬上限防滥用。
+	const (
+		page    = 500
+		hardCap = 5000
+	)
 	var dirs []string
-	for offset := 0; offset < 5000; offset += page {
+	for offset := 0; offset < hardCap; offset += page {
 		wss, err := h.wsStore.ListWorkspacesByOwner(ctx, uid, page, offset)
 		if err != nil {
 			h.log.Warn("skill_api: list owner workspaces", "err", err, "offset", offset)
@@ -104,9 +107,12 @@ func (h *SkillHandlers) ownerWorkDirs(ctx context.Context, uid string) []string 
 			}
 		}
 		if len(wss) < page {
-			break
+			return dirs // 不足一页，已到尾部
 		}
 	}
+	// 循环因 offset 达 hardCap 退出（非 return）：owner workspace 数超上限，
+	// 尾部 workspace 的 skill 从合并列表静默丢失。hardCap 作 DoS 防护保留，此处仅告警（spec review P3#1）。
+	h.log.Warn("skill_api: owner workspaces reached hard cap; tail skills dropped from merged list", "uid", uid, "cap", hardCap)
 	return dirs
 }
 
@@ -175,11 +181,12 @@ func (h *SkillHandlers) InstallWorkspace(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	zr, ok := h.parseSkillUpload(w, r)
+	zr, closer, ok := h.parseSkillUpload(w, r)
 	if !ok {
 		h.auditSkill(r, uid, "skill.install", audit.OutcomeFailure)
 		return
 	}
+	defer closer() // f 供 zip.Reader 作 ReaderAt，Install 消费完方可 Close（spec review P2#1）
 	replace := r.URL.Query().Has("replace")
 	res, err := h.locator.Install(r.Context(), skills.ScopeWorkspace, ws.WorkDir, h.homeDir(), zr, replace)
 	if err != nil {
@@ -221,25 +228,28 @@ func (h *SkillHandlers) DeleteWorkspace(w http.ResponseWriter, r *http.Request) 
 }
 
 // parseSkillUpload 解析 multipart zip 上传（MaxBytesReader 兜底 20MB）。
-func (h *SkillHandlers) parseSkillUpload(w http.ResponseWriter, r *http.Request) (*zip.Reader, bool) {
+// 返回的 closer 必须在调用方消费完 zr（即 Install 返回）后调用：*os.File 分支下
+// zip.Reader 持有 f 作为 ReaderAt，提前 Close 会使 extractZip→ReadAt 读已关闭 fd
+// （spec review P2#1）。io.ReadAll 回退分支（小文件 sectionReader）Close 无害。
+func (h *SkillHandlers) parseSkillUpload(w http.ResponseWriter, r *http.Request) (*zip.Reader, func(), bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxSkillUploadSize)
 	if err := r.ParseMultipartForm(maxSkillUploadSize); err != nil {
 		writeAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "multipart parse failed: "+err.Error())
-		return nil, false
+		return nil, nil, false
 	}
 	f, _, err := r.FormFile("file")
 	if err != nil {
 		writeAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "missing 'file' field")
-		return nil, false
+		return nil, nil, false
 	}
-	defer func() { _ = f.Close() }()
 	// 复用 *os.File ReaderAt 避免 20MB 全量载内存（spec review P2#5）。
 	zr, err := skills.ZipReaderFromFile(f)
 	if err != nil {
+		_ = f.Close()
 		writeAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "invalid zip archive")
-		return nil, false
+		return nil, nil, false
 	}
-	return zr, true
+	return zr, func() { _ = f.Close() }, true
 }
 
 // writeSkillError 映射 skills 包语义错误到 HTTP 错误码（spec §5）。
@@ -262,10 +272,12 @@ func (h *SkillHandlers) writeSkillError(w http.ResponseWriter, err error, action
 }
 
 // auditSkill 记录 workspace skill 写操作到 tamper-evident user_activity（spec §3.5）。
+// IP/UserAgent 与同包 GatewayAPI 会话删除、admin enqueueAdminActivity 对齐（spec review P2#2）。
 //
-// TODO(#910 review P2#6): Platform 硬编码 WebChat，API-key 调用者的 skill 写入被
-// 误标。正确做法是 AuthenticateRequest 返回认证路径（cookie→WebChat /
-// api-key→PlatformAPI），但该签名变更跨切面（所有调用方），留待后续单独 PR 统一。
+// TODO(#910 review P2#3): Platform 硬编码 WebChat，API-key 调用者的 skill 写入被
+// 误标。正确做法是让 AuthenticateRequest 返回认证路径（cookie→WebChat /
+// api-key→PlatformAPI）并在 auditSkill 传入；该签名变更跨切面（security.Authenticator
+// 所有调用方），留待后续单独 PR 统一，本 PR 不塞入。
 func (h *SkillHandlers) auditSkill(r *http.Request, uid, action, outcome string) {
 	if h.auditCollector == nil {
 		return
@@ -280,5 +292,7 @@ func (h *SkillHandlers) auditSkill(r *http.Request, uid, action, outcome string)
 		ResourceType: "skill",
 		Outcome:      outcome,
 		DetailJSON:   string(detail),
+		IP:           r.RemoteAddr,
+		UserAgent:    r.UserAgent(),
 	})
 }
