@@ -33,6 +33,7 @@ var (
 	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
 	_ worker.WorkerCommander                  = (*Worker)(nil)
 	_ worker.ControlRequester                 = (*Worker)(nil)
+	_ worker.PermissionCeilingReporter        = (*Worker)(nil)
 	_ base.MetadataHandler                    = (*Worker)(nil)
 	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
 )
@@ -164,6 +165,10 @@ type Worker struct {
 	conn   *acpConn
 	cancel context.CancelFunc
 
+	// permissionCeiling is captured once per Worker session and survives
+	// reset/clear so runtime approval changes cannot widen the startup policy.
+	permissionCeiling worker.PermissionCeiling
+
 	// drainCh signals readLoop to drain all buffered notifications from NotificationCh.
 	// drainDoneCh signals back when the drain is complete.
 	// readLoop is the sole consumer of NotificationCh — Input() must not read it directly.
@@ -226,6 +231,10 @@ func (w *Worker) SessionStoreDir() string   { return "" }
 func (w *Worker) MaxTurns() int             { return 0 }
 func (w *Worker) Modalities() []string      { return []string{"text", "code", "image"} }
 
+func (w *Worker) PermissionCeiling() (string, bool) {
+	return w.permissionCeiling.Mode()
+}
+
 // ─── WorkerSessionIDHandler ──────────────────────────────────────────────────
 
 func (w *Worker) SetWorkerSessionID(id string) {
@@ -264,8 +273,20 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	// Issue #789: a non-empty PermissionMode tier overrides the constructor's config-level
 	// autoApprove default. Empty mode keeps the config default (backward compat for
 	// cron/platform sessions without a workspace).
-	if session.PermissionMode != "" {
-		w.autoApprove.Store(permissionModeToACPApprove(session.PermissionMode))
+	effectiveMode := session.PermissionMode
+	if effectiveMode == "" {
+		if w.autoApprove.Load() {
+			effectiveMode = worker.PermissionModeBypass
+		} else {
+			effectiveMode = worker.PermissionModeWorkspace
+		}
+	}
+	if err := w.permissionCeiling.Capture(effectiveMode); err != nil {
+		w.Mu.Unlock()
+		return fmt.Errorf("acp: capture permission ceiling: %w", err)
+	}
+	if ceiling, ok := w.permissionCeiling.Mode(); ok {
+		w.autoApprove.Store(permissionModeToACPApprove(ceiling))
 	}
 	w.Mu.Unlock()
 
@@ -935,15 +956,26 @@ func (w *Worker) handleSetModel(ctx context.Context, body map[string]any) (map[s
 }
 
 func (w *Worker) handleSetPermissionMode(body map[string]any) (map[string]any, error) {
-	mode, _ := body["mode"].(string)
-	switch mode {
-	case "auto-accept":
-		w.autoApprove.Store(true)
-	case "default", "":
-		w.autoApprove.Store(false)
-	default:
-		return nil, fmt.Errorf("acp: set_permission_mode: unsupported mode: %s", mode)
+	requested, _ := body["mode"].(string)
+	mode, err := w.permissionCeiling.Check(requested)
+	if err != nil {
+		sessionID := ""
+		if w.BaseWorker != nil {
+			w.Mu.Lock()
+			sessionID = w.sessionID
+			w.Mu.Unlock()
+		}
+		if w.BaseWorker != nil && w.Log != nil {
+			w.Log.Warn("acp: permission mode change rejected",
+				"security_event", "permission_mode_change_rejected",
+				"worker_type", worker.TypeACP,
+				"session_id", sessionID,
+				"reason", worker.PermissionRejectionReason(err),
+			)
+		}
+		return nil, fmt.Errorf("acp: set permission mode: %w", err)
 	}
+	w.autoApprove.Store(permissionModeToACPApprove(mode))
 	return map[string]any{"mode": mode}, nil
 }
 

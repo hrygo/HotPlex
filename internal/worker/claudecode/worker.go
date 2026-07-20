@@ -29,6 +29,7 @@ import (
 // Compile-time interface compliance checks.
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
+var _ worker.PermissionCeilingReporter = (*Worker)(nil)
 var _ base.MetadataHandler = (*Worker)(nil)
 
 // trySender is a named interface for non-blocking envelope send.
@@ -81,8 +82,19 @@ func InitConfig(cfg config.ClaudeCodeConfig) {
 	}
 }
 
-// autoApproveTool checks if a control request's tool name is in the auto-approve list.
-// If matched, it sends an allow response and returns true.
+// autoApproveTool checks if a control request's tool name is in the auto-approve
+// list. Restricted session ceilings always require explicit approval; configured
+// auto-approval must never reopen a write path.
+func (w *Worker) autoApproveTool(ctrl *ControlHandler, cr *ControlRequestPayload) bool {
+	ceiling, initialized := w.permissionCeiling.Mode()
+	if !initialized || ceiling == worker.PermissionModeReadOnly || ceiling == worker.PermissionModeWorkspace {
+		return false
+	}
+	return autoApproveTool(ctrl, cr)
+}
+
+// autoApproveTool applies the configured tool allowlist. Worker call sites must
+// first enforce the session ceiling through (*Worker).autoApproveTool.
 func autoApproveTool(ctrl *ControlHandler, cr *ControlRequestPayload) bool {
 	list := permissionAutoApprove.Load()
 	if list == nil {
@@ -125,6 +137,10 @@ type Worker struct {
 	sessionID   string
 	projectDir  string             // original working directory for the worker process
 	origSession worker.SessionInfo // first Start's session info, reused by ResetContext
+
+	// permissionCeiling is captured on the first Start/Resume and intentionally
+	// survives ResetContext so runtime commands cannot widen a restarted session.
+	permissionCeiling worker.PermissionCeiling
 
 	// Protocol layers
 	parser  *Parser
@@ -172,6 +188,10 @@ func (w *Worker) SessionStoreDir() string   { return defaultSessionStoreDir }
 func (w *Worker) MaxTurns() int             { return 0 }
 func (w *Worker) Modalities() []string      { return []string{"text", "code", "image"} }
 
+func (w *Worker) PermissionCeiling() (string, bool) {
+	return w.permissionCeiling.Mode()
+}
+
 // ─── Worker Lifecycle ─────────────────────────────────────────────────────────
 
 func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
@@ -198,6 +218,11 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 		return fmt.Errorf("claudecode: already started")
 	}
 
+	effectiveMode := w.effectivePermissionMode(session)
+	if err := w.permissionCeiling.Capture(effectiveMode); err != nil {
+		return fmt.Errorf("claudecode: capture permission ceiling: %w", err)
+	}
+
 	// When creating a new session (--session-id), clean up leftover files from
 	// previous sessions to prevent "already in use" errors from Claude Code CLI.
 	if !resume {
@@ -213,7 +238,7 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 	}
 	w.Proc = proc.New(proc.Opts{
 		Logger:       w.Log,
-		AllowedTools: session.AllowedTools,
+		AllowedTools: allowedToolsForPermissionMode(effectiveMode, session.AllowedTools),
 	})
 	w.Proc.SetPIDKey(session.SessionID)
 
@@ -383,10 +408,9 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	// Empty session PermissionMode (platform/cron sessions) falls back to the operator
 	// default (worker.claude_code.permission_mode) via resolvePermissionMode; an explicit
 	// session tier (workspace sessions) always wins. SkipPermissions is a legacy escape hatch.
-	operatorMode, _ := operatorPermissionMode.Load().(string)
-	effectiveMode := resolvePermissionMode(session.PermissionMode, operatorMode)
+	effectiveMode := w.effectivePermissionMode(session)
 	permArg, skip := permissionModeToCCArg(effectiveMode)
-	if skip || session.SkipPermissions {
+	if skip || (session.SkipPermissions && effectiveMode == worker.PermissionModeBypass) {
 		args = append(args, "--dangerously-skip-permissions")
 	} else if permArg != "" {
 		args = append(args, "--permission-mode", permArg)
@@ -408,8 +432,9 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 			args = append(args, "--model", session.AllowedModels[0])
 		}
 	}
-	if len(session.AllowedTools) > 0 {
-		args = append(args, "--allowed-tools", joinTools(session.AllowedTools))
+	allowedTools := allowedToolsForPermissionMode(effectiveMode, session.AllowedTools)
+	if len(allowedTools) > 0 {
+		args = append(args, "--allowed-tools", joinTools(allowedTools))
 	}
 	// System prompt injection: use temp files instead of inline arguments.
 	// On Windows, CLI wrappers (e.g. ccr.cmd) pass args through cmd.exe which
@@ -470,6 +495,27 @@ func (w *Worker) buildCLIArgs(session worker.SessionInfo, resume bool) ([]string
 	}
 
 	return args, nil
+}
+
+func (w *Worker) effectivePermissionMode(session worker.SessionInfo) string {
+	if ceiling, ok := w.permissionCeiling.Mode(); ok {
+		return ceiling
+	}
+	operatorMode, _ := operatorPermissionMode.Load().(string)
+	effectiveMode := resolvePermissionMode(session.PermissionMode, operatorMode)
+	if effectiveMode == "" {
+		return worker.PermissionModeBypass
+	}
+	return effectiveMode
+}
+
+func allowedToolsForPermissionMode(mode string, tools []string) []string {
+	switch mode {
+	case worker.PermissionModeReadOnly, worker.PermissionModeWorkspace:
+		return nil
+	default:
+		return tools
+	}
 }
 
 func (w *Worker) Input(ctx context.Context, content string, metadata map[string]any) error {
@@ -615,6 +661,14 @@ func (w *Worker) Health() worker.WorkerHealth {
 
 // SendControlRequest sends a control request to Claude Code and waits for the response.
 func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
+	if subtype == "set_permission_mode" {
+		var err error
+		body, err = w.preparePermissionModeRequest(body)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	w.Mu.Lock()
 	if w.Proc == nil || !w.Proc.IsRunning() {
 		w.Mu.Unlock()
@@ -627,6 +681,36 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 		return nil, fmt.Errorf("claudecode: control handler not initialized")
 	}
 	return ctrl.SendControlRequest(ctx, subtype, body)
+}
+
+func (w *Worker) preparePermissionModeRequest(body map[string]any) (map[string]any, error) {
+	requested, _ := body["mode"].(string)
+	canonical, err := w.permissionCeiling.Check(requested)
+	if err != nil {
+		w.Mu.Lock()
+		sessionID := w.sessionID
+		w.Mu.Unlock()
+		if w.BaseWorker != nil && w.Log != nil {
+			w.Log.Warn("claudecode: permission mode change rejected",
+				"security_event", "permission_mode_change_rejected",
+				"worker_type", worker.TypeClaudeCode,
+				"session_id", sessionID,
+				"reason", worker.PermissionRejectionReason(err),
+			)
+		}
+		return nil, fmt.Errorf("claudecode: set permission mode: %w", err)
+	}
+
+	nativeMode, skip := permissionModeToCCArg(canonical)
+	if skip {
+		nativeMode = "bypassPermissions"
+	}
+	request := make(map[string]any, len(body)+1)
+	for key, value := range body {
+		request[key] = value
+	}
+	request["mode"] = nativeMode
+	return request, nil
 }
 
 // UpdateSystemPrompt updates the stored origSession.SystemPrompt so that
@@ -865,9 +949,12 @@ func (w *Worker) readOutput(ctx context.Context) {
 				}
 				// Check auto-approve before mapping for permission requests
 				if cr.Subtype == string(ControlCanUseTool) && cr.ToolName != "AskUserQuestion" {
-					if autoApproveTool(w.control, cr) {
+					if w.autoApproveTool(w.control, cr) {
 						continue
 					}
+				}
+				if cr.Subtype == string(ControlSetPermissionMode) && !w.allowInboundPermissionMode(cr) {
+					continue
 				}
 				// Delegate control-event mapping to Mapper.MapControl.
 				// For non-mapped subtypes (set_*, mcp_*), MapControl returns nil
@@ -897,6 +984,29 @@ func (w *Worker) readOutput(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// allowInboundPermissionMode validates a Claude-originated mode change before
+// ControlHandler can auto-acknowledge it. Rejections use a bounded reason code
+// and never include the untrusted mode text.
+func (w *Worker) allowInboundPermissionMode(cr *ControlRequestPayload) bool {
+	_, err := w.permissionCeiling.Check(cr.PermissionMode)
+	if err == nil {
+		return true
+	}
+	reason := worker.PermissionRejectionReason(err)
+	w.BaseWorker.Log.Warn("claudecode: inbound permission mode change rejected",
+		"security_event", "permission_mode_change_rejected",
+		"worker_type", worker.TypeClaudeCode,
+		"session_id", w.sessionID,
+		"reason", reason,
+	)
+	if w.control != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), autoRespondCtx)
+		_ = w.control.SendErrorResponse(ctx, cr.RequestID, reason)
+		cancel()
+	}
+	return false
 }
 
 // ─── WorkerCommander ──────────────────────────────────────────────────────────

@@ -53,7 +53,12 @@ Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / Open
 | `auto-edit` | 全自动执行，无需逐项确认 | 受信任的自动化 |
 | `bypass` | 跳过所有权限确认 | CI/CD、沙箱环境 |
 
-权限模式作为 Workspace 属性持久化，通过 WebChat Workspace 设置或 HTTP API 配置；运行时亦可用 `/perm <模式>` 命令临时切换。各档到 Worker 原生参数的映射见[远程开发指南](remote-coding-agent.md)。
+权限模式作为 Workspace 属性持久化，通过 WebChat Workspace 设置或 HTTP API
+配置。Worker 启动时的有效模式同时成为该会话不可变的 permission ceiling：
+运行时 `/perm <模式>` 只能收紧，或从收紧状态恢复到启动 ceiling，不能提权。
+该 ceiling 以 set-once 语义持久化到 session，跨 `/clear`、Worker 重建、
+崩溃恢复与 Gateway 重启保持不变；后续 Workspace 配置放宽不影响既有会话。
+各档到 Worker 原生参数的映射见[远程开发指南](remote-coding-agent.md)。
 
 > 全局配置项 `worker.default_permission_mode`（缺省 `workspace`）由 bridge 在 workspace 无显式 override 时注入；workspace 级显式 override 优先级更高。运维想全局放开权限须显式设为 `bypass`。
 
@@ -83,7 +88,7 @@ Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / Open
 
 ### 配置 allowed_tools
 
-通过 `init` 的 `config.allowed_tools` 或 CLI `--allowed-tools` 限制 Session 可用工具：
+通过 `init` 的 `config.allowed_tools` 限制 Session 可用工具：
 
 ```json
 {
@@ -94,17 +99,28 @@ Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / Open
 }
 ```
 
+`allowed_tools` 不是越过权限模式的授权通道。对于 `read-only` 和 `workspace`
+会话，Claude Code 与 OpenCode Server 会忽略 caller-supplied 的工具预批准
+规则，避免 `Write`、`Bash` 等重新打开写入、任意 shell 或 workspace 外访问。
+
 ### /perm 命令
 
-使用 `/perm` 查看或修改当前 Session 的权限设置：
+使用 `/perm <模式>` 临时调整当前 Session 的权限设置：
 
 ```
-/perm              # 查看当前权限状态
-/perm mode bypass  # 切换到 bypass 模式（慎用）
-/perm mode default # 切换回默认模式
+/perm read-only
+/perm workspace
+/perm auto-edit
+/perm bypass
 ```
 
-**警告**：`bypass` 模式下 AI Agent 可执行任何操作而不请求审批，仅在完全信任的场景下使用。
+支持的统一模式只有 `read-only`、`workspace`、`auto-edit`、`bypass`；兼容
+`plan`、`acceptEdits`、`auto`、`bypassPermissions` 等 Worker 原生别名。
+未知值失败关闭。请求高于启动 ceiling 的模式会被拒绝并记录结构化安全日志。
+
+**警告**：只有以 `bypass` ceiling 启动的会话才能在运行时进入 `bypass`。
+该模式下 AI Agent 可执行任何操作而不请求审批，仅在完全信任且另有隔离的
+场景下使用。
 
 ## Bash 命令策略
 

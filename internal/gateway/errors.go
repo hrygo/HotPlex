@@ -29,6 +29,11 @@ func classifyWorkerError(err error) events.ErrorCode {
 	if errors.Is(err, base.ErrInvalidSchema) {
 		return events.ErrCodeInvalidMessage
 	}
+	if errors.Is(err, worker.ErrInvalidPermissionMode) ||
+		errors.Is(err, worker.ErrPermissionEscalation) ||
+		errors.Is(err, worker.ErrPermissionCeilingUnset) {
+		return events.ErrCodeInvalidMessage
+	}
 	if errors.Is(err, worker.ErrNotImplemented) {
 		return events.ErrCodeNotSupported
 	}

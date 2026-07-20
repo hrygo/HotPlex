@@ -103,6 +103,25 @@ func (s *pgStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessio
 	return nil
 }
 
+// SetPermissionCeilingIfEmpty atomically captures the first effective Worker
+// permission ceiling and returns the authoritative stored value.
+func (s *pgStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+
+	if _, err := s.db.ExecContext(ctx, s.queries["sessions.set_permission_ceiling_if_empty"], ceiling, id); err != nil {
+		return "", fmt.Errorf("session store: set permission ceiling: %w", err)
+	}
+	var stored string
+	if err := s.db.QueryRowContext(ctx, s.queries["store.get_permission_ceiling"], id).Scan(&stored); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrSessionNotFound
+		}
+		return "", fmt.Errorf("session store: get permission ceiling: %w", err)
+	}
+	return stored, nil
+}
+
 // Get loads a session by ID. Returns ErrSessionNotFound if not found.
 func (s *pgStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	info, err := scanSession(s.db.QueryRowContext(ctx, s.queries["store.get_session"], id))

@@ -127,10 +127,15 @@ type Worker struct {
 
 	// workerSessionID atomically stores the worker-internal session ID.
 	workerSessionID atomic.Value // string
+
+	// permissionCeiling is immutable for this Worker session and survives
+	// in-place reset/clear operations.
+	permissionCeiling worker.PermissionCeiling
 }
 
 var (
 	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
+	_ worker.PermissionCeilingReporter        = (*Worker)(nil)
 	_ base.MetadataHandler                    = (*Worker)(nil)
 	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
 )
@@ -215,6 +220,10 @@ func (w *Worker) SessionStoreDir() string   { return "" }
 // but it cannot be set via the HTTP session API.
 func (w *Worker) MaxTurns() int        { return 0 }
 func (w *Worker) Modalities() []string { return []string{"text", "code", "image"} }
+
+func (w *Worker) PermissionCeiling() (string, bool) {
+	return w.permissionCeiling.Mode()
+}
 
 // ─── Worker Lifecycle ─────────────────────────────────────────────────────────
 
@@ -533,10 +542,21 @@ func (w *Worker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
 }
 
 func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
-	if w.cmd == nil {
+	if subtype == "set_permission_mode" {
+		var err error
+		body, err = w.preparePermissionModeRequest(body)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	w.Mu.Lock()
+	cmd := w.cmd
+	w.Mu.Unlock()
+	if cmd == nil {
 		return nil, fmt.Errorf("opencode server: commander not initialized")
 	}
-	result, err := w.cmd.SendControlRequest(ctx, subtype, body)
+	result, err := cmd.SendControlRequest(ctx, subtype, body)
 	if err != nil {
 		return result, err
 	}
@@ -547,7 +567,7 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 		w.Mu.Unlock()
 		if conn != nil {
 			conn.mu.Lock()
-			if pm := w.cmd.PendingModel(); pm != nil {
+			if pm := cmd.PendingModel(); pm != nil {
 				conn.allowedModel = &ocsModelRef{ProviderID: pm.ProviderID, ModelID: pm.ModelID}
 			}
 			if v, ok := body["variant"].(string); ok && v != "" {
@@ -557,6 +577,30 @@ func (w *Worker) SendControlRequest(ctx context.Context, subtype string, body ma
 		}
 	}
 	return result, nil
+}
+
+func (w *Worker) preparePermissionModeRequest(body map[string]any) (map[string]any, error) {
+	requested, _ := body["mode"].(string)
+	canonical, err := w.permissionCeiling.Check(requested)
+	if err != nil {
+		if w.BaseWorker != nil && w.Log != nil {
+			w.Log.Warn("opencodeserver: permission mode change rejected",
+				"security_event", "permission_mode_change_rejected",
+				"worker_type", worker.TypeOpenCodeSrv,
+				"session_id", w.GetWorkerSessionID(),
+				"reason", worker.PermissionRejectionReason(err),
+			)
+		}
+		return nil, fmt.Errorf("opencodeserver: set permission mode: %w", err)
+	}
+
+	request := make(map[string]any, len(body)+2)
+	for key, value := range body {
+		request[key] = value
+	}
+	request["mode"] = permissionModeToOCS(canonical)
+	request["permission_tier"] = canonical
+	return request, nil
 }
 
 func (w *Worker) Compact(ctx context.Context, args map[string]any) error {
@@ -643,23 +687,36 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 		return fmt.Errorf("commander not initialized")
 	}
 
-	// Issue #789: map the unified 4 tiers to OCS native modes (default bypass).
-	mode := permissionModeToOCS(session.PermissionMode)
+	ceiling, ok := w.permissionCeiling.Mode()
+	if !ok {
+		return worker.ErrPermissionCeilingUnset
+	}
+	mode := permissionModeToOCS(ceiling)
 
 	body := map[string]any{
 		"mode":            mode,
-		"permission_tier": session.PermissionMode,
+		"permission_tier": ceiling,
 	}
 
 	// B3-2 绕行: pass AllowedTools so setPermissionMode can generate
 	// per-tool allow rules. Semantics differ from CC --allowed-tools:
 	// OCS permission rules are session-scoped and pattern-based.
-	if len(session.AllowedTools) > 0 {
-		body["allowed_tools"] = session.AllowedTools
+	allowedTools := allowedToolsForOCSPermissionMode(ceiling, session.AllowedTools)
+	if len(allowedTools) > 0 {
+		body["allowed_tools"] = allowedTools
 	}
 
 	_, err := cmd.SendControlRequest(ctx, "set_permission_mode", body)
 	return err
+}
+
+func allowedToolsForOCSPermissionMode(mode string, tools []string) []string {
+	switch mode {
+	case worker.PermissionModeReadOnly, worker.PermissionModeWorkspace:
+		return nil
+	default:
+		return tools
+	}
 }
 
 func (w *Worker) createSession(ctx context.Context, projectDir string) (string, error) {
@@ -775,6 +832,14 @@ func (w *Worker) initSessionConn(ctx context.Context, serverSessionID string, se
 		sessionID:     serverSessionID,
 		contextWindow: w.singleton.cfg.ContextWindow,
 		projectDir:    session.ProjectDir,
+	}
+	effectiveMode := session.PermissionMode
+	if effectiveMode == "" {
+		effectiveMode = worker.PermissionModeBypass
+	}
+	if err := w.permissionCeiling.Capture(effectiveMode); err != nil {
+		w.cmd = nil
+		return fmt.Errorf("capture permission ceiling: %w", err)
 	}
 	if err := w.applyPermissions(ctx, session); err != nil {
 		w.cmd = nil

@@ -91,6 +91,11 @@ func (m *mockAPISM) EnsureWorkerSessionID(ctx context.Context, id, workerSession
 	return m.Called(ctx, id, workerSessionID).Error(0)
 }
 
+func (m *mockAPISM) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	args := m.Called(ctx, id, ceiling)
+	return args.String(0), args.Error(1)
+}
+
 func (m *mockAPISM) ResetExpiry(ctx context.Context, id string) error {
 	return m.Called(ctx, id).Error(0)
 }

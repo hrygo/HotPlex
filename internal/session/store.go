@@ -19,6 +19,7 @@ import (
 type Store interface {
 	Upsert(ctx context.Context, info *SessionInfo) error
 	UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error
+	SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error)
 	Get(ctx context.Context, id string) (*SessionInfo, error)
 	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
@@ -151,6 +152,28 @@ func (s *SQLiteStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSe
 	})
 }
 
+// SetPermissionCeilingIfEmpty atomically captures the first effective Worker
+// permission ceiling and returns the authoritative stored value.
+func (s *SQLiteStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+
+	var stored string
+	err := s.writeMu.WithLock(func() error {
+		if _, err := s.db.ExecContext(ctx, queries["sessions.set_permission_ceiling_if_empty"], ceiling, id); err != nil {
+			return fmt.Errorf("session store: set permission ceiling: %w", err)
+		}
+		if err := s.db.QueryRowContext(ctx, queries["store.get_permission_ceiling"], id).Scan(&stored); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrSessionNotFound
+			}
+			return fmt.Errorf("session store: get permission ceiling: %w", err)
+		}
+		return nil
+	})
+	return stored, err
+}
+
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanSession(sc rowScanner) (*SessionInfo, error) {
@@ -163,6 +186,7 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 		&info.ID, &info.UserID, &info.OwnerID, &info.WorkerSessionID, &info.WorkerType, &info.State, &info.BotID, &info.BotName,
 		&info.Platform, &platformKeyStr, &info.WorkDir, &info.Title,
 		&createdAt, &updatedAt, &expiresAt, &idleExpiresAt, &ctxJSON, &info.Source, &info.ClientKey, &info.WorkspaceID,
+		&info.PermissionCeiling,
 	)
 	if err != nil {
 		return nil, err

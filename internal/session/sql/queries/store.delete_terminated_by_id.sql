@@ -6,4 +6,4 @@ RETURNING id, user_id, COALESCE(owner_id, user_id), worker_session_id, worker_ty
           bot_id, COALESCE(bot_name, ''), platform, platform_key_json,
           COALESCE(work_dir, ''), COALESCE(title, ''), created_at, updated_at,
           expires_at, idle_expires_at, context_json, source, COALESCE(client_key, ''),
-          COALESCE(workspace_id, '');
+          COALESCE(workspace_id, ''), COALESCE(permission_ceiling, '');

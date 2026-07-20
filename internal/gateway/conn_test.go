@@ -608,6 +608,11 @@ func (m *mockSessionStoreForBotID) UpdateWorkerSessionIDSQL(ctx context.Context,
 	return args.Error(0)
 }
 
+func (m *mockSessionStoreForBotID) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	args := m.Called(ctx, id, ceiling)
+	return args.String(0), args.Error(1)
+}
+
 func (m *mockSessionStoreForBotID) Get(ctx context.Context, id string) (*session.SessionInfo, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
@@ -1347,6 +1352,11 @@ func (m *mockBridgeSM) EnsureWorkerSessionID(ctx context.Context, id, workerSess
 	return args.Error(0)
 }
 
+func (m *mockBridgeSM) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	args := m.Called(ctx, id, ceiling)
+	return args.String(0), args.Error(1)
+}
+
 func (m *mockBridgeSM) ResetExpiry(ctx context.Context, id string) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
@@ -1406,7 +1416,10 @@ func (m *mockBridgeWorker) Start(_ context.Context, info worker.SessionInfo) err
 	return m.startErr
 }
 func (m *mockBridgeWorker) Input(context.Context, string, map[string]any) error { return nil }
-func (m *mockBridgeWorker) Resume(context.Context, worker.SessionInfo) error    { return m.resumeErr }
+func (m *mockBridgeWorker) Resume(_ context.Context, info worker.SessionInfo) error {
+	m.startInfo = info
+	return m.resumeErr
+}
 func (m *mockBridgeWorker) Terminate(context.Context) error {
 	m.terminated.Store(true)
 	return nil
@@ -1429,6 +1442,23 @@ func (m *mockBridgeWorker) IsStopped() bool {
 }
 
 var _ worker.Worker = (*mockBridgeWorker)(nil)
+
+type permissionReportingBridgeWorker struct {
+	*mockBridgeWorker
+	ceiling string
+}
+
+func (w *permissionReportingBridgeWorker) PermissionCeiling() (string, bool) {
+	return w.ceiling, w.ceiling != ""
+}
+
+type fixedBridgeWorkerFactory struct {
+	w worker.Worker
+}
+
+func (f fixedBridgeWorkerFactory) NewWorker(worker.WorkerType) (worker.Worker, error) {
+	return f.w, nil
+}
 
 // mockBridgeWorkerFactory returns pre-configured mockBridgeWorker instances.
 // It ignores the requested type and cycles through the pre-configured list,
@@ -1709,6 +1739,48 @@ func TestBridge_ResumeSession_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"type":"state"`)
 	require.Contains(t, string(data), `"state":"running"`)
+}
+
+func TestBridge_ResumeSession_UsesPersistedCeilingAfterWorkspacePolicyWidens(t *testing.T) {
+	const sessionID = "sess_resume_ceiling"
+	sm := &mockBridgeSM{Mock: mock.Mock{}}
+	sm.Test(t)
+	sessionInfo := &session.SessionInfo{
+		ID:                sessionID,
+		UserID:            "user1",
+		WorkerType:        worker.TypeClaudeCode,
+		State:             events.StateIdle,
+		WorkspaceID:       "ws-1",
+		PermissionCeiling: worker.PermissionModeWorkspace,
+	}
+	sm.On("Get", sessionID).Return(sessionInfo, nil)
+	sm.On("GetWorker", sessionID).Return(nil)
+	sm.On("Transition", mock.Anything, sessionID, events.StateRunning).Return(nil)
+	sm.On("AttachWorker", sessionID, mock.Anything).Return(nil)
+	sm.On("SetPermissionCeilingIfEmpty", mock.Anything, sessionID, worker.PermissionModeWorkspace).
+		Return(worker.PermissionModeWorkspace, nil)
+	sm.On("ResetExpiry", mock.Anything, sessionID).Return(nil)
+
+	baseWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+	}
+	reportingWorker := &permissionReportingBridgeWorker{
+		mockBridgeWorker: baseWorker,
+		ceiling:          worker.PermissionModeWorkspace,
+	}
+	b := NewBridge(BridgeDeps{
+		Log:     slog.Default(),
+		Hub:     newTestHub(t),
+		SM:      sm,
+		WSStore: &stubWSStore{ws: &session.Workspace{ID: "ws-1", PermissionMode: worker.PermissionModeBypass}},
+	})
+	b.wf = fixedBridgeWorkerFactory{w: reportingWorker}
+
+	require.NoError(t, b.ResumeSession(t.Context(), sessionID, ""))
+	require.Equal(t, worker.PermissionModeWorkspace, baseWorker.startInfo.PermissionMode,
+		"persisted session ceiling must win over a newly widened workspace policy")
+	sm.AssertExpectations(t)
 }
 
 // TestBridge_ResumeSession_DeletedSession verifies that resuming a DELETED session

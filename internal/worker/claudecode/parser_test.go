@@ -220,6 +220,7 @@ func TestParser_ParseLine_ControlRequestSetPermissionMode(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "req_auto", cr.RequestID)
 	require.Equal(t, "set_permission_mode", cr.Subtype)
+	require.Equal(t, "auto-accept", cr.PermissionMode)
 }
 
 func TestParser_ParseLine_ControlRequestMCPStatus(t *testing.T) {

@@ -1090,6 +1090,10 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 // buildWorkerInfo constructs a worker.SessionInfo from session metadata,
 // carrying over bridge-level config (workerEnv, blocklist).
 func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
+	permissionMode := si.PermissionCeiling
+	if permissionMode == "" {
+		permissionMode = b.resolveWorkspacePermissionMode(si.WorkspaceID)
+	}
 	info := worker.SessionInfo{
 		SessionID:       sessionID,
 		UserID:          userID,
@@ -1102,7 +1106,7 @@ func (b *Bridge) buildWorkerInfo(sessionID, userID, workDir string, si *session.
 		ACPCommand:      si.PlatformKey[worker.ACPCommandPlatformKey],
 		ForkSession:     si.PlatformKey[worker.ForkSessionPlatformKey] == "true",
 		JSONSchema:      si.PlatformKey[worker.JSONSchemaPlatformKey],
-		PermissionMode:  b.resolveWorkspacePermissionMode(si.WorkspaceID),
+		PermissionMode:  permissionMode,
 		// TODO: platform adapters (Slack/Feishu) need to populate ForkSession/JSONSchema
 		// into PlatformKey for this wiring to take effect; tracked in UX follow-up.
 	}

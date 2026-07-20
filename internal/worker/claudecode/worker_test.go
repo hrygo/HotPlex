@@ -219,7 +219,7 @@ func TestBuildCLIArgs_AllOptions(t *testing.T) {
 	require.Contains(t, args, "--permission-mode", "plan")
 	require.Contains(t, args, "--disallowed-tools", "WebSearch,Edit")
 	require.Contains(t, args, "--model", "claude-sonnet-4-6")
-	require.Contains(t, args, "--allowed-tools", "Read,Write,Bash")
+	require.NotContains(t, args, "--allowed-tools", "read-only must ignore caller allowed_tools")
 	// System prompt is now injected via temp file.
 	require.Contains(t, args, "--append-system-prompt-file")
 	require.NotContains(t, args, "--append-system-prompt", "You are a helpful assistant.")
@@ -935,6 +935,29 @@ func TestAutoApproveTool_EmptyOrNilList(t *testing.T) {
 
 			result := autoApproveTool(ctrl, cr)
 			require.False(t, result, "should not auto-approve with empty list")
+			require.Empty(t, buf.String())
+		})
+	}
+}
+
+func TestWorkerAutoApproveTool_RestrictedCeilingsRequireExplicitApproval(t *testing.T) {
+	original := permissionAutoApprove.Load()
+	defer permissionAutoApprove.Store(original)
+	permissionAutoApprove.Store([]string{"ExitPlanMode", "Write", "Bash"})
+
+	for _, ceiling := range []string{worker.PermissionModeReadOnly, worker.PermissionModeWorkspace} {
+		t.Run(ceiling, func(t *testing.T) {
+			w := New()
+			require.NoError(t, w.permissionCeiling.Capture(ceiling))
+			var buf bytes.Buffer
+			ctrl := NewControlHandler(slog.Default(), &buf)
+
+			approved := w.autoApproveTool(ctrl, &ControlRequestPayload{
+				Subtype:   string(ControlCanUseTool),
+				ToolName:  "ExitPlanMode",
+				RequestID: "restricted",
+			})
+			require.False(t, approved)
 			require.Empty(t, buf.String())
 		})
 	}

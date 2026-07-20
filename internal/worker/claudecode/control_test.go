@@ -137,6 +137,21 @@ func TestControlHandlerSendPermissionResponse(t *testing.T) {
 	require.Equal(t, "user approved", parsed.Response.Response["reason"])
 }
 
+func TestControlHandlerSendErrorResponse(t *testing.T) {
+	t.Parallel()
+	var lb lockedBuffer
+	h := NewControlHandler(slog.Default(), &lb)
+
+	require.NoError(t, h.SendErrorResponse(context.Background(), "req-denied", "ceiling_exceeded"))
+
+	var parsed ControlResponse
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(lb.Bytes()), &parsed))
+	require.Equal(t, "error", parsed.Response.Subtype)
+	require.Equal(t, "req-denied", parsed.Response.RequestID)
+	require.Equal(t, "ceiling_exceeded", parsed.Response.Error)
+	require.Empty(t, parsed.Response.Response)
+}
+
 func TestControlHandlerSendQuestionResponse(t *testing.T) {
 	t.Parallel()
 

@@ -39,6 +39,11 @@ func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSess
 	return args.Error(0)
 }
 
+func (m *mockStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	args := m.Called(ctx, id, ceiling)
+	return args.String(0), args.Error(1)
+}
+
 func (m *mockStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {

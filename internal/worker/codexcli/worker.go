@@ -86,6 +86,7 @@ var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
 var _ worker.SystemPromptUpdater = (*AppServerWorker)(nil)
+var _ worker.PermissionCeilingReporter = (*AppServerWorker)(nil)
 
 type appState int
 
@@ -122,6 +123,8 @@ type AppServerWorker struct {
 	// into the first user input of a new thread. Cleared after injection.
 	pendingHistory  []worker.ConversationTurn
 	historyInjected bool
+
+	permissionCeiling worker.PermissionCeiling
 }
 
 var (
@@ -176,6 +179,10 @@ func (w *AppServerWorker) EnvBlocklist() []string    { return EnvBlocklist }
 func (w *AppServerWorker) SessionStoreDir() string   { return "" }
 func (w *AppServerWorker) MaxTurns() int             { return 0 }
 func (w *AppServerWorker) Modalities() []string      { return []string{"text", "code", "image"} }
+
+func (w *AppServerWorker) PermissionCeiling() (string, bool) {
+	return w.permissionCeiling.Mode()
+}
 
 func (w *AppServerWorker) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
 	if w.commands == nil {
@@ -358,7 +365,12 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 	}
 
 	cfg := resolveConfig()
+	session = w.sessionWithPermissionCeiling(session)
 	params := buildThreadStartParams(session, cfg)
+	effectiveMode := permissionModeFromCodexEffective(params)
+	if err := w.permissionCeiling.Capture(effectiveMode); err != nil {
+		return fmt.Errorf("codexcli: %s: capture permission ceiling: %w", errPrefix, err)
+	}
 
 	resp, err := w.manager.Call(context.Background(), "thread/start", params)
 	if err != nil {
@@ -398,6 +410,13 @@ func (w *AppServerWorker) startNewThread(session worker.SessionInfo, errPrefix s
 	w.mu.Unlock()
 
 	return nil
+}
+
+func (w *AppServerWorker) sessionWithPermissionCeiling(session worker.SessionInfo) worker.SessionInfo {
+	if ceiling, ok := w.permissionCeiling.Mode(); ok {
+		session.PermissionMode = ceiling
+	}
+	return session
 }
 
 // injectHistoryPrefix prepends conversation history to the first user
@@ -782,6 +801,34 @@ func codexApprovalRank(s string) int {
 		return 1
 	}
 	return 0
+}
+
+// permissionModeFromCodexEffective converts the actual thread/start sandbox and
+// approval pair back to a conservative unified permission tier for persistence.
+// Unknown/custom sandboxes fail closed to read-only.
+func permissionModeFromCodexEffective(params map[string]any) string {
+	sandbox, _ := params["sandbox"].(string)
+	approval, _ := params["approvalPolicy"].(string)
+	switch sandbox {
+	case "read-only":
+		return worker.PermissionModeReadOnly
+	case "workspace-write":
+		switch approval {
+		case "never":
+			return worker.PermissionModeAutoEdit
+		case "on-request":
+			return worker.PermissionModeWorkspace
+		default:
+			return worker.PermissionModeReadOnly
+		}
+	case "danger-full-access":
+		if approval == "never" {
+			return worker.PermissionModeBypass
+		}
+		return worker.PermissionModeReadOnly
+	default:
+		return worker.PermissionModeReadOnly
+	}
 }
 
 // buildThreadStartParams constructs the JSON-RPC params for "thread/start".

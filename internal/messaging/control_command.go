@@ -124,6 +124,12 @@ var workerSlashCommandsWithArgs = map[string]bool{
 	"/effort": true,
 }
 
+var workerNaturalCommandsWithArgs = map[string]bool{
+	"$model": true, "$切换模型": true,
+	"$perm": true, "$权限模式": true,
+	"$effort": true,
+}
+
 // workerCommands maps slash and natural language triggers to worker stdio commands.
 var workerCommands = NewCommandMap(
 	map[string]events.WorkerStdioCommand{
@@ -175,13 +181,13 @@ type WorkerCommandResult struct {
 //   - Slash commands: /context, /mcp, /model sonnet-4, /perm bypassPermissions, /effort high
 //   - Natural language: $上下文, $MCP状态, $切换模型, etc. (require $ prefix)
 func ParseWorkerCommand(text string) *WorkerCommandResult {
-	t := strings.TrimSpace(strings.ToLower(text))
-	t = trimTrailingPunct(t)
+	t := trimTrailingPunct(strings.TrimSpace(text))
 
 	base, args := parseWorkerSlashCommands(t)
-	if cmd, ok := workerCommands.LookupSlash(base); ok {
-		label := base
-		if !workerSlashCommandsWithArgs[base] {
+	normalizedBase := strings.ToLower(base)
+	if cmd, ok := workerCommands.LookupSlash(normalizedBase); ok {
+		label := normalizedBase
+		if !workerSlashCommandsWithArgs[normalizedBase] {
 			args = ""
 		}
 		return &WorkerCommandResult{
@@ -190,11 +196,22 @@ func ParseWorkerCommand(text string) *WorkerCommandResult {
 			Args:    args,
 		}
 	}
-
-	if cmd, ok := workerCommands.LookupNatural(t); ok {
+	if cmd, ok := workerCommands.LookupNatural(normalizedBase); ok {
+		if !workerNaturalCommandsWithArgs[normalizedBase] {
+			args = ""
+		}
 		return &WorkerCommandResult{
 			Command: cmd,
-			Label:   t,
+			Label:   normalizedBase,
+			Args:    args,
+		}
+	}
+
+	normalizedText := strings.ToLower(t)
+	if cmd, ok := workerCommands.LookupNatural(normalizedText); ok {
+		return &WorkerCommandResult{
+			Command: cmd,
+			Label:   normalizedText,
 		}
 	}
 

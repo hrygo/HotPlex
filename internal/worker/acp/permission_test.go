@@ -27,3 +27,25 @@ func TestPermissionModeToACPApprove(t *testing.T) {
 		})
 	}
 }
+
+func TestACPPermissionCeilingRejectsEscalation(t *testing.T) {
+	t.Parallel()
+	w := &Worker{}
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeWorkspace))
+
+	resp, err := w.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{"mode": "plan"})
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeReadOnly, resp["mode"])
+	require.False(t, w.autoApprove.Load())
+
+	resp, err = w.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{"mode": "acceptEdits"})
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeWorkspace, resp["mode"])
+	require.False(t, w.autoApprove.Load())
+
+	_, err = w.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{"mode": "auto-accept"})
+	require.ErrorIs(t, err, worker.ErrPermissionEscalation)
+
+	_, err = w.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{"mode": "bypassPermissions"})
+	require.ErrorIs(t, err, worker.ErrPermissionEscalation)
+}

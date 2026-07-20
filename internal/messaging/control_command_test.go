@@ -77,7 +77,8 @@ func TestParseWorkerCommand_SlashCommands(t *testing.T) {
 		{"/rewind", "/rewind", events.StdioRewind, ""},
 		{"/commit", "/commit", events.StdioCommit, ""},
 		{"/model sonnet-4", "/model sonnet-4", events.StdioSetModel, "sonnet-4"},
-		{"/perm bypassPermissions", "/perm bypassPermissions", events.StdioSetPermMode, "bypasspermissions"},
+		{"/perm bypassPermissions", "/perm bypassPermissions", events.StdioSetPermMode, "bypassPermissions"},
+		{"/model Claude-Sonnet-4", "/MODEL Claude-Sonnet-4", events.StdioSetModel, "Claude-Sonnet-4"},
 		{"/effort high", "/effort high", events.StdioEffort, "high"},
 	}
 	for _, tt := range tests {
@@ -121,6 +122,18 @@ func TestParseWorkerCommand_NaturalLanguage(t *testing.T) {
 			require.Equal(t, tt.want, result.Command)
 		})
 	}
+}
+
+func TestParseWorkerCommand_NaturalLanguagePreservesPermissionArgs(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"$权限模式 bypassPermissions", "$perm Auto-Edit"} {
+		result := ParseWorkerCommand(input)
+		require.NotNil(t, result)
+		require.Equal(t, events.StdioSetPermMode, result.Command)
+		require.NotEmpty(t, result.Args)
+	}
+	require.Equal(t, "bypassPermissions", ParseWorkerCommand("$权限模式 bypassPermissions").Args)
+	require.Equal(t, "Auto-Edit", ParseWorkerCommand("$perm Auto-Edit").Args)
 }
 
 func TestParseWorkerCommand_PriorityControlCommandFirst(t *testing.T) {

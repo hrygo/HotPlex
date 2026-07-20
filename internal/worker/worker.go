@@ -160,6 +160,13 @@ type Worker interface {
 	IsStopped() bool
 }
 
+// PermissionCeilingReporter exposes the canonical effective permission ceiling
+// captured by a Worker after a successful Start or Resume. Bridge persists this
+// value as immutable session metadata before launching event forwarding.
+type PermissionCeilingReporter interface {
+	PermissionCeiling() (string, bool)
+}
+
 // ResetResult describes the outcome of a ResetContext call.
 // Gateway reads this to decide orchestration without knowing Worker internals.
 type ResetResult struct {

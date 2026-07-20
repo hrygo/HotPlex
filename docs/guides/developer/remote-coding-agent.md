@@ -87,13 +87,35 @@ Workspace 级 4 档统一权限模式（#789），作为 Workspace 属性持久�
 
 ### 运行时切换
 
-会话中可用 `/perm <模式>`（或 `$权限模式`）临时切换当前会话的权限行为（值透传至 Worker）：
+会话中可用 `/perm <模式>`（或结构化 `worker_command`）临时收紧当前
+会话的权限。支持统一的 4 个模式：
 
 ```
-/perm bypassPermissions
+/perm read-only
+/perm workspace
+/perm auto-edit
+/perm bypass
 ```
 
-跳过所有权限确认（适合自动化场景，风险自担）。
+Worker 启动时的有效权限会被锁定为该会话不可变的 **permission ceiling**。
+运行时可以切换到更严格的模式，也可以从更严格的模式恢复到启动 ceiling，
+但不能升级到 ceiling 之上。例如，`workspace` 会话可以临时切到
+`read-only` 后再恢复为 `workspace`，不能切到 `auto-edit` 或 `bypass`。
+首次有效 ceiling 会原子持久化到 session，因而 `/clear`、Worker 重建、
+崩溃恢复、Gateway 重启或后续 Workspace 配置放宽都不会扩大既有会话权限。
+
+Gateway 会把 `plan`、`acceptEdits`、`auto`、`bypassPermissions` 等兼容别名
+规范化为统一模式；未知值会被拒绝。Claude Code、OpenCode Server 和 ACP
+会在 Worker 层再次校验 ceiling。Codex CLI 不支持运行时权限切换，仍返回
+不支持错误。
+
+> `allowed_tools` 只能在 ceiling 内缩小或预配置工具范围，不能扩大
+> `read-only` / `workspace` 的权限。Claude Code 与 OpenCode Server 会在这两档
+> 忽略 caller-supplied 的工具预批准规则。
+
+> ACP 的 `approve` 仅表示协议层是否自动审批，不等同于 OS sandbox，也不能
+> 单独提供可靠的 workspace 文件系统边界。生产环境仍需在 ACP Agent 外部配置
+> 进程/容器级隔离。
 
 ---
 
