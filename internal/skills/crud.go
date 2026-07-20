@@ -88,6 +88,12 @@ func (l *Locator) Install(_ context.Context, scope Scope, baseDir, homeDir strin
 		return nil, extractErr
 	}
 
+	// check+rename 关键段持 installMu：消除并发 replace 的静默数据丢失（T2
+	// RemoveAll 删 T1 刚 Rename 的目录）与并发新装的 TOCTOU（T2 Rename ENOTEMPTY
+	// → 误 500）。extractZip 在锁外（IO 重）；skill 写低频，全局锁足够。
+	l.installMu.Lock()
+	defer l.installMu.Unlock()
+
 	destDir := filepath.Join(destRoot, es.name)
 
 	// 同 scope 同名校验（spec §3.3 B5）。
@@ -113,6 +119,12 @@ func (l *Locator) Install(_ context.Context, scope Scope, baseDir, homeDir strin
 		_ = os.RemoveAll(destDir)
 	}
 	if err := os.Rename(contentRoot, destDir); err != nil {
+		// 持锁后 TOCTOU 已消除；ENOTEMPTY 仅在 destDir 残留时发生，重新分类为
+		// AlreadyExists 给客户端契约化 409（而非通用 500）。
+		if !replace && hasManagedSkill(baseDir, es.name) {
+			cleanup()
+			return nil, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, es.name)
+		}
 		cleanup()
 		return nil, fmt.Errorf("skills: install (rename): %w", err)
 	}
@@ -138,6 +150,9 @@ func (l *Locator) Install(_ context.Context, scope Scope, baseDir, homeDir strin
 
 // Read 返回指定 scope/name 的 skill 详情（含 SKILL.md 全文与包内文件列表）。
 func (l *Locator) Read(_ context.Context, scope Scope, baseDir, name string) (*Detail, error) {
+	if baseDir == "" {
+		return nil, fmt.Errorf("%w: empty baseDir", ErrInvalidFormat)
+	}
 	if !skillNameRegexp.MatchString(name) {
 		return nil, fmt.Errorf("%w: invalid name %q", ErrInvalidFormat, name)
 	}
@@ -172,9 +187,16 @@ func (l *Locator) Read(_ context.Context, scope Scope, baseDir, name string) (*D
 // Delete 移除指定 scope/name 的 managed skill 目录并失效缓存。
 // name 正则保证无路径分隔符/".."，删除严格落在 managedDir(baseDir)/<name> 内。
 func (l *Locator) Delete(_ context.Context, scope Scope, baseDir, name string) error {
+	if baseDir == "" {
+		return fmt.Errorf("%w: empty baseDir", ErrInvalidFormat)
+	}
 	if !skillNameRegexp.MatchString(name) {
 		return fmt.Errorf("%w: invalid name %q", ErrInvalidFormat, name)
 	}
+	// 持 installMu 与 Install 互斥：防并发 install+delete 同名的竞态。
+	l.installMu.Lock()
+	defer l.installMu.Unlock()
+
 	destRoot := managedDir(baseDir)
 	dir := filepath.Join(destRoot, name)
 	// 双保险：解析后必须在 destRoot 内（name 已过正则，此处冗余防御）。

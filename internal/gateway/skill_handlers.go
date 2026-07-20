@@ -2,11 +2,9 @@ package gateway
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -90,15 +88,23 @@ func (h *SkillHandlers) ownerWorkDirs(ctx context.Context, uid string) []string 
 	if h.wsStore == nil {
 		return nil
 	}
-	wss, err := h.wsStore.ListWorkspacesByOwner(ctx, uid, 1000, 0)
-	if err != nil {
-		h.log.Warn("skill_api: list owner workspaces", "err", err)
-		return nil
-	}
-	dirs := make([]string, 0, len(wss))
-	for _, ws := range wss {
-		if ws.WorkDir != "" {
-			dirs = append(dirs, ws.WorkDir)
+	// 分页拉取全部 workspace（spec review P2#4）：硬编码单页 1000 会静默丢弃
+	// 尾部 workspace 的 skill。每页 500 循环至不足一页；设 5000 硬上限防滥用。
+	const page = 500
+	var dirs []string
+	for offset := 0; offset < 5000; offset += page {
+		wss, err := h.wsStore.ListWorkspacesByOwner(ctx, uid, page, offset)
+		if err != nil {
+			h.log.Warn("skill_api: list owner workspaces", "err", err, "offset", offset)
+			return dirs
+		}
+		for _, ws := range wss {
+			if ws.WorkDir != "" {
+				dirs = append(dirs, ws.WorkDir)
+			}
+		}
+		if len(wss) < page {
+			break
 		}
 	}
 	return dirs
@@ -227,12 +233,8 @@ func (h *SkillHandlers) parseSkillUpload(w http.ResponseWriter, r *http.Request)
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
-	buf, err := io.ReadAll(f)
-	if err != nil {
-		writeAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "read upload failed")
-		return nil, false
-	}
-	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
+	// 复用 *os.File ReaderAt 避免 20MB 全量载内存（spec review P2#5）。
+	zr, err := skills.ZipReaderFromFile(f)
 	if err != nil {
 		writeAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "invalid zip archive")
 		return nil, false
@@ -260,6 +262,10 @@ func (h *SkillHandlers) writeSkillError(w http.ResponseWriter, err error, action
 }
 
 // auditSkill 记录 workspace skill 写操作到 tamper-evident user_activity（spec §3.5）。
+//
+// TODO(#910 review P2#6): Platform 硬编码 WebChat，API-key 调用者的 skill 写入被
+// 误标。正确做法是 AuthenticateRequest 返回认证路径（cookie→WebChat /
+// api-key→PlatformAPI），但该签名变更跨切面（所有调用方），留待后续单独 PR 统一。
 func (h *SkillHandlers) auditSkill(r *http.Request, uid, action, outcome string) {
 	if h.auditCollector == nil {
 		return

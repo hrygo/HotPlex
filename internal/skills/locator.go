@@ -20,9 +20,17 @@ type cacheEntry struct {
 
 // Locator discovers skills from the filesystem with TTL-based caching.
 type Locator struct {
-	log       *slog.Logger
-	cache     map[string]*cacheEntry
-	mu        sync.RWMutex
+	log   *slog.Logger
+	cache map[string]*cacheEntry
+	mu    sync.RWMutex // protects cache
+	// installMu serializes filesystem-mutating skill CRUD (Install/Delete).
+	// Install is check-then-rename (hasManagedSkill → RemoveAll → Rename); without
+	// serialization, concurrent replace=true installs silently lose data (T2's
+	// RemoveAll deletes T1's just-renamed dir) and concurrent new-name installs race
+	// to ENOTEMPTY → spurious 500 instead of the contracted 409. Distinct from cache
+	// mu (read-heavy, would over-contend if merged). Skill writes are infrequent
+	// (admin/owner ops), so a single global lock is sufficient.
+	installMu sync.Mutex
 	ttl       time.Duration
 	stopCh    chan struct{}
 	closeOnce sync.Once
@@ -77,7 +85,11 @@ func (l *Locator) List(_ context.Context, homeDir, workDir string) ([]Skill, err
 //
 // 用于 GET /api/skills：一个用户可能拥有多个 workspace，此方法把它们的 managed
 // skill 合并进全局视图。各 workDir 仍走各自的 TTL 缓存；写入后由调用方 Invalidate。
-func (l *Locator) ListMerged(_ context.Context, homeDir string, workDirs []string) ([]Skill, error) {
+//
+// ctx 向下传播至 List（符合请求路径禁用 context.Background 的约定）。注意 List→scanDirs
+// 当前为同步 os.ReadDir 遍历、不响应取消；多 workspace 大目录扫描的 ctx-aware 改造
+// （filepath.WalkDir + ctx 检查）作为后续优化，此处先打通 ctx 链路。
+func (l *Locator) ListMerged(ctx context.Context, homeDir string, workDirs []string) ([]Skill, error) {
 	seen := make(map[string]int) // name → result index
 	var result []Skill
 	add := func(s Skill) {
@@ -93,7 +105,7 @@ func (l *Locator) ListMerged(_ context.Context, homeDir string, workDirs []strin
 	}
 
 	if homeDir != "" {
-		if g, err := l.List(context.Background(), homeDir, ""); err == nil {
+		if g, err := l.List(ctx, homeDir, ""); err == nil {
 			for _, s := range g {
 				add(s)
 			}
@@ -103,7 +115,7 @@ func (l *Locator) ListMerged(_ context.Context, homeDir string, workDirs []strin
 		if wd == "" {
 			continue
 		}
-		ss, err := l.List(context.Background(), homeDir, wd)
+		ss, err := l.List(ctx, homeDir, wd)
 		if err != nil {
 			continue
 		}

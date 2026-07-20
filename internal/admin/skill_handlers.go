@@ -2,9 +2,7 @@ package admin
 
 import (
 	"archive/zip"
-	"bytes"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 
@@ -175,12 +173,8 @@ func parseAdminSkillUpload(w http.ResponseWriter, r *http.Request) (*zip.Reader,
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
-	buf, err := io.ReadAll(f)
-	if err != nil {
-		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "read upload failed")
-		return nil, false
-	}
-	zr, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
+	// 复用 *os.File ReaderAt 避免 20MB 全量载内存（spec review P2#5）。
+	zr, err := skills.ZipReaderFromFile(f)
 	if err != nil {
 		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_ZIP", "invalid zip archive")
 		return nil, false

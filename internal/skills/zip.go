@@ -2,6 +2,7 @@ package skills
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -169,6 +170,22 @@ func extractFile(f *zip.File, dest string) error {
 		return fmt.Errorf("actual size exceeds %d bytes", maxSingleFile)
 	}
 	return nil
+}
+
+// ZipReaderFromFile 从 multipart 上传文件构造 zip.Reader，优先利用 *os.File 的
+// ReaderAt（multipart >32KiB 溢出磁盘时）避免全量载内存（20MB×N 并发 DoS，spec
+// review P2#5）；小文件（内存 *sectionReader）回退 io.ReadAll。f 由调用方 Close。
+func ZipReaderFromFile(f io.ReadCloser) (*zip.Reader, error) {
+	if osFile, ok := f.(*os.File); ok {
+		if info, err := osFile.Stat(); err == nil {
+			return zip.NewReader(osFile, info.Size())
+		}
+	}
+	buf, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	return zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
 }
 
 // locateAndValidateSkill 在 staging 内定位 SKILL.md（扁平 staging/SKILL.md
