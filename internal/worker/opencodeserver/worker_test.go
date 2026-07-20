@@ -75,6 +75,37 @@ func TestOpenCodeServerWorker_InitSessionConnFailsClosedWhenPermissionSetupFails
 	require.Nil(t, w.httpConn, "permission setup failure must not leave a usable connection")
 }
 
+func TestOpenCodeServerWorker_ApplyPermissionsPreservesUnifiedTier(t *testing.T) {
+	t.Parallel()
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch, r.Method)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		rw.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	w := New()
+	w.cmd = &ServerCommander{
+		client:    server.Client(),
+		baseURL:   server.URL,
+		sessionID: "ocs-session-1",
+	}
+
+	err := w.applyPermissions(t.Context(), worker.SessionInfo{PermissionMode: worker.PermissionModeAutoEdit})
+	require.NoError(t, err)
+	perms := got["permission"].([]any)
+	for _, p := range perms {
+		rule := p.(map[string]any)
+		if rule["permission"] == "external_directory" {
+			require.Equal(t, "allow", rule["action"])
+			return
+		}
+	}
+	t.Fatal("missing external_directory rule")
+}
+
 func TestOpenCodeServerWorker_EnvBlocklist(t *testing.T) {
 	t.Parallel()
 	w := New()

@@ -49,7 +49,7 @@ Workspace 级 4 档统一权限模式（#789），跨 Claude Code / Codex / Open
 | 模式 | 行为 | 适用场景 |
 |------|------|---------|
 | `read-only` | 仅规划与只读，不执行写操作 | 代码审查、只读分析 |
-| `workspace` | 自动接受编辑，其他敏感操作仍需审批 | 日常开发 |
+| `workspace` | 自动接受 workspace 内编辑；访问 workspace 外目录及其他敏感操作仍需审批 | 日常开发 |
 | `auto-edit` | 全自动执行，无需逐项确认 | 受信任的自动化 |
 | `bypass` | 跳过所有权限确认 | CI/CD、沙箱环境 |
 

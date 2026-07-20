@@ -214,6 +214,7 @@ func (c *ServerCommander) setModel(_ context.Context, body map[string]any) (map[
 
 func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string]any) (map[string]any, error) {
 	mode, _ := body["mode"].(string)
+	permissionTier, _ := body["permission_tier"].(string)
 
 	// Extract AllowedTools for B3-2 绕行: convert tool whitelist to OCS permission rules.
 	allowedTools, _ := body["allowed_tools"].([]string)
@@ -250,11 +251,22 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 			slog.Warn("opencode: ignoring allowed_tools in plan mode to preserve read-only access",
 				"mode", mode, "allowed_tools", allowedTools)
 		}
-	case "acceptEdits":
-		// Auto-accept edits + reads; other ops still ask (issue #789 workspace/auto-edit tiers).
+	case "acceptEdits", worker.PermissionModeWorkspace, worker.PermissionModeAutoEdit:
+		// Both tiers auto-accept edits and reads. OpenCode evaluates
+		// external_directory separately before the file tool; its active agent
+		// profile permits that capability unless the session overrides it.
+		// Workspace preserves the boundary, whereas auto-edit deliberately
+		// retains its no-prompt semantics.
+		externalDirectoryAction := "ask"
+		if permissionTier == worker.PermissionModeAutoEdit || mode == worker.PermissionModeAutoEdit {
+			// auto-edit is intentionally broader than workspace: it is the
+			// user-selected no-prompt tier across all Worker implementations.
+			externalDirectoryAction = "allow"
+		}
 		rules = []map[string]any{
 			{"permission": "read", "action": "allow", "pattern": "*"},
 			{"permission": "edit", "action": "allow", "pattern": "*"},
+			{"permission": "external_directory", "action": externalDirectoryAction, "pattern": "*"},
 		}
 	default:
 		// Unknown mode: no rules injected. Note: OCS defaults to ALLOW when no rule

@@ -425,11 +425,12 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		mode         string
-		allowedTools []string
-		checkBody    func(*testing.T, map[string]any)
-		wantSuccess  bool
+		name           string
+		mode           string
+		permissionTier string
+		allowedTools   []string
+		checkBody      func(*testing.T, map[string]any)
+		wantSuccess    bool
 	}{
 		{
 			name: "bypassPermissions", mode: "bypassPermissions",
@@ -486,6 +487,43 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 			wantSuccess: true,
 		},
 		{
+			name: "acceptEdits asks before accessing an external directory",
+			mode: "acceptEdits", permissionTier: worker.PermissionModeWorkspace,
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				var externalDirRule map[string]any
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					if rule["permission"] == "external_directory" {
+						externalDirRule = rule
+						break
+					}
+				}
+				require.Equal(t, map[string]any{
+					"permission": "external_directory",
+					"action":     "ask",
+					"pattern":    "*",
+				}, externalDirRule)
+			},
+			wantSuccess: true,
+		},
+		{
+			name: "auto-edit permits an external directory without a prompt",
+			mode: "acceptEdits", permissionTier: worker.PermissionModeAutoEdit,
+			checkBody: func(t *testing.T, reqBody map[string]any) {
+				perms := reqBody["permission"].([]any)
+				for _, p := range perms {
+					rule := p.(map[string]any)
+					if rule["permission"] == "external_directory" {
+						require.Equal(t, "allow", rule["action"])
+						return
+					}
+				}
+				t.Fatal("missing external_directory rule")
+			},
+			wantSuccess: true,
+		},
+		{
 			name: "default mode + allowedTools generates per-tool rules only",
 			mode: "default", allowedTools: []string{"Edit", "Write"},
 			checkBody: func(t *testing.T, reqBody map[string]any) {
@@ -517,6 +555,9 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 			reqBody := map[string]any{"mode": tt.mode}
+			if tt.permissionTier != "" {
+				reqBody["permission_tier"] = tt.permissionTier
+			}
 			if len(tt.allowedTools) > 0 {
 				reqBody["allowed_tools"] = tt.allowedTools
 			}

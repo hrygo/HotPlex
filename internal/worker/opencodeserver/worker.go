@@ -647,7 +647,8 @@ func (w *Worker) applyPermissions(ctx context.Context, session worker.SessionInf
 	mode := permissionModeToOCS(session.PermissionMode)
 
 	body := map[string]any{
-		"mode": mode,
+		"mode":            mode,
+		"permission_tier": session.PermissionMode,
 	}
 
 	// B3-2 绕行: pass AllowedTools so setPermissionMode can generate
