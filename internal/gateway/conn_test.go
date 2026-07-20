@@ -1577,6 +1577,57 @@ func TestBridge_StartSession_Success(t *testing.T) {
 	sm.AssertExpectations(t)
 }
 
+// TestBridge_StartSession_AppliesWorkspacePermissionModeToFirstWorker guards
+// the first-worker path: CreateWithBot returns a pre-binding snapshot, whereas
+// SetWorkspaceID updates the manager's internal session state. The worker must
+// receive the newly bound workspace ID so its read-only permission ceiling is
+// enforced before any input can be handled.
+func TestBridge_StartSession_AppliesWorkspacePermissionModeToFirstWorker(t *testing.T) {
+	t.Parallel()
+
+	const (
+		sessionID   = "sess-readonly-workspace"
+		workspaceID = "ws-readonly"
+	)
+	sm := &mockBridgeSM{Mock: mock.Mock{}}
+	sm.Test(t)
+
+	sessionInfo := &session.SessionInfo{
+		ID:         sessionID,
+		UserID:     "user1",
+		WorkerType: worker.TypeOpenCodeSrv,
+		State:      events.StateCreated,
+	}
+	sm.On("CreateWithBot", mock.Anything, sessionID, "user1", "", "", worker.TypeOpenCodeSrv, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
+	sm.On("SetWorkspaceID", mock.Anything, sessionID, workspaceID).Return(nil)
+	sm.On("AttachWorker", sessionID, mock.Anything).Return(nil)
+	sm.On("Transition", mock.Anything, sessionID, events.StateRunning).Return(nil)
+
+	workerEvents := make(chan *events.Envelope)
+	startedWorker := &mockBridgeWorker{
+		workerType: worker.TypeOpenCodeSrv,
+		conn:       &fakeWorkerConn{ch: workerEvents},
+	}
+	b := NewBridge(BridgeDeps{
+		Log:     slog.Default(),
+		Hub:     newTestHub(t),
+		SM:      sm,
+		WSStore: &stubWSStore{ws: &session.Workspace{ID: workspaceID, PermissionMode: worker.PermissionModeReadOnly}},
+	})
+	b.wf = &mockBridgeWorkerFactory{workers: []*mockBridgeWorker{startedWorker}}
+
+	err := b.StartSession(t.Context(), worker.SessionStartParams{
+		ID:          sessionID,
+		UserID:      "user1",
+		WorkerType:  worker.TypeOpenCodeSrv,
+		WorkspaceID: workspaceID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeReadOnly, startedWorker.startInfo.PermissionMode)
+
+	sm.AssertExpectations(t)
+}
+
 // TestBridge_StartSession_CreateFails verifies that when session creation fails,
 // StartSession returns an error without calling worker.Start.
 func TestBridge_StartSession_CreateFails(t *testing.T) {
