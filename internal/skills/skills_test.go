@@ -107,7 +107,7 @@ func TestScanDir_WithMarkdownFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "hello.md"), []byte("---\nname: hello\ndescription: Says hello\n---\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "skip.txt"), []byte("not a skill"), 0o644))
 
-	skills, err := scanDir(dir, SourceGlobal)
+	skills, err := scanDir(dir, SourceGlobal, false)
 	require.NoError(t, err)
 	require.Len(t, skills, 1)
 	require.Equal(t, "hello", skills[0].Name)
@@ -122,7 +122,7 @@ func TestScanDir_Subdirectory(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(sub, "SKILL.md"), []byte("---\nname: my-tool\ndescription: A tool\n---\n"), 0o644))
 
-	skills, err := scanDir(dir, SourceProject)
+	skills, err := scanDir(dir, SourceProject, false)
 	require.NoError(t, err)
 	require.Len(t, skills, 1)
 	require.Equal(t, "my-tool", skills[0].Name)
@@ -134,7 +134,7 @@ func TestScanDir_NonDir(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "notadir")
 	require.NoError(t, os.WriteFile(f, []byte("x"), 0o644))
 
-	_, err := scanDir(f, SourceGlobal)
+	_, err := scanDir(f, SourceGlobal, false)
 	require.Error(t, err)
 }
 
@@ -146,7 +146,7 @@ func TestParseSkillFile_Valid(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "skill.md")
 	require.NoError(t, os.WriteFile(f, []byte("---\nname: my-skill\ndescription: Does things\n---\n# My Skill\n"), 0o644))
 
-	s := parseSkillFile(f, SourceGlobal)
+	s := parseSkillFile(f, SourceGlobal, false)
 	require.NotNil(t, s)
 	require.Equal(t, "my-skill", s.Name)
 	require.Equal(t, "Does things", s.Description)
@@ -158,7 +158,7 @@ func TestParseSkillFile_NoFrontmatter(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "skill.md")
 	require.NoError(t, os.WriteFile(f, []byte("# No frontmatter\n"), 0o644))
 
-	s := parseSkillFile(f, SourceGlobal)
+	s := parseSkillFile(f, SourceGlobal, false)
 	require.Nil(t, s)
 }
 
@@ -168,14 +168,14 @@ func TestParseSkillFile_NoName(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "skill.md")
 	require.NoError(t, os.WriteFile(f, []byte("---\ndescription: no name field\n---\n"), 0o644))
 
-	s := parseSkillFile(f, SourceGlobal)
+	s := parseSkillFile(f, SourceGlobal, false)
 	require.Nil(t, s)
 }
 
 func TestParseSkillFile_Nonexistent(t *testing.T) {
 	t.Parallel()
 
-	s := parseSkillFile("/nonexistent/file.md", SourceGlobal)
+	s := parseSkillFile("/nonexistent/file.md", SourceGlobal, false)
 	require.Nil(t, s)
 }
 
@@ -290,4 +290,91 @@ func TestNewLocator_NegativeTTL_UsesDefault(t *testing.T) {
 	defer l.Close()
 
 	require.Equal(t, defaultTTL, l.ttl)
+}
+
+// ─── managed 标注 / FilePath 回填（spec §3.2 a）──────────────────────────────
+
+// writeSkill 在 dir 下创建 SKILL.md（含合法 frontmatter）。
+func writeSkill(t *testing.T, dir, name, desc string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("---\nname: "+name+"\ndescription: "+desc+"\n---\n# "+name+"\n"), 0o644))
+}
+
+func TestScanDirs_ManagedAndFilePath(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	workDir := t.TempDir()
+
+	// home .agents/skills/foo → global managed（可写区）
+	writeSkill(t, filepath.Join(homeDir, ".agents", "skills", "foo"), "foo", "global managed")
+	// home .claude/skills/bar → global external（只读）
+	writeSkill(t, filepath.Join(homeDir, ".claude", "skills", "bar"), "bar", "global external")
+	// workDir .agents/skills/baz → project managed
+	writeSkill(t, filepath.Join(workDir, ".agents", "skills", "baz"), "baz", "project managed")
+
+	skills := scanDirs(homeDir, workDir)
+	byName := map[string]Skill{}
+	for _, s := range skills {
+		byName[s.Name] = s
+	}
+
+	require.Contains(t, byName, "foo")
+	require.True(t, byName["foo"].Managed, ".agents/skills 必须标注 managed")
+	require.Equal(t, SourceGlobal, byName["foo"].Source)
+	require.NotEmpty(t, byName["foo"].FilePath)
+
+	require.Contains(t, byName, "bar")
+	require.False(t, byName["bar"].Managed, ".claude/skills 必须标注 external 只读")
+	require.NotEmpty(t, byName["bar"].FilePath)
+
+	require.Contains(t, byName, "baz")
+	require.True(t, byName["baz"].Managed)
+	require.Equal(t, SourceProject, byName["baz"].Source)
+}
+
+// ─── Invalidate / InvalidateAll（spec §3.2 b）──────────────────────────────
+
+func TestLocator_Invalidate(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	workDir := t.TempDir()
+	writeSkill(t, filepath.Join(workDir, ".agents", "skills", "foo"), "foo", "v1")
+
+	l := NewLocator(slog.Default(), time.Minute)
+	defer l.Close()
+
+	got, err := l.List(context.Background(), homeDir, workDir)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "v1", got[0].Description)
+
+	// 磁盘更新 + 失效该 workDir 缓存。
+	writeSkill(t, filepath.Join(workDir, ".agents", "skills", "foo"), "foo", "v2")
+	l.Invalidate(workDir)
+
+	got, err = l.List(context.Background(), homeDir, workDir)
+	require.NoError(t, err)
+	require.Equal(t, "v2", got[0].Description, "Invalidate 必须强制重新扫描")
+}
+
+func TestLocator_InvalidateAll(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	workDir := t.TempDir()
+	writeSkill(t, filepath.Join(workDir, ".agents", "skills", "foo"), "foo", "v1")
+
+	l := NewLocator(slog.Default(), time.Minute)
+	defer l.Close()
+
+	_, err := l.List(context.Background(), homeDir, workDir)
+	require.NoError(t, err)
+	require.Len(t, l.cache, 1)
+
+	l.InvalidateAll()
+	require.Empty(t, l.cache)
 }

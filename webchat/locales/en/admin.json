@@ -69,6 +69,7 @@
     "sessions": "Sessions",
     "activity": "Activity",
     "workspaces": "Workspaces",
+    "skills": "Skills",
     "cron": "Cron",
     "api_keys": "API Keys",
     "admin_connection": "Admin Connection",
@@ -607,6 +608,35 @@
       "run_count": "Run Count",
       "last_run": "Last Run",
       "next_run": "Next Run"
+    }
+  },
+  "skills": {
+    "title": "Skills",
+    "subtitle": "Manage global skills under ~/.agents/skills. External skills (.claude/.hotplex) are read-only.",
+    "action": { "upload": "Upload Skill", "install": "Install" },
+    "label": { "managed": "Managed", "external": "External (read-only)" },
+    "empty": { "title": "No skills installed", "desc": "Upload a skill .zip to install it into the global skills directory." },
+    "dialog": {
+      "upload_title": "Upload Skill",
+      "upload_desc": "Select a .zip whose root has SKILL.md (or a single top-level dir containing it). Aligned with agentskills.io.",
+      "replace": "Replace existing same-name skill",
+      "uploading": "Uploading…"
+    },
+    "error": {
+      "no_file": "Please select a zip file",
+      "not_zip": "Only .zip files are accepted",
+      "already_exists": "Skill already exists — enable \"Replace existing\" to overwrite",
+      "install_failed": "Install failed",
+      "delete_failed": "Delete failed"
+    },
+    "toast": {
+      "installed": "Skill installed",
+      "installed_warning": "Installed — {{warning}}",
+      "deleted": "Skill deleted"
+    },
+    "confirm": {
+      "delete_title": "Delete Skill",
+      "delete_body": "Delete skill \"{{name}}\"? This removes it from the global skills directory and cannot be undone."
     }
   }
 }

@@ -1,6 +1,6 @@
 # Skill 管理 — HTTP API 与 zip 上传
 
-**状态**: Draft · **日期**: 2026-07-17 · **跟踪 issue**: #910 · **关联**: [Admin-Workspace-PermissionMode-Management-Spec.md](./Admin-Workspace-PermissionMode-Management-Spec.md)、[ACP-Worker-Spec.md](./ACP-Worker-Spec.md) · **版本目标**: TBD
+**状态**: Implemented · **日期**: 2026-07-17 · **跟踪 issue**: #910 · **关联**: [Admin-Workspace-PermissionMode-Management-Spec.md](./Admin-Workspace-PermissionMode-Management-Spec.md)、[ACP-Worker-Spec.md](./ACP-Worker-Spec.md) · **版本目标**: v1.37.0
 
 ---
 
@@ -284,3 +284,34 @@ AuditSkillDelete = "skill.delete"
 
 1. **`Source` 值是否重命名** `project`→`workspace`：是 wire 值变更（客户端 `=="project"` 会断），需协调 SDK；首版**保留** `global`/`project`，仅在文档注明 project=workspace scope。
 2. **全局 skill 的物理 owner**：`~/.agents/skills` 在多用户服务器上是 hotplex 服务账号的 home，所有用户共享。确认这是"全局"的预期语义（与本 spec 一致）。
+
+---
+
+## 10. 实施记录
+
+**分支**: `feat/910-skill-management`（关联 issue #910）
+
+### 已实施
+
+- **阶段 1（skills 包）**：`Skill` 加 `Managed`/`FilePath`；scanner 区分 managed(`.agents`)/external(`.claude`/`.hotplex`)；Locator 加 `Invalidate(workDir)`/`InvalidateAll()`/`ListMerged`；`zip.go` 安全管线（zip-slip/炸弹/恶意 entry/类型白名单 + agentskills.io 格式校验）；`crud.go` `Install`/`Read`/`Delete`（原子 Rename 落盘 + 回滚 + 跨 scope warning + 按 scope 缓存失效策略）。
+- **阶段 2（HTTP API）**：8 端点（gateway 用户端 5 + admin 4），multipart `MaxBytesReader` 20MB，审计接入（admin `AuditSkillCreate/Update/Delete` + 用户端 `auditCollector` → user_activity），`SkillEntry` wire 加 `Managed`（omitempty 向后兼容）。
+- **阶段 3（前端）**：admin 全局 skill 管理页（list + zip 上传 + 删除 + warning toast + 只读外部标注）+ admin-nav `Skills` 入口 + zh-CN/en locales 同步。
+
+### 偏离 spec
+
+- **§3.3 A 复用 SafePathJoin**：`security.SafePathJoin` 对目标路径调 `filepath.EvalSymlinks`，而解压时目标文件尚未创建会直接失败。改用等价的 `safeExtractJoin`（Clean + 拒绝绝对路径/".." + Join + 字符串前缀校验，省去 EvalSymlinks）：staging 为本包新建的受控临时目录、entry 相对路径已严格 Clean，前缀校验足以防 zip-slip；显式 `HasPrefix` 双保险保留。
+
+### 阶段 0（实测验证）
+
+§1.2 的 4 adapter 加载行为已通过**官方源码调研确认**（Codex `loader.rs` 主路径 `$HOME/.agents/skills`、OpenCode `skills.mdx` agent-compat 路径、CC 文档只读 `.claude/skills`）。真实 worker 实测（zip 装 skill 到 `~/.agents/skills` 后 CC 建软链 / Codex / OCS 是否在会话中加载）建议在部署环境验证。
+
+### 待确认项决议
+
+1. `Source` 保留 `global`/`project`（wire 兼容；project=workspace scope，文档注明），重命名留待后续协调 SDK。
+2. 全局 `~/.agents/skills` 为服务账号 home、所有用户共享——确认为"全局"预期语义。
+
+### 后续（非本 PR 范围）
+
+- **workspace skill 管理 UI（普通用户页）**：后端 API（`/api/workspaces/{wid}/skills`）+ 前端 client（`webchat/lib/api/skills.ts`）已就绪，UI 待 workspace 详情页改造时接入（复用 admin 全局页模式）。
+- **`docs/reference/admin-api.md`、`api.md` 端点契约**：docs/reference 门户待建；本 spec §5 数据契约汇总为权威参考。
+- **onboard skill 软链引导**（CC 专属 `ln -s ~/.agents/skills ~/.claude/skills`；Codex/OCS 无需；ACP 按底层）：待 onboard 手册页接入。

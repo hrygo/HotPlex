@@ -17,9 +17,14 @@ type skillFrontmatter struct {
 
 // scanDirs scans all skill directories and returns deduplicated skills.
 // Order: global dirs first, then project dirs (project overrides global by name).
+// The managed flag marks entries under .agents/skills (writable region) so the
+// list can distinguish managed skills (UI may create/replace/delete) from
+// external read-only sources (.claude/.hotplex that the user manages by hand).
 func scanDirs(homeDir, workDir string) []Skill {
 	type dirEntry struct {
-		path, source string
+		path    string
+		source  string
+		managed bool
 	}
 
 	dirs := make([]dirEntry, 0, 7)
@@ -27,28 +32,32 @@ func scanDirs(homeDir, workDir string) []Skill {
 	// Global skill dirs require a valid home directory
 	if homeDir != "" {
 		dirs = append(dirs,
-			dirEntry{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal},
-			dirEntry{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal},
-			dirEntry{filepath.Join(homeDir, ".hotplex", "skills"), SourceGlobal},
+			dirEntry{filepath.Join(homeDir, ".claude", "skills"), SourceGlobal, false},
+			dirEntry{filepath.Join(homeDir, ".agents", "skills"), SourceGlobal, true},
+			dirEntry{filepath.Join(homeDir, ".hotplex", "skills"), SourceGlobal, false},
 		)
 	}
 
-	dirs = append(dirs,
-		dirEntry{filepath.Join(workDir, ".claude", "skills"), SourceProject},
-		dirEntry{filepath.Join(workDir, ".agents", "skills"), SourceProject},
-	)
-
-	// Also check current working dir (hotplex repo root) if distinct from workDir
-	if cwd, _ := os.Getwd(); cwd != "" && cwd != workDir {
+	// workDir 为空时仅扫描全局（home）目录，不触碰进程 cwd——用于无项目上下文的
+	// 合并列表（GET /api/skills），避免把 hotplex 自身仓库的 skill 误纳入用户视图。
+	if workDir != "" {
 		dirs = append(dirs,
-			dirEntry{filepath.Join(cwd, ".claude", "skills"), SourceProject},
-			dirEntry{filepath.Join(cwd, ".agents", "skills"), SourceProject},
+			dirEntry{filepath.Join(workDir, ".claude", "skills"), SourceProject, false},
+			dirEntry{filepath.Join(workDir, ".agents", "skills"), SourceProject, true},
 		)
+
+		// Also check current working dir (hotplex repo root) if distinct from workDir
+		if cwd, _ := os.Getwd(); cwd != "" && cwd != workDir {
+			dirs = append(dirs,
+				dirEntry{filepath.Join(cwd, ".claude", "skills"), SourceProject, false},
+				dirEntry{filepath.Join(cwd, ".agents", "skills"), SourceProject, true},
+			)
+		}
 	}
 
 	var all []Skill
 	for _, d := range dirs {
-		skills, err := scanDir(d.path, d.source)
+		skills, err := scanDir(d.path, d.source, d.managed)
 		if err != nil {
 			continue
 		}
@@ -59,7 +68,7 @@ func scanDirs(homeDir, workDir string) []Skill {
 
 // scanDir reads all .md files from a single skill directory.
 // Skips symlink files to avoid duplicates from linked directories.
-func scanDir(dir, source string) ([]Skill, error) {
+func scanDir(dir, source string, managed bool) ([]Skill, error) {
 	fi, err := os.Lstat(dir)
 	if err != nil || !fi.IsDir() {
 		return nil, fmt.Errorf("not a directory: %s", dir)
@@ -83,13 +92,13 @@ func scanDir(dir, source string) ([]Skill, error) {
 			// Subdirectory: look for SKILL.md or skill.md
 			for _, name := range []string{"SKILL.md", "skill.md"} {
 				candidate := filepath.Join(fullPath, name)
-				if s := parseSkillFile(candidate, source); s != nil {
+				if s := parseSkillFile(candidate, source, managed); s != nil {
 					result = append(result, *s)
 					break
 				}
 			}
 		} else if strings.HasSuffix(entry.Name(), ".md") {
-			if s := parseSkillFile(fullPath, source); s != nil {
+			if s := parseSkillFile(fullPath, source, managed); s != nil {
 				result = append(result, *s)
 			}
 		}
@@ -108,7 +117,7 @@ func isSymlink(path string) bool {
 
 // parseSkillFile reads a .md file and extracts name/description from YAML frontmatter.
 // Returns nil if the file cannot be read or has no valid frontmatter.
-func parseSkillFile(path, source string) *Skill {
+func parseSkillFile(path, source string, managed bool) *Skill {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -132,6 +141,8 @@ func parseSkillFile(path, source string) *Skill {
 		Name:        fm.Name,
 		Description: desc,
 		Source:      source,
+		Managed:     managed,
+		FilePath:    path,
 	}
 }
 

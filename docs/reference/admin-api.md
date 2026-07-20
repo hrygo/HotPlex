@@ -325,6 +325,27 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 
 PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQUEST`（body 缺 `permission_mode`）/ `404 WORKSPACE_NOT_FOUND`（id 不存在）/ `409 WORKSPACE_VERSION_MISMATCH`（`updated_at` CAS 冲突；或并发更新下 workspace 恰有活跃会话时的 CAS heuristic 误判——本端点只改 `permission_mode`、不动 `work_dir`，活跃会话不真正阻塞，故两种成因都应重新 GET 最新 `updated_at` 后重试，新值仅对新会话生效）。
 
+### Skill 管理（admin 全局）
+
+> 🆕 **issue #910** — admin 控制台的全局 skill 管理。zip 上传安装到 `~/.agents/skills`（对齐开放 `.agents` 标准，Codex/OpenCode 原生读取；Claude Code 需软链，见 [Skill 配置教程](../tutorials/skills-setup.md)）。区别于用户自助的 `/api/workspaces/{wid}/skills/*`（见下文 WebChat 多租户端点段）：admin 端管理**全局共享** skill，用户端管理各自 **workspace** skill。
+
+| 方法 | 路径 | Scope | 说明 |
+|------|------|-------|------|
+| GET | `/admin/api/skills` | `admin:read` | 列出全局 skill（`.agents`/`.claude`/`.hotplex` 合并，带 `managed` 标注） |
+| POST | `/admin/api/skills` | `admin:write` | zip 上传安装全局 skill（`?replace=true` 覆盖同名） |
+| GET | `/admin/api/skills/{name}` | `admin:read` | 全局 skill 详情（含 `SKILL.md` 全文 `body` + 包内文件列表 `files`） |
+| DELETE | `/admin/api/skills/{name}` | `admin:write` | 删除全局 skill |
+
+**GET /admin/api/skills** — 合并扫描 home 下 `.agents/skills`（`managed:true`，可写）与 `.claude/skills`、`.hotplex/skills`（`managed:false`，只读外部），同名 project 覆盖 global。响应：`{"skills":[{name,description,source,managed}],"total":N}`。GET 不审计。
+
+**POST /admin/api/skills** — multipart 上传，`file` 字段为 `.zip` 包（body 上限 20MB）。zip 根下须直接有 `SKILL.md`，或单一顶层目录内含 `SKILL.md`（目录名必须等于 frontmatter `name`）。frontmatter 必填 `name`（正则 `^[a-z0-9]+(-[a-z0-9]+)*$`，1-64 字符）与 `description`（1-1024 字符）。文件类型白名单：`.md`/`.json`/`.yaml`/`.yml`/`.txt`/`.py`/`.sh`/`.toml`/图片（`.png`/`.jpg`/`.jpeg`/`.svg`）；拒可执行/二进制。`?replace=true` 覆盖同名，否则同名返回 `409`。安装成功返回 `skills.InstallResult`（含 `name`/`description`/`source:"global"`/`managed:true`/`body`/`files`，以及可能的 `warning`）。
+
+> 🛡️ **安全**：zip-slip（`SafePathJoin` + 前缀双保险）、解压炸弹（zip ≤20MB / 解压总 ≤50MB / 单文件 ≤5MB / entry ≤500 / 压缩率 >100× 拒）、恶意 entry（`IsRegular()` 过滤 symlink/device）多维防护（spec §3.3 A）。
+
+> 🛡️ **审计**：POST/DELETE 写操作由 middleware 级 `admin_audit` 统一记录，action = `skill.create`（POST，`?replace=true` 时映射为 `skill.update`）/ `skill.delete`（DELETE），actor = uid（Cookie 通道）或 `admin-token`（Bearer）。
+
+错误码：`400 SKILL_INVALID_ZIP`（损坏/超限/含恶意 entry）/ `400 SKILL_INVALID_FORMAT`（无 SKILL.md / frontmatter 缺失 / name 不合规 / name≠目录名 / description 超长）/ `400 SKILL_FILE_TYPE_BLOCKED`（类型不在白名单）/ `409 SKILL_ALREADY_EXISTS`（同名且未带 `?replace=true`）/ `404 SKILL_NOT_FOUND`（name 不存在）。
+
 ## Gateway API 端点
 
 Gateway API（`/api/sessions`）监听在网关主端口（`8888`），面向客户端 SDK 和 WebSocket 连接，使用 API Key 认证（非 Bearer Token）。
@@ -393,6 +414,24 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 > **PATCH 乐观并发（CAS）**：更新基于 `updated_at` 做乐观锁——服务端 `UPDATE ... WHERE id = ? AND updated_at = ?`，调用方缓存的 `updated_at` 不再匹配（被并发修改）时影响 0 行，返回 `409 WORKSPACE_VERSION_MISMATCH`（"workspace concurrently modified, please re-fetch and retry"）。客户端无需在 body 显式传版本字段（先 GET 取最新值再 PATCH），收到 409 后应重新 GET 再重试，避免静默 lost update。
 
 > **PATCH body 字段语义**：`name`、`agent_config_overrides` 传空字符串表示**不更新**（无法通过 PATCH 清空这两项）；`worker_preference` 为指针类型以区分三态——**省略**（字段未传）不更新、**空字符串** `""` 显式清除回默认 worker、**非空**设为指定类型（校验失败返回 `400 INVALID_WORKER_TYPE`）；`work_dir` 为 workspace 级可变字段——**省略/空字符串**不更新，**非空**时校验 owner 沙箱（`403 WORK_DIR_OUTSIDE_SANDBOX`）、值变更须 workspace 无活跃会话（`409 WORKSPACE_NOT_EMPTY`，因 work_dir 进 session key 派生）、且未被该 owner 其他 workspace 占用（`409 WORK_DIR_TAKEN`）后更新（见上）。
+
+**Workspace Skill 管理（spec #910）**：
+
+每个 workspace 可管理自己的 skill（安装到 `<work_dir>/.agents/skills`）。鉴权与 workspace CRUD 一致（API Key 优先 / Cookie 兜底），写操作额外校验 owner 归属（`ws.OwnerUserID != uid && !isAdmin` → `403 WORKSPACE_FORBIDDEN`）。另提供脱离 workspace 的合并查询：`/api/skills` 返回 `全局 + 当前用户所有 workspace + 外部只读` 的合并列表（每用户视图）。
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| GET | `/api/skills` | API Key / Cookie | 合并列表：全局 + 我的 workspace + 外部只读（带 `managed` 标注） |
+| GET | `/api/skills/{name}` | API Key / Cookie | 合并列表中该 skill 的元信息（覆盖胜出 scope） |
+| POST | `/api/workspaces/{wid}/skills` | owner | zip 上传安装 workspace skill（`?replace=true` 覆盖） |
+| GET | `/api/workspaces/{wid}/skills/{name}` | owner | workspace scope skill 详情（含 `body` + `files`） |
+| DELETE | `/api/workspaces/{wid}/skills/{name}` | owner | 删除 workspace skill |
+
+> ⚠️ **同名遮蔽（spec §3.3 B6）**：workspace 安装与全局同名的 skill 时**允许安装但返回 `warning`**（`shadows global skill '<name>'`）——workspace skill 在合并列表中覆盖全局生效，UI 须显式提示。
+
+> 🛡️ **审计**：workspace skill 写操作（POST/DELETE）由 handler 显式写入 tamper-evident `user_activity`（`action` = `skill.install` / `skill.delete`，`resource_type` = `skill`，`platform` = `webchat`），与 `/api/admin/*` 写操作一致；读操作不审计。
+
+zip 格式、文件类型白名单与安全约束同上方「Skill 管理（admin 全局）」；错误码复用 `SKILL_INVALID_ZIP` / `SKILL_INVALID_FORMAT` / `SKILL_FILE_TYPE_BLOCKED` / `SKILL_ALREADY_EXISTS` / `SKILL_NOT_FOUND`，另增 `403 WORKSPACE_FORBIDDEN`（非 owner）。
 
 **Workspace 用户与邀请管理（spec ⑥，admin 维度）**：
 

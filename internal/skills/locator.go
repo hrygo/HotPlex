@@ -20,9 +20,17 @@ type cacheEntry struct {
 
 // Locator discovers skills from the filesystem with TTL-based caching.
 type Locator struct {
-	log       *slog.Logger
-	cache     map[string]*cacheEntry
-	mu        sync.RWMutex
+	log   *slog.Logger
+	cache map[string]*cacheEntry
+	mu    sync.RWMutex // protects cache
+	// installMu serializes filesystem-mutating skill CRUD (Install/Delete).
+	// Install is check-then-rename (hasManagedSkill → RemoveAll → Rename); without
+	// serialization, concurrent replace=true installs silently lose data (T2's
+	// RemoveAll deletes T1's just-renamed dir) and concurrent new-name installs race
+	// to ENOTEMPTY → spurious 500 instead of the contracted 409. Distinct from cache
+	// mu (read-heavy, would over-contend if merged). Skill writes are infrequent
+	// (admin/owner ops), so a single global lock is sufficient.
+	installMu sync.Mutex
 	ttl       time.Duration
 	stopCh    chan struct{}
 	closeOnce sync.Once
@@ -70,6 +78,72 @@ func (l *Locator) List(_ context.Context, homeDir, workDir string) ([]Skill, err
 	l.mu.Unlock()
 
 	return skills, nil
+}
+
+// ListMerged 合并全局（homeDir 范围）与多个 workspace 的 skill 列表，去重
+// （workspace project 覆盖 global 同名）。workDirs 为空或全空时仅返回 global。
+//
+// 用于 GET /api/skills：一个用户可能拥有多个 workspace，此方法把它们的 managed
+// skill 合并进全局视图。各 workDir 仍走各自的 TTL 缓存；写入后由调用方 Invalidate。
+//
+// ctx 向下传播至 List（符合请求路径禁用 context.Background 的约定）。注意 List→scanDirs
+// 当前为同步 os.ReadDir 遍历、不响应取消；多 workspace 大目录扫描的 ctx-aware 改造
+// （filepath.WalkDir + ctx 检查）作为后续优化，此处先打通 ctx 链路。
+func (l *Locator) ListMerged(ctx context.Context, homeDir string, workDirs []string) ([]Skill, error) {
+	seen := make(map[string]int) // name → result index
+	var result []Skill
+	add := func(s Skill) {
+		if idx, ok := seen[s.Name]; ok {
+			// project 覆盖 global（与 dedup 一致）；同名 project 取先到者。
+			if s.Source == SourceProject && result[idx].Source == SourceGlobal {
+				result[idx] = s
+			}
+		} else {
+			seen[s.Name] = len(result)
+			result = append(result, s)
+		}
+	}
+
+	if homeDir != "" {
+		if g, err := l.List(ctx, homeDir, ""); err == nil {
+			for _, s := range g {
+				add(s)
+			}
+		}
+	}
+	for _, wd := range workDirs {
+		if wd == "" {
+			continue
+		}
+		ss, err := l.List(ctx, homeDir, wd)
+		if err != nil {
+			continue
+		}
+		for _, s := range ss {
+			if s.Source == SourceProject { // global 已由上面加入
+				add(s)
+			}
+		}
+	}
+	return result, nil
+}
+
+// Invalidate drops the cached skills for a single workDir. Call after a
+// workspace-scoped CRUD so the next List re-scans the filesystem instead of
+// serving a stale merged list. Safe to call for a workDir that was never cached.
+func (l *Locator) Invalidate(workDir string) {
+	l.mu.Lock()
+	delete(l.cache, workDir)
+	l.mu.Unlock()
+}
+
+// InvalidateAll drops every cached entry. Call after a global-scoped CRUD — a
+// global skill change invalidates the merged list (global + workspace) of every
+// workspace, so a single Invalidate(workDir) is not enough.
+func (l *Locator) InvalidateAll() {
+	l.mu.Lock()
+	l.cache = make(map[string]*cacheEntry)
+	l.mu.Unlock()
 }
 
 // Close stops the background sweep goroutine.
