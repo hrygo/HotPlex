@@ -256,9 +256,6 @@
         "delete_title": "删除工作区技能",
         "delete_body": "确认删除技能 \"{{name}}\" 吗？此操作将从工作区技能目录中移除该技能，且无法撤销。"
       },
-      "title": {
-        "list": "已安装技能"
-      },
       "error": {
         "not_zip": "仅接受 .zip 格式文件",
         "no_file": "请选择一个 zip 文件",

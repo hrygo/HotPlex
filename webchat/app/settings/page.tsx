@@ -177,7 +177,7 @@ export default function SettingsPage() {
       <div className="fixed inset-0 z-0 noise-overlay pointer-events-none" />
 
       {/* Top Header Bar */}
-      <header className="relative z-30 h-14 flex items-center px-4 md:px-6 gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-header)] backdrop-blur-xl sticky top-0">
+      <header className="relative z-30 h-14 shrink-0 flex items-center px-4 md:px-6 gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-header)] backdrop-blur-xl sticky top-0">
         <Link
           href="/"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all text-xs font-bold border border-transparent hover:border-[var(--border-subtle)]"

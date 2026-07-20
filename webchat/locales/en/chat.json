@@ -256,9 +256,6 @@
         "delete_title": "Delete Workspace Skill",
         "delete_body": "Delete skill \"{{name}}\"? This removes it from the workspace skills directory and cannot be undone."
       },
-      "title": {
-        "list": "Installed Skills"
-      },
       "error": {
         "not_zip": "Only .zip files are accepted",
         "no_file": "Please select a zip file",
