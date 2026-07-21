@@ -996,6 +996,9 @@ func (m *mockInputSM) UpdateWorkerSessionID(_ context.Context, _ string, _ strin
 func (m *mockInputSM) EnsureWorkerSessionID(_ context.Context, _ string, _ string) error {
 	return nil
 }
+func (m *mockInputSM) SetPermissionCeilingIfEmpty(_ context.Context, _ string, ceiling string) (string, error) {
+	return ceiling, nil
+}
 func (m *mockInputSM) List(_ context.Context, _ string, _ string, _ string, _ int, _ int) ([]*session.SessionInfo, error) {
 	return nil, nil
 }

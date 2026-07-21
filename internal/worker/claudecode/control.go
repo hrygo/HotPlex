@@ -135,9 +135,31 @@ func (h *ControlHandler) SendResponse(ctx context.Context, resp *ControlResponse
 
 // SendPermissionResponse sends a user's permission decision back to Claude Code.
 func (h *ControlHandler) SendPermissionResponse(ctx context.Context, reqID string, allowed bool, reason string) error {
-	return h.sendResponse(ctx, reqID, map[string]any{
-		"allowed": allowed,
-		"reason":  reason,
+	behavior := "deny"
+	if allowed {
+		behavior = "allow"
+	}
+	resp := map[string]any{
+		"behavior": behavior,
+		"allowed":  allowed,
+		"reason":   reason,
+	}
+	if !allowed && reason != "" {
+		resp["message"] = reason
+	}
+	return h.sendResponse(ctx, reqID, resp)
+}
+
+// SendErrorResponse rejects a control request using Claude's protocol-level
+// error shape. Callers must pass a bounded, non-sensitive reason code.
+func (h *ControlHandler) SendErrorResponse(ctx context.Context, reqID, reason string) error {
+	return h.SendResponse(ctx, &ControlResponse{
+		Type: "control_response",
+		Response: ResponsePayload{
+			Subtype:   "error",
+			RequestID: reqID,
+			Error:     reason,
+		},
 	})
 }
 

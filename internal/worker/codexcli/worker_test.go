@@ -2146,6 +2146,16 @@ func TestSendControlRequestSetModel(t *testing.T) {
 	require.Contains(t, err.Error(), "set_model not supported")
 }
 
+func TestSendControlRequestSetPermissionModeIsExplicitlyUnsupported(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	w.commands = NewServerCommander(w.manager, "thr-1")
+
+	_, err := w.SendControlRequest(context.Background(), "set_permission_mode", map[string]any{"mode": "read-only"})
+	require.ErrorIs(t, err, worker.ErrNotImplemented)
+}
+
 // ─── Conn Tests ───────────────────────────────────────────────────────────
 
 func TestConnAfterStartReturnsAppConn(t *testing.T) {
@@ -2376,6 +2386,46 @@ func TestServerCommanderUnknownSubtype(t *testing.T) {
 	_, err := sc.SendControlRequest(context.Background(), "unknown_subtype", nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown control subtype")
+}
+
+func TestPermissionModeFromCodexEffective(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		sandbox  string
+		approval string
+		want     string
+	}{
+		{"read only", "read-only", "never", worker.PermissionModeReadOnly},
+		{"workspace prompt", "workspace-write", "on-request", worker.PermissionModeWorkspace},
+		{"workspace automatic", "workspace-write", "never", worker.PermissionModeAutoEdit},
+		{"workspace untrusted fails closed", "workspace-write", "untrusted", worker.PermissionModeReadOnly},
+		{"workspace unknown approval fails closed", "workspace-write", "future-policy", worker.PermissionModeReadOnly},
+		{"full bypass", "danger-full-access", "never", worker.PermissionModeBypass},
+		{"full with approval fails closed", "danger-full-access", "on-request", worker.PermissionModeReadOnly},
+		{"unknown sandbox fails closed", "docker", "never", worker.PermissionModeReadOnly},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := permissionModeFromCodexEffective(map[string]any{
+				"sandbox":        tt.sandbox,
+				"approvalPolicy": tt.approval,
+			})
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCodexPermissionCeilingSurvivesNewThread(t *testing.T) {
+	t.Parallel()
+	w := &AppServerWorker{}
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeWorkspace))
+
+	session := w.sessionWithPermissionCeiling(worker.SessionInfo{
+		PermissionMode: worker.PermissionModeBypass,
+	})
+	require.Equal(t, worker.PermissionModeWorkspace, session.PermissionMode)
 }
 
 func TestServerCommanderMCPOAuthMissingName(t *testing.T) {

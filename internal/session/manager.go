@@ -244,6 +244,10 @@ type SessionInfo struct {
 	// WorkspaceID is the WebChat multitenancy anchor (spec ① §6.4).
 	// Empty for platform/cron sessions (Slack/Feishu) — they have no workspace.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// PermissionCeiling is the first effective permission tier reported by the
+	// Worker after a successful Start/Resume. It is immutable for the lifetime
+	// of this session and survives gateway restarts and Worker replacement.
+	PermissionCeiling string `json:"permission_ceiling,omitempty"`
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -1193,6 +1197,33 @@ func (m *Manager) UpdateWorkerSessionID(ctx context.Context, id, workerSessionID
 // stale DB rows after guard re-persist failures.
 func (m *Manager) EnsureWorkerSessionID(ctx context.Context, id, workerSessionID string) error {
 	return m.updateWorkerSessionID(ctx, id, workerSessionID, true)
+}
+
+// SetPermissionCeilingIfEmpty atomically persists the first effective Worker
+// permission ceiling. The authoritative stored value is returned so callers
+// can detect a concurrent first-writer mismatch and fence the Worker.
+func (m *Manager) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	if m == nil {
+		return "", ErrSessionNotFound
+	}
+	canonical, err := worker.NormalizeRuntimePermissionMode(ceiling)
+	if err != nil {
+		return "", err
+	}
+	ms := m.getManagedSession(ctx, id)
+	if ms == nil {
+		return "", ErrSessionNotFound
+	}
+
+	stored, err := m.store.SetPermissionCeilingIfEmpty(ctx, id, canonical)
+	if err != nil {
+		return "", err
+	}
+
+	ms.mu.Lock()
+	ms.info.PermissionCeiling = stored
+	ms.mu.Unlock()
+	return stored, nil
 }
 
 func (m *Manager) updateWorkerSessionID(ctx context.Context, id, workerSessionID string, force bool) error {

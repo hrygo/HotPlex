@@ -219,7 +219,7 @@ func TestBuildCLIArgs_AllOptions(t *testing.T) {
 	require.Contains(t, args, "--permission-mode", "plan")
 	require.Contains(t, args, "--disallowed-tools", "WebSearch,Edit")
 	require.Contains(t, args, "--model", "claude-sonnet-4-6")
-	require.Contains(t, args, "--allowed-tools", "Read,Write,Bash")
+	require.NotContains(t, args, "--allowed-tools", "read-only must ignore caller allowed_tools")
 	// System prompt is now injected via temp file.
 	require.Contains(t, args, "--append-system-prompt-file")
 	require.NotContains(t, args, "--append-system-prompt", "You are a helpful assistant.")
@@ -749,12 +749,13 @@ func TestControlHandler_SendPermissionResponse(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		allowed bool
-		reason  string
+		name     string
+		allowed  bool
+		reason   string
+		behavior string
 	}{
-		{"allow_with_reason", true, "approved by user"},
-		{"deny_without_reason", false, ""},
+		{"allow_with_reason", true, "approved by user", "allow"},
+		{"deny_without_reason", false, "", "deny"},
 	}
 
 	for _, tc := range tests {
@@ -773,6 +774,7 @@ func TestControlHandler_SendPermissionResponse(t *testing.T) {
 			require.Equal(t, "success", resp.Response.Subtype)
 			require.Equal(t, tc.allowed, resp.Response.Response["allowed"])
 			require.Equal(t, tc.reason, resp.Response.Response["reason"])
+			require.Equal(t, tc.behavior, resp.Response.Response["behavior"])
 		})
 	}
 }
@@ -888,6 +890,7 @@ func TestAutoApproveTool_MatchingTool(t *testing.T) {
 	// Verify a response was written to stdin (buf)
 	require.NotEmpty(t, buf.String(), "should send permission response")
 	require.Contains(t, buf.String(), `"allowed":true`)
+	require.Contains(t, buf.String(), `"behavior":"allow"`)
 	require.Contains(t, buf.String(), "auto-approved")
 }
 
@@ -935,6 +938,29 @@ func TestAutoApproveTool_EmptyOrNilList(t *testing.T) {
 
 			result := autoApproveTool(ctrl, cr)
 			require.False(t, result, "should not auto-approve with empty list")
+			require.Empty(t, buf.String())
+		})
+	}
+}
+
+func TestWorkerAutoApproveTool_RestrictedCeilingsRequireExplicitApproval(t *testing.T) {
+	original := permissionAutoApprove.Load()
+	defer permissionAutoApprove.Store(original)
+	permissionAutoApprove.Store([]string{"ExitPlanMode", "Write", "Bash"})
+
+	for _, ceiling := range []string{worker.PermissionModeReadOnly, worker.PermissionModeWorkspace} {
+		t.Run(ceiling, func(t *testing.T) {
+			w := New()
+			require.NoError(t, w.permissionCeiling.Capture(ceiling))
+			var buf bytes.Buffer
+			ctrl := NewControlHandler(slog.Default(), &buf)
+
+			approved := w.autoApproveTool(ctrl, &ControlRequestPayload{
+				Subtype:   string(ControlCanUseTool),
+				ToolName:  "ExitPlanMode",
+				RequestID: "restricted",
+			})
+			require.False(t, approved)
 			require.Empty(t, buf.String())
 		})
 	}

@@ -3,6 +3,8 @@ package codexcli
 import (
 	"context"
 	"fmt"
+
+	"github.com/hrygo/hotplex/internal/worker"
 )
 
 type ServerCommander struct {
@@ -18,6 +20,8 @@ func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype strin
 	switch subtype {
 	case "set_model":
 		return nil, fmt.Errorf("codexcli: set_model not supported")
+	case "set_permission_mode":
+		return nil, worker.ErrNotImplemented
 	case "get_context_usage":
 		return sc.manager.LastContextUsage(sc.threadID), nil
 	case "mcp_status":

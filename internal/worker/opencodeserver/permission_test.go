@@ -27,3 +27,25 @@ func TestPermissionModeToOCS(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenCodeServerPermissionCeilingPublicPath(t *testing.T) {
+	t.Parallel()
+	w := New()
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeWorkspace))
+
+	request, err := w.preparePermissionModeRequest(map[string]any{"mode": "plan"})
+	require.NoError(t, err)
+	require.Equal(t, "plan", request["mode"])
+	require.Equal(t, worker.PermissionModeReadOnly, request["permission_tier"])
+
+	request, err = w.preparePermissionModeRequest(map[string]any{"mode": "acceptEdits"})
+	require.NoError(t, err)
+	require.Equal(t, "acceptEdits", request["mode"])
+	require.Equal(t, worker.PermissionModeWorkspace, request["permission_tier"])
+
+	_, err = w.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{"mode": "auto"})
+	require.ErrorIs(t, err, worker.ErrPermissionEscalation)
+
+	_, err = w.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{"mode": "bypassPermissions"})
+	require.ErrorIs(t, err, worker.ErrPermissionEscalation)
+}

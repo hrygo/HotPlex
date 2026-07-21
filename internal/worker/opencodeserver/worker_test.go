@@ -92,6 +92,7 @@ func TestOpenCodeServerWorker_ApplyPermissionsPreservesUnifiedTier(t *testing.T)
 		baseURL:   server.URL,
 		sessionID: "ocs-session-1",
 	}
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeAutoEdit))
 
 	err := w.applyPermissions(t.Context(), worker.SessionInfo{PermissionMode: worker.PermissionModeAutoEdit})
 	require.NoError(t, err)

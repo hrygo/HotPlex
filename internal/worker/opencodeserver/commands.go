@@ -18,13 +18,21 @@ import (
 // ServerCommander implements worker.ControlRequester + worker.WorkerCommander for OpenCode Server.
 // Routes worker commands to OpenCode's HTTP REST API.
 type ServerCommander struct {
-	mu            sync.Mutex
-	client        *http.Client
-	baseURL       string
-	sessionID     string
-	pendingModel  *ModelRef
-	contextWindow int64
-	projectDir    string
+	mu                sync.Mutex
+	permissionApplyMu sync.Mutex
+	client            *http.Client
+	baseURL           string
+	sessionID         string
+	pendingModel      *ModelRef
+	contextWindow     int64
+	projectDir        string
+
+	// permissionMode retains the current tightened mode. The startup tool
+	// whitelist is captured once and never replaced by a runtime tightening, so
+	// restoring to the ceiling cannot widen a scoped bypass/auto-edit session.
+	permissionMode                string
+	permissionPolicyInitialized   bool
+	permissionCeilingAllowedTools []string
 }
 
 // ModelRef stores model selection for subsequent message requests.
@@ -74,11 +82,14 @@ func (c *ServerCommander) Compact(ctx context.Context, args map[string]any) erro
 
 // Clear implements WorkerCommander — delete session + create new.
 func (c *ServerCommander) Clear(ctx context.Context) error {
-	if err := c.doDelete(ctx, "/session/"+url.PathEscape(c.getSessionID())); err != nil {
-		return fmt.Errorf("opencode clear (delete): %w", err)
-	}
+	c.permissionApplyMu.Lock()
+	defer c.permissionApplyMu.Unlock()
+
 	c.mu.Lock()
+	oldID := c.sessionID
 	dir := c.projectDir
+	permissionMode := c.permissionMode
+	allowedTools := append([]string(nil), c.permissionCeilingAllowedTools...)
 	c.mu.Unlock()
 	createPath := "/session"
 	if dir != "" {
@@ -95,6 +106,29 @@ func (c *ServerCommander) Clear(ctx context.Context) error {
 	}
 	if err := c.doPost(ctx, createPath, createBody, &newSession); err != nil {
 		return fmt.Errorf("opencode clear (create): %w", err)
+	}
+
+	if permissionMode != "" {
+		body := map[string]any{
+			"mode":            permissionModeToOCS(permissionMode),
+			"permission_tier": permissionMode,
+		}
+		if len(allowedTools) > 0 {
+			body["allowed_tools"] = allowedTools
+		}
+		if _, err := c.setPermissionModeForSessionLocked(ctx, newSession.ID, body); err != nil {
+			_ = c.doDelete(context.Background(), "/session/"+url.PathEscape(newSession.ID))
+			return fmt.Errorf("opencode clear (permissions): %w", err)
+		}
+	}
+	if err := c.doDelete(ctx, "/session/"+url.PathEscape(oldID)); err != nil {
+		// The old session may already be gone (timeout, 404, or server-side
+		// GC). Discarding the freshly-created, permissioned new session to
+		// preserve a potentially-stale oldID would leave the commander bound
+		// to a dead session. Adopt the new session and let the orphaned old
+		// session be reclaimed by the server's own session GC.
+		slog.Warn("opencode clear: failed to delete old session, adopting new session",
+			"old_session_id", oldID, "new_session_id", newSession.ID, "err", err)
 	}
 	c.setSessionID(newSession.ID)
 	return nil
@@ -213,11 +247,40 @@ func (c *ServerCommander) setModel(_ context.Context, body map[string]any) (map[
 }
 
 func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string]any) (map[string]any, error) {
-	mode, _ := body["mode"].(string)
+	c.permissionApplyMu.Lock()
+	defer c.permissionApplyMu.Unlock()
+	return c.setPermissionModeForSessionLocked(ctx, c.getSessionID(), body)
+}
+
+func (c *ServerCommander) setPermissionModeForSessionLocked(ctx context.Context, targetSessionID string, body map[string]any) (map[string]any, error) {
+	requestedMode, _ := body["mode"].(string)
 	permissionTier, _ := body["permission_tier"].(string)
+	canonicalMode := permissionTier
+	if canonicalMode == "" {
+		canonicalMode = requestedMode
+	}
+	canonicalMode, err := worker.NormalizeRuntimePermissionMode(canonicalMode)
+	if err != nil {
+		return nil, fmt.Errorf("opencode set permission: %w", err)
+	}
+	mode := permissionModeToOCS(canonicalMode)
 
 	// Extract AllowedTools for B3-2 绕行: convert tool whitelist to OCS permission rules.
 	allowedTools, _ := body["allowed_tools"].([]string)
+	c.mu.Lock()
+	initialized := c.permissionPolicyInitialized
+	ceilingAllowedTools := append([]string(nil), c.permissionCeilingAllowedTools...)
+	c.mu.Unlock()
+	if initialized && (canonicalMode == worker.PermissionModeAutoEdit || canonicalMode == worker.PermissionModeBypass) {
+		allowedTools = ceilingAllowedTools
+	}
+	if canonicalMode == worker.PermissionModeReadOnly || canonicalMode == worker.PermissionModeWorkspace {
+		if len(allowedTools) > 0 {
+			slog.Warn("opencode: ignoring allowed_tools to preserve permission ceiling",
+				"mode", canonicalMode, "allowed_tools_count", len(allowedTools))
+		}
+		allowedTools = nil
+	}
 
 	// Initialize as non-nil to ensure JSON encodes as [] not null.
 	rules := make([]map[string]any, 0)
@@ -230,7 +293,7 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 			// Intentional security tightening: when bypassPermissions is paired with
 			// an explicit tool whitelist, scope down from allow-all to allow-listed only.
 			slog.Info("opencode: bypassPermissions mode with allowed_tools restricts to tool whitelist",
-				"mode", mode, "allowed_tools", allowedTools)
+				"mode", mode, "allowed_tools_count", len(allowedTools))
 		}
 	case "plan":
 		// Read-only: OCS allows unmatched permissions by default. Ask before every
@@ -249,45 +312,48 @@ func (c *ServerCommander) setPermissionMode(ctx context.Context, body map[string
 		}
 		if len(allowedTools) > 0 {
 			slog.Warn("opencode: ignoring allowed_tools in plan mode to preserve read-only access",
-				"mode", mode, "allowed_tools", allowedTools)
+				"mode", mode, "allowed_tools_count", len(allowedTools))
 		}
-	case "acceptEdits", worker.PermissionModeWorkspace, worker.PermissionModeAutoEdit:
-		// Both tiers auto-accept edits and reads. OpenCode evaluates
-		// external_directory separately before the file tool; its active agent
-		// profile permits that capability unless the session overrides it.
-		// Workspace preserves the boundary, whereas auto-edit deliberately
-		// retains its no-prompt semantics.
+	case "acceptEdits":
+		// Both tiers auto-accept edits and reads. Workspace starts from an ask-all
+		// baseline so unmatched capabilities such as shell execution cannot inherit
+		// OpenCode's permissive profile defaults. Auto-edit deliberately omits that
+		// baseline and retains its no-prompt semantics.
 		externalDirectoryAction := "ask"
-		if permissionTier == worker.PermissionModeAutoEdit || mode == worker.PermissionModeAutoEdit {
-			// auto-edit is intentionally broader than workspace: it is the
-			// user-selected no-prompt tier across all Worker implementations.
+		if canonicalMode == worker.PermissionModeWorkspace {
+			rules = append(rules, map[string]any{"permission": "*", "action": "ask", "pattern": "*"})
+		}
+		if canonicalMode == worker.PermissionModeAutoEdit {
 			externalDirectoryAction = "allow"
 		}
-		rules = []map[string]any{
-			{"permission": "read", "action": "allow", "pattern": "*"},
-			{"permission": "edit", "action": "allow", "pattern": "*"},
-			{"permission": "external_directory", "action": externalDirectoryAction, "pattern": "*"},
-		}
+		rules = append(rules,
+			map[string]any{"permission": "read", "action": "allow", "pattern": "*"},
+			map[string]any{"permission": "edit", "action": "allow", "pattern": "*"},
+			map[string]any{"permission": "external_directory", "action": externalDirectoryAction, "pattern": "*"},
+		)
 	default:
-		// Unknown mode: no rules injected. Note: OCS defaults to ALLOW when no rule
-		// matches (opt-in allowlist), so this is NOT safe for restricting access.
-		if len(allowedTools) > 0 {
-			slog.Info("opencode: default mode with allowed_tools restricts to tool whitelist",
-				"mode", mode, "allowed_tools", allowedTools)
-		}
+		return nil, fmt.Errorf("opencode set permission: %w", worker.ErrInvalidPermissionMode)
 	}
 	// Apply allowed tools whitelist outside plan mode. Plan mode starts from an
 	// ask-all baseline, so a caller-supplied allow rule could reopen automatic writes.
-	if mode != "plan" {
+	if canonicalMode == worker.PermissionModeAutoEdit || canonicalMode == worker.PermissionModeBypass {
 		for _, tool := range allowedTools {
 			rules = append(rules, map[string]any{"permission": "tool", "action": "allow", "pattern": tool})
 		}
 	}
-	slog.Info("opencode: applying permission rules to session", "session_id", c.getSessionID(), "mode", mode, "rules", rules)
-	if err := c.doPatch(ctx, "/session/"+url.PathEscape(c.getSessionID()), map[string]any{"permission": rules}); err != nil {
+	slog.Info("opencode: applying permission rules to session",
+		"session_id", targetSessionID, "mode", mode, "rule_count", len(rules))
+	if err := c.doPatch(ctx, "/session/"+url.PathEscape(targetSessionID), map[string]any{"permission": rules}); err != nil {
 		return nil, fmt.Errorf("opencode set permission: %w", err)
 	}
-	return map[string]any{"success": true, "mode": mode}, nil
+	c.mu.Lock()
+	c.permissionMode = canonicalMode
+	if !c.permissionPolicyInitialized {
+		c.permissionPolicyInitialized = true
+		c.permissionCeilingAllowedTools = append([]string(nil), allowedTools...)
+	}
+	c.mu.Unlock()
+	return map[string]any{"success": true, "mode": requestedMode}, nil
 }
 
 func (c *ServerCommander) queryMCPStatus(ctx context.Context) (map[string]any, error) {

@@ -724,7 +724,7 @@ func (a *deltaAccumulator) toRequest(sessionID string) *captureRequest {
 	})
 	return &captureRequest{event: &StoredEvent{
 		SessionID: sessionID,
-		Seq:       a.seq,
+		Seq:       a.lastSeq,
 		Type:      string(a.eventType),
 		Data:      mergedData,
 		Direction: "outbound",

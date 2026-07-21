@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -63,6 +64,7 @@ func TestReadOutput_ControlEvent_PermissionRequest(t *testing.T) {
 	t.Parallel()
 
 	w := NewWithMocks()
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeBypass))
 	mc := newMockConn("user1", "session1")
 	w.testConn = mc
 
@@ -202,6 +204,42 @@ func TestReadOutput_ControlAutoSuccess(t *testing.T) {
 	require.Len(t, sent, 0) // auto-success handled internally
 }
 
+func TestReadOutput_InboundPermissionEscalationIsDenied(t *testing.T) {
+	t.Parallel()
+
+	w := NewWithMocks()
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeWorkspace))
+	mc := newMockConn("user1", "session1")
+	w.testConn = mc
+	var response bytes.Buffer
+	w.control = NewControlHandler(slog.Default(), &response)
+
+	line := `{"type":"control_request","request_id":"deny_123","response":{"subtype":"set_permission_mode","permission_mode":"bypassPermissions"}}`
+	sent := helperReadOutput(t, w, mc, []string{line})
+
+	require.Empty(t, sent)
+	require.Contains(t, response.String(), `"subtype":"error"`)
+	require.Contains(t, response.String(), `"error":"ceiling_exceeded"`)
+	require.NotContains(t, response.String(), `"subtype":"success"`)
+	require.NotContains(t, response.String(), "bypassPermissions")
+}
+
+func TestAllowInboundPermissionMode_AllowsTightening(t *testing.T) {
+	t.Parallel()
+
+	w := NewWithMocks()
+	require.NoError(t, w.permissionCeiling.Capture(worker.PermissionModeWorkspace))
+	var response bytes.Buffer
+	w.control = NewControlHandler(slog.Default(), &response)
+
+	require.True(t, w.allowInboundPermissionMode(&ControlRequestPayload{
+		RequestID:      "tighten_123",
+		Subtype:        string(ControlSetPermissionMode),
+		PermissionMode: "plan",
+	}))
+	require.Empty(t, response.String(), "legal requests proceed to the normal auto-success path")
+}
+
 func TestReadOutput_StreamEvent(t *testing.T) {
 	t.Parallel()
 
@@ -292,7 +330,7 @@ func TestSendControlRequest_NotRunning(t *testing.T) {
 	t.Parallel()
 
 	w := New()
-	_, err := w.SendControlRequest(context.Background(), "set_permission_mode", nil)
+	_, err := w.SendControlRequest(context.Background(), "get_context_usage", nil)
 	require.Error(t, err)
 	var we *worker.WorkerError
 	require.ErrorAs(t, err, &we)

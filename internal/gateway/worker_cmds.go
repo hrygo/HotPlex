@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -131,17 +132,25 @@ func (h *Handler) handleSetModel(ctx context.Context, env *events.Envelope, cr w
 }
 
 func (h *Handler) handleSetPermMode(ctx context.Context, env *events.Envelope, cr worker.ControlRequester, args string, extra map[string]any) error {
-	mode := args
-	if mode == "" {
-		mode, _ = extra["mode"].(string)
-	}
-	if mode == "" {
-		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "permission mode required")
+	mode, err := normalizeRequestedPermissionMode(args, extra)
+	if err != nil {
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "invalid permission mode: %v", err)
 	}
 	if _, err := cr.SendControlRequest(ctx, "set_permission_mode", map[string]any{"mode": mode}); err != nil {
 		return h.sendErrorf(ctx, env, classifyWorkerError(err), "set permission: %v", err)
 	}
 	return nil
+}
+
+func normalizeRequestedPermissionMode(args string, extra map[string]any) (string, error) {
+	mode := strings.TrimSpace(args)
+	if mode == "" && extra != nil {
+		mode, _ = extra["mode"].(string)
+	}
+	if mode == "" {
+		return "", fmt.Errorf("%w: permission mode required", worker.ErrInvalidPermissionMode)
+	}
+	return worker.NormalizeRuntimePermissionMode(mode)
 }
 
 func (h *Handler) handlePassthroughCommand(ctx context.Context, env *events.Envelope, w worker.Worker, cmd events.WorkerStdioCommand, args string) error {

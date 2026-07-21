@@ -300,7 +300,10 @@ func TestServerCommanderClearWithErrors(t *testing.T) {
 		createFails bool
 		expectError bool
 	}{
-		{"delete fails", true, false, true},
+		// "delete old fails" now adopts the new session instead of failing:
+		// the old session may already be gone (timeout/404/GC), so keeping a
+		// potentially-stale oldID is riskier than accepting the orphan.
+		{"delete old fails, adopts new session", true, false, false},
 		{"create fails", false, true, true},
 		{"both succeed", false, false, false},
 	}
@@ -330,9 +333,6 @@ func TestServerCommanderClearWithErrors(t *testing.T) {
 			err := c.Clear(context.Background())
 			if tt.expectError {
 				require.Error(t, err)
-				if tt.deleteFails {
-					require.Contains(t, err.Error(), "opencode clear (delete)")
-				}
 				if tt.createFails {
 					require.Contains(t, err.Error(), "opencode clear (create)")
 				}
@@ -364,7 +364,125 @@ func TestServerCommanderSessionIDAfterClear(t *testing.T) {
 	})
 	require.Equal(t, "sess-test-123", c.SessionID())
 	require.NoError(t, c.Clear(context.Background()))
-	require.Equal(t, "generated-session-2", c.SessionID())
+	require.Equal(t, "generated-session-1", c.SessionID())
+}
+
+func TestServerCommanderClear_ReappliesPermissionCeiling(t *testing.T) {
+	t.Parallel()
+
+	var patchedSessions []string
+	c, _ := newTestCommander(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch:
+			patchedSessions = append(patchedSessions, r.URL.Path)
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			rules := body["permission"].([]any)
+			require.NotEmpty(t, rules)
+			for _, rawRule := range rules {
+				rule := rawRule.(map[string]any)
+				require.NotEqual(t, "tool", rule["permission"],
+					"workspace ceiling must ignore caller-controlled tool allow rules")
+			}
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/session":
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "replacement-session"}))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	_, err := c.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{
+		"mode":            "acceptEdits",
+		"permission_tier": worker.PermissionModeWorkspace,
+		"allowed_tools":   []string{"Write", "Bash"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, c.Clear(t.Context()))
+	require.Equal(t, "replacement-session", c.SessionID())
+	require.Equal(t, []string{
+		"/session/sess-test-123",
+		"/session/replacement-session",
+	}, patchedSessions)
+}
+
+func TestServerCommanderPermissionCeilingWhitelistSurvivesTightenAndRestore(t *testing.T) {
+	t.Parallel()
+
+	var patches [][]map[string]any
+	c, _ := newTestCommander(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch, r.Method)
+		var body struct {
+			Permission []map[string]any `json:"permission"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		patches = append(patches, body.Permission)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := c.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{
+		"mode":            "bypassPermissions",
+		"permission_tier": worker.PermissionModeBypass,
+		"allowed_tools":   []string{"Read", "Write"},
+	})
+	require.NoError(t, err)
+	_, err = c.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{
+		"mode":            "acceptEdits",
+		"permission_tier": worker.PermissionModeWorkspace,
+	})
+	require.NoError(t, err)
+	_, err = c.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{
+		"mode":            "bypassPermissions",
+		"permission_tier": worker.PermissionModeBypass,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, patches, 3)
+	restored := patches[2]
+	require.Len(t, restored, 2)
+	for _, rule := range restored {
+		require.Equal(t, "tool", rule["permission"])
+		require.Equal(t, "allow", rule["action"])
+		require.Contains(t, []string{"Read", "Write"}, rule["pattern"])
+		require.NotEqual(t, "*", rule["pattern"], "restore must not widen to wildcard allow-all")
+	}
+}
+
+func TestServerCommanderClear_PermissionReplayFailureKeepsOldSession(t *testing.T) {
+	t.Parallel()
+
+	var deletedPaths []string
+	c, _ := newTestCommander(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/session/sess-test-123":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/session":
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": "replacement-session"}))
+		case r.Method == http.MethodPatch && r.URL.Path == "/session/replacement-session":
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.Method == http.MethodDelete:
+			deletedPaths = append(deletedPaths, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	_, err := c.SendControlRequest(t.Context(), "set_permission_mode", map[string]any{
+		"mode":            "acceptEdits",
+		"permission_tier": worker.PermissionModeWorkspace,
+	})
+	require.NoError(t, err)
+
+	err = c.Clear(t.Context())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "opencode clear (permissions)")
+	require.Equal(t, "sess-test-123", c.SessionID())
+	require.Equal(t, []string{"/session/replacement-session"}, deletedPaths,
+		"failed replacement must be cleaned up without deleting the still-active old session")
 }
 
 func TestServerCommanderRewind(t *testing.T) {
@@ -431,18 +549,19 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 		allowedTools   []string
 		checkBody      func(*testing.T, map[string]any)
 		wantSuccess    bool
+		wantErr        bool
+		wantCalled     bool
 	}{
 		{
 			name: "bypassPermissions", mode: "bypassPermissions",
 			checkBody:   nil,
 			wantSuccess: true,
+			wantCalled:  true,
 		},
 		{
 			name: "unknown mode", mode: "unknownMode",
-			checkBody: func(t *testing.T, reqBody map[string]any) {
-				require.Equal(t, []any{}, reqBody["permission"])
-			},
-			wantSuccess: true,
+			wantErr:    true,
+			wantCalled: false,
 		},
 		{
 			name: "bypassPermissions + allowedTools generates per-tool rules only",
@@ -457,6 +576,7 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				}
 			},
 			wantSuccess: true,
+			wantCalled:  true,
 		},
 		{
 			name: "plan asks by default and ignores write-capable allowedTools",
@@ -485,12 +605,17 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				require.False(t, allowed["tool"], "allowed_tools must not reopen write-capable tools in plan mode")
 			},
 			wantSuccess: true,
+			wantCalled:  true,
 		},
 		{
 			name: "acceptEdits asks before accessing an external directory",
 			mode: "acceptEdits", permissionTier: worker.PermissionModeWorkspace,
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				perms := reqBody["permission"].([]any)
+				defaultRule := perms[0].(map[string]any)
+				require.Equal(t, "*", defaultRule["permission"])
+				require.Equal(t, "ask", defaultRule["action"],
+					"workspace must ask for unmatched capabilities such as shell execution")
 				var externalDirRule map[string]any
 				for _, p := range perms {
 					rule := p.(map[string]any)
@@ -506,6 +631,7 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				}, externalDirRule)
 			},
 			wantSuccess: true,
+			wantCalled:  true,
 		},
 		{
 			name: "auto-edit permits an external directory without a prompt",
@@ -522,20 +648,22 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				t.Fatal("missing external_directory rule")
 			},
 			wantSuccess: true,
+			wantCalled:  true,
 		},
 		{
-			name: "default mode + allowedTools generates per-tool rules only",
-			mode: "default", allowedTools: []string{"Edit", "Write"},
+			name: "default alias maps to workspace and ignores caller allowedTools",
+			mode: "default", allowedTools: []string{"Edit", "Write", "Bash"},
 			checkBody: func(t *testing.T, reqBody map[string]any) {
 				perms := reqBody["permission"].([]any)
-				require.Len(t, perms, 2)
+				require.NotEmpty(t, perms)
 				for _, p := range perms {
 					rule := p.(map[string]any)
-					require.Equal(t, "tool", rule["permission"])
-					require.Equal(t, "allow", rule["action"])
+					require.NotEqual(t, "tool", rule["permission"],
+						"workspace ceiling must not add caller-controlled tool allow rules")
 				}
 			},
 			wantSuccess: true,
+			wantCalled:  true,
 		},
 	}
 
@@ -562,8 +690,13 @@ func TestServerCommanderSetPermissionMode(t *testing.T) {
 				reqBody["allowed_tools"] = tt.allowedTools
 			}
 			resp, err := c.SendControlRequest(context.Background(), "set_permission_mode", reqBody)
+			if tt.wantErr {
+				require.Error(t, err)
+				require.False(t, called, "invalid mode must fail before PATCH")
+				return
+			}
 			require.NoError(t, err)
-			require.True(t, called)
+			require.Equal(t, tt.wantCalled, called)
 			require.Equal(t, tt.mode, resp["mode"])
 			require.Equal(t, tt.wantSuccess, resp["success"])
 		})
@@ -902,9 +1035,9 @@ func TestServerCommanderContextCancellation(t *testing.T) {
 			errorContains: "opencode rewind",
 		},
 		{
-			name:          "Clear (delete)",
+			name:          "Clear (create)",
 			call:          func(c *ServerCommander, ctx context.Context) error { return c.Clear(ctx) },
-			errorContains: "opencode clear (delete)",
+			errorContains: "opencode clear (create)",
 		},
 	}
 

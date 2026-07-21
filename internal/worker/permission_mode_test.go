@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,4 +49,100 @@ func TestNormalizePermissionMode(t *testing.T) {
 	require.Equal(t, PermissionModeBypass, NormalizePermissionMode(PermissionModeBypass))
 	// Unknown values pass through unchanged — ValidatePermissionMode is the gatekeeper.
 	require.Equal(t, "weird", NormalizePermissionMode("weird"))
+}
+
+func TestNormalizeRuntimePermissionMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"read-only", PermissionModeReadOnly},
+		{"READONLY", PermissionModeReadOnly},
+		{"plan", PermissionModeReadOnly},
+		{"workspace", PermissionModeWorkspace},
+		{"acceptEdits", PermissionModeWorkspace},
+		{"accept-edits", PermissionModeWorkspace},
+		{"default", PermissionModeWorkspace},
+		{"auto-edit", PermissionModeAutoEdit},
+		{"AUTO", PermissionModeAutoEdit},
+		{"auto-accept", PermissionModeAutoEdit},
+		{"bypass", PermissionModeBypass},
+		{"bypassPermissions", PermissionModeBypass},
+		{"dangerously-skip-permissions", PermissionModeBypass},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := NormalizeRuntimePermissionMode(tt.input)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	for _, input := range []string{"", "unknown", "plan-ish"} {
+		t.Run("invalid_"+input, func(t *testing.T) {
+			t.Parallel()
+			_, err := NormalizeRuntimePermissionMode(input)
+			require.ErrorIs(t, err, ErrInvalidPermissionMode)
+		})
+	}
+}
+
+func TestPermissionCeilingTransitionMatrix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		ceiling   string
+		requested string
+		want      string
+		wantErr   error
+	}{
+		{"read-only remains read-only", PermissionModeReadOnly, "plan", PermissionModeReadOnly, nil},
+		{"read-only rejects workspace", PermissionModeReadOnly, PermissionModeWorkspace, "", ErrPermissionEscalation},
+		{"read-only rejects auto-edit", PermissionModeReadOnly, PermissionModeAutoEdit, "", ErrPermissionEscalation},
+		{"read-only rejects bypass", PermissionModeReadOnly, "bypassPermissions", "", ErrPermissionEscalation},
+		{"workspace tightens to read-only", PermissionModeWorkspace, "PLAN", PermissionModeReadOnly, nil},
+		{"workspace restores to ceiling", PermissionModeWorkspace, "acceptEdits", PermissionModeWorkspace, nil},
+		{"workspace rejects auto-edit", PermissionModeWorkspace, "auto", "", ErrPermissionEscalation},
+		{"workspace rejects bypass", PermissionModeWorkspace, PermissionModeBypass, "", ErrPermissionEscalation},
+		{"bypass accepts every tier", PermissionModeBypass, PermissionModeAutoEdit, PermissionModeAutoEdit, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var ceiling PermissionCeiling
+			require.NoError(t, ceiling.Capture(tt.ceiling))
+			got, err := ceiling.Check(tt.requested)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPermissionCeilingIsImmutable(t *testing.T) {
+	t.Parallel()
+	var ceiling PermissionCeiling
+	require.NoError(t, ceiling.Capture(PermissionModeWorkspace))
+	require.NoError(t, ceiling.Capture(PermissionModeBypass))
+
+	mode, ok := ceiling.Mode()
+	require.True(t, ok)
+	require.Equal(t, PermissionModeWorkspace, mode)
+
+	_, err := ceiling.Check(PermissionModeAutoEdit)
+	require.ErrorIs(t, err, ErrPermissionEscalation)
+	require.False(t, errors.Is(err, ErrPermissionCeilingUnset))
+}
+
+func TestPermissionCeilingRejectsCheckBeforeCapture(t *testing.T) {
+	t.Parallel()
+	var ceiling PermissionCeiling
+	_, err := ceiling.Check(PermissionModeReadOnly)
+	require.ErrorIs(t, err, ErrPermissionCeilingUnset)
 }

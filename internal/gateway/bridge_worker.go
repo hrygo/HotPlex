@@ -92,6 +92,14 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		b.sm.DetachWorker(sid)
 		return nil, err
 	}
+	if err := b.capturePermissionCeiling(params.ctx, sid, w); err != nil {
+		_ = w.Terminate(context.Background())
+		b.sm.DetachWorker(sid)
+		if attachErrFn != nil {
+			attachErrFn(w, err)
+		}
+		return nil, err
+	}
 	b.bindWorkerRun(sid, w, params.forwardOpts.workerRunID)
 
 	// Best-effort async persist so WorkerSessionID survives gateway restart
@@ -117,6 +125,39 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	}()
 
 	return w, nil
+}
+
+// capturePermissionCeiling persists the first true effective permission tier
+// before the Worker becomes observable through forwarding. A concurrent
+// first-writer mismatch fences this Worker instead of allowing it to run above
+// the already-established session ceiling.
+func (b *Bridge) capturePermissionCeiling(ctx context.Context, sessionID string, w worker.Worker) error {
+	reporter, ok := w.(worker.PermissionCeilingReporter)
+	if !ok {
+		return nil
+	}
+	ceiling, initialized := reporter.PermissionCeiling()
+	if !initialized {
+		return fmt.Errorf("bridge: worker permission ceiling: %w", worker.ErrPermissionCeilingUnset)
+	}
+	stored, err := b.sm.SetPermissionCeilingIfEmpty(ctx, sessionID, ceiling)
+	if err != nil {
+		return fmt.Errorf("bridge: persist permission ceiling: %w", err)
+	}
+	var persisted worker.PermissionCeiling
+	if err := persisted.Capture(stored); err != nil {
+		return fmt.Errorf("bridge: invalid persisted permission ceiling: %w", err)
+	}
+	// The store-level check only fences the WIDER-than-store direction: a
+	// replacement Worker that reports a ceiling above the persisted value is
+	// rejected. A stricter Worker (below the stored ceiling) is allowed because
+	// the Worker's own local PermissionCeiling is the authoritative runtime
+	// fence — it already blocks escalation at the Worker. The persisted value
+	// is metadata for resume/restart, not a second enforcement point.
+	if _, err := persisted.Check(ceiling); err != nil {
+		return fmt.Errorf("bridge: concurrent permission ceiling mismatch: %w", err)
+	}
+	return nil
 }
 
 // forwarderBinding is the immutable ownership contract captured synchronously

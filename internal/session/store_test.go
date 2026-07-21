@@ -63,6 +63,34 @@ func TestSQLiteStore_DeletePhysical_NotFound(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSQLiteStore_SetPermissionCeilingIfEmpty_IsImmutableAcrossStores(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	cfg := config.Default()
+	cfg.DB.Path = filepath.Join(t.TempDir(), "permission-ceiling.db")
+	cfg.DB.SQLite.Path = cfg.DB.Path
+
+	store1, err := NewSQLiteStore(ctx, cfg, sqlutil.NewWriteMu(sqlutil.DialectSQLite))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store1.Close() })
+	store2, err := NewSQLiteStore(ctx, cfg, sqlutil.NewWriteMu(sqlutil.DialectSQLite))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store2.Close() })
+
+	helperUpsert(t, store1, "sess_ceiling", "user1", events.StateCreated)
+	stored, err := store1.SetPermissionCeilingIfEmpty(ctx, "sess_ceiling", "workspace")
+	require.NoError(t, err)
+	require.Equal(t, "workspace", stored)
+
+	stored, err = store2.SetPermissionCeilingIfEmpty(ctx, "sess_ceiling", "bypass")
+	require.NoError(t, err)
+	require.Equal(t, "workspace", stored, "a second store instance must not widen the first ceiling")
+
+	got, err := store2.Get(ctx, "sess_ceiling")
+	require.NoError(t, err)
+	require.Equal(t, "workspace", got.PermissionCeiling)
+}
+
 // ─── SQLiteStore: Compact ────────────────────────────────────────────────────
 
 func TestSQLiteStore_Compact_BelowThreshold(t *testing.T) {

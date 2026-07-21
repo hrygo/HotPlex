@@ -82,6 +82,9 @@ type ControlRequestPayload struct {
 	Subtype   string          `json:"subtype"`
 	ToolName  string          `json:"tool_name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
+	// PermissionMode is the target of a set_permission_mode request emitted by
+	// Claude Code. It must be retained so the Worker can enforce its ceiling.
+	PermissionMode string `json:"permission_mode,omitempty"`
 
 	// Elicitation fields are populated by the parser for subtype="elicitation".
 	// This avoids re-parsing raw bytes in the worker/mapper layer.

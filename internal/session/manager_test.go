@@ -39,6 +39,11 @@ func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSess
 	return args.Error(0)
 }
 
+func (m *mockStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
+	args := m.Called(ctx, id, ceiling)
+	return args.String(0), args.Error(1)
+}
+
 func (m *mockStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
@@ -2537,6 +2542,106 @@ func TestManager_UpdateWorkerSessionID_NilManager(t *testing.T) {
 	m := (*Manager)(nil)
 	err := m.UpdateWorkerSessionID(context.Background(), "any", "id")
 	require.True(t, errors.Is(err, ErrSessionNotFound))
+}
+
+// ─── Permission ceiling tests ────────────────────────────────────────────────
+
+func TestManager_SetPermissionCeilingIfEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	now := time.Now()
+	m.mu.Lock()
+	m.sessions["sess_ceiling"] = &managedSession{info: SessionInfo{
+		ID:         "sess_ceiling",
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}}
+	m.mu.Unlock()
+
+	// The store remains authoritative when another instance captured a stricter
+	// value first. The caller alias is normalized before persistence.
+	store.On("SetPermissionCeilingIfEmpty", ctx, "sess_ceiling", worker.PermissionModeWorkspace).
+		Return(worker.PermissionModeReadOnly, nil)
+
+	stored, err := m.SetPermissionCeilingIfEmpty(ctx, "sess_ceiling", "default")
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeReadOnly, stored)
+
+	info, err := m.Get(ctx, "sess_ceiling")
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeReadOnly, info.PermissionCeiling)
+}
+
+func TestManager_SetPermissionCeilingIfEmpty_RejectsInvalidAndMissingSessions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("Get", ctx, "missing").Return(nil, ErrSessionNotFound)
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	_, err = m.SetPermissionCeilingIfEmpty(ctx, "missing", "not-a-mode")
+	require.ErrorIs(t, err, worker.ErrInvalidPermissionMode)
+
+	_, err = m.SetPermissionCeilingIfEmpty(ctx, "missing", worker.PermissionModeReadOnly)
+	require.ErrorIs(t, err, ErrSessionNotFound)
+
+	var nilManager *Manager
+	_, err = nilManager.SetPermissionCeilingIfEmpty(ctx, "missing", worker.PermissionModeReadOnly)
+	require.ErrorIs(t, err, ErrSessionNotFound)
+}
+
+func TestManager_SetPermissionCeilingIfEmpty_StoreError(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	now := time.Now()
+	m.mu.Lock()
+	m.sessions["sess_ceiling_error"] = &managedSession{info: SessionInfo{
+		ID:         "sess_ceiling_error",
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateRunning,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}}
+	m.mu.Unlock()
+
+	storeErr := errors.New("store unavailable")
+	store.On(
+		"SetPermissionCeilingIfEmpty",
+		ctx,
+		"sess_ceiling_error",
+		worker.PermissionModeWorkspace,
+	).Return("", storeErr)
+
+	_, err = m.SetPermissionCeilingIfEmpty(ctx, "sess_ceiling_error", worker.PermissionModeWorkspace)
+	require.ErrorIs(t, err, storeErr)
 }
 
 // ─── ResetGCInterval tests ───────────────────────────────────────────────────
