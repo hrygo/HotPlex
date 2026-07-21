@@ -1688,6 +1688,25 @@ export function useHotPlexRuntime({
             interactionMapRef.current.set(data.id, { type: "permission" });
             setMessages((prev) => {
                 const lastMessage = prev[prev.length - 1];
+                const newPart = {
+                    type: "tool-call" as const,
+                    toolName: "ask_permission",
+                    args: {
+                        description: data.description,
+                        tool_name: data.tool_name,
+                        args: data.args,
+                        interaction: {
+                            kind: "permission",
+                            requestId: data.id,
+                            status: "pending",
+                            createdAt: Date.now(),
+                            expiresAt:
+                                Date.now() + 5 * 60 * 1000,
+                        },
+                    },
+                    toolCallId: data.id,
+                };
+
                 if (lastMessage?.role === "assistant") {
                     return [
                         ...prev.slice(0, -1),
@@ -1695,29 +1714,21 @@ export function useHotPlexRuntime({
                             ...lastMessage,
                             parts: [
                                 ...lastMessage.parts,
-                                {
-                                    type: "tool-call" as const,
-                                    toolName: "ask_permission",
-                                    args: {
-                                        description: data.description,
-                                        tool_name: data.tool_name,
-                                        args: data.args,
-                                        interaction: {
-                                            kind: "permission",
-                                            requestId: data.id,
-                                            status: "pending",
-                                            createdAt: Date.now(),
-                                            expiresAt:
-                                                Date.now() + 5 * 60 * 1000,
-                                        },
-                                    },
-                                    toolCallId: data.id,
-                                },
+                                newPart,
                             ],
                         },
                     ];
                 }
-                return prev;
+                return [
+                    ...prev,
+                    {
+                        id: `msg_assistant_${data.id}`,
+                        role: "assistant" as const,
+                        content: "",
+                        parts: [newPart],
+                        createdAt: new Date(),
+                    },
+                ];
             });
         };
         client.on("permissionRequest", handlePermissionRequest);
@@ -1731,37 +1742,48 @@ export function useHotPlexRuntime({
             interactionMapRef.current.set(data.id, { type: "question" });
             setMessages((prev) => {
                 const lastMessage = prev[prev.length - 1];
+                const questionText =
+                    data.questions?.map((q) => q.question).join("\n") || "";
+                const newPart = {
+                    type: "tool-call" as const,
+                    toolName: "question_request",
+                    args: {
+                        description: questionText,
+                        questions: data.questions,
+                        interaction: {
+                            kind: "question",
+                            requestId: data.id,
+                            status: "pending",
+                            createdAt: Date.now(),
+                            expiresAt:
+                                Date.now() + 5 * 60 * 1000,
+                        },
+                    },
+                    toolCallId: data.id,
+                };
+
                 if (lastMessage?.role === "assistant") {
-                    const questionText =
-                        data.questions?.map((q) => q.question).join("\n") || "";
                     return [
                         ...prev.slice(0, -1),
                         {
                             ...lastMessage,
                             parts: [
                                 ...lastMessage.parts,
-                                {
-                                    type: "tool-call" as const,
-                                    toolName: "question_request",
-                                    args: {
-                                        description: questionText,
-                                        questions: data.questions,
-                                        interaction: {
-                                            kind: "question",
-                                            requestId: data.id,
-                                            status: "pending",
-                                            createdAt: Date.now(),
-                                            expiresAt:
-                                                Date.now() + 5 * 60 * 1000,
-                                        },
-                                    },
-                                    toolCallId: data.id,
-                                },
+                                newPart,
                             ],
                         },
                     ];
                 }
-                return prev;
+                return [
+                    ...prev,
+                    {
+                        id: `msg_assistant_${data.id}`,
+                        role: "assistant" as const,
+                        content: "",
+                        parts: [newPart],
+                        createdAt: new Date(),
+                    },
+                ];
             });
         };
         client.on("questionRequest", handleQuestionRequest);
@@ -1775,6 +1797,25 @@ export function useHotPlexRuntime({
             interactionMapRef.current.set(data.id, { type: "elicitation" });
             setMessages((prev) => {
                 const lastMessage = prev[prev.length - 1];
+                const newPart = {
+                    type: "tool-call" as const,
+                    toolName: "elicitation",
+                    args: {
+                        message: data.message,
+                        mcp_server_name: data.mcp_server_name,
+                        url: data.url,
+                        interaction: {
+                            kind: "elicitation",
+                            requestId: data.id,
+                            status: "pending",
+                            createdAt: Date.now(),
+                            expiresAt:
+                                Date.now() + 5 * 60 * 1000,
+                        },
+                    },
+                    toolCallId: data.id,
+                };
+
                 if (lastMessage?.role === "assistant") {
                     return [
                         ...prev.slice(0, -1),
@@ -1782,29 +1823,21 @@ export function useHotPlexRuntime({
                             ...lastMessage,
                             parts: [
                                 ...lastMessage.parts,
-                                {
-                                    type: "tool-call" as const,
-                                    toolName: "elicitation",
-                                    args: {
-                                        message: data.message,
-                                        mcp_server_name: data.mcp_server_name,
-                                        url: data.url,
-                                        interaction: {
-                                            kind: "elicitation",
-                                            requestId: data.id,
-                                            status: "pending",
-                                            createdAt: Date.now(),
-                                            expiresAt:
-                                                Date.now() + 5 * 60 * 1000,
-                                        },
-                                    },
-                                    toolCallId: data.id,
-                                },
+                                newPart,
                             ],
                         },
                     ];
                 }
-                return prev;
+                return [
+                    ...prev,
+                    {
+                        id: `msg_assistant_${data.id}`,
+                        role: "assistant" as const,
+                        content: "",
+                        parts: [newPart],
+                        createdAt: new Date(),
+                    },
+                ];
             });
         };
         client.on("elicitationRequest", handleElicitationRequest);

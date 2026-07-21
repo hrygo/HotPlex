@@ -223,7 +223,7 @@ worker:
     # Enable --permission-prompt-tool stdio for forwarding permission requests
     # to Slack/Feishu interaction UI. When false (default), Claude Code auto-denies
     # permission requests in headless mode (no user interaction).
-    permission_prompt: false
+    permission_prompt: true
     # Tool names to auto-approve without forwarding to user interaction UI.
     # These tools are approved silently when permission_prompt is enabled.
     permission_auto_approve:

@@ -749,12 +749,13 @@ func TestControlHandler_SendPermissionResponse(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		allowed bool
-		reason  string
+		name     string
+		allowed  bool
+		reason   string
+		behavior string
 	}{
-		{"allow_with_reason", true, "approved by user"},
-		{"deny_without_reason", false, ""},
+		{"allow_with_reason", true, "approved by user", "allow"},
+		{"deny_without_reason", false, "", "deny"},
 	}
 
 	for _, tc := range tests {
@@ -773,6 +774,7 @@ func TestControlHandler_SendPermissionResponse(t *testing.T) {
 			require.Equal(t, "success", resp.Response.Subtype)
 			require.Equal(t, tc.allowed, resp.Response.Response["allowed"])
 			require.Equal(t, tc.reason, resp.Response.Response["reason"])
+			require.Equal(t, tc.behavior, resp.Response.Response["behavior"])
 		})
 	}
 }
@@ -888,6 +890,7 @@ func TestAutoApproveTool_MatchingTool(t *testing.T) {
 	// Verify a response was written to stdin (buf)
 	require.NotEmpty(t, buf.String(), "should send permission response")
 	require.Contains(t, buf.String(), `"allowed":true`)
+	require.Contains(t, buf.String(), `"behavior":"allow"`)
 	require.Contains(t, buf.String(), "auto-approved")
 }
 

@@ -134,6 +134,7 @@ func TestControlHandlerSendPermissionResponse(t *testing.T) {
 	require.Equal(t, "success", parsed.Response.Subtype)
 	require.Equal(t, "req-002", parsed.Response.RequestID)
 	require.Equal(t, true, parsed.Response.Response["allowed"])
+	require.Equal(t, "allow", parsed.Response.Response["behavior"])
 	require.Equal(t, "user approved", parsed.Response.Response["reason"])
 }
 

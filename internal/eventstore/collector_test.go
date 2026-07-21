@@ -74,7 +74,7 @@ func TestCollector_CaptureDeltaString(t *testing.T) {
 	page, err := store.QueryBySession(context.Background(), "s1", 0, CursorLatest, 100)
 	require.NoError(t, err)
 	require.Len(t, page.Events, 1)
-	require.Equal(t, int64(4), page.Events[0].Seq)
+	require.Equal(t, int64(5), page.Events[0].Seq)
 	require.Equal(t, string(events.Message), page.Events[0].Type)
 
 	var data map[string]any
@@ -102,7 +102,7 @@ func TestCollector_CaptureDeltaStringSizeFlush(t *testing.T) {
 	require.Len(t, page.Events, 2)
 
 	require.Equal(t, string(events.Message), page.Events[0].Type)
-	require.Equal(t, int64(1), page.Events[0].Seq)
+	require.Equal(t, int64(2), page.Events[0].Seq)
 
 	var data map[string]any
 	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
@@ -128,7 +128,7 @@ func TestCollector_MessageEndFlushWithoutStore(t *testing.T) {
 	// Message (flushed deltas) + Done. MessageEnd NOT stored.
 	require.Len(t, page.Events, 2)
 	require.Equal(t, string(events.Message), page.Events[0].Type)
-	require.Equal(t, int64(3), page.Events[0].Seq)
+	require.Equal(t, int64(4), page.Events[0].Seq)
 	require.Equal(t, string(events.Done), page.Events[1].Type)
 }
 
@@ -213,7 +213,7 @@ func TestCollector_ReplaySeqOrdering(t *testing.T) {
 		types[i] = e.Type
 	}
 
-	require.Equal(t, []int64{1, 2, 4, 7, 9, 12}, seqs)
+	require.Equal(t, []int64{1, 2, 5, 7, 10, 12}, seqs)
 	require.Equal(t, []string{
 		string(events.Input), string(events.State), string(events.Message),
 		string(events.ToolCall), string(events.Message), string(events.Done),
@@ -364,7 +364,7 @@ func TestCollector_CaptureReasoningString(t *testing.T) {
 	require.Len(t, page.Events, 2) // Reasoning + Done
 
 	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
-	require.Equal(t, int64(1), page.Events[0].Seq)
+	require.Equal(t, int64(2), page.Events[0].Seq)
 
 	var data map[string]any
 	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
@@ -532,7 +532,7 @@ func TestCollector_CaptureReasoningViaCapture(t *testing.T) {
 	require.Len(t, page.Events, 2) // Reasoning + Done
 
 	require.Equal(t, string(events.Reasoning), page.Events[0].Type)
-	require.Equal(t, int64(1), page.Events[0].Seq)
+	require.Equal(t, int64(2), page.Events[0].Seq)
 
 	var data map[string]any
 	require.NoError(t, json.Unmarshal(page.Events[0].Data, &data))
