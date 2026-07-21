@@ -811,9 +811,18 @@ func (h *Hub) EnsureSeqHydrated(sessionID string) error {
 	if h.seqHydrator == nil {
 		return nil
 	}
-	if h.seqGen.Initialized(sessionID) {
+	// Use the hydrated flag (not Initialized) so a racing producer that called
+	// Next before us — implicitly creating the counter — cannot short-circuit
+	// hydration. Without this, a session resumed after WS bounce skips the DB
+	// read, restarts the counter near 0, and collides with persisted history
+	// (recurring UNIQUE constraint failures; issue #879 regression surviving #900).
+	if h.seqGen.IsHydrated(sessionID) {
 		return nil
 	}
+
+	// priorPeek reveals a racing producer: >0 means Next already allocated seqs
+	// before hydration ran. Init below raises the floor past them.
+	priorPeek := h.seqGen.Peek(sessionID)
 
 	// Flush the collector's async captureC before reading LatestSeq so that
 	// events whose seq was already allocated but not yet committed to the DB
@@ -831,6 +840,12 @@ func (h *Hub) EnsureSeqHydrated(sessionID string) error {
 		return fmt.Errorf("gateway: hydrate seq for session %s: %w", sessionID, err)
 	}
 	h.seqGen.Init(sessionID, latest)
+	h.seqGen.MarkHydrated(sessionID)
+	h.log.Info("gateway: seq hydrated from eventstore",
+		"session_id", sessionID,
+		"latest_seq", latest,
+		"prior_peek", priorPeek,
+	)
 	return nil
 }
 

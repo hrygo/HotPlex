@@ -82,6 +82,28 @@ func kindOf(req *captureRequest) string {
 	return "event"
 }
 
+// seq returns the sequence number carried by the request, for diagnostics.
+func (r *captureRequest) seq() int64 {
+	if r.event != nil {
+		return r.event.Seq
+	}
+	if r.turn != nil {
+		return r.turn.Seq
+	}
+	return 0
+}
+
+// typeName returns the event type (or turn role) for diagnostics.
+func (r *captureRequest) typeName() string {
+	if r.event != nil {
+		return r.event.Type
+	}
+	if r.turn != nil {
+		return r.turn.Role
+	}
+	return ""
+}
+
 // Collector captures AEP events, merges message.delta streams, and writes
 // them asynchronously to the underlying EventStore.
 //
@@ -598,6 +620,8 @@ func (c *Collector) flushBatch(batch []*captureRequest) {
 			c.log.Warn("eventstore: batch append failed",
 				"session_id", req.sessionID(),
 				"kind", kindOf(req),
+				"seq", req.seq(),
+				"type", req.typeName(),
 				"err", err,
 			)
 			batchErr = err
@@ -643,7 +667,7 @@ func (c *Collector) flushIndividually(batch []*captureRequest) {
 		cancel()
 		if err != nil {
 			c.log.Warn("eventstore: isolated append failed",
-				"session_id", req.sessionID(), "kind", kindOf(req), "err", err)
+				"session_id", req.sessionID(), "kind", kindOf(req), "seq", req.seq(), "type", req.typeName(), "err", err)
 		}
 	}
 }

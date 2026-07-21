@@ -23,7 +23,8 @@ type SeqFlusher interface {
 // SeqGen generates monotonically increasing sequence numbers per session.
 // Uses sync.Map + per-session atomic.Int64 to eliminate cross-session contention.
 type SeqGen struct {
-	seq sync.Map // sessionID → *atomic.Int64
+	seq      sync.Map // sessionID → *atomic.Int64
+	hydrated sync.Map // sessionID → *atomic.Bool: set once Init ran from persisted state
 }
 
 // NewSeqGen creates a new sequence generator.
@@ -56,6 +57,27 @@ func (g *SeqGen) Next(sessionID string) int64 {
 // Remove deletes the sequence counter for a physically deleted session.
 func (g *SeqGen) Remove(sessionID string) {
 	g.seq.Delete(sessionID)
+	g.hydrated.Delete(sessionID)
+}
+
+// IsHydrated reports whether the counter has been seeded from persisted events.
+// Unlike Initialized, a bare Next (which implicitly creates the counter via
+// LoadOrStore) does NOT set this flag, so EnsureSeqHydrated can still raise the
+// floor from the DB even when a racing producer allocated seqs first. This
+// closes the resume-race window where the old Initialized()-based guard
+// short-circuited hydration and let the counter collide with history.
+func (g *SeqGen) IsHydrated(sessionID string) bool {
+	v, ok := g.hydrated.Load(sessionID)
+	if !ok {
+		return false
+	}
+	return v.(*atomic.Bool).Load() //nolint:errcheck // LoadOrStore guarantees *atomic.Bool
+}
+
+// MarkHydrated records that the counter has been hydrated from persisted state.
+func (g *SeqGen) MarkHydrated(sessionID string) {
+	v, _ := g.hydrated.LoadOrStore(sessionID, new(atomic.Bool))
+	v.(*atomic.Bool).Store(true) //nolint:errcheck // LoadOrStore guarantees *atomic.Bool
 }
 
 // Init seeds the sequence counter for a session to start, but only if start is

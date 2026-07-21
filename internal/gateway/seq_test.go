@@ -221,6 +221,34 @@ func TestHub_EnsureSeqHydratedCallsFlusherBeforeHydrate(t *testing.T) {
 	flusher.mu.Unlock()
 }
 
+// TestHub_EnsureSeqHydratedNotShortCircuitedByPriorNextSeq verifies the fix for
+// the session-resume race where a NextSeq call before EnsureSeqHydrated creates
+// a seqGen entry. With the old Initialized()-based guard, the entry's mere
+// existence skipped DB hydration, so the counter restarted from a small value
+// and collided with persisted history (recurring UNIQUE constraint failures on
+// events.session_id/seq_guard_id/seq — issue #879 regression surviving #900).
+//
+// Fix: a separate "hydrated" flag tracks whether Init ran from the DB; a bare
+// NextSeq does not set it, so EnsureSeqHydrated still raises the floor.
+func TestHub_EnsureSeqHydratedNotShortCircuitedByPriorNextSeq(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	hydrator := &mockSeqHydrator{seq: 9899}
+	h.SetSeqHydrator(hydrator)
+
+	// A producer allocates a seq BEFORE EnsureSeqHydrated runs (e.g. an early
+	// init_ack or a racing forwarder on session resume). This implicitly
+	// creates the counter at a low value but must NOT count as "hydrated".
+	require.Equal(t, int64(1), h.NextSeq("s1"))
+
+	// EnsureSeqHydrated must still query the DB and raise the floor to 9899; it
+	// must NOT skip just because the counter already exists. Under the bug,
+	// Initialized()==true short-circuits and Next returns 2 (collision bait).
+	require.NoError(t, h.EnsureSeqHydrated("s1"))
+	require.Equal(t, 1, hydrator.calls, "hydrator must be consulted despite prior Next")
+	require.Equal(t, int64(9900), h.NextSeq("s1"))
+}
+
 func TestHub_ReleaseSeqWaitsForDurableProducer(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
