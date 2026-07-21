@@ -373,3 +373,20 @@ func TestLocator_ListWorkspaceInstalled_InvalidatedByWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
+
+func TestLocator_ListWorkspaceInstalled_EmptyExistingDir(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	workDir := t.TempDir()
+	// 创建空的受管目录 —— 删除最后一个 skill 后的真实残留状态。
+	// 此时 scanDir 返回 (nil, nil)，dedup(nil) 历史上会返回 nil，使端点
+	// 序列化为 {"skills":null}。此测试钉死非 nil 空切片契约（{"skills":[]}）。
+	require.NoError(t, os.MkdirAll(filepath.Join(workDir, ".agents", "skills"), 0o755))
+
+	got, err := l.ListWorkspaceInstalled(context.Background(), workDir)
+	require.NoError(t, err)
+	require.NotNil(t, got, "空但存在的目录须返回非 nil 切片")
+	require.Empty(t, got)
+}

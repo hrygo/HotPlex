@@ -158,7 +158,7 @@
       },
       "skills": {
         "title": "Workspace Skills",
-        "desc": "Manage custom skills installed in this workspace. Global skills are read-only."
+        "desc": "Manage skills installed in this workspace."
       }
     },
     "action": {
@@ -229,8 +229,7 @@
         "list": "Installed Skills"
       },
       "label": {
-        "managed": "Managed",
-        "external": "External (read-only)"
+        "managed": "Managed"
       },
       "action": {
         "upload": "Upload Skill",

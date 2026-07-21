@@ -79,7 +79,13 @@ func scanWorkspaceInstalled(workDir string) []Skill {
 	if err != nil {
 		return []Skill{}
 	}
-	return dedup(skills)
+	skills = dedup(skills)
+	if skills == nil {
+		// 空但存在的受管目录（如删除最后一个 skill 后的残留）：dedup(nil) 返回
+		// nil 会使端点序列化为 {"skills":null}。强制非 nil 空切片 → {"skills":[]}。
+		skills = []Skill{}
+	}
+	return skills
 }
 
 // scanDir reads all .md files from a single skill directory.

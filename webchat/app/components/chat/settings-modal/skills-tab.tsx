@@ -62,6 +62,9 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
     const [detail, setDetail] = useState<SkillDetail | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
     const [detailError, setDetailError] = useState<string | null>(null);
+    // Tracks the workspace the current detail-dialog state belongs to, so a
+    // workspace switch can reset the dialog in the render-time block below.
+    const [prevWorkspaceId, setPrevWorkspaceId] = useState(workspace.id);
 
     // Action states
     const [uploading, setUploading] = useState(false);
@@ -78,6 +81,9 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
     const abortRef = useRef<AbortController | null>(null);
     const isMounted = useRef(false);
+    // Aborts the in-flight detail fetch so a rapid second click (or a workspace
+    // switch) can't leave the prior skill's SKILL.md rendered under a new title.
+    const detailAbortRef = useRef<AbortController | null>(null);
 
     // Pagination states
     const [currentPage, setCurrentPage] = useState(1);
@@ -300,34 +306,68 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
     // handleViewDetail opens the detail dialog and fetches the skill's SKILL.md
     // body + file list from the workspace-scoped detail endpoint (issue #918).
+    // Aborts any in-flight detail fetch so a rapid second click can't leave the
+    // prior skill's content rendered under the new title.
     const handleViewDetail = async (name: string) => {
+        detailAbortRef.current?.abort();
+        const ctrl = new AbortController();
+        detailAbortRef.current = ctrl;
+
         setDetailTarget(name);
         setDetail(null);
         setDetailError(null);
         setDetailLoading(true);
         try {
-            const d = await getWorkspaceSkill(workspace.id, name);
-            if (!isMounted.current) return;
+            const d = await getWorkspaceSkill(workspace.id, name, ctrl.signal);
+            if (ctrl.signal.aborted || !isMounted.current) return;
             setDetail(d);
         } catch (err) {
-            if (!isMounted.current) return;
-            console.error(err);
+            if (ctrl.signal.aborted || !isMounted.current) return;
+            // Expected SKILL_NOT_FOUND (e.g. skill deleted since the list
+            // rendered) is a user state, not a server fault — keep it out of the
+            // console, consistent with the upload/delete flows (commit 0970f435).
+            const msg = err instanceof Error ? err.message : "";
+            if (!msg.includes("SKILL_NOT_FOUND") && !msg.includes("not found")) {
+                console.error(err);
+            }
             setDetailError(
                 t("settings.skills.error.detail_failed", {
                     defaultValue: "Failed to load skill details",
                 }),
             );
         } finally {
-            if (isMounted.current) setDetailLoading(false);
+            if (!ctrl.signal.aborted && isMounted.current) setDetailLoading(false);
         }
     };
 
-    const closeDetail = () => {
+    const closeDetail = useCallback(() => {
+        detailAbortRef.current?.abort();
         setDetailTarget(null);
         setDetail(null);
         setDetailError(null);
         setDetailLoading(false);
-    };
+    }, []);
+
+    // Switching workspace must close any open detail dialog: load() refetches the
+    // list for the new workspace, but the dialog's cached SKILL.md belongs to the
+    // prior one. Done in two coordinated pieces (React's "adjusting state when a
+    // prop changes" pattern, which avoids set-state-in-effect):
+    //   - the effect cleanup below aborts the in-flight detail fetch (pure side
+    //     effect, no setState);
+    //   - the render-time block resets the dialog state (no side effect).
+    useEffect(() => {
+        return () => {
+            detailAbortRef.current?.abort();
+        };
+    }, [workspace.id]);
+
+    if (workspace.id !== prevWorkspaceId) {
+        setPrevWorkspaceId(workspace.id);
+        setDetailTarget(null);
+        setDetail(null);
+        setDetailError(null);
+        setDetailLoading(false);
+    }
 
     if (loading) {
         return (
@@ -452,12 +492,12 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                 {/* Skill List */}
                 <div className="space-y-2">
                     {paginatedSkills.map((s) => {
-                        // A skill is deletable if it is project-scoped (workspace) and managed.
-                        const isDeletable = s.source === "project" && s.managed;
-
+                        // listWorkspaceInstalled returns only workspace-installed
+                        // managed skills (source=project, managed=true), so every
+                        // row is deletable — no isDeletable guard needed.
                         return (
                             <div
-                                key={`${s.source}/${s.name}`}
+                                key={s.name}
                                 className="flex items-center justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-default)] transition-colors"
                             >
                                 <div className="min-w-0 flex-1">
@@ -466,29 +506,15 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                             {s.name}
                                         </span>
                                         <Badge
-                                            kind={
-                                                s.managed
-                                                    ? "managed"
-                                                    : "external"
-                                            }
-                                            label={
-                                                s.managed
-                                                    ? t(
-                                                          "settings.skills.label.managed",
-                                                      )
-                                                    : t(
-                                                          "settings.skills.label.external",
-                                                      )
-                                            }
+                                            kind="managed"
+                                            label={t(
+                                                "settings.skills.label.managed",
+                                            )}
                                         />
                                         <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
-                                            {s.source === "project"
-                                                ? t(
-                                                      "chat:settings.label.active_workspace",
-                                                  )
-                                                : t(
-                                                      "chat:settings.group.personal",
-                                                  )}
+                                            {t(
+                                                "chat:settings.label.active_workspace",
+                                            )}
                                         </span>
                                     </div>
                                     <p className="mt-1 text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed">
@@ -505,18 +531,16 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                             defaultValue: "Details",
                                         })}
                                     </button>
-                                    {isDeletable && (
-                                        <button
-                                            type="button"
-                                            disabled={actionLoading === s.name}
-                                            onClick={() => setDeleteTarget(s.name)}
-                                            className="rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] hover:border-[var(--accent-coral)]/30 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98]"
-                                        >
-                                            {t("settings.skills.action.delete", {
-                                                defaultValue: "Delete",
-                                            })}
-                                        </button>
-                                    )}
+                                    <button
+                                        type="button"
+                                        disabled={actionLoading === s.name}
+                                        onClick={() => setDeleteTarget(s.name)}
+                                        className="rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] hover:border-[var(--accent-coral)]/30 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98]"
+                                    >
+                                        {t("settings.skills.action.delete", {
+                                            defaultValue: "Delete",
+                                        })}
+                                    </button>
                                 </div>
                             </div>
                         );

@@ -1,10 +1,10 @@
 /**
- * User-facing Skills API (issue #910).
+ * User-facing Skills API (issue #910, #918).
  *
- * /api/skills — merged list (global + caller's workspaces + external read-only),
- * each entry carrying `managed` (true = under .agents/skills, UI-manageable).
- * /api/workspaces/{wid}/skills — workspace-scoped skill list (only skills installed
- *   under that workspace's .agents/skills; issue #918) + zip install CRUD.
+ * /api/workspaces/{wid}/skills — workspace-scoped skill surface (issue #918):
+ *   list / read / install / delete, scoped strictly to that workspace's
+ *   .agents/skills (no global, no .claude read-only, no other workspace).
+ * /api/skills/{name} — read a single skill's detail from the merged list.
  *
  * Auth: same cookie/api-key channel as the rest of the user REST API (client.ts).
  */
@@ -40,12 +40,6 @@ export interface SkillInstallResult {
   body: string;
   files: string[];
   warning?: string; // non-empty = workspace install shadows a global same-name skill
-}
-
-export async function listSkills(signal?: AbortSignal): Promise<SkillListResponse> {
-  const res = await fetch(`${BASE}/api/skills`, { headers: withAuth(), ...authOpts(), signal });
-  if (!res.ok) throw new Error(await extractApiError(res, `listSkills failed: ${res.status}`));
-  return res.json();
 }
 
 // listWorkspaceSkills lists ONLY the skills installed under a workspace's
