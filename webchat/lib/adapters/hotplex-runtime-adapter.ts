@@ -1298,6 +1298,7 @@ export function useHotPlexRuntime({
             }
 
             let errorMessage = data?.message;
+            const msgLower = (errorMessage || "").toLowerCase();
 
             // User-friendly mapping for specific terminal errors
             switch (data?.code as string) {
@@ -1329,11 +1330,20 @@ export function useHotPlexRuntime({
                     errorMessage = `🔄 ${data?.message || "Recovering session after unexpected crash..."}`;
                     break;
                 default:
-                    errorMessage =
-                        errorMessage ||
-                        (data?.code
-                            ? `Error: ${data.code}`
-                            : "An unexpected error occurred.");
+                    if (
+                        msgLower.includes("429") ||
+                        msgLower.includes("too many requests") ||
+                        msgLower.includes("rate limit")
+                    ) {
+                        errorMessage =
+                            "Rate limit exceeded (429): The upstream AI provider is rate-limiting requests or quota is exhausted. Please try again later or check your API key/quota limits.";
+                    } else {
+                        errorMessage =
+                            errorMessage ||
+                            (data?.code
+                                ? `Error: ${data.code}`
+                                : "An unexpected error occurred.");
+                    }
             }
 
             // Add error message to thread
