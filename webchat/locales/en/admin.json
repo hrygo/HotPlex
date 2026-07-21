@@ -616,25 +616,63 @@
   "skills": {
     "title": "Skills",
     "subtitle": "Manage global skills under ~/.agents/skills. External skills (.claude/.hotplex) are read-only.",
-    "action": { "upload": "Upload Skill", "install": "Install" },
+    "action": {
+      "upload": "Upload Skill",
+      "install": "Install",
+      "create_text": "New Skill",
+      "save": "Save Changes",
+      "edit": "Edit",
+      "view": "View",
+      "close": "Close"
+    },
     "label": { "managed": "Managed", "external": "External (read-only)" },
-    "empty": { "title": "No skills installed", "desc": "Upload a skill .zip to install it into the global skills directory." },
+    "search_placeholder": "Search skill name or description…",
+    "empty": { "title": "No skills installed", "desc": "Upload a skill .zip or create a new text skill to install it into global skills directory." },
+    "pagination": {
+      "prev": "Previous",
+      "next": "Next",
+      "page_info": "Page {{page}} of {{totalPages}} (Total {{total}})"
+    },
     "dialog": {
       "upload_title": "Upload Skill",
       "upload_desc": "Select a .zip whose root has SKILL.md (or a single top-level dir containing it). Aligned with agentskills.io.",
       "replace": "Replace existing same-name skill",
       "uploading": "Uploading…"
     },
+    "create_dialog": {
+      "title": "Create Text Skill",
+      "desc": "Create a new SKILL.md in global skills directory. Must include YAML Frontmatter.",
+      "name_label": "Skill Name",
+      "content_label": "SKILL.md Content",
+      "creating": "Creating…"
+    },
+    "detail_drawer": {
+      "title": "Skill Detail",
+      "edit_title": "Edit Skill",
+      "files_count": "{{count}} files included",
+      "body_tab": "SKILL.md Content",
+      "files_tab": "Files List",
+      "saving": "Saving…",
+      "save_success": "Skill updated successfully",
+      "save_failed": "Failed to update skill"
+    },
     "error": {
       "no_file": "Please select a zip file",
       "not_zip": "Only .zip files are accepted",
       "already_exists": "Skill already exists — enable \"Replace existing\" to overwrite",
       "install_failed": "Install failed",
-      "delete_failed": "Delete failed"
+      "delete_failed": "Delete failed",
+      "name_required": "Please enter a skill name",
+      "blocked_ext": "Zip contains unsupported file type ({{ext}}). Only .md, .json, .yaml, .txt, .png, .jpg, .py, .sh are allowed.",
+      "file_type_blocked": "Zip contains blocked file types (e.g. .pptx, .exe, .docx). Only text and asset files are allowed.",
+      "invalid_zip": "Invalid or corrupted zip archive. Please verify the archive.",
+      "invalid_format": "Invalid skill format. Root must contain a valid SKILL.md with YAML frontmatter."
     },
     "toast": {
       "installed": "Skill installed",
       "installed_warning": "Installed — {{warning}}",
+      "created": "Skill created",
+      "updated": "Skill updated",
       "deleted": "Skill deleted"
     },
     "confirm": {

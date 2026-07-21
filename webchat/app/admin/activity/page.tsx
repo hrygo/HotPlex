@@ -68,6 +68,12 @@ function detailSummary(row: AuditActivity, t: TFunction<'admin'>): string {
       return name || JSON.stringify(parsed).slice(0, 80);
     }
     case 'permission': {
+      if (row.action === 'permission.request') {
+        const toolName = get('tool_name') || get('tool');
+        const desc = get('description');
+        const text = toolName ? `请求工具授权 · ${toolName}` : '请求授权';
+        return desc ? `${text} · ${desc}` : text;
+      }
       const allowed = parsed.allowed;
       const reason = get('reason');
       const text = allowed === true ? '允许授权' : allowed === false ? '拒绝授权' : '权限响应';

@@ -155,3 +155,45 @@ func buildToolCallDetail(tc *events.ToolCallData) string {
 	b, _ := json.Marshal(d)
 	return string(b)
 }
+
+// emitPermissionRequestAudit enqueues a permission.request audit event when
+// an outgoing PermissionRequest is forwarded to a client.
+func (b *Bridge) emitPermissionRequestAudit(fc *forwardContext, pr *events.PermissionRequestData) {
+	c := b.auditCollector
+	if c == nil || pr == nil {
+		return
+	}
+	userID := fc.sessOwner
+	if userID == "" {
+		userID = audit.AnonymousUserID
+	}
+
+	detailMap := map[string]any{
+		"id":          pr.ID,
+		"tool_name":   pr.ToolName,
+		"description": pr.Description,
+	}
+	if len(pr.Args) > 0 {
+		detailMap["args"] = pr.Args
+	}
+
+	detailBytes, err := json.Marshal(detailMap)
+	var detailStr string
+	if err == nil {
+		detailStr = string(detailBytes)
+	}
+
+	ua := &audit.UserActivity{
+		Ts:           time.Now().UnixMilli(),
+		UserID:       userID,
+		UserIDType:   audit.UserIDTypePlatform,
+		Platform:     fc.sessPlatform,
+		SessionID:    fc.sessionID,
+		Action:       audit.ActionPermissionRequest,
+		ResourceType: "permission",
+		ResourceID:   pr.ID,
+		Outcome:      audit.OutcomeSuccess,
+		DetailJSON:   detailStr,
+	}
+	_ = c.Enqueue(context.Background(), ua)
+}

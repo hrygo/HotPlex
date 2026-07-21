@@ -221,10 +221,11 @@ func setupRoutes(
 	adminMux.HandleFunc("GET /admin/workspaces", adminAPI.HandleListAdminWorkspaces)
 	adminMux.HandleFunc("PATCH /admin/workspaces/{id}", adminAPI.HandleUpdateAdminWorkspacePermissionMode)
 
-	// Skill management API (issue #910): global skill list/install/read/delete.
+	// Skill management API (issue #910): global skill list/install/read/update/delete.
 	adminMux.HandleFunc("GET /admin/api/skills", adminAPI.HandleListSkills)
 	adminMux.HandleFunc("POST /admin/api/skills", adminAPI.HandleInstallSkill)
 	adminMux.HandleFunc("GET /admin/api/skills/{name}", adminAPI.HandleGetSkill)
+	adminMux.HandleFunc("PUT /admin/api/skills/{name}", adminAPI.HandleUpdateSkill)
 	adminMux.HandleFunc("DELETE /admin/api/skills/{name}", adminAPI.HandleDeleteSkill)
 
 	// Documentation

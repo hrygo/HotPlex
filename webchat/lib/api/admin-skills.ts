@@ -23,6 +23,8 @@ export interface AdminSkill {
 export interface AdminSkillListResponse {
   skills: AdminSkill[];
   total: number;
+  page?: number;
+  page_size?: number;
 }
 
 export interface AdminSkillDetail {
@@ -38,12 +40,35 @@ export interface AdminSkillInstallResult extends AdminSkillDetail {
   warning?: string;
 }
 
-export async function listAdminSkills(): Promise<AdminSkillListResponse> {
-  return adminFetch<AdminSkillListResponse>('/admin/api/skills');
+export async function listAdminSkills(params?: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+}): Promise<AdminSkillListResponse> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set('page', params.page.toString());
+  if (params?.page_size) query.set('page_size', params.page_size.toString());
+  if (params?.search) query.set('q', params.search);
+  const qStr = query.toString();
+  return adminFetch<AdminSkillListResponse>(`/admin/api/skills${qStr ? `?${qStr}` : ''}`);
 }
 
 export async function getAdminSkill(name: string): Promise<AdminSkillDetail> {
   return adminFetch<AdminSkillDetail>(`/admin/api/skills/${encodeURIComponent(name)}`);
+}
+
+export async function updateAdminSkill(name: string, body: string): Promise<AdminSkillDetail> {
+  return adminFetch<AdminSkillDetail>(`/admin/api/skills/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function createAdminSkillText(name: string, body: string, replace = false): Promise<AdminSkillInstallResult> {
+  return adminFetch<AdminSkillInstallResult>(`/admin/api/skills${replace ? '?replace=true' : ''}`, {
+    method: 'POST',
+    body: JSON.stringify({ name, body, replace }),
+  });
 }
 
 export async function deleteAdminSkill(name: string): Promise<void> {

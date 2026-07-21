@@ -214,3 +214,17 @@ func TestExtractZip_HighCompressionRatio(t *testing.T) {
 	_, err := runExtract(t, zr)
 	require.ErrorIs(t, err, ErrInvalidZip)
 }
+
+func TestSanitizeZipEntryName(t *testing.T) {
+	t.Parallel()
+
+	// UTF-8 正常文件名
+	f1 := &zip.File{FileHeader: zip.FileHeader{Name: "my-skill/SKILL.md"}}
+	require.Equal(t, "my-skill/SKILL.md", sanitizeZipEntryName(f1))
+
+	// GBK 编码的中文字符串："中文测试.pptx" 对应的 GBK 字节序列
+	gbkBytes := []byte{0xd6, 0xd0, 0xce, 0xc4, 0xb2, 0xe2, 0xca, 0xd4, 0x2e, 0x70, 0x70, 0x74, 0x78}
+	f2 := &zip.File{FileHeader: zip.FileHeader{Name: string(gbkBytes), NonUTF8: true}}
+	sanitized := sanitizeZipEntryName(f2)
+	require.Equal(t, "中文测试.pptx", sanitized)
+}

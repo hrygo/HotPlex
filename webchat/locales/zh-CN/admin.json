@@ -616,25 +616,63 @@
   "skills": {
     "title": "技能管理",
     "subtitle": "管理 ~/.agents/skills 下的全局技能。外部技能（.claude/.hotplex）为只读。",
-    "action": { "upload": "上传技能", "install": "安装" },
+    "action": {
+      "upload": "上传技能",
+      "install": "安装",
+      "create_text": "新建技能",
+      "save": "保存更改",
+      "edit": "编辑",
+      "view": "查看",
+      "close": "关闭"
+    },
     "label": { "managed": "可管理", "external": "外部（只读）" },
-    "empty": { "title": "暂无技能", "desc": "上传 .zip 技能包以安装到全局技能目录。" },
+    "search_placeholder": "搜索技能名称或描述…",
+    "empty": { "title": "暂无技能", "desc": "上传 .zip 技能包或新建文本技能以安装到全局技能目录。" },
+    "pagination": {
+      "prev": "上一页",
+      "next": "下一页",
+      "page_info": "第 {{page}} / {{totalPages}} 页（共 {{total}} 条）"
+    },
     "dialog": {
       "upload_title": "上传技能",
       "upload_desc": "选择根目录含 SKILL.md（或单个顶层目录内含 SKILL.md）的 .zip 包，对齐 agentskills.io 标准。",
       "replace": "覆盖同名技能",
       "uploading": "上传中…"
     },
+    "create_dialog": {
+      "title": "新建文本技能",
+      "desc": "在全局技能目录直接创建 SKILL.md。需包含 YAML Frontmatter 元数据。",
+      "name_label": "技能名称",
+      "content_label": "SKILL.md 内容",
+      "creating": "创建中…"
+    },
+    "detail_drawer": {
+      "title": "技能详情",
+      "edit_title": "编辑技能",
+      "files_count": "包含 {{count}} 个文件",
+      "body_tab": "SKILL.md 内容",
+      "files_tab": "包内文件列表",
+      "saving": "保存中…",
+      "save_success": "技能更新成功",
+      "save_failed": "技能更新失败"
+    },
     "error": {
       "no_file": "请选择 zip 文件",
       "not_zip": "仅接受 .zip 文件",
       "already_exists": "技能已存在 — 勾选「覆盖同名」以覆盖",
       "install_failed": "安装失败",
-      "delete_failed": "删除失败"
+      "delete_failed": "删除失败",
+      "name_required": "请输入技能名称",
+      "blocked_ext": "包内包含不支持的文件类型 ({{ext}})。仅允许包含 .md, .json, .yaml, .txt, .png, .jpg, .py, .sh 等描述与脚本文件。",
+      "file_type_blocked": "包内包含不支持的文件类型（如 .pptx, .exe, .docx）。Zip 压缩包仅允许包含 .md, .json, .yaml, .txt, .png, .jpg, .py, .sh 等文本与资源文件。",
+      "invalid_zip": "Zip 压缩包文件损坏或无效，请重新检查压缩包文件。",
+      "invalid_format": "技能格式无效。根目录（或单顶层目录）中必须包含有效的 SKILL.md。"
     },
     "toast": {
       "installed": "技能已安装",
       "installed_warning": "已安装 — {{warning}}",
+      "created": "技能已创建",
+      "updated": "技能已更新",
       "deleted": "技能已删除"
     },
     "confirm": {

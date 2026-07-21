@@ -390,3 +390,53 @@ func TestLocator_ListWorkspaceInstalled_EmptyExistingDir(t *testing.T) {
 	require.NotNil(t, got, "空但存在的目录须返回非 nil 切片")
 	require.Empty(t, got)
 }
+
+func TestLocator_Update(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	workDir := t.TempDir()
+	_, err := l.Install(context.Background(), ScopeWorkspace, workDir, "",
+		makeZip(t, map[string]string{"SKILL.md": "---\nname: my-skill\ndescription: orig\n---\n# Orig"}), false)
+	require.NoError(t, err)
+
+	updatedBody := "---\nname: my-skill\ndescription: updated desc\n---\n# Updated Skill"
+	d, err := l.Update(context.Background(), ScopeWorkspace, workDir, "my-skill", updatedBody)
+	require.NoError(t, err)
+	require.Equal(t, "my-skill", d.Name)
+	require.Equal(t, "updated desc", d.Description)
+	require.Equal(t, updatedBody, d.Body)
+
+	// Update non-existent skill
+	_, err = l.Update(context.Background(), ScopeWorkspace, workDir, "missing", updatedBody)
+	require.ErrorIs(t, err, ErrSkillNotFound)
+
+	// Update invalid frontmatter
+	_, err = l.Update(context.Background(), ScopeWorkspace, workDir, "my-skill", "no frontmatter here")
+	require.ErrorIs(t, err, ErrInvalidFormat)
+}
+
+func TestLocator_CreateText(t *testing.T) {
+	t.Parallel()
+	l := newTestLocator()
+	defer l.Close()
+
+	workDir := t.TempDir()
+	body := "---\nname: text-skill\ndescription: a text skill\n---\n# Text Skill"
+	res, err := l.CreateText(context.Background(), ScopeWorkspace, workDir, "", "text-skill", body, false)
+	require.NoError(t, err)
+	require.Equal(t, "text-skill", res.Name)
+	require.Equal(t, "a text skill", res.Description)
+	require.Equal(t, body, res.Body)
+
+	// Duplicate create without replace
+	_, err = l.CreateText(context.Background(), ScopeWorkspace, workDir, "", "text-skill", body, false)
+	require.ErrorIs(t, err, ErrSkillAlreadyExists)
+
+	// Duplicate create with replace
+	newBody := "---\nname: text-skill\ndescription: replaced text skill\n---\n# Replaced"
+	res, err = l.CreateText(context.Background(), ScopeWorkspace, workDir, "", "text-skill", newBody, true)
+	require.NoError(t, err)
+	require.Equal(t, "replaced text skill", res.Description)
+}

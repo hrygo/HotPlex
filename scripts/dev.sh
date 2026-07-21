@@ -85,6 +85,45 @@ kill_pidfile() {
     fi
 }
 
+# Recursively signal a process and all its descendants (children before parent).
+# Used for multi-layer process trees such as `pnpm dev` -> `next dev` -> `next-server`,
+# where killing only the top PID orphans the children (reparented to PID 1) and leaves
+# them holding the listen socket.
+kill_tree() {
+    local pid=$1; local sig=${2:-TERM}
+    [[ -z "$pid" ]] && return 0
+    local child
+    for child in $(pgrep -P "$pid" 2>/dev/null); do
+        kill_tree "$child" "$sig"
+    done
+    kill -"$sig" "$pid" 2>/dev/null || true
+}
+
+# Like kill_pidfile but signals the whole descendant tree (TERM then KILL).
+# Needed for webchat: the PID file records the top-level pnpm shim, not the
+# next-server that actually owns the port.
+kill_pidfile_tree() {
+    local pidfile=$1; local name=${2:-service}
+    [[ ! -f "$pidfile" ]] && return 0
+    local pid; pid=$(read_pid "$pidfile")
+    [[ -z "$pid" ]] && rm -f "$pidfile" && return 0
+    if kill -0 "$pid" 2>/dev/null; then
+        info "Stopping $name (PID $pid)..."
+        kill_tree "$pid" TERM
+        local dead=1
+        for i in $(seq 1 "${GRACE_PERIOD:-7}"); do
+            sleep 1
+            kill -0 "$pid" 2>/dev/null || { dead=0; break; }
+        done
+        [[ "$dead" -ne 0 ]] && kill_tree "$pid" KILL
+        rm -f "$pidfile"
+        [[ "$dead" -ne 0 ]] && ok "$name force-stopped" || ok "$name stopped"
+    else
+        info "$name: stale PID file"
+        rm -f "$pidfile"
+    fi
+}
+
 # Kill processes listening on a port.
 kill_port() {
     local port=$1; local name=${2:-service}
@@ -93,9 +132,9 @@ kill_port() {
     for pid in $pids; do
         if kill -0 "$pid" 2>/dev/null; then
             info "Killing $name on port $port (PID $pid)..."
-            kill -TERM "$pid" 2>/dev/null || true
+            kill_tree "$pid" TERM
             sleep 1
-            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" KILL || true
         fi
     done
 }
@@ -210,11 +249,13 @@ start_webchat() {
         return 0
     fi
 
-    # Clean stale processes on the port.
+    # Clean stale processes on the port (and any descendant workers they spawned).
     local stale; stale=$(lsof -ti:"$WEBCHAT_PORT" 2>/dev/null || true)
     if [[ -n "$stale" ]]; then
         warn "Port $WEBCHAT_PORT occupied (PID $stale), killing..."
-        echo "$stale" | xargs kill -9 2>/dev/null || true
+        for spid in $stale; do
+            kill_tree "$spid" KILL
+        done
         sleep 1
         stale=$(lsof -ti:"$WEBCHAT_PORT" 2>/dev/null || true)
         if [[ -n "$stale" ]]; then
@@ -245,7 +286,7 @@ start_webchat() {
 }
 
 stop_webchat() {
-    kill_pidfile "$WEBCHAT_PID" "webchat"
+    kill_pidfile_tree "$WEBCHAT_PID" "webchat"
     kill_port "$WEBCHAT_PORT" "webchat (port)"
 }
 

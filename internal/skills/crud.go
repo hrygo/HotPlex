@@ -213,6 +213,120 @@ func (l *Locator) Delete(_ context.Context, scope Scope, baseDir, name string) e
 	return nil
 }
 
+// Update 重新写入指定 managed skill 的 SKILL.md 内容并更新/校验 frontmatter。
+func (l *Locator) Update(_ context.Context, scope Scope, baseDir, name, body string) (*Detail, error) {
+	if baseDir == "" {
+		return nil, fmt.Errorf("%w: empty baseDir", ErrInvalidFormat)
+	}
+	if !skillNameRegexp.MatchString(name) {
+		return nil, fmt.Errorf("%w: invalid name %q", ErrInvalidFormat, name)
+	}
+	fm := extractFrontmatter([]byte(body))
+	if fm == nil || strings.TrimSpace(fm.Name) == "" {
+		return nil, fmt.Errorf("%w: missing or invalid frontmatter", ErrInvalidFormat)
+	}
+
+	l.installMu.Lock()
+	defer l.installMu.Unlock()
+
+	if !hasManagedSkill(baseDir, name) {
+		return nil, fmt.Errorf("%w: %s", ErrSkillNotFound, name)
+	}
+
+	destRoot := managedDir(baseDir)
+	dir := filepath.Join(destRoot, name)
+	mdPath, ok := findSkillMD(dir)
+	if !ok {
+		mdPath = filepath.Join(dir, "SKILL.md")
+	}
+
+	if err := os.WriteFile(mdPath, []byte(body), 0o644); err != nil {
+		return nil, fmt.Errorf("skills: update write: %w", err)
+	}
+
+	l.invalidateScope(scope, baseDir)
+
+	files, _ := collectFiles(dir)
+	desc := CollapseSpaces(strings.ReplaceAll(strings.TrimSpace(fm.Description), "\n", " "))
+	return &Detail{
+		Skill: Skill{
+			Name:        strings.TrimSpace(fm.Name),
+			Description: desc,
+			Source:      scopeSource(scope),
+			Managed:     true,
+			FilePath:    mdPath,
+		},
+		Body:  body,
+		Files: files,
+	}, nil
+}
+
+// CreateText 根据文本内容（SKILL.md）创建新 managed skill。
+func (l *Locator) CreateText(_ context.Context, scope Scope, baseDir, homeDir, name, body string, replace bool) (*InstallResult, error) {
+	if baseDir == "" {
+		return nil, fmt.Errorf("%w: empty baseDir", ErrInvalidFormat)
+	}
+	fm := extractFrontmatter([]byte(body))
+	if fm == nil || strings.TrimSpace(fm.Name) == "" {
+		return nil, fmt.Errorf("%w: missing or invalid frontmatter", ErrInvalidFormat)
+	}
+	if name == "" {
+		name = strings.TrimSpace(fm.Name)
+	}
+	if !skillNameRegexp.MatchString(name) {
+		return nil, fmt.Errorf("%w: invalid name %q", ErrInvalidFormat, name)
+	}
+
+	l.installMu.Lock()
+	defer l.installMu.Unlock()
+
+	destRoot := managedDir(baseDir)
+	if err := os.MkdirAll(destRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("skills: mkdir skills root: %w", err)
+	}
+
+	if !replace && hasManagedSkill(baseDir, name) {
+		return nil, fmt.Errorf("%w: %s", ErrSkillAlreadyExists, name)
+	}
+
+	var warning string
+	if scope == ScopeWorkspace && homeDir != "" && hasManagedSkill(homeDir, name) {
+		warning = fmt.Sprintf("shadows global skill '%s'", name)
+	}
+
+	destDir := filepath.Join(destRoot, name)
+	if replace {
+		_ = os.RemoveAll(destDir)
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return nil, fmt.Errorf("skills: mkdir skill dir: %w", err)
+	}
+
+	mdPath := filepath.Join(destDir, "SKILL.md")
+	if err := os.WriteFile(mdPath, []byte(body), 0o644); err != nil {
+		return nil, fmt.Errorf("skills: create write: %w", err)
+	}
+
+	l.invalidateScope(scope, baseDir)
+
+	files, _ := collectFiles(destDir)
+	desc := CollapseSpaces(strings.ReplaceAll(strings.TrimSpace(fm.Description), "\n", " "))
+	return &InstallResult{
+		Detail: Detail{
+			Skill: Skill{
+				Name:        strings.TrimSpace(fm.Name),
+				Description: desc,
+				Source:      scopeSource(scope),
+				Managed:     true,
+				FilePath:    mdPath,
+			},
+			Body:  body,
+			Files: files,
+		},
+		Warning: warning,
+	}, nil
+}
+
 // invalidateScope 按 scope 选择缓存失效策略（spec §3.2）：
 // 全局写影响所有 workspace 的合并列表 → InvalidateAll；workspace 写仅清自身。
 func (l *Locator) invalidateScope(scope Scope, baseDir string) {

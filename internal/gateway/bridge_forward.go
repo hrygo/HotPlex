@@ -355,6 +355,11 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		if b.suppressPermissionRequest(opts.ctx, env, w) {
 			return
 		}
+		if prd, ok := env.Event.Data.(events.PermissionRequestData); ok {
+			b.emitPermissionRequestAudit(fc, &prd)
+		} else if prdPtr, ok := env.Event.Data.(*events.PermissionRequestData); ok && prdPtr != nil {
+			b.emitPermissionRequestAudit(fc, prdPtr)
+		}
 	}
 
 	deltaContent, reasoningContent := b.extractTurnContent(env, fc)

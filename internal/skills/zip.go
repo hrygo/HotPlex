@@ -10,7 +10,26 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
+
+// sanitizeZipEntryName 将 zip entry 文件名转为合法 UTF-8 字符串。
+// 针对 Windows/GBK 压缩包解压后出现的乱码/hex 转义进格式化修饰。
+func sanitizeZipEntryName(f *zip.File) string {
+	name := f.Name
+	if f.NonUTF8 || !utf8.ValidString(name) {
+		if decoded, err := simplifiedchinese.GBK.NewDecoder().String(name); err == nil && utf8.ValidString(decoded) {
+			name = decoded
+		} else if decoded, err := simplifiedchinese.HZGB2312.NewDecoder().String(name); err == nil && utf8.ValidString(decoded) {
+			name = decoded
+		} else {
+			name = strings.ToValidUTF8(name, "")
+		}
+	}
+	return name
+}
 
 // 容量/安全阈值（spec §3.3 A）。zip body 的 20MB 上限在 handler 层由
 // http.MaxBytesReader 兜底；此处的阈值约束解压阶段。
@@ -98,29 +117,31 @@ func extractZip(zr *zip.Reader, tempStaging string) (*extractedSkill, error) {
 	var totalUncompressed uint64
 
 	for _, f := range zr.File {
+		cleanName := sanitizeZipEntryName(f)
+
 		// 拒嵌套 zip（spec §3.3 A 禁嵌套 zip）。
-		if strings.HasSuffix(strings.ToLower(f.Name), ".zip") {
+		if strings.HasSuffix(strings.ToLower(cleanName), ".zip") {
 			return nil, fmt.Errorf("%w: nested zip not allowed", ErrInvalidZip)
 		}
 		// 目录 entry（显式或以 / 结尾）跳过——目录由文件路径隐式创建。
-		if f.Mode().IsDir() || strings.HasSuffix(f.Name, "/") {
+		if f.Mode().IsDir() || strings.HasSuffix(cleanName, "/") {
 			continue
 		}
 		// 仅接受常规文件 entry：拒 symlink/device/pipe（spec §3.3 A 恶意 entry）。
 		if !f.Mode().IsRegular() {
-			return nil, fmt.Errorf("%w: non-regular entry %q", ErrInvalidZip, f.Name)
+			return nil, fmt.Errorf("%w: non-regular entry %s", ErrInvalidZip, cleanName)
 		}
 		// 文件类型白名单（spec §3.3 B7）。
-		if !allowedFileExts[strings.ToLower(filepath.Ext(f.Name))] {
-			return nil, fmt.Errorf("%w: %q", ErrFileTypeBlocked, f.Name)
+		if !allowedFileExts[strings.ToLower(filepath.Ext(cleanName))] {
+			return nil, fmt.Errorf("%w: %s", ErrFileTypeBlocked, cleanName)
 		}
 		// 单文件大小（spec §3.3 A 单文件 ≤5MB）。
 		if f.UncompressedSize64 > maxSingleFile {
-			return nil, fmt.Errorf("%w: file too large %q (%d bytes)", ErrInvalidZip, f.Name, f.UncompressedSize64)
+			return nil, fmt.Errorf("%w: file too large %s (%d bytes)", ErrInvalidZip, cleanName, f.UncompressedSize64)
 		}
 		// 压缩率（spec §3.3 A 压缩率 >100× 拒）。
 		if f.CompressedSize64 > 0 && f.UncompressedSize64 > uint64(maxCompressionRatio)*f.CompressedSize64 {
-			return nil, fmt.Errorf("%w: suspicious compression ratio %q", ErrInvalidZip, f.Name)
+			return nil, fmt.Errorf("%w: suspicious compression ratio %s", ErrInvalidZip, cleanName)
 		}
 		// 解压总大小（spec §3.3 A 解压总 ≤50MB）。
 		totalUncompressed += f.UncompressedSize64
@@ -130,16 +151,16 @@ func extractZip(zr *zip.Reader, tempStaging string) (*extractedSkill, error) {
 
 		// zip-slip 双保险：safeExtractJoin（Clean/拒绝对路径与".."→Join→前缀校验）
 		// + 显式 HasPrefix 再查一次（spec §3.3 A）。
-		rel := filepath.Clean(filepath.FromSlash(f.Name))
+		rel := filepath.Clean(filepath.FromSlash(cleanName))
 		dest, err := safeExtractJoin(stagingBase, rel)
 		if err != nil {
-			return nil, fmt.Errorf("%w: unsafe path %q: %w", ErrInvalidZip, f.Name, err)
+			return nil, fmt.Errorf("%w: unsafe path %s: %w", ErrInvalidZip, cleanName, err)
 		}
 		if dest != stagingBase && !strings.HasPrefix(dest, stagingBase+sep) {
-			return nil, fmt.Errorf("%w: path escapes staging %q", ErrInvalidZip, f.Name)
+			return nil, fmt.Errorf("%w: path escapes staging %s", ErrInvalidZip, cleanName)
 		}
 		if err := extractFile(f, dest); err != nil {
-			return nil, fmt.Errorf("%w: extract %q: %w", ErrInvalidZip, f.Name, err)
+			return nil, fmt.Errorf("%w: extract %s: %w", ErrInvalidZip, cleanName, err)
 		}
 	}
 

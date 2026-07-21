@@ -358,6 +358,37 @@ func TestEmitToolCallAudit_Backpressure(t *testing.T) {
 	// or panicking. The collector's spill mechanism guarantees zero loss.
 }
 
+func TestEmitPermissionRequestAudit(t *testing.T) {
+	t.Parallel()
+	c, query := gwTestCollector(t)
+	b := &Bridge{auditCollector: c}
+	fc := &forwardContext{
+		sessionID:    "sess-req-1",
+		sessOwner:    "u-req-1",
+		sessPlatform: "slack",
+	}
+
+	b.emitPermissionRequestAudit(fc, &events.PermissionRequestData{
+		ID:          "req-pr-1",
+		ToolName:    "Bash",
+		Description: "Execute shell script",
+		Args:        []string{"ls", "-la"},
+	})
+
+	require.Eventually(t, func() bool { return len(query(t)) >= 1 }, 2*time.Second, 5*time.Millisecond)
+	r := query(t)[0]
+	require.Equal(t, audit.ActionPermissionRequest, r.Action)
+	require.Equal(t, audit.OutcomeSuccess, r.Outcome)
+	require.Equal(t, "u-req-1", r.UserID)
+	require.Equal(t, "slack", r.Platform)
+	require.Equal(t, "sess-req-1", r.SessionID)
+	require.Equal(t, "permission", r.ResourceType)
+	require.Equal(t, "req-pr-1", r.ResourceID)
+	require.Contains(t, r.DetailJSON, `"tool_name":"Bash"`)
+	require.Contains(t, r.DetailJSON, "Execute shell script")
+	require.Contains(t, r.DetailJSON, "ls")
+}
+
 func TestEmitInteractionAudit_PermissionResponse(t *testing.T) {
 	t.Parallel()
 	c, query := gwTestCollector(t)

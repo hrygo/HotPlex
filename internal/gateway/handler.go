@@ -119,6 +119,60 @@ func (h *Handler) emitInteractionAudit(userID, platform, sessionID string, event
 	detailMap := make(map[string]any)
 
 	switch eventType {
+	case events.PermissionRequest:
+		action = audit.ActionPermissionRequest
+		resourceType = "permission"
+		var reqID string
+		var toolName string
+		var description string
+		var args []string
+
+		if prd, ok := data.(events.PermissionRequestData); ok {
+			reqID = prd.ID
+			toolName = prd.ToolName
+			description = prd.Description
+			args = prd.Args
+		} else if prdPtr, ok := data.(*events.PermissionRequestData); ok && prdPtr != nil {
+			reqID = prdPtr.ID
+			toolName = prdPtr.ToolName
+			description = prdPtr.Description
+			args = prdPtr.Args
+		} else if m, ok := data.(map[string]any); ok {
+			reqID, _ = m["id"].(string)
+			if reqID == "" {
+				reqID, _ = m["request_id"].(string)
+			}
+			toolName, _ = m["tool_name"].(string)
+			if toolName == "" {
+				toolName, _ = m["tool"].(string)
+			}
+			description, _ = m["description"].(string)
+			if rawArgs, ok := m["args"].([]string); ok {
+				args = rawArgs
+			} else if rawArgsAny, ok := m["args"].([]any); ok {
+				for _, a := range rawArgsAny {
+					if s, ok := a.(string); ok {
+						args = append(args, s)
+					}
+				}
+			}
+		}
+
+		resourceID = reqID
+		if reqID != "" {
+			detailMap["id"] = reqID
+		}
+		if toolName != "" {
+			detailMap["tool_name"] = toolName
+		}
+		if description != "" {
+			detailMap["description"] = description
+		}
+		if len(args) > 0 {
+			detailMap["args"] = args
+		}
+		outcome = audit.OutcomeSuccess
+
 	case events.PermissionResponse:
 		action = audit.ActionPermissionResponse
 		resourceType = "permission"
