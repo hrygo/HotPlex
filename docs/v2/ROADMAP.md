@@ -48,7 +48,7 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 
 ## 当前基线
 
-截至 v1.32.2，HotPlex 已经具备 2.0 的运行时内核：
+截至 v1.37.x，HotPlex 已经具备 2.0 的运行时内核（含 #878 durable ingress reliability epic 交付的 execution 账本/owner lease/repairer/单活跃门与 `runtime.execution.*` 事件）：
 
 | 能力 | 当前实现 | 2.0 演进方向 |
 | --- | --- | --- |
@@ -57,6 +57,7 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 | Worker | `claude_code`、`opencode_server`、`codex_cli`、`acp` 注册式适配器 | 通过 AgentSpec 统一声明 provider、权限、sandbox、预算 |
 | AEP | `pkg/events` 作为唯一 wire contract，Envelope 支持 Metadata，OwnerID 内部校验 | 增加 runtime/security/audit 事件类型，不引入第二套事件总线 |
 | Event Store | outbound/inbound 事件持久化、turns 聚合、崩溃/超时 synthetic turn | 为 runtime trace、context recovery 和审计查询提供事实源 |
+| Execution / Durable Ingress | `internal/execution` 输入账本：owner instance + lease、有界 repairer、delivery/runtime 状态分离、单活跃门（`SESSION_BUSY`）、ambiguity fence、`runtime.execution.*` 事件（#878 epic） | 作为 #851 ExecutionQueue 与 #868 Cockpit 的持久化事实源；real-PG 多实例验证待接入 CI |
 | Observability | OpenTelemetry bootstrap、Prometheus metrics、worker/session/gateway 指标 | 增加 Agent lifecycle、tool execution、policy decision spans |
 | Security/Audit | API key、cookie admin fallback、workspace owner 校验、tool call/user activity audit | 收敛成策略检查接口，保持现有认证链路 |
 | Cron | 定时任务、执行超时、重试、平台投递 | 作为 scheduler 的已实现经验，避免过早引入分布式调度 |
