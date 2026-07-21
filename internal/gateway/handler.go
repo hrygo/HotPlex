@@ -102,6 +102,148 @@ func (h *Handler) emitAudit(outcome, userID, platform, sessionID, content string
 	})
 }
 
+// emitInteractionAudit enqueues a non-blocking interaction response audit event
+// (permission.response / question.response / elicitation.response).
+func (h *Handler) emitInteractionAudit(userID, platform, sessionID string, eventType events.Kind, data any, content string) {
+	if h.auditCollector == nil {
+		return
+	}
+	if userID == "" {
+		userID = audit.AnonymousUserID
+	}
+
+	var action string
+	var resourceType string
+	var resourceID string
+	var outcome string
+	detailMap := make(map[string]any)
+
+	switch eventType {
+	case events.PermissionResponse:
+		action = audit.ActionPermissionResponse
+		resourceType = "permission"
+		var allowed = true
+		var reason string
+		var reqID string
+
+		if prd, ok := data.(events.PermissionResponseData); ok {
+			reqID = prd.ID
+			allowed = prd.Allowed
+			reason = prd.Reason
+		} else if m, ok := data.(map[string]any); ok {
+			reqID, _ = m["id"].(string)
+			if reqID == "" {
+				reqID, _ = m["request_id"].(string)
+			}
+			if a, ok := m["allowed"].(bool); ok {
+				allowed = a
+			}
+			reason, _ = m["reason"].(string)
+		}
+
+		resourceID = reqID
+		if reqID != "" {
+			detailMap["id"] = reqID
+		}
+		detailMap["allowed"] = allowed
+		if reason != "" {
+			detailMap["reason"] = reason
+		}
+		if content != "" {
+			detailMap["content"] = content
+		}
+		if allowed {
+			outcome = audit.OutcomeSuccess
+		} else {
+			outcome = audit.OutcomeDenied
+		}
+
+	case events.QuestionResponse:
+		action = audit.ActionQuestionResponse
+		resourceType = "question"
+		var reqID string
+		var answers any
+
+		if qrd, ok := data.(events.QuestionResponseData); ok {
+			reqID = qrd.ID
+			answers = qrd.Answers
+		} else if m, ok := data.(map[string]any); ok {
+			reqID, _ = m["id"].(string)
+			answers = m["answers"]
+		}
+
+		resourceID = reqID
+		if reqID != "" {
+			detailMap["id"] = reqID
+		}
+		if answers != nil {
+			detailMap["answers"] = answers
+		}
+		if content != "" {
+			detailMap["content"] = content
+		}
+		outcome = audit.OutcomeSuccess
+
+	case events.ElicitationResponse:
+		action = audit.ActionElicitationResponse
+		resourceType = "elicitation"
+		var reqID string
+		var act string
+		var elicitContent any
+
+		if erd, ok := data.(events.ElicitationResponseData); ok {
+			reqID = erd.ID
+			act = erd.Action
+			elicitContent = erd.Content
+		} else if m, ok := data.(map[string]any); ok {
+			reqID, _ = m["id"].(string)
+			act, _ = m["action"].(string)
+			elicitContent = m["content"]
+		}
+
+		resourceID = reqID
+		if reqID != "" {
+			detailMap["id"] = reqID
+		}
+		if act != "" {
+			detailMap["action"] = act
+		}
+		if elicitContent != nil {
+			detailMap["content"] = elicitContent
+		} else if content != "" {
+			detailMap["content"] = content
+		}
+		if act == "decline" || act == "cancel" {
+			outcome = audit.OutcomeDenied
+		} else {
+			outcome = audit.OutcomeSuccess
+		}
+
+	default:
+		return
+	}
+
+	detailJSON := "{}"
+	if len(detailMap) > 0 {
+		if bytes, err := json.Marshal(detailMap); err == nil {
+			detailJSON = string(bytes)
+		}
+	}
+
+	_ = h.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
+		Ts:           time.Now().UnixMilli(),
+		UserID:       userID,
+		UserIDType:   audit.UserIDTypePlatform,
+		Platform:     platform,
+		SessionID:    sessionID,
+		Action:       action,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Outcome:      outcome,
+		DetailJSON:   detailJSON,
+	})
+}
+
 // Handle processes an incoming envelope from a client.
 func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) {
 	defer func() {
@@ -215,6 +357,22 @@ func (h *Handler) tryInteractionResponse(ctx context.Context, env *events.Envelo
 		} else if h.bridge != nil {
 			h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
 			h.recordPermissionDenial(respType, md, env)
+		}
+		if h.auditCollector != nil {
+			siPlatform := ""
+			if h.sm != nil {
+				if si, err := h.sm.Get(ctx, env.SessionID); err == nil {
+					siPlatform = si.Platform
+				}
+			}
+			switch respType {
+			case "permission":
+				h.emitInteractionAudit(env.OwnerID, siPlatform, env.SessionID, events.PermissionResponse, md["permission_response"], content)
+			case "question":
+				h.emitInteractionAudit(env.OwnerID, siPlatform, env.SessionID, events.QuestionResponse, md["question_response"], content)
+			case "elicitation":
+				h.emitInteractionAudit(env.OwnerID, siPlatform, env.SessionID, events.ElicitationResponse, md["elicitation_response"], content)
+			}
 		}
 	} else {
 		h.log.Warn("gateway: interaction response dropped — no worker",
@@ -990,7 +1148,7 @@ func (h *Handler) handleInteractionResponseEvent(ctx context.Context, env *event
 		return fmt.Errorf("%s: worker response failed: %w", code, err)
 	}
 
-	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, "")
+	h.emitInteractionAudit(env.OwnerID, si.Platform, env.SessionID, env.Event.Type, env.Event.Data, "")
 	if h.bridge != nil {
 		h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, env.Event.Type, env.Event.Data)
 	}

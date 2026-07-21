@@ -28,6 +28,9 @@ const ACTION_GROUPS: Array<{ groupKey: string; prefix: string }> = [
   { groupKey: 'session', prefix: 'session.' },
   { groupKey: 'message', prefix: 'message.' },
   { groupKey: 'tool', prefix: 'tool.' },
+  { groupKey: 'permission', prefix: 'permission.' },
+  { groupKey: 'question', prefix: 'question.' },
+  { groupKey: 'elicitation', prefix: 'elicitation.' },
   { groupKey: 'admin', prefix: 'admin.' },
   { groupKey: 'system', prefix: 'system.' },
 ];
@@ -63,6 +66,24 @@ function detailSummary(row: AuditActivity, t: TFunction<'admin'>): string {
       const title = get('title');
       if (name && title) return `${name} · ${title}`;
       return name || JSON.stringify(parsed).slice(0, 80);
+    }
+    case 'permission': {
+      const allowed = parsed.allowed;
+      const reason = get('reason');
+      const text = allowed === true ? '允许授权' : allowed === false ? '拒绝授权' : '权限响应';
+      return reason ? `${text} · ${reason}` : text;
+    }
+    case 'question': {
+      const answers = parsed.answers;
+      if (answers && typeof answers === 'object') {
+        const vals = Object.values(answers).filter(Boolean);
+        if (vals.length > 0) return vals.join(', ');
+      }
+      return '回答问题';
+    }
+    case 'elicitation': {
+      const act = get('action');
+      return act ? `MCP 响应 · ${act}` : 'MCP 响应';
     }
     case 'auth':
       return `${get('method') || ''} ${get('path') || ''}`.trim();

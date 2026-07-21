@@ -357,3 +357,80 @@ func TestEmitToolCallAudit_Backpressure(t *testing.T) {
 	// No assertion on row count — the point is the loop returns without blocking
 	// or panicking. The collector's spill mechanism guarantees zero loss.
 }
+
+func TestEmitInteractionAudit_PermissionResponse(t *testing.T) {
+	t.Parallel()
+	c, query := gwTestCollector(t)
+	h := &Handler{auditCollector: c}
+
+	// Test Allowed = true
+	h.emitInteractionAudit("u-1", "webchat", "sess-p1", events.PermissionResponse, events.PermissionResponseData{
+		ID:      "req-p1",
+		Allowed: true,
+		Reason:  "approved by user",
+	}, "")
+
+	require.Eventually(t, func() bool { return len(query(t)) >= 1 }, 2*time.Second, 5*time.Millisecond)
+	r := query(t)[0]
+	require.Equal(t, audit.ActionPermissionResponse, r.Action)
+	require.Equal(t, audit.OutcomeSuccess, r.Outcome)
+	require.Equal(t, "u-1", r.UserID)
+	require.Equal(t, "webchat", r.Platform)
+	require.Equal(t, "sess-p1", r.SessionID)
+	require.Equal(t, "permission", r.ResourceType)
+	require.Equal(t, "req-p1", r.ResourceID)
+	require.Contains(t, r.DetailJSON, `"allowed":true`)
+	require.Contains(t, r.DetailJSON, "approved by user")
+
+	// Test Allowed = false (Denied)
+	h.emitInteractionAudit("u-1", "webchat", "sess-p2", events.PermissionResponse, map[string]any{
+		"id":      "req-p2",
+		"allowed": false,
+		"reason":  "user denied",
+	}, "")
+
+	require.Eventually(t, func() bool { return len(query(t)) >= 2 }, 2*time.Second, 5*time.Millisecond)
+	r2 := query(t)[1]
+	require.Equal(t, audit.ActionPermissionResponse, r2.Action)
+	require.Equal(t, audit.OutcomeDenied, r2.Outcome)
+	require.Contains(t, r2.DetailJSON, `"allowed":false`)
+	require.Contains(t, r2.DetailJSON, "user denied")
+}
+
+func TestEmitInteractionAudit_QuestionResponse(t *testing.T) {
+	t.Parallel()
+	c, query := gwTestCollector(t)
+	h := &Handler{auditCollector: c}
+
+	h.emitInteractionAudit("u-2", "feishu", "sess-q1", events.QuestionResponse, events.QuestionResponseData{
+		ID:      "req-q1",
+		Answers: map[string]string{"q1": "Option A"},
+	}, "")
+
+	require.Eventually(t, func() bool { return len(query(t)) >= 1 }, 2*time.Second, 5*time.Millisecond)
+	r := query(t)[0]
+	require.Equal(t, audit.ActionQuestionResponse, r.Action)
+	require.Equal(t, audit.OutcomeSuccess, r.Outcome)
+	require.Equal(t, "question", r.ResourceType)
+	require.Equal(t, "req-q1", r.ResourceID)
+	require.Contains(t, r.DetailJSON, "Option A")
+}
+
+func TestEmitInteractionAudit_ElicitationResponse(t *testing.T) {
+	t.Parallel()
+	c, query := gwTestCollector(t)
+	h := &Handler{auditCollector: c}
+
+	h.emitInteractionAudit("u-3", "slack", "sess-e1", events.ElicitationResponse, events.ElicitationResponseData{
+		ID:     "req-e1",
+		Action: "decline",
+	}, "")
+
+	require.Eventually(t, func() bool { return len(query(t)) >= 1 }, 2*time.Second, 5*time.Millisecond)
+	r := query(t)[0]
+	require.Equal(t, audit.ActionElicitationResponse, r.Action)
+	require.Equal(t, audit.OutcomeDenied, r.Outcome)
+	require.Equal(t, "elicitation", r.ResourceType)
+	require.Equal(t, "req-e1", r.ResourceID)
+	require.Contains(t, r.DetailJSON, `"action":"decline"`)
+}

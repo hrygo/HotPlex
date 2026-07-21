@@ -20,6 +20,9 @@ const (
 	ActionSessionDelete            = "session.delete"
 	ActionMessageInbound           = "message.inbound"
 	ActionToolCall                 = "tool.call" // P2 - reserved
+	ActionPermissionResponse       = "permission.response"
+	ActionQuestionResponse         = "question.response"
+	ActionElicitationResponse      = "elicitation.response"
 	ActionSystemAuditConfigChanged = "system.audit_config_changed"
 	ActionSystemAuditExport        = "system.audit_export"
 )

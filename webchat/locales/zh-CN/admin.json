@@ -466,6 +466,9 @@
       "session": "会话",
       "message": "消息",
       "tool": "工具调用",
+      "permission": "授权/权限",
+      "question": "提问响应",
+      "elicitation": "引导响应",
       "admin": "管理",
       "system": "系统"
     },

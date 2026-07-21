@@ -9,7 +9,7 @@
 // so the icon + color stay consistent across surfaces. Unknown prefixes fall
 // back to a neutral dot.
 
-export type ActionCategory = 'auth' | 'session' | 'message' | 'tool' | 'admin' | 'system' | 'other';
+export type ActionCategory = 'auth' | 'session' | 'message' | 'tool' | 'permission' | 'question' | 'elicitation' | 'admin' | 'system' | 'other';
 
 export function actionCategory(action: string): ActionCategory {
   const head = action.split('.', 1)[0];
@@ -22,6 +22,12 @@ export function actionCategory(action: string): ActionCategory {
       return 'message';
     case 'tool':
       return 'tool';
+    case 'permission':
+      return 'permission';
+    case 'question':
+      return 'question';
+    case 'elicitation':
+      return 'elicitation';
     case 'admin':
       return 'admin';
     case 'system':
@@ -36,6 +42,9 @@ const CATEGORY_COLOR: Record<ActionCategory, string> = {
   session: 'text-[var(--accent-emerald)]',
   message: 'text-[var(--accent-blue)]',
   tool: 'text-[var(--accent-violet,#a78bfa)]',
+  permission: 'text-[var(--accent-emerald)]',
+  question: 'text-[var(--accent-blue)]',
+  elicitation: 'text-[var(--accent-violet,#a78bfa)]',
   admin: 'text-[var(--accent-amber)]',
   system: 'text-[var(--text-muted)]',
   other: 'text-[var(--text-faint)]',
@@ -77,6 +86,27 @@ function CategoryGlyph({ category }: { category: ActionCategory }) {
       return (
         <svg {...common}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17 6 9.75a4.5 4.5 0 0 1 6.01-6.01l-2.34 2.34 2.25 2.25 2.34-2.34A4.5 4.5 0 0 1 15.17 12l5.42 5.42a2.1 2.1 0 0 1-2.97 2.97Z" />
+        </svg>
+      );
+    case 'permission':
+      // key / shield check
+      return (
+        <svg {...common}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+        </svg>
+      );
+    case 'question':
+      // question mark circle
+      return (
+        <svg {...common}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M12 18h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </svg>
+      );
+    case 'elicitation':
+      // sparkles
+      return (
+        <svg {...common}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
         </svg>
       );
     case 'admin':

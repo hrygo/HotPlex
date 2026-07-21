@@ -462,10 +462,13 @@
       "next": "Next"
     },
     "action_groups": {
-      "auth": "Authentication",
+      "auth": "Auth",
       "session": "Session",
       "message": "Message",
       "tool": "Tool Call",
+      "permission": "Permission",
+      "question": "Question",
+      "elicitation": "Elicitation",
       "admin": "Admin",
       "system": "System"
     },

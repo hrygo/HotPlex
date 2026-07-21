@@ -55,6 +55,7 @@ HotPlex 内建**用户行为审计子系统**（`user_activity`），对所有�
 | 认证 | `auth.login` / `auth.logout` / `auth.apikey_used` / `auth.denied` | 凭证登录/登出、API Key 使用、认证拒绝（`auth.token_validated` 常量保留但不再触发） |
 | Session | `session.create` / `session.delete` | 会话创建与删除 |
 | 消息 | `message.inbound` | 入站消息（含消息文本内容） |
+| 交互授权 | `permission.response` / `question.response` / `elicitation.response` | 用户响应工具授权/提问/MCP 引导（含决策结果 allow/deny 及 ID） |
 | Tool | `tool.call` | Worker 工具调用（敏感工具全量记录，非敏感工具记录摘要） |
 | Admin | `admin.*` | 所有管理操作（Bot/ApiKey/Cron/Session 等的 CRUD） |
 | 系统 | `system.audit_config_changed` / `system.audit_export` | 审计配置变更、审计数据导出 |
