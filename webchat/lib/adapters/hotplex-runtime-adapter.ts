@@ -108,12 +108,7 @@ type ThreadSuggestion = { title: string; label: string; prompt: string };
 
 export type InteractionKind = "permission" | "question" | "elicitation";
 export type InteractionStatus =
-    | "pending"
-    | "submitting"
-    | "resolved"
-    | "rejected"
-    | "expired"
-    | "failed";
+    "pending" | "submitting" | "resolved" | "rejected" | "expired" | "failed";
 
 export interface InteractionState {
     kind: InteractionKind;
@@ -1577,7 +1572,7 @@ export function useHotPlexRuntime({
         const handleConnected = (ack: { state?: string }) => {
             sessionAlreadyConnectedRef.current = false;
             setConnectionState("connected");
-            
+
             // Decouple turn active state from connection session state.
             // On connection/reconnection, the turn is idle by default until/unless
             // incoming stream events or local dispatches happen.
@@ -1700,8 +1695,7 @@ export function useHotPlexRuntime({
                             requestId: data.id,
                             status: "pending",
                             createdAt: Date.now(),
-                            expiresAt:
-                                Date.now() + 5 * 60 * 1000,
+                            expiresAt: Date.now() + 5 * 60 * 1000,
                         },
                     },
                     toolCallId: data.id,
@@ -1712,10 +1706,7 @@ export function useHotPlexRuntime({
                         ...prev.slice(0, -1),
                         {
                             ...lastMessage,
-                            parts: [
-                                ...lastMessage.parts,
-                                newPart,
-                            ],
+                            parts: [...lastMessage.parts, newPart],
                         },
                     ];
                 }
@@ -1755,8 +1746,7 @@ export function useHotPlexRuntime({
                             requestId: data.id,
                             status: "pending",
                             createdAt: Date.now(),
-                            expiresAt:
-                                Date.now() + 5 * 60 * 1000,
+                            expiresAt: Date.now() + 5 * 60 * 1000,
                         },
                     },
                     toolCallId: data.id,
@@ -1767,10 +1757,7 @@ export function useHotPlexRuntime({
                         ...prev.slice(0, -1),
                         {
                             ...lastMessage,
-                            parts: [
-                                ...lastMessage.parts,
-                                newPart,
-                            ],
+                            parts: [...lastMessage.parts, newPart],
                         },
                     ];
                 }
@@ -1809,8 +1796,7 @@ export function useHotPlexRuntime({
                             requestId: data.id,
                             status: "pending",
                             createdAt: Date.now(),
-                            expiresAt:
-                                Date.now() + 5 * 60 * 1000,
+                            expiresAt: Date.now() + 5 * 60 * 1000,
                         },
                     },
                     toolCallId: data.id,
@@ -1821,10 +1807,7 @@ export function useHotPlexRuntime({
                         ...prev.slice(0, -1),
                         {
                             ...lastMessage,
-                            parts: [
-                                ...lastMessage.parts,
-                                newPart,
-                            ],
+                            parts: [...lastMessage.parts, newPart],
                         },
                     ];
                 }
@@ -2140,7 +2123,11 @@ export function useHotPlexRuntime({
             await dispatchInput(mergedText);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logger.error("RuntimeAdapter", "Failed to send merged queued items", { error: message });
+            logger.error(
+                "RuntimeAdapter",
+                "Failed to send merged queued items",
+                { error: message },
+            );
             for (const item of items) {
                 const result = queueStore.enqueue(sid, item.text);
                 if (result.ok && result.item) {
@@ -2295,10 +2282,7 @@ export function useHotPlexRuntime({
                 : "";
             if (!textContent.trim()) return;
             const sid = sessionIdRef.current;
-            if (
-                turnActiveRef.current ||
-                stoppingRef.current
-            ) {
+            if (turnActiveRef.current || stoppingRef.current) {
                 const result = enqueueFollowUp(textContent);
                 if (!result.ok && result.reason === "limit") {
                     throw new Error(i18n.t("chat:follow_up.error.limit"));
