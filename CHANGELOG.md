@@ -1,6 +1,24 @@
 # Changelog
 
-## [1.37.0] - 2026-07-20
+## [1.37.1] - 2026-07-21
+
+### Summary
+
+v1.37.1 是一次 patch 版本更新，重点修复 **Permission Ceiling 强制执行** 的完整性缺陷，确保会话级权限上限在 Gateway 命令、Worker 原生控制路径、重置（reset）、恢复（resume）及 Worker 替换全生命周期中一致生效。新增 workspace-only skill 列表端点补全 SKill CRUD 闭环。同时修复交互事件（权限/提问/采集）的审计记录结构化程度不足的问题。
+
+### Added
+
+- **Skills**: Workspace-only skill 列表端点 `GET /api/workspaces/{wid}/skills` — 仅返回该 workspace 安装的受管 skill（不含全局/.claude 只读/其他 workspace）；webchat Skills tab 改用该端点并接上 skill 详情对话框（SKILL.md 正文 + 文件清单），凑齐 workspace 完整 CRUD 闭环。(#919)
+
+### Fixed
+
+- **Worker**: 不可变的 Permission Ceiling — 每个 session 持久化 set-once 权限上限，在 Gateway 命令（/plan、/auto-edit）、Worker 原生控制、reset、resume 及 Worker 替换全生命周期中强制执行；Claude Code allowed-tools 硬化、OCS 权限 replay 原子化、Codex sandbox policy 保守映射、SQLite/PostgreSQL 全覆盖。(#920)
+- **Audit**: 交互事件（权限/提问/采集）的结构化审计记录 — 新增 `permission.response` / `question.response` / `elicitation.response` action 类型，将 response ID、决策（allowed/denied）、原因、回答解析为结构化 DetailJSON 写入 `user_activity`，取代原有的通用 `message.inbound` 空内容审计。(#99f8c206)
+- **WebChat**: 屏蔽预期的 SKILL_* 校验错误（如 `SKILL_FILE_TYPE_BLOCKED`）在浏览器控制台中输出 — 这些是用户输入错误，已有 UI 内联提示，不再产生 console.error 干扰。(#0970f435)
+
+### Security
+
+- **Worker**: Permission Ceiling 加固 — plan 模式下拒绝 `allowed_tools` caller-supplied 规则覆盖；权限应用失败不再静默（`initSessionConn` 返回 error）；set-once 设计确保即使 Worker 重启或替换也无法降级已确定的权限上限。(#920)
 
 ### Summary
 
