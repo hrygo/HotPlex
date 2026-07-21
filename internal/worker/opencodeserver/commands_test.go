@@ -300,7 +300,10 @@ func TestServerCommanderClearWithErrors(t *testing.T) {
 		createFails bool
 		expectError bool
 	}{
-		{"delete fails", true, false, true},
+		// "delete old fails" now adopts the new session instead of failing:
+		// the old session may already be gone (timeout/404/GC), so keeping a
+		// potentially-stale oldID is riskier than accepting the orphan.
+		{"delete old fails, adopts new session", true, false, false},
 		{"create fails", false, true, true},
 		{"both succeed", false, false, false},
 	}
@@ -330,9 +333,6 @@ func TestServerCommanderClearWithErrors(t *testing.T) {
 			err := c.Clear(context.Background())
 			if tt.expectError {
 				require.Error(t, err)
-				if tt.deleteFails {
-					require.Contains(t, err.Error(), "opencode clear (delete)")
-				}
 				if tt.createFails {
 					require.Contains(t, err.Error(), "opencode clear (create)")
 				}

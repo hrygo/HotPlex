@@ -122,8 +122,13 @@ func (c *ServerCommander) Clear(ctx context.Context) error {
 		}
 	}
 	if err := c.doDelete(ctx, "/session/"+url.PathEscape(oldID)); err != nil {
-		_ = c.doDelete(context.Background(), "/session/"+url.PathEscape(newSession.ID))
-		return fmt.Errorf("opencode clear (delete): %w", err)
+		// The old session may already be gone (timeout, 404, or server-side
+		// GC). Discarding the freshly-created, permissioned new session to
+		// preserve a potentially-stale oldID would leave the commander bound
+		// to a dead session. Adopt the new session and let the orphaned old
+		// session be reclaimed by the server's own session GC.
+		slog.Warn("opencode clear: failed to delete old session, adopting new session",
+			"old_session_id", oldID, "new_session_id", newSession.ID, "err", err)
 	}
 	c.setSessionID(newSession.ID)
 	return nil

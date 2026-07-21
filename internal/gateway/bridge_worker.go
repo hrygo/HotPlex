@@ -148,6 +148,12 @@ func (b *Bridge) capturePermissionCeiling(ctx context.Context, sessionID string,
 	if err := persisted.Capture(stored); err != nil {
 		return fmt.Errorf("bridge: invalid persisted permission ceiling: %w", err)
 	}
+	// The store-level check only fences the WIDER-than-store direction: a
+	// replacement Worker that reports a ceiling above the persisted value is
+	// rejected. A stricter Worker (below the stored ceiling) is allowed because
+	// the Worker's own local PermissionCeiling is the authoritative runtime
+	// fence — it already blocks escalation at the Worker. The persisted value
+	// is metadata for resume/restart, not a second enforcement point.
 	if _, err := persisted.Check(ceiling); err != nil {
 		return fmt.Errorf("bridge: concurrent permission ceiling mismatch: %w", err)
 	}
