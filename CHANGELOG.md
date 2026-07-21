@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.37.2] - 2026-07-21
+
+### Summary
+
+v1.37.2 是一次 patch 版本更新，聚焦于 **Gateway Core 事件序列号竞态** 与 **WebChat 限流体验** 两项可靠性修复。最重要的修复解决了 session seq 计数器在 racing `NextSeq` 下从近 0 重启、与持久化历史碰撞反复触发 `events` UNIQUE 约束失败的问题——这是 issue #879 在 #900 写锁围栏之后仍然复现的回归根因。WebChat 现对上游 429 限流返回友好提示。管理端 Skills 页面顺带补齐了完整 CRUD 与 UI/UX 完善。
+
+### Fixed
+
+- **Gateway Core**: session seq 从 eventstore seed，修复 racing `NextSeq` 回归 — `EnsureSeqHydrated` 的 `Initialized()` 守卫在早 `init_ack` / forwarder resume 触发的竞态 `NextSeq` 已通过 `LoadOrStore` 建立低值计数器时短路了 DB hydration，致计数器从近 0 重启并与持久化历史碰撞，`events(session_id, seq_guard_id, seq)` 反复 UNIQUE 失败（#879 在 #900 写锁围栏后仍存活）。引入独立 `hydrated` flag 标记 DB 发起的 hydration——裸 `NextSeq` 不置位，`EnsureSeqHydrated` 仍能从 DB 抬高水位；并补充 `prior_peek` 日志与 collector append 告警的 seq/type 字段便于诊断。(0231fc74)
+- **WebChat UI**: 上游 429 限流友好提示 — runtime adapter 在错误处理 default 分支检测 HTTP 429 rate-limit，返回友好错误信息替代原始错误展示。(26facd83)
+
+### Added
+
+- **Skills**: 管理端 Skills 完整 CRUD 与 UI/UX 完善 — 新增 create-text / list-paged / update / delete API handlers；修复 GBK zip entry 名解码与内联 modal 错误告警处理；`/admin/skills` 升级为响应式流式 modal、金色光标交互、搜索与分页，`/settings` skills tab 对齐视觉标准与 i18n。(2d836d8a)
+
 ## [1.37.1] - 2026-07-21
 
 ### Summary

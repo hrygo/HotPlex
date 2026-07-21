@@ -11,7 +11,7 @@
             "name": "Apache 2.0",
             "url": "https://github.com/hrygo/hotplex/blob/main/LICENSE"
         },
-        "version": "1.37.1"
+        "version": "1.37.2"
     },
     "host": "localhost:8888",
     "basePath": "/",
@@ -306,7 +306,7 @@
                         "AdminBearerAuth": []
                     }
                 ],
-                "description": "Returns every skill under the global .agents/.claude/.hotplex dirs. Requires admin:read.",
+                "description": "Returns skills under the global .agents/.claude/.hotplex dirs with search \u0026 pagination. Requires admin:read.",
                 "produces": [
                     "application/json"
                 ],
@@ -314,6 +314,26 @@
                     "Admin API"
                 ],
                 "summary": "List global skills (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default: 10, max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search query for skill name or description",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -383,6 +403,139 @@
                     },
                     "409": {
                         "description": "SKILL_ALREADY_EXISTS",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/skills/{name}": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Returns detail of a global skill including full SKILL.md body and files list. Requires admin:read.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Get global skill detail (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Skill name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "SKILL_NOT_FOUND",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Update SKILL.md body of a global managed skill. Requires admin:write.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Update global skill (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Skill name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "SKILL_NOT_FOUND",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Deletes a global managed skill. Requires admin:write.",
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Delete global skill (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Skill name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Insufficient scope",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "SKILL_NOT_FOUND",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
