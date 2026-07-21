@@ -158,7 +158,7 @@
       },
       "skills": {
         "title": "Workspace Skills",
-        "desc": "Manage custom skills installed in this workspace. Global skills are read-only."
+        "desc": "Manage skills installed in this workspace."
       }
     },
     "action": {
@@ -229,14 +229,14 @@
         "list": "Installed Skills"
       },
       "label": {
-        "managed": "Managed",
-        "external": "External (read-only)"
+        "managed": "Managed"
       },
       "action": {
         "upload": "Upload Skill",
         "delete": "Delete",
         "install": "Install",
-        "choose_file": "Choose File"
+        "choose_file": "Choose File",
+        "details": "Details"
       },
       "placeholder": {
         "no_file": "No file chosen (.zip)"
@@ -253,7 +253,10 @@
         "upload_title": "Upload Workspace Skill",
         "upload_desc": "Select a .zip whose root has SKILL.md (or a single top-level dir containing it). Aligned with agentskills.io.",
         "replace": "Replace existing same-name skill",
-        "uploading": "Uploading..."
+        "uploading": "Uploading...",
+        "detail_title": "Skill Details",
+        "detail_files": "Files",
+        "detail_body": "SKILL.md"
       },
       "toast": {
         "installed": "Skill installed successfully",
@@ -273,7 +276,8 @@
         "invalid_zip": "Invalid zip archive. Please ensure the file is not corrupted.",
         "file_type_blocked": "The archive contains blocked file types.",
         "invalid_format": "Invalid skill format. Please ensure that the root (or single top-level directory) contains a valid SKILL.md file with correct YAML frontmatter (name & description).",
-        "not_found": "Skill not found."
+        "not_found": "Skill not found.",
+        "detail_failed": "Failed to load skill details"
       }
     }
   },

@@ -54,17 +54,24 @@ func NewLocator(log *slog.Logger, ttl time.Duration) *Locator {
 // List returns deduplicated skills for the given homeDir and workDir.
 // Returns cached results if fresh; otherwise scans filesystem.
 func (l *Locator) List(_ context.Context, homeDir, workDir string) ([]Skill, error) {
-	key := workDir
+	return l.cached(workDir, func() []Skill { return scanDirs(homeDir, workDir) }), nil
+}
 
+// cached 是 List 与 ListWorkspaceInstalled 共享的 TTL 缓存读写脚手架：命中且未
+// 过期则返回缓存切片；否则调 scan 重扫、按容量淘汰最旧条目后写入。抽出此 helper
+// 使缓存语义（淘汰策略、容量上限、TTL）单点维护——此前两方法各自复制了同一份
+// RLock→miss→scan→Lock→evict→write 块，且键方案已发生 divergence（裸 workDir vs
+// "ws-installed:" 前缀），任何缓存改动都须同步两处，易漏。
+func (l *Locator) cached(key string, scan func() []Skill) []Skill {
 	l.mu.RLock()
 	if e, ok := l.cache[key]; ok && time.Now().Before(e.expiresAt) {
 		skills := e.skills
 		l.mu.RUnlock()
-		return skills, nil
+		return skills
 	}
 	l.mu.RUnlock()
 
-	skills := scanDirs(homeDir, workDir)
+	skills := scan()
 
 	l.mu.Lock()
 	// Evict oldest if at capacity
@@ -77,7 +84,22 @@ func (l *Locator) List(_ context.Context, homeDir, workDir string) ([]Skill, err
 	}
 	l.mu.Unlock()
 
-	return skills, nil
+	return skills
+}
+
+// wsInstalledCacheKey 与 List 的缓存键（workDir）隔离：List 返回 global+project
+// 合并结果，ListWorkspaceInstalled 仅返回 <workDir>/.agents/skills 受管 skill，二者
+// 同以 workDir 为维度但内容不同，故用前缀区分。workDir 为文件系统路径（以 "/" 或盘符
+// 开头），不会与该前缀碰撞。Invalidate(workDir) 需同时清除两个键（见下）。
+func wsInstalledCacheKey(workDir string) string { return "ws-installed:" + workDir }
+
+// ListWorkspaceInstalled 仅返回指定 workspace 下「安装的」受管 skill
+// （<workDir>/.agents/skills，source=project & managed=true），不含全局、不含
+// <workDir>/.claude/skills 只读目录、不含其他 workspace。用于
+// GET /api/workspaces/{wid}/skills（issue #918）：workspace 管理面只列本 workspace
+// 安装的 skill。走独立 TTL 缓存键；workspace 写操作经 Invalidate 同步失效该键。
+func (l *Locator) ListWorkspaceInstalled(_ context.Context, workDir string) ([]Skill, error) {
+	return l.cached(wsInstalledCacheKey(workDir), func() []Skill { return scanWorkspaceInstalled(workDir) }), nil
 }
 
 // ListMerged 合并全局（homeDir 范围）与多个 workspace 的 skill 列表，去重
@@ -131,9 +153,11 @@ func (l *Locator) ListMerged(ctx context.Context, homeDir string, workDirs []str
 // Invalidate drops the cached skills for a single workDir. Call after a
 // workspace-scoped CRUD so the next List re-scans the filesystem instead of
 // serving a stale merged list. Safe to call for a workDir that was never cached.
+// 同时清除 ListWorkspaceInstalled 的独立缓存键，避免 workspace 写后该端点回陈旧列表。
 func (l *Locator) Invalidate(workDir string) {
 	l.mu.Lock()
 	delete(l.cache, workDir)
+	delete(l.cache, wsInstalledCacheKey(workDir))
 	l.mu.Unlock()
 }
 

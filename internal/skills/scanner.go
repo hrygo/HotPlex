@@ -66,6 +66,28 @@ func scanDirs(homeDir, workDir string) []Skill {
 	return dedup(all)
 }
 
+// scanWorkspaceInstalled 仅扫描 workspace 的受管 skill 目录
+// （<workDir>/.agents/skills，source=project & managed=true），即该 workspace
+// 「安装的」skill。不含全局目录、不含 <workDir>/.claude/skills 只读目录、不含其他
+// workspace。用于 GET /api/workspaces/{wid}/skills：workspace 管理面只列/只管本
+// workspace 安装的 skill（issue #918）。目录不存在时返回空切片而非错误。
+func scanWorkspaceInstalled(workDir string) []Skill {
+	if workDir == "" {
+		return []Skill{}
+	}
+	skills, err := scanDir(filepath.Join(workDir, ".agents", "skills"), SourceProject, true)
+	if err != nil {
+		return []Skill{}
+	}
+	skills = dedup(skills)
+	if skills == nil {
+		// 空但存在的受管目录（如删除最后一个 skill 后的残留）：dedup(nil) 返回
+		// nil 会使端点序列化为 {"skills":null}。强制非 nil 空切片 → {"skills":[]}。
+		skills = []Skill{}
+	}
+	return skills
+}
+
 // scanDir reads all .md files from a single skill directory.
 // Skips symlink files to avoid duplicates from linked directories.
 func scanDir(dir, source string, managed bool) ([]Skill, error) {

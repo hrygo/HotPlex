@@ -4,10 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type { Workspace } from "@/lib/api/workspaces";
 import {
-    listSkills,
+    listWorkspaceSkills,
     installWorkspaceSkill,
     deleteWorkspaceSkill,
+    getWorkspaceSkill,
     type Skill,
+    type SkillDetail,
 } from "@/lib/api/skills";
 import { TabPanel } from "./tab-panel";
 import { useTranslation } from "react-i18next";
@@ -55,6 +57,15 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
     const [showUpload, setShowUpload] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
+    // Detail dialog state (issue #918: workspace skill detail view).
+    const [detailTarget, setDetailTarget] = useState<string | null>(null);
+    const [detail, setDetail] = useState<SkillDetail | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailError, setDetailError] = useState<string | null>(null);
+    // Tracks the workspace the current detail-dialog state belongs to, so a
+    // workspace switch can reset the dialog in the render-time block below.
+    const [prevWorkspaceId, setPrevWorkspaceId] = useState(workspace.id);
+
     // Action states
     const [uploading, setUploading] = useState(false);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -70,6 +81,9 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
     const abortRef = useRef<AbortController | null>(null);
     const isMounted = useRef(false);
+    // Aborts the in-flight detail fetch so a rapid second click (or a workspace
+    // switch) can't leave the prior skill's SKILL.md rendered under a new title.
+    const detailAbortRef = useRef<AbortController | null>(null);
 
     // Pagination states
     const [currentPage, setCurrentPage] = useState(1);
@@ -98,7 +112,9 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         }
 
         try {
-            const res = await listSkills(ctrl.signal);
+            // Workspace-only list (issue #918): this tab manages solely the skills
+            // installed under the active workspace — no global/inherited entries.
+            const res = await listWorkspaceSkills(workspace.id, ctrl.signal);
             if (ctrl.signal.aborted || !isMounted.current) return;
             setSkills(res.skills || []);
         } catch (err) {
@@ -107,7 +123,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         } finally {
             if (!ctrl.signal.aborted && isMounted.current) setLoading(false);
         }
-    }, []);
+    }, [workspace.id]);
 
     useEffect(() => {
         isMounted.current = true;
@@ -288,6 +304,71 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
+    // handleViewDetail opens the detail dialog and fetches the skill's SKILL.md
+    // body + file list from the workspace-scoped detail endpoint (issue #918).
+    // Aborts any in-flight detail fetch so a rapid second click can't leave the
+    // prior skill's content rendered under the new title.
+    const handleViewDetail = async (name: string) => {
+        detailAbortRef.current?.abort();
+        const ctrl = new AbortController();
+        detailAbortRef.current = ctrl;
+
+        setDetailTarget(name);
+        setDetail(null);
+        setDetailError(null);
+        setDetailLoading(true);
+        try {
+            const d = await getWorkspaceSkill(workspace.id, name, ctrl.signal);
+            if (ctrl.signal.aborted || !isMounted.current) return;
+            setDetail(d);
+        } catch (err) {
+            if (ctrl.signal.aborted || !isMounted.current) return;
+            // Expected SKILL_NOT_FOUND (e.g. skill deleted since the list
+            // rendered) is a user state, not a server fault — keep it out of the
+            // console, consistent with the upload/delete flows (commit 0970f435).
+            const msg = err instanceof Error ? err.message : "";
+            if (!msg.includes("SKILL_NOT_FOUND") && !msg.includes("not found")) {
+                console.error(err);
+            }
+            setDetailError(
+                t("settings.skills.error.detail_failed", {
+                    defaultValue: "Failed to load skill details",
+                }),
+            );
+        } finally {
+            if (!ctrl.signal.aborted && isMounted.current) setDetailLoading(false);
+        }
+    };
+
+    const closeDetail = useCallback(() => {
+        detailAbortRef.current?.abort();
+        setDetailTarget(null);
+        setDetail(null);
+        setDetailError(null);
+        setDetailLoading(false);
+    }, []);
+
+    // Switching workspace must close any open detail dialog: load() refetches the
+    // list for the new workspace, but the dialog's cached SKILL.md belongs to the
+    // prior one. Done in two coordinated pieces (React's "adjusting state when a
+    // prop changes" pattern, which avoids set-state-in-effect):
+    //   - the effect cleanup below aborts the in-flight detail fetch (pure side
+    //     effect, no setState);
+    //   - the render-time block resets the dialog state (no side effect).
+    useEffect(() => {
+        return () => {
+            detailAbortRef.current?.abort();
+        };
+    }, [workspace.id]);
+
+    if (workspace.id !== prevWorkspaceId) {
+        setPrevWorkspaceId(workspace.id);
+        setDetailTarget(null);
+        setDetail(null);
+        setDetailError(null);
+        setDetailLoading(false);
+    }
+
     if (loading) {
         return (
             <div className="flex items-center justify-center py-16">
@@ -411,12 +492,12 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                 {/* Skill List */}
                 <div className="space-y-2">
                     {paginatedSkills.map((s) => {
-                        // A skill is deletable if it is project-scoped (workspace) and managed.
-                        const isDeletable = s.source === "project" && s.managed;
-
+                        // listWorkspaceInstalled returns only workspace-installed
+                        // managed skills (source=project, managed=true), so every
+                        // row is deletable — no isDeletable guard needed.
                         return (
                             <div
-                                key={`${s.source}/${s.name}`}
+                                key={s.name}
                                 className="flex items-center justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3.5 hover:border-[var(--border-default)] transition-colors"
                             >
                                 <div className="min-w-0 flex-1">
@@ -425,47 +506,42 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                             {s.name}
                                         </span>
                                         <Badge
-                                            kind={
-                                                s.managed
-                                                    ? "managed"
-                                                    : "external"
-                                            }
-                                            label={
-                                                s.managed
-                                                    ? t(
-                                                          "settings.skills.label.managed",
-                                                      )
-                                                    : t(
-                                                          "settings.skills.label.external",
-                                                      )
-                                            }
+                                            kind="managed"
+                                            label={t(
+                                                "settings.skills.label.managed",
+                                            )}
                                         />
                                         <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
-                                            {s.source === "project"
-                                                ? t(
-                                                      "chat:settings.label.active_workspace",
-                                                  )
-                                                : t(
-                                                      "chat:settings.group.personal",
-                                                  )}
+                                            {t(
+                                                "chat:settings.label.active_workspace",
+                                            )}
                                         </span>
                                     </div>
                                     <p className="mt-1 text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed">
                                         {s.description}
                                     </p>
                                 </div>
-                                {isDeletable && (
+                                <div className="ml-3 flex shrink-0 items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleViewDetail(s.name)}
+                                        className="rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-default)] transition-all cursor-pointer active:scale-[0.98]"
+                                    >
+                                        {t("settings.skills.action.details", {
+                                            defaultValue: "Details",
+                                        })}
+                                    </button>
                                     <button
                                         type="button"
                                         disabled={actionLoading === s.name}
                                         onClick={() => setDeleteTarget(s.name)}
-                                        className="ml-3 shrink-0 rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] hover:border-[var(--accent-coral)]/30 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98]"
+                                        className="rounded-md border border-[var(--border-subtle)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] hover:border-[var(--accent-coral)]/30 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98]"
                                     >
                                         {t("settings.skills.action.delete", {
                                             defaultValue: "Delete",
                                         })}
                                     </button>
-                                )}
+                                </div>
                             </div>
                         );
                     })}
@@ -755,6 +831,116 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                     })}
                                 </button>
                             </div>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
+
+            {/* Skill Detail Dialog (issue #918) — portaled for the same reason as
+          the other dialogs (settings card overflow-hidden + backdrop-filter). */}
+            {detailTarget &&
+                createPortal(
+                    <div
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                        onClick={closeDetail}
+                    >
+                        <div
+                            className="relative w-full max-w-lg max-h-[80vh] flex flex-col border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 rounded-xl shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="mb-4 flex items-center justify-between">
+                                <h2 className="text-sm font-bold text-[var(--text-primary)]">
+                                    {t("settings.skills.dialog.detail_title", {
+                                        defaultValue: "Skill Details",
+                                    })}
+                                </h2>
+                                <button
+                                    onClick={closeDetail}
+                                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                                    aria-label={t("common:action.close")}
+                                >
+                                    <svg
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="mb-3 text-xs font-mono font-bold text-[var(--accent-gold)]">
+                                {detailTarget}
+                            </div>
+
+                            {detailLoading && (
+                                <div className="flex items-center justify-center py-10">
+                                    <div className="w-5 h-5 border-2 border-[var(--accent-gold)] stroke-[var(--accent-gold)] border-t-transparent rounded-full animate-spin" />
+                                </div>
+                            )}
+
+                            {!detailLoading && detailError && (
+                                <div
+                                    role="alert"
+                                    className="flex items-start gap-2 rounded-lg border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] px-3 py-2.5 text-xs font-medium text-[var(--accent-coral)]"
+                                >
+                                    <span className="min-w-0 break-words">
+                                        {detailError}
+                                    </span>
+                                </div>
+                            )}
+
+                            {!detailLoading && detail && (
+                                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+                                    {detail.description && (
+                                        <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                                            {detail.description}
+                                        </p>
+                                    )}
+                                    {detail.files && detail.files.length > 0 && (
+                                        <div>
+                                            <h3 className="mb-1.5 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--text-faint)]">
+                                                {t(
+                                                    "settings.skills.dialog.detail_files",
+                                                    { defaultValue: "Files" },
+                                                )}
+                                            </h3>
+                                            <ul className="space-y-1">
+                                                {detail.files.map((f) => (
+                                                    <li
+                                                        key={f}
+                                                        className="text-[10px] font-mono text-[var(--text-secondary)]"
+                                                    >
+                                                        {f}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                    {detail.body && (
+                                        <div>
+                                            <h3 className="mb-1.5 text-[10px] font-mono font-bold uppercase tracking-widest text-[var(--text-faint)]">
+                                                {t(
+                                                    "settings.skills.dialog.detail_body",
+                                                    {
+                                                        defaultValue:
+                                                            "SKILL.md",
+                                                    },
+                                                )}
+                                            </h3>
+                                            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                                                {detail.body}
+                                            </pre>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>,
                     document.body,

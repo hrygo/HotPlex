@@ -158,7 +158,7 @@ export default function SettingsPage() {
     },
     skills: {
       title: t('chat:settings.heading.skills.title', { defaultValue: 'Workspace Skills' }),
-      description: t('chat:settings.heading.skills.desc', { defaultValue: 'Manage custom skills installed in this workspace. Global skills are read-only.' }),
+      description: t('chat:settings.heading.skills.desc', { defaultValue: 'Manage skills installed in this workspace.' }),
     },
     profile: {
       title: t('chat:settings.heading.profile.title', { defaultValue: 'Personal Profile' }),

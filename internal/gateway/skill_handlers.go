@@ -175,6 +175,25 @@ func (h *SkillHandlers) authorizeWorkspace(w http.ResponseWriter, r *http.Reques
 	return ws, uid, platform, true
 }
 
+// ListWorkspace: GET /api/workspaces/{wid}/skills — 仅列该 workspace「安装的」受管
+// skill（<ws.WorkDir>/.agents/skills），不含全局、不含 .claude 只读、不含其他 workspace
+// （issue #918：workspace 管理面只列/只管本 workspace 安装的 skill）。鉴权同其他
+// workspace 端点（owner 或 admin；wsStore 未配置 → 503）。读操作不写审计（与 ListMerged
+// 一致）。响应结构与 ListMerged 同构（{skills,total}），便于前端复用类型。
+func (h *SkillHandlers) ListWorkspace(w http.ResponseWriter, r *http.Request) {
+	ws, _, _, ok := h.authorizeWorkspace(w, r)
+	if !ok {
+		return
+	}
+	list, err := h.locator.ListWorkspaceInstalled(r.Context(), ws.WorkDir)
+	if err != nil {
+		h.log.Error("skill_api: list workspace", "err", err)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
+		return
+	}
+	respondJSON(w, map[string]any{"skills": list, "total": len(list)})
+}
+
 // InstallWorkspace: POST /api/workspaces/{wid}/skills — zip 上传安装（?replace=true 覆盖）。
 func (h *SkillHandlers) InstallWorkspace(w http.ResponseWriter, r *http.Request) {
 	ws, uid, platform, ok := h.authorizeWorkspace(w, r)
