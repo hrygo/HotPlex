@@ -9,7 +9,7 @@
 
 1. **整体路线已存在**：Wave 0-4 / Milestone A-D 已由 `IMPLEMENTATION-ROADMAP.md` 与 `GITHUB-MILESTONES.md` 定义。本文不另起炉灶。
 
-2. **#878 epic（durable ingress reliability）已验证并关闭（2026-07-21）**：6 个 slice 代码全部就位，且 Slice 6 验证矩阵已全绿——`make check`（SQLite + race + 4-worker + build + docs）+ real-PostgreSQL（docker pg16）多实例/故障注入/迁移/审计。残余的"PG 测试接入 CI"由 #923 跟踪。
+2. **#878 epic（durable ingress reliability）已验证并关闭（2026-07-21）**：6 个 slice 代码全部就位，且 Slice 6 验证矩阵已全绿——`make check`（SQLite + race + 4-worker + build + docs）+ real-PostgreSQL（docker pg16）多实例/故障注入/迁移/审计。残余的"PG 测试接入 CI"已决定不做（#923 not planned），改为本地 docker 按需验证 + PR checklist 补偿控制。
 
 3. **epic 与 Wave 1/2 收敛，不平行**：epic Slice 5 交付了 **#849 的 first cut**（最小 3 个 runtime 事件 + `execution_id` metadata）；epic Slice 4 交付了 **#851 的 first cut**（单活跃门 `SESSION_BUSY`）。因此 #849/#851 应**收窄为剩余更广泛范围**，而非重做。
 
@@ -21,7 +21,7 @@
 
 | Issue | 规划归属 | 代码状态 | 真实剩余工作 |
 |-------|----------|----------|--------------|
-| **#878** epic | 可靠性 epic | ✅ **已验证并关闭**（2026-07-21） | Slice6 矩阵全绿：SQLite `make check` + real-PG（docker pg16）多实例/迁移/审计；CI 接入由 #923 跟踪 |
+| **#878** epic | 可靠性 epic | ✅ **已验证并关闭**（2026-07-21） | Slice6 矩阵全绿：SQLite `make check` + real-PG（docker pg16）多实例/迁移/审计；PG-CI 接入已决定不做（#923 not planned），本地 docker 按需验证 |
 | **#849** runtime events | Wave1 / Milestone A | 🟡 最小 3 事件已由 epic Slice5 交付 | 收窄：security/context/policy 事件分类 |
 | **#851** execution queue | Wave2 / Milestone B | 🟡 单活跃门已由 epic Slice4 交付 | 收窄：完整 ExecutionQueue 抽象 |
 | **#850** tracing/metrics | Wave1 / Milestone A | 🟡 部分 execution 指标已有 | runtime span attributes 标准化 + 低基数语义 key |
@@ -100,7 +100,7 @@
 
 | 风险/缺口 | 说明 | 缓解 |
 |------|------|------|
-| **real-PG 未接入 CI** | epic 已用本地 docker（pg16）验证 real-PG 全绿并关闭，但 `//go:build pg` 测试**仍未接入 CI**（ci.yml 无 postgres service） | 已建 #923 跟踪：CI 加 postgres service + `-tags pg -p 1`（pg 测试共享库须 `-p 1` 防 goose 踩踏） |
+| **real-PG 未接入 CI（已接受）** | epic 已用本地 docker（pg16）验证 real-PG 全绿并关闭，但 `//go:build pg` 测试**仍未接入 CI**（ci.yml 无 postgres service） | 已决定不做（#923 not planned）：PG 变更须本地 docker 跑 `-tags pg -p 1` 验证并写入 PR checklist；若重估，pg 测试共享库须 `-p 1` 防 goose 踩踏 |
 | #849/#851 范围漂移 | 收窄不当会漏掉 epic 未覆盖部分 | 逐条对照 epic body 的 "Relationships/Converges" 声明 |
 | #848/#866 依赖 context_json | session store 可能尚无该列 | 实施前核实/补列（SQLite+PG 成对迁移） |
 | 文档基线过时 | ROADMAP 写于 v1.32.2 | 本次已把"当前基线"更新到 v1.37.x |
