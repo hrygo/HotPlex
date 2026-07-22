@@ -285,7 +285,7 @@ LLM Provider 返回临时错误（429、529、400 等）时的自动重试配置
 |------|------|--------|----------|------|
 | `command` | string | `claude` | `HOTPLEX_WORKER_CLAUDE_CODE_COMMAND` | Worker 启动命令。支持带子命令，如 `ccr code` |
 | `permission_mode` | string | `""` (= `bypass`) | `HOTPLEX_WORKER_CLAUDE_CODE_PERMISSION_MODE` | Claude Code 的 operator 默认/上限权限模式 tier。对 platform/cron 会话（bridge 注入空 sessionMode）直接作为有效模式；对 workspace 会话作为 permissiveness 上限，有效模式取 session 模式与 operator 的较低者（防越权）。合法值 `read-only`/`workspace`/`auto-edit`/`bypass`/空，空 = `bypass`（向后兼容 legacy 默认）。与 `codex_cli.sandbox`+`approval_mode`、`acp.auto_approve` 对应；区别于 `default_permission_mode`（后者是 bridge 为 workspace 会话解析的有效模式，归一化为 `workspace`） |
-| `permission_prompt` | bool | `false` | — | 启用 `--permission-prompt-tool` stdio 模式。开启后权限请求会转发到 Slack/飞书交互 UI |
+| `permission_prompt` | bool | `true` | — | 启用 `--permission-prompt-tool` stdio 模式。开启后权限请求会转发到 Slack/飞书交互 UI。config.yaml 默认开启（#920），使 headless Worker 的权限请求默认走交互 UI 而非静默拒绝；字段缺省时 Go 零值为 `false`（行为回退为静默拒绝） |
 | `permission_auto_approve` | []string | `["ExitPlanMode"]` | — | 自动批准的工具名称列表（无需转发用户交互 UI） |
 | `mcp_servers` | map | `{}` | — | 用户配置的 MCP Server。空值 = 使用默认发现机制 |
 
