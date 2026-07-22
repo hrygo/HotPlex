@@ -66,13 +66,17 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.Wr
 }
 
 // marshalSessionJSON serializes the Context and PlatformKey fields for Upsert.
-// The bound AgentIdentity (#848), when present, is folded into the context_json
-// blob under a reserved key — the in-memory Context is not mutated, so identity
-// survives a /reset (which clears Context) and re-persists on the next Upsert.
+// The bound AgentIdentity (#848) and effective AgentSpec snapshot (#866), when
+// present, are folded into the context_json blob under reserved keys — the
+// in-memory Context is not mutated, so both survive a /reset (which clears
+// Context) and re-persist on the next Upsert.
 func marshalSessionJSON(info *SessionInfo) (ctxJSON, pkJSON []byte, err error) {
 	ctx := info.Context
 	if info.Identity != nil {
 		ctx = agentspec.MergeIntoContext(ctx, info.Identity)
+	}
+	if info.SpecSnapshot != nil {
+		ctx = agentspec.MergeSnapshotIntoContext(ctx, info.SpecSnapshot)
 	}
 	if ctx != nil {
 		ctxJSON, err = json.Marshal(ctx)
@@ -218,6 +222,21 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 		// so a context-less session still round-trips to a NULL column.
 		if id := agentspec.ExtractFromContext(info.Context); id != nil {
 			info.Identity = id
+			if len(info.Context) == 0 {
+				info.Context = nil
+			}
+		}
+		// Pop the effective AgentSpec snapshot out of Context and, when present,
+		// restore the effective tool whitelist (#866 AC1). AllowedTools is
+		// in-memory only — it has no column — so without this restore a resumed
+		// session would silently lose its tool boundary across a restart. Legacy
+		// rows without the reserved key are untouched (SpecSnapshot stays nil,
+		// AllowedTools stays empty = no restriction).
+		if snap := agentspec.ExtractSnapshotFromContext(info.Context); snap != nil {
+			info.SpecSnapshot = snap
+			if tools := snap.RestoreAllowedTools(); tools != nil {
+				info.AllowedTools = tools
+			}
 			if len(info.Context) == 0 {
 				info.Context = nil
 			}

@@ -257,6 +257,16 @@ type SessionInfo struct {
 	// legacy sessions remain correlatable. It is independent of Context (which
 	// /reset clears): identity is session-level and survives a context reset.
 	Identity *agentspec.AgentIdentity `json:"-"`
+	// SpecSnapshot is the effective AgentSpec snapshot (#866): the versioned,
+	// secret-free projection of the runtime policy that governed this session at
+	// start time, persisted under context_json (no dedicated column). On resume
+	// it is the source of truth for the effective policy — a config change does
+	// NOT silently alter it — and AllowedTools is restored from it (the one
+	// effective-policy field that is otherwise in-memory only). Nil for sessions
+	// with no tool whitelist or created before #866 (legacy fallback: no
+	// restore, AllowedTools stays empty = no restriction). Independent of
+	// Context (/reset clears Context but the snapshot survives, like Identity).
+	SpecSnapshot *agentspec.EffectiveAgentSpecSnapshot `json:"-"`
 }
 
 // EffectiveIdentity returns the bound identity if one was persisted, otherwise
@@ -297,6 +307,34 @@ func bindIdentity(info *SessionInfo) {
 		WorkerType:  string(info.WorkerType),
 	})
 	info.Identity = &id
+}
+
+// bindSpecSnapshot captures the effective runtime policy as a persisted snapshot
+// (#866). It is called at creation so the policy that governed the session is
+// frozen: on resume the snapshot — not mutable config — is the source of truth,
+// so a config change does not silently alter an existing session's effective
+// policy (issue #866 AC2).
+//
+// First-cut binding captures the effective fields available on SessionInfo at
+// create time (WorkerType, AllowedTools, and the permission ceiling once the
+// worker reports it). A snapshot is bound only when there is an effective tool
+// whitelist to persist — otherwise the session is tool-unrestricted and a
+// snapshot would add bytes without value (legacy-equivalent: nil → no restore).
+// The full effective spec (sandbox/budget/model) is captured once the
+// agentspec resolver becomes authoritative on the live path (follow-up slice).
+func bindSpecSnapshot(info *SessionInfo) {
+	if info == nil || len(info.AllowedTools) == 0 {
+		return
+	}
+	spec := agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: string(info.WorkerType)},
+		Policy: agentspec.PolicySpec{
+			PermissionMode: info.PermissionCeiling,
+			AllowedTools:   append([]string(nil), info.AllowedTools...),
+		},
+	}
+	snap := agentspec.SnapshotFromSpec(spec)
+	info.SpecSnapshot = &snap
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -362,9 +400,12 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	}
 	// Bind the AgentIdentity snapshot (#848); re-bound when WorkspaceID is set.
 	bindIdentity(info)
+	// Capture the effective runtime policy snapshot (#866) so it survives
+	// restart and is not silently altered by later config drift.
+	bindSpecSnapshot(info)
 
 	if err := m.store.Upsert(ctx, info); err != nil {
-		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure, info.EffectiveIdentity())
+		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure, info.EffectiveIdentity(), info.SpecSnapshot)
 		return nil, err
 	}
 
@@ -375,13 +416,13 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	m.log.Info("session: created", "session_id", id, "user_id", userID, "worker_type", workerType, "bot_id", botID)
 	observability.SessionCreated().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(workerType))))
 	sessionsActiveGauge(string(events.StateCreated)).Add(1)
-	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess, info.EffectiveIdentity())
+	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess, info.EffectiveIdentity(), info.SpecSnapshot)
 	return info, nil
 }
 
 // emitSessionCreateAudit enqueues a session.create audit event.
 // Uses context.Background() so audit never blocks the caller.
-func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity) {
+func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity, snap *agentspec.EffectiveAgentSpecSnapshot) {
 	if m.auditCollector == nil {
 		return
 	}
@@ -395,13 +436,13 @@ func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, wor
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   auditDetailJSON(botID, workerType, id),
+		DetailJSON:   auditDetailJSON(botID, workerType, id, snap),
 	})
 }
 
 // emitSessionDeleteAudit enqueues a session.delete audit event.
 // Uses context.Background() so audit never blocks the caller.
-func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity) {
+func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity, snap *agentspec.EffectiveAgentSpecSnapshot) {
 	if m.auditCollector == nil {
 		return
 	}
@@ -415,7 +456,7 @@ func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, wor
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   auditDetailJSON(botID, workerType, id),
+		DetailJSON:   auditDetailJSON(botID, workerType, id, snap),
 	})
 }
 
@@ -450,11 +491,14 @@ func AuditDetailFields(botID, workerType string, id agentspec.AgentIdentity) map
 	return detail
 }
 
-// auditDetailJSON marshals AuditDetailFields into the detail_json string. The
-// map only holds strings/bools, so marshal cannot fail in practice; the fallback
-// keeps the primary correlation key if it ever does.
-func auditDetailJSON(botID, workerType string, id agentspec.AgentIdentity) string {
-	b, err := json.Marshal(AuditDetailFields(botID, workerType, id))
+// auditDetailJSON marshals AuditDetailFields (plus the effective-spec fingerprint
+// when a snapshot is bound) into the detail_json string. The map only holds
+// strings/bools/ints, so marshal cannot fail in practice; the fallback keeps the
+// primary correlation key if it ever does.
+func auditDetailJSON(botID, workerType string, id agentspec.AgentIdentity, snap *agentspec.EffectiveAgentSpecSnapshot) string {
+	detail := AuditDetailFields(botID, workerType, id)
+	snap.StampMetadata(detail)
+	b, err := json.Marshal(detail)
 	if err != nil {
 		return fmt.Sprintf(`{%q:%q}`, agentspec.MetadataKeyAgentID, id.AgentID)
 	}
@@ -1113,7 +1157,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 			current.mu.Unlock()
 		}
 		m.mu.Unlock()
-		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure, candidate.EffectiveIdentity())
+		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure, candidate.EffectiveIdentity(), candidate.SpecSnapshot)
 		return persistErr
 	}
 
@@ -1146,7 +1190,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	m.log.Info("session: deleted", "session_id", id)
-	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess, candidate.EffectiveIdentity())
+	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess, candidate.EffectiveIdentity(), candidate.SpecSnapshot)
 	return nil
 }
 

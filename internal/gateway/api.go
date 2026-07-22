@@ -437,7 +437,9 @@ func (g *GatewayAPI) emitSessionDeleteAudit(r *http.Request, si *session.Session
 	}
 	// #848: carry the unified identity keys so REST deletes correlate with WS/
 	// cron session events. errMsg (if any) is merged into the same payload.
+	// #866: stamp the effective-spec fingerprint when a snapshot was bound.
 	fields := session.AuditDetailFields(si.BotID, string(si.WorkerType), si.EffectiveIdentity())
+	si.SpecSnapshot.StampMetadata(fields)
 	if errMsg != "" {
 		fields["error"] = errMsg
 	}

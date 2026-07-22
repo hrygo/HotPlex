@@ -87,6 +87,10 @@ Cron 任务每次执行都会产生新的 Session（`DeriveCronSessionKey(jobID,
 
 与 Session Key 同源的 UUIDv5 思路也用于派生 Agent 身份 ID（`agentspec.DeriveAgentID`）：`SHA1(agentIdentityNamespace, userID|workspaceID|agentName|workerType)`，使用与 session-key 命名空间隔离的独立子命名空间，故 AgentID 永不与真实 Session ID 冲突。AgentIdentity 是 secret-free 值对象，绑定在 session 上（折叠进现有 `context_json` 列，无迁移），并在 `init_ack` 元数据 / audit detail_json / `forward_events` trace span 三处以统一 key（`agent_id` 为主）传播，供跨 session/event/audit/trace 按 agent 身份关联。身份是 session 级的：`/reset` 清空 Context 后身份仍存活，并在下次持久化时重新写入。详见 `docs/v2/API-DESIGN.md` §Agent Identity。
 
+**有效 AgentSpec 快照持久化（#866）**：
+
+启动 session 时所用的有效、无密钥运行时策略被冻结为 `agentspec.EffectiveAgentSpecSnapshot`（版本化 + 内容哈希），与身份共用同一套 context_json 折叠机制（reserved key `_agent_spec`，无迁移）。它的核心价值是**让 resume/restart 重建同一份运行时契约**：`AllowedTools` 是唯一仅存内存、无 DB 列的有效策略字段——没有快照，重启后 session 会静默丢失工具边界。`bindSpecSnapshot` 在 `CreateWithBot` 从有效字段派生（仅当存在工具白名单时），scan 时 `RestoreAllowedTools` 回填。于是**配置变更不会静默改变既有 session 的有效策略**：resume 读到的是持久化快照，而非重新从（可能已漂移的）config 派生。快照同样在 `/reset` 后存活（session 级），其 `spec_version`/`spec_hash` 盖章进 audit detail_json 供关联。详见 `docs/v2/API-DESIGN.md` §Effective AgentSpec Snapshot。
+
 ## 内部机制
 
 ### 双层锁架构
