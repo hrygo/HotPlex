@@ -300,6 +300,18 @@ type RuntimeContext interface {
 - external vector store。
 - enterprise knowledge backend。
 
+### First-Cut 实现状态（#852）
+
+#852 交付了只读 `RuntimeContext.Load` facade（`internal/runtimecontext/`），约束同为"不改语义、不写入、零行为回退"——eventstore 与 turns 保持权威，facade 只观察。`Save` / `ContextUpdate` 留待后续 slice，接口与值类型现已预留目标形状。
+
+- **只读 facade**：`Facade` 实现 `Loader{ Load(ctx, sessionID, opts) (*ContextSnapshot, error) }`。Load 把四个来源投影进一个 `ContextSnapshot`，**不**写入任何 store，**不**改变 eventstore/turns 语义。resume/fork/history 行为对非 webchat 会话保持不变（无 workspace 时不查询、不报错）。
+- **四源 + 适配器边界**：facade 仅依赖自身的 `SessionReader`/`EventReader`/`TurnReader`/`WorkspaceReader` 接口；具体适配器（`adapters.go`）是**唯一**接触 store 类型之处，把 store struct 投影成 facade 自己的值类型（AC："适配器不泄露私有 provider 结构"）。未来内存后端只需实现同名接口即可替换，facade 无需改动。
+- **权威源 vs 尽力而为**：session 源是**必需且权威**的——缺失或报错则 Load 返回该错误（调用方无法为未知 session 伪造上下文）。其余三源（events/turns/workspace）均为 best-effort：缺失、空、或瞬态错误只记 `Debug` 日志并将对应字段留零值，Load 仍返回 session 上下文。store 的 `ErrNotFound`（"无事件/无轮次"）被适配器吞掉——无轮次的会话是正常的，不是错误。
+- **值对象（无密钥）**：`ContextSnapshot`（secret-free）内含 `SessionContext`（复用 #848 `AgentIdentity` + #866 `EffectiveAgentSpecSnapshot` 这两个已公开、无密钥的域类型，而非 store 内部结构）、`WorkspaceContext`（`AgentConfigOverrides` 原样透传 raw JSON，facade **不**解释）、`TurnSummary`/`TurnStatSummary`、`EventSummary`（**刻意省略 Data 载荷**——保持有界且无密钥；需要原始 event 体的调用方直接读 eventstore）。
+- **加载选项**：`ContextLoadOptions` 零值 = 以默认值加载全部（20 轮、50 事件、含统计与 workspace）；用 `Skip*` 或负数 limit 主动**跳过**某个来源。Load 对缺席或跳过的可选来源**永不**报错。
+- **排序**：events 与 turns 均投影为 oldest→newest（store 的 DESC SQL 在 Go 层反转）。
+- **明确不做（first-cut）**：不实现 `Save`（写入）——`ContextUpdate` 仅预留形状；不解释/解析 `AgentConfigOverrides`；不新增 DB 列或迁移；高基数身份键（`agent_id`/`user_id`/`workspace_id`/`spec_hash`）**绝不**作 metric label，仅用于 trace/事件/审计。真实 store 往返测试（SQLite，session+eventstore 共享单文件）覆盖四源端到端。
+
 ## HTTP/Admin API 候选
 
 这些端点只在内部 contract 稳定后添加：

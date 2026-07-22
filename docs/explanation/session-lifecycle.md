@@ -91,6 +91,10 @@ Cron 任务每次执行都会产生新的 Session（`DeriveCronSessionKey(jobID,
 
 启动 session 时所用的有效、无密钥运行时策略被冻结为 `agentspec.EffectiveAgentSpecSnapshot`（版本化 + 内容哈希），与身份共用同一套 context_json 折叠机制（reserved key `_agent_spec`，无迁移）。它的核心价值是**让 resume/restart 重建同一份运行时契约**：`AllowedTools` 是唯一仅存内存、无 DB 列的有效策略字段——没有快照，重启后 session 会静默丢失工具边界。`bindSpecSnapshot` 在 `CreateWithBot` 从有效字段派生（仅当存在工具白名单时），scan 时 `RestoreAllowedTools` 回填。于是**配置变更不会静默改变既有 session 的有效策略**：resume 读到的是持久化快照，而非重新从（可能已漂移的）config 派生。快照同样在 `/reset` 后存活（session 级），其 `spec_version`/`spec_hash` 盖章进 audit detail_json 供关联。详见 `docs/v2/API-DESIGN.md` §Effective AgentSpec Snapshot。
 
+**只读 RuntimeContext facade（#852）**：
+
+身份与快照之外，session 的完整运行时上下文还散落在 eventstore 原始事件、materialized turns、worker 自身 session id、workspace agent 配置四个来源。`runtimecontext.Facade` 把它们聚合进一个只读 `ContextSnapshot`，**不写入、不改语义**——eventstore 与 turns 仍是权威，facade 只观察。它只依赖自身的 `SessionReader`/`EventReader`/`TurnReader`/`WorkspaceReader` 接口，具体适配器是唯一接触 store 类型之处，故 store 内部结构不外泄，未来内存后端可无缝替换。session 源权威且必需（未知 session 无法伪造上下文），其余三源 best-effort：无事件/无轮次/无 workspace（如平台、cron 会话）只记 debug 日志并留零值，绝不阻断 Load，resume/fork/history 行为因此对非 webchat 会话保持不变。`ContextSnapshot` 复用 #848 身份与 #866 快照这两个无密钥域类型，`EventSummary` 刻意省略 Data 载荷以保持有界。`Save`/`ContextUpdate` 留待后续 slice（接口已预留目标形状）。详见 `docs/v2/API-DESIGN.md` §Runtime Context API。
+
 ## 内部机制
 
 ### 双层锁架构
