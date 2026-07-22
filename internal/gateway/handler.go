@@ -549,7 +549,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		h.log.Info("gateway: duplicate input suppressed",
 			"session_id", env.SessionID,
 			"client_message_id", execRecord.ClientMessageID,
-			"execution_id", execRecord.ExecutionID,
+			observability.KeyExecutionID, execRecord.ExecutionID,
 			"status", execRecord.Status)
 		h.sendInputAck(ctx, env, execRecord, true)
 		return nil
@@ -568,7 +568,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 		if err := h.finishInputExecution(ctx, execRecord, execution.StatusUnknown, events.ErrCodeInternalError); err != nil {
 			h.log.Error("gateway: persist abandoned input status failed", "err", err,
-				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+				"session_id", env.SessionID, observability.KeyExecutionID, execRecord.ExecutionID)
 		}
 	}()
 	// The first acknowledgement means the input is durably recorded. A second
@@ -579,7 +579,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	finishOutcome := func(status execution.Status, code events.ErrorCode) {
 		if statusErr := h.finishInputExecution(ctx, execRecord, status, code); statusErr != nil {
 			h.log.Error("gateway: persist input outcome failed", "err", statusErr,
-				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID, "status", status)
+				"session_id", env.SessionID, observability.KeyExecutionID, execRecord.ExecutionID, "status", status)
 		}
 		// The outcome is recorded on the in-memory record (and reflected in the
 		// ack) regardless of durable-write success; gateway-restart recovery
@@ -696,7 +696,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		}
 		if mrErr := h.executionStore.MarkRunning(ctx, execRecord.ExecutionID, h.ownerInstanceID, workerRunID); mrErr != nil {
 			h.log.Warn("gateway: mark execution running failed", "err", mrErr,
-				"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+				"session_id", env.SessionID, observability.KeyExecutionID, execRecord.ExecutionID)
 			h.finishRuntimeWithoutDispatch(ctx, execRecord, persistedRunID, events.ErrCodeInternalError)
 			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "execution dispatch registration failed")
@@ -750,7 +750,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	}
 	if err := h.finishInputExecution(ctx, execRecord, execution.StatusDelivered, ""); err != nil {
 		h.log.Error("gateway: persist delivered input status failed", "err", err,
-			"session_id", env.SessionID, "execution_id", execRecord.ExecutionID)
+			"session_id", env.SessionID, observability.KeyExecutionID, execRecord.ExecutionID)
 		// The worker accepted the input but the durable status write failed —
 		// treat the outcome as ambiguous for the client.
 		execRecord.Status = execution.StatusUnknown
@@ -837,16 +837,16 @@ func (h *Handler) acceptInputExecutionWithRetry(ctx context.Context, env *events
 	freshRunID, startErr := h.bridge.StartFreshWorker(ctx, env.SessionID)
 	if startErr != nil {
 		h.log.Warn("gateway: fresh worker start for fenced execution failed",
-			"err", startErr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
+			"err", startErr, "session_id", env.SessionID, observability.KeyExecutionID, fenced.ExecutionID)
 		return rec, duplicate, err
 	}
 	if cerr := h.executionStore.ClearFenceAfterFreshStart(ctx, fenced.ExecutionID, fenced.FenceReason, freshRunID); cerr != nil {
 		h.log.Warn("gateway: clear stale fence failed",
-			"err", cerr, "session_id", env.SessionID, "execution_id", fenced.ExecutionID)
+			"err", cerr, "session_id", env.SessionID, observability.KeyExecutionID, fenced.ExecutionID)
 		return rec, duplicate, err
 	}
 	h.log.Info("gateway: cleared stale fence, retrying accept",
-		"session_id", env.SessionID, "execution_id", fenced.ExecutionID,
+		"session_id", env.SessionID, observability.KeyExecutionID, fenced.ExecutionID,
 		"fence_reason", fenced.FenceReason)
 	return h.acceptInputExecution(ctx, env)
 }
@@ -954,7 +954,7 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 		context.WithoutCancel(ctx), rec.ExecutionID, workerRunID, rtStatus, errorCode,
 	)
 	if err != nil {
-		h.log.Warn("gateway: finish runtime on stop failed, enqueuing repair", "err", err, "session_id", sessionID, "execution_id", rec.ExecutionID)
+		h.log.Warn("gateway: finish runtime on stop failed, enqueuing repair", "err", err, "session_id", sessionID, observability.KeyExecutionID, rec.ExecutionID)
 		if h.repairer != nil {
 			h.repairer.Enqueue(execution.RepairIntent{
 				ExecutionID: rec.ExecutionID,
@@ -993,12 +993,12 @@ func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, rec
 	ack.Priority = events.PriorityControl
 	ack.OwnerID = source.OwnerID
 	ack.Metadata = map[string]any{
-		"execution_id":      record.ExecutionID,
-		"client_message_id": record.ClientMessageID,
+		observability.KeyExecutionID: record.ExecutionID,
+		"client_message_id":          record.ClientMessageID,
 	}
 	if err := h.hub.SendToSession(context.WithoutCancel(ctx), ack); err != nil {
 		h.log.Warn("gateway: input ack delivery failed", "err", err,
-			"session_id", source.SessionID, "execution_id", record.ExecutionID)
+			"session_id", source.SessionID, observability.KeyExecutionID, record.ExecutionID)
 	}
 }
 

@@ -89,7 +89,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	defer span.End()
 	w := fb.worker
 	workerType := w.Type()
-	flog := b.log.With("trace_id", observability.TraceID(ctx))
+	flog := b.log.With(observability.KeyTraceID, observability.TraceID(ctx))
 	defer func() {
 		if r := recover(); r != nil {
 			observability.GatewayForwarderPanics().Add(context.Background(), 1,
@@ -501,7 +501,7 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 	// forwarder must never finish the newest open execution for the session.
 	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, fc.workerRunID, rtStatus, ""); err != nil {
 		b.flogOf(fc).Debug("bridge: finish runtime on done", "err", err,
-			"session_id", sessionID, "execution_id", rec.ExecutionID, "status", rtStatus)
+			"session_id", sessionID, observability.KeyExecutionID, rec.ExecutionID, "status", rtStatus)
 		if errors.Is(err, execution.ErrRunMismatch) {
 			return
 		}

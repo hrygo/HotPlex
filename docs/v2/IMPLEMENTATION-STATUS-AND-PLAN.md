@@ -2,7 +2,7 @@
 
 > **状态**:  living document · **基线**: v1.37.2 · **首次对账**: 2026-07-21 · **更新**: 2026-07-22
 >
-> **2026-07-22 进度**：Wave 1 链首 #847 / #848 / #866 + Wave 2 #852 的 first cut 均已实现（PR #924）。剩余 Wave 1：#849（runtime 事件分类）、#850（span/key 标准化）；Wave 2：#851（执行队列）。
+> **2026-07-22 进度**：Wave 1 链首 #847 / #848 / #866 + #850（span/key 标准化 first cut）+ Wave 2 #852 的 first cut 均已实现（PR #924）。剩余 Wave 1：#849（runtime 事件分类）、#850（worker_type/session_id 全量迁移）；Wave 2：#851（执行队列）。
 > 本文把 `docs/v2/` 既有规划（ROADMAP / IMPLEMENTATION-ROADMAP / GITHUB-MILESTONES）与**当前代码实际状态**对账，修正"规划写于 v1.32.2、部分工作已由 #878 epic 交付"的偏差。规划原则与 Wave 划分仍以既有文档为准，本文只做状态修订与排序。
 
 ---
@@ -26,7 +26,7 @@
 | **#878** epic | 可靠性 epic | ✅ **已验证并关闭**（2026-07-21） | Slice6 矩阵全绿：SQLite `make check` + real-PG（docker pg16）多实例/迁移/审计；PG-CI 接入已决定不做（#923 not planned），本地 docker 按需验证 |
 | **#849** runtime events | Wave1 / Milestone A | 🟡 最小 3 事件已由 epic Slice5 交付 | 收窄：security/context/policy 事件分类 |
 | **#851** execution queue | Wave2 / Milestone B | 🟡 单活跃门已由 epic Slice4 交付 | 收窄：完整 ExecutionQueue 抽象 |
-| **#850** tracing/metrics | Wave1 / Milestone A | 🟡 部分 execution 指标已有 | runtime span attributes 标准化 + 低基数语义 key |
+| **#850** tracing/metrics | Wave1 / Milestone A | 🟡 first cut 已实现（PR #924） | 已交付：`observability/keys.go` 单一真相源 + 基数契约 + `span_id` 注入（满足 trace 关联 AC）+ `trace_id`/`execution_id` 字面量迁移；剩余：`worker_type`(40+)/`session_id`(60+) 全量迁移 |
 | **#847** AgentSpec | Wave1 / **链首** | ✅ 已实现（PR #924） | first cut 交付：归一化运行时模型 + 无密钥值对象（commit fdc77915） |
 | **#848** AgentIdentity | Wave1 | ✅ 已实现（PR #924） | first cut 交付：身份绑定 + context_json 折叠（无迁移，commit c75cfb5a） |
 | **#852** RuntimeContext | Wave2 | ✅ 已实现（PR #924） | 只读 Load facade 交付（四源 + 适配器边界，commit 0239992a）；Save 留待后续 slice |

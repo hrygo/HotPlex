@@ -136,6 +136,20 @@ func TraceID(ctx context.Context) string {
 	return ""
 }
 
+// SpanID returns the OpenTelemetry span ID carried in ctx, or "" when ctx holds
+// no valid span. Paired with TraceID, it lets a downstream consumer correlate an
+// AEP event or slog record to the precise span that produced it (not just the
+// trace). See keys.go KeySpanID.
+func SpanID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		return sc.SpanID().String()
+	}
+	return ""
+}
+
 func Shutdown(ctx context.Context) error {
 	var errs []error
 	if tp != nil {
