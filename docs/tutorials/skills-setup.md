@@ -98,7 +98,7 @@ ls -l ~/.claude/skills
 
 ## 5. 修改与删除
 
-- **修改 skill** = 重新打包 zip 上传（勾选「覆盖同名」）。不支持在线编辑器。
+- **修改 skill** 有两种方式：① 在线编辑——在 skill 详情的「Body」标签页直接改写 `SKILL.md` 全文并保存（对应 `PUT /admin/api/skills/{name}`，仅 `managed` skill 可改）；② 重新打包 zip 上传覆盖（勾选「覆盖同名」）。两种方式都只更新 `SKILL.md`，包内其他文件需通过 zip 覆盖替换。
 - **删除 skill** = 列表中点击删除。仅 `managed` skill（`.agents/skills` 下）可删；`.claude`/`.hotplex` 下的只读外部 skill 需在文件系统手动删除。
 
 ## 6. REST API
@@ -109,6 +109,11 @@ ls -l ~/.claude/skills
 # 安装全局 skill（admin Bearer）
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -F "file=@my-skill.zip" "http://localhost:9999/admin/api/skills?replace=true"
+
+# 在线更新全局 skill 的 SKILL.md 全文（admin Bearer）
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"body\":\"$(jq -Rs . < SKILL.md)\"}" \
+  "http://localhost:9999/admin/api/skills/my-skill"
 
 # 安装 workspace skill（owner，Cookie 或 API Key）
 curl -X POST -H "X-API-Key: $API_KEY" \
