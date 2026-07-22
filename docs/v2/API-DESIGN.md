@@ -120,6 +120,20 @@ type AgentIdentity struct {
 - `AgentID` 可由 `userID + workspaceID + agent name + worker type` 派生，避免引入全局 registry。
 - 匿名 session 继续兼容，但 runtime events 必须标记 anonymous identity。
 
+### First-Cut 实现状态（#848）
+
+#848 交付了 AgentIdentity 的**值对象 + 持久化 + 三面传播**（`internal/agentspec/identity.go` + `internal/session` 接入）。它落实了上述规则，并以"不改 wire、不加迁移、零行为回退"为约束：
+
+- **值对象**：`agentspec.AgentIdentity`（secret-free）+ `DeriveAgentID`（UUIDv5，独立子命名空间，与 session-key 命名空间隔离）+ `BuildAgentIdentity`（AgentName→BotName→WorkerType 回退、显式 `Anonymous` 标记）+ `IsAnonymousUser`。纯函数，表驱动测试覆盖确定性/离散性/匿名/无密钥不变量。
+- **持久化（无迁移）**：身份折叠进**现有** `context_json TEXT` 列（SQLite + PG），reserved key `_agent_identity`。marshal 时折叠（**不改动内存 Context**，故 `/reset` 清空 Context 后身份仍存活并在下次 Upsert 重新持久化）；scan 时弹出到类型化字段，空 map 归一为 nil。遗留行（无该 key）原样可读，`Identity == nil`。
+- **绑定**：`bindIdentity` 在 `CreateWithBot`（覆盖 platform/cron/messaging）与 `SetWorkspaceID`（覆盖 WebChat 创建后绑定 workspace）处（重新）派生——总从当前字段重派生，使晚到 workspace 纠正首次无 workspace 的身份。`SessionInfo.EffectiveIdentity()` 对遗留 session 从字段派生等价身份（确定性 AgentID，与新建一致）。
+- **三面统一传播**（统一 key：`agent_id` / `worker_type` / `user_id` / `workspace_id` / `platform`；`agent_id` 为主关联键，恒在）：
+  - **AEP metadata**：`init_ack` 经 `StampIdentityMetadata` 盖章，客户端从首帧即可按 `agent_id` 关联。
+  - **audit detail_json**：`session.AuditDetailFields`（统一 key + `bot_id`，空值省略），接入 manager 的 create/delete 与 REST API delete（`api.go`）。
+  - **trace attributes**：`bridge.forward_events` span（高基数键作 trace 属性，**不作 metric label**；`worker_type`/`platform` 低基数）。
+- **无密钥不变量**：结构体拒绝 token/secret/credential/apikey 字段（反射断言）；序列化不含 provider token。
+- **明确不做（first-cut）**：不新增专用 DB 列（直到查询需求证明，否则沿用 context_json）；不对每个转发 envelope 注入身份（init_ack 握手期携带即可，服务端关联由 trace/audit 覆盖）；不以身份 key 作 metric label（高基数）；`Provider` best-effort 留空；不接入 `AllowedModels`（属 #847 F1）。现有 owner/workspace 校验仍是权威，身份仅作观测/关联视图。
+
 ## Runtime Service Contract
 
 内部 contract 应放在 Gateway/Session 能复用的位置，第一版可以是薄封装。

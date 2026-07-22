@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -248,6 +250,53 @@ type SessionInfo struct {
 	// Worker after a successful Start/Resume. It is immutable for the lifetime
 	// of this session and survives gateway restarts and Worker replacement.
 	PermissionCeiling string `json:"permission_ceiling,omitempty"`
+	// Identity is the bound AgentIdentity value object (#848): the stable,
+	// secret-free identity snapshot persisted under context_json (no dedicated
+	// column). Nil for sessions created before #848 — callers use
+	// EffectiveIdentity(), which derives an equivalent identity on the fly so
+	// legacy sessions remain correlatable. It is independent of Context (which
+	// /reset clears): identity is session-level and survives a context reset.
+	Identity *agentspec.AgentIdentity `json:"-"`
+}
+
+// EffectiveIdentity returns the bound identity if one was persisted, otherwise
+// derives an equivalent AgentIdentity from this SessionInfo's existing fields.
+// The derived AgentID is deterministic, so a legacy session (Identity == nil)
+// correlates identically to one created after #848. Existing owner/workspace
+// checks remain authoritative — this is an observation/correlation view only.
+func (s SessionInfo) EffectiveIdentity() agentspec.AgentIdentity {
+	if s.Identity != nil {
+		return *s.Identity
+	}
+	return agentspec.BuildAgentIdentity(agentspec.IdentityInput{
+		UserID:      s.UserID,
+		WorkspaceID: s.WorkspaceID,
+		BotID:       s.BotID,
+		BotName:     s.BotName,
+		Platform:    s.Platform,
+		WorkerType:  string(s.WorkerType),
+	})
+}
+
+// bindIdentity derives a fresh AgentIdentity snapshot from info's current fields
+// and attaches it. It is called at creation and whenever an identity-bearing
+// field (notably WorkspaceID, which WebChat binds after creation) changes, so
+// the persisted identity stays consistent with the session references. It always
+// re-derives from fields rather than reusing a cached value, so a late-bound
+// workspace corrects an identity that was first bound without one.
+func bindIdentity(info *SessionInfo) {
+	if info == nil {
+		return
+	}
+	id := agentspec.BuildAgentIdentity(agentspec.IdentityInput{
+		UserID:      info.UserID,
+		WorkspaceID: info.WorkspaceID,
+		BotID:       info.BotID,
+		BotName:     info.BotName,
+		Platform:    info.Platform,
+		WorkerType:  string(info.WorkerType),
+	})
+	info.Identity = &id
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -311,9 +360,11 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 		Source:       source,
 		ClientKey:    clientKey,
 	}
+	// Bind the AgentIdentity snapshot (#848); re-bound when WorkspaceID is set.
+	bindIdentity(info)
 
 	if err := m.store.Upsert(ctx, info); err != nil {
-		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure)
+		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure, info.EffectiveIdentity())
 		return nil, err
 	}
 
@@ -324,17 +375,16 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	m.log.Info("session: created", "session_id", id, "user_id", userID, "worker_type", workerType, "bot_id", botID)
 	observability.SessionCreated().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(workerType))))
 	sessionsActiveGauge(string(events.StateCreated)).Add(1)
-	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess)
+	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess, info.EffectiveIdentity())
 	return info, nil
 }
 
 // emitSessionCreateAudit enqueues a session.create audit event.
 // Uses context.Background() so audit never blocks the caller.
-func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string) {
+func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity) {
 	if m.auditCollector == nil {
 		return
 	}
-	detailJSON := fmt.Sprintf(`{"bot_id":%q,"worker_type":%q}`, botID, workerType)
 	_ = m.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:           time.Now().UnixMilli(),
 		UserID:       userID,
@@ -345,17 +395,16 @@ func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, wor
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   detailJSON,
+		DetailJSON:   auditDetailJSON(botID, workerType, id),
 	})
 }
 
 // emitSessionDeleteAudit enqueues a session.delete audit event.
 // Uses context.Background() so audit never blocks the caller.
-func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string) {
+func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity) {
 	if m.auditCollector == nil {
 		return
 	}
-	detailJSON := fmt.Sprintf(`{"bot_id":%q,"worker_type":%q}`, botID, workerType)
 	_ = m.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:           time.Now().UnixMilli(),
 		UserID:       userID,
@@ -366,8 +415,50 @@ func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, wor
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   detailJSON,
+		DetailJSON:   auditDetailJSON(botID, workerType, id),
 	})
+}
+
+// AuditDetailFields returns the secret-free field map for a session audit
+// event's detail_json. It carries the unified identity correlation keys (#848):
+// agent_id is always present (the primary cross-surface key), and worker_type /
+// user_id / workspace_id / platform use the SAME key names as AEP metadata and
+// trace attributes, so a single agent correlates across all three surfaces.
+// bot_id is an audit-specific key. Keys with empty values are omitted to keep
+// platform/anonymous-session payloads minimal. Callers may extend the map (e.g.
+// add an "error" field) before marshalling.
+func AuditDetailFields(botID, workerType string, id agentspec.AgentIdentity) map[string]any {
+	detail := map[string]any{
+		agentspec.MetadataKeyAgentID:    id.AgentID,
+		agentspec.MetadataKeyWorkerType: workerType,
+	}
+	if botID != "" {
+		detail["bot_id"] = botID
+	}
+	if id.UserID != "" {
+		detail[agentspec.MetadataKeyUserID] = id.UserID
+	}
+	if id.WorkspaceID != "" {
+		detail[agentspec.MetadataKeyWorkspaceID] = id.WorkspaceID
+	}
+	if id.Platform != "" {
+		detail[agentspec.MetadataKeyPlatform] = id.Platform
+	}
+	if id.Anonymous {
+		detail["anonymous"] = true
+	}
+	return detail
+}
+
+// auditDetailJSON marshals AuditDetailFields into the detail_json string. The
+// map only holds strings/bools, so marshal cannot fail in practice; the fallback
+// keeps the primary correlation key if it ever does.
+func auditDetailJSON(botID, workerType string, id agentspec.AgentIdentity) string {
+	b, err := json.Marshal(AuditDetailFields(botID, workerType, id))
+	if err != nil {
+		return fmt.Sprintf(`{%q:%q}`, agentspec.MetadataKeyAgentID, id.AgentID)
+	}
+	return string(b)
 }
 
 // SetWorkspaceID binds a session to a workspace and persists the change (spec ①).
@@ -389,6 +480,7 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 	// releasing m.mu (review P1 fix — lock ordering: m.mu → ms.mu).
 	ms.mu.Lock()
 	ms.info.WorkspaceID = workspaceID
+	bindIdentity(&ms.info) // re-bind now that the workspace anchor is known
 	info := ms.info
 	ms.mu.Unlock()
 	m.mu.Unlock()
@@ -1021,7 +1113,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 			current.mu.Unlock()
 		}
 		m.mu.Unlock()
-		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure)
+		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure, candidate.EffectiveIdentity())
 		return persistErr
 	}
 
@@ -1054,7 +1146,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	m.log.Info("session: deleted", "session_id", id)
-	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess)
+	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess, candidate.EffectiveIdentity())
 	return nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/sqlutil"
@@ -65,9 +66,16 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.Wr
 }
 
 // marshalSessionJSON serializes the Context and PlatformKey fields for Upsert.
+// The bound AgentIdentity (#848), when present, is folded into the context_json
+// blob under a reserved key — the in-memory Context is not mutated, so identity
+// survives a /reset (which clears Context) and re-persists on the next Upsert.
 func marshalSessionJSON(info *SessionInfo) (ctxJSON, pkJSON []byte, err error) {
-	if info.Context != nil {
-		ctxJSON, err = json.Marshal(info.Context)
+	ctx := info.Context
+	if info.Identity != nil {
+		ctx = agentspec.MergeIntoContext(ctx, info.Identity)
+	}
+	if ctx != nil {
+		ctxJSON, err = json.Marshal(ctx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("session store: marshal context: %w", err)
 		}
@@ -203,6 +211,16 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	if ctxJSON.Valid && ctxJSON.String != "" {
 		if err := json.Unmarshal([]byte(ctxJSON.String), &info.Context); err != nil {
 			return nil, fmt.Errorf("session store: unmarshal context: %w", err)
+		}
+		// Pop the bound identity out of Context into the typed field. Legacy
+		// rows without the reserved key are untouched (Identity stays nil); when
+		// identity was the only entry the emptied map is normalized back to nil
+		// so a context-less session still round-trips to a NULL column.
+		if id := agentspec.ExtractFromContext(info.Context); id != nil {
+			info.Identity = id
+			if len(info.Context) == 0 {
+				info.Context = nil
+			}
 		}
 	}
 	if platformKeyStr.Valid && platformKeyStr.String != "" {

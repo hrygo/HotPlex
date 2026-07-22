@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -127,6 +128,30 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 			if fc.sessOwner == "" {
 				fc.sessOwner = si.UserID
 			}
+			// #848: correlate the forward span by agent identity, under the same
+			// unified key names used by AEP metadata and audit detail_json. The
+			// high-cardinality agent_id/user_id/workspace_id are safe as trace
+			// attributes (they are NOT metric labels). EffectiveIdentity is the
+			// authoritative projection — bound identity, or derived for legacy
+			// sessions so they correlate identically to post-#848 ones.
+			eff := si.EffectiveIdentity()
+			spanAttrs := []attribute.KeyValue{
+				attribute.String(agentspec.MetadataKeyAgentID, eff.AgentID),
+				attribute.String(agentspec.MetadataKeyWorkerType, string(workerType)),
+			}
+			if eff.UserID != "" {
+				spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyUserID, eff.UserID))
+			}
+			if eff.WorkspaceID != "" {
+				spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyWorkspaceID, eff.WorkspaceID))
+			}
+			if eff.Platform != "" {
+				spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyPlatform, eff.Platform))
+			}
+			if eff.Anonymous {
+				spanAttrs = append(spanAttrs, attribute.Bool("anonymous", true))
+			}
+			span.SetAttributes(spanAttrs...)
 		}
 	}
 

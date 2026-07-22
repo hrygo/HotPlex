@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -168,6 +169,47 @@ func TestBuildInitAck(t *testing.T) {
 	require.Equal(t, events.StateCreated, ack.Event.Data.(InitAckData).State)
 	require.Equal(t, events.Version, ack.Event.Data.(InitAckData).ServerCaps.ProtocolVersion)
 	require.True(t, ack.Event.Data.(InitAckData).ServerCaps.SupportsResume)
+}
+
+// TestStampIdentityMetadata: the init_ack carries the agent-identity correlation
+// keys under the unified names (#848) so a client can correlate by agent_id from
+// the first frame. Legacy sessions (no bound identity) derive an equivalent one.
+func TestStampIdentityMetadata(t *testing.T) {
+	t.Parallel()
+
+	t.Run("workspace session stamps unified keys", func(t *testing.T) {
+		t.Parallel()
+		si := &session.SessionInfo{
+			UserID: "u1", WorkspaceID: "ws1", BotID: "B1", BotName: "helper",
+			Platform: "webchat", WorkerType: worker.TypeClaudeCode,
+		}
+		ack := BuildInitAck("sess-init", events.StateCreated, worker.TypeClaudeCode)
+		StampIdentityMetadata(ack, si)
+		require.Equal(t, si.EffectiveIdentity().AgentID, ack.Metadata[agentspec.MetadataKeyAgentID])
+		require.Equal(t, "claude_code", ack.Metadata[agentspec.MetadataKeyWorkerType])
+		require.Equal(t, "u1", ack.Metadata[agentspec.MetadataKeyUserID])
+		require.Equal(t, "ws1", ack.Metadata[agentspec.MetadataKeyWorkspaceID])
+		require.Equal(t, "webchat", ack.Metadata[agentspec.MetadataKeyPlatform])
+	})
+
+	t.Run("platform session omits empty workspace_id", func(t *testing.T) {
+		t.Parallel()
+		si := &session.SessionInfo{
+			UserID: "u1", BotID: "B1", Platform: "slack", WorkerType: worker.TypeClaudeCode,
+		}
+		ack := BuildInitAck("sess-init", events.StateCreated, worker.TypeClaudeCode)
+		StampIdentityMetadata(ack, si)
+		require.Contains(t, ack.Metadata, agentspec.MetadataKeyAgentID)
+		_, hasWS := ack.Metadata[agentspec.MetadataKeyWorkspaceID]
+		require.False(t, hasWS)
+	})
+
+	t.Run("nil-safe", func(t *testing.T) {
+		t.Parallel()
+		require.NotPanics(t, func() { StampIdentityMetadata(nil, nil) })
+		ack := BuildInitAck("sess-init", events.StateCreated, worker.TypeClaudeCode)
+		require.NotPanics(t, func() { StampIdentityMetadata(ack, nil) })
+	})
 }
 
 func TestBuildInitAckError(t *testing.T) {

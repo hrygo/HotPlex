@@ -435,10 +435,13 @@ func (g *GatewayAPI) emitSessionDeleteAudit(r *http.Request, si *session.Session
 	if g.auditCollector == nil {
 		return
 	}
-	detail := ""
+	// #848: carry the unified identity keys so REST deletes correlate with WS/
+	// cron session events. errMsg (if any) is merged into the same payload.
+	fields := session.AuditDetailFields(si.BotID, string(si.WorkerType), si.EffectiveIdentity())
 	if errMsg != "" {
-		detail = fmt.Sprintf(`{"error":%q}`, errMsg)
+		fields["error"] = errMsg
 	}
+	b, _ := json.Marshal(fields)
 	_ = g.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:           time.Now().UnixMilli(),
 		UserID:       si.UserID,
@@ -449,7 +452,7 @@ func (g *GatewayAPI) emitSessionDeleteAudit(r *http.Request, si *session.Session
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   detail,
+		DetailJSON:   string(b),
 		IP:           r.RemoteAddr,
 		UserAgent:    r.UserAgent(),
 	})

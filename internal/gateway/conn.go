@@ -805,6 +805,9 @@ func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, _ InitDat
 
 	ack := BuildInitAck(sessionID, si.State, si.WorkerType)
 	ack.Seq = c.hub.NextSeq(sessionID)
+	// #848: stamp the handshake with the agent identity so the client can
+	// correlate this session by agent identity from the first frame.
+	StampIdentityMetadata(ack, si)
 	if err := c.WriteCtx(context.Background(), ack); err != nil {
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 		return fmt.Errorf("send init_ack: %w", err)

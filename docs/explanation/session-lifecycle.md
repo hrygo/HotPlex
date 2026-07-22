@@ -83,6 +83,10 @@ HotPlex 使用 UUIDv5（SHA-1 哈希 + 固定命名空间）生成确定性的 S
 
 Cron 任务每次执行都会产生新的 Session（`DeriveCronSessionKey(jobID, epoch)`），使用独立的 `CronNamespace`。这解决了早期设计中 Cron 会话与 Slack/飞书会话 ID 冲突导致 100% 超时的问题。
 
+**Agent 身份派生（#848）**：
+
+与 Session Key 同源的 UUIDv5 思路也用于派生 Agent 身份 ID（`agentspec.DeriveAgentID`）：`SHA1(agentIdentityNamespace, userID|workspaceID|agentName|workerType)`，使用与 session-key 命名空间隔离的独立子命名空间，故 AgentID 永不与真实 Session ID 冲突。AgentIdentity 是 secret-free 值对象，绑定在 session 上（折叠进现有 `context_json` 列，无迁移），并在 `init_ack` 元数据 / audit detail_json / `forward_events` trace span 三处以统一 key（`agent_id` 为主）传播，供跨 session/event/audit/trace 按 agent 身份关联。身份是 session 级的：`/reset` 清空 Context 后身份仍存活，并在下次持久化时重新写入。详见 `docs/v2/API-DESIGN.md` §Agent Identity。
+
 ## 内部机制
 
 ### 双层锁架构

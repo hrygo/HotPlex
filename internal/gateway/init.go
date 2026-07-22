@@ -109,6 +109,20 @@ func BuildInitAck(sessionID string, state events.SessionState, wt worker.WorkerT
 	)
 }
 
+// StampIdentityMetadata attaches the session's agent-identity correlation keys
+// (#848) to an outgoing envelope's Metadata, under the unified key names shared
+// with audit detail_json and trace attributes (agent_id/worker_type/user_id/
+// workspace_id/platform). Called for init_ack so a client can correlate the
+// session by agent identity from the first frame. Secret-free; MetadataMap
+// omits empty fields, so platform/anonymous sessions send a minimal payload.
+// Nil-safe for both env and si.
+func StampIdentityMetadata(env *events.Envelope, si *session.SessionInfo) {
+	if env == nil || si == nil {
+		return
+	}
+	env.Metadata = si.EffectiveIdentity().MetadataMap()
+}
+
 // BuildInitAckError builds an init_ack error envelope.
 func BuildInitAckError(sessionID string, initErr *InitError) *events.Envelope {
 	return events.NewEnvelope(
