@@ -395,3 +395,78 @@ func (c *Config) ResolvePlatformWorkDir(platform string) string {
 	}
 	return c.Worker.DefaultWorkDir
 }
+
+// DefaultWorkerType is the compile-time default worker type — level 5 of the
+// worker_type fallback. It mirrors worker.TypeClaudeCode but is declared here
+// because internal/config cannot import internal/worker (import cycle). Keep in
+// sync with the worker package constant.
+const DefaultWorkerType = "claude_code"
+
+// ResolveWorkerType resolves the effective worker type for a messaging-platform
+// session via the documented 5-level fallback (#847 / F3):
+//
+//	per-bot  (bots[].worker_type)
+//	→ platform YAML/env (slack/feishu/yuanxin .worker_type — env override and
+//	  messaging shared-default propagation are already applied at config load)
+//	→ compile default (DefaultWorkerType).
+//
+// It is the single convergence point for a chain otherwise scattered across
+// Default()+propagatePlatform (load-time levels 5→4→2) and
+// cmd/hotplex/messaging_init.go (startup-time level-1 per-bot override).
+// WebChat sessions do NOT use this resolver: their worker_type is request-driven
+// (gateway/api.go: body > query > workspace.WorkerPreference > default).
+func (c *Config) ResolveWorkerType(platform, botName string) string {
+	if wt := c.botWorkerType(platform, botName); wt != "" {
+		return wt
+	}
+	if wt := c.platformWorkerType(platform); wt != "" {
+		return wt
+	}
+	// Level 4: messaging shared default. Normally already propagated into the
+	// platform value at load (propagatePlatform); consulted explicitly here so
+	// the documented chain still holds for a config that skipped propagation
+	// (e.g. unit tests). In a loaded config the platform value is already
+	// non-empty here, so this is a defensive no-op in production.
+	if c.Messaging.WorkerType != "" {
+		return c.Messaging.WorkerType
+	}
+	return DefaultWorkerType
+}
+
+// botWorkerType returns the per-bot worker_type override (level 1), or "" when
+// the platform has no bots or the named bot sets no override.
+func (c *Config) botWorkerType(platform, botName string) string {
+	if botName == "" {
+		return ""
+	}
+	switch platform {
+	case "slack":
+		for _, b := range c.Messaging.Slack.Bots {
+			if b.Name == botName {
+				return b.WorkerType
+			}
+		}
+	case "feishu":
+		for _, b := range c.Messaging.Feishu.Bots {
+			if b.Name == botName {
+				return b.WorkerType
+			}
+		}
+	}
+	return ""
+}
+
+// platformWorkerType returns the platform-level worker_type (levels 2-4 already
+// collapsed by load-time env override + messaging-default propagation), or "" for
+// platforms without a worker_type field.
+func (c *Config) platformWorkerType(platform string) string {
+	switch platform {
+	case "slack":
+		return c.Messaging.Slack.WorkerType
+	case "feishu":
+		return c.Messaging.Feishu.WorkerType
+	case "yuanxin":
+		return c.Messaging.Yuanxin.WorkerType
+	}
+	return ""
+}

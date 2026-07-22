@@ -4,7 +4,7 @@
 > **基线**: v1.37.2 · **类型**: first-cut 设计（不含实现；遵守 Design-No-Implement）
 > **关联规划**: `docs/v2/IMPLEMENTATION-ROADMAP.md`（#847 ROI 9/10 第一刀）、`docs/v2/IMPLEMENTATION-STATUS-AND-PLAN.md`
 >
-> **修订记录（F1-F7）**：独立审查对 5 条 spec 断言做了代码取证，发现 7 项需修订——F1/F2 移除两个"顺手/委托现有逻辑"的隐性行为变更与不成立假设；F3/F4 修正 worker_type 与 WS≡REST 两处过度断言；F5/F6/F7 收紧包放置论证、补字段所有权表、定义 InitMetadata 与灰度回滚。逐项处理见 §10。
+> **修订记录（F1-F8）**：独立审查对 5 条 spec 断言做了代码取证，发现 7 项需修订——F1/F2 移除两个"顺手/委托现有逻辑"的隐性行为变更与不成立假设；F3/F4 修正 worker_type 与 WS≡REST 两处过度断言；F5/F6/F7 收紧包放置论证、补字段所有权表、定义 InitMetadata 与灰度回滚。**实施取证阶段再发现 F8（HIGH）**：`StartSession` 只收 `SessionStartParams`、`SessionInfo` 在 bridge 层构造，原 §3.5 "MapToSessionInfo → StartSession" 集成模型事实错误——first-cut 收窄为仅接入口层 `MapToStartParams`，bridge/SessionInfo 接入列为后续 slice。逐项处理见 §10。
 
 ---
 
@@ -27,27 +27,31 @@
 
 ## 2. 当前基线（碎片现状，已取证）
 
-### 2.1 映射目标
-- `worker.SessionStartParams`（`internal/worker/worker.go:95`）：ID/UserID/BotID/BotName/WorkerType/AllowedTools/WorkDir/Platform/PlatformKey/WorkspaceID/InjectExclude。
-- `worker.SessionInfo`（`internal/worker/worker.go:312`）：富字段集——AllowedTools/DisallowedTools/AllowedModels/PermissionMode/SkipPermissions/Sandbox/ACPCommand/MaxTurns/MaxBudgetUSD/AllowedDirs/SystemPrompt/MCPConfig/ConfigEnv/ConfigBlocklist 等。
+### 2.1 映射目标（两个不同构造层 — 取证修订 F8）
+- `worker.SessionStartParams`（`internal/worker/worker.go:95`）：ID/UserID/BotID/BotName/WorkerType/AllowedTools/WorkDir/Platform/PlatformKey/Title/ClientKey/WorkspaceID/InjectExclude。**在入口层（conn.go WS init / api.go REST create）构造**，作为 `Bridge.StartSession(ctx, p SessionStartParams)` 的唯一入参。
+- `worker.SessionInfo`（`internal/worker/worker.go:312`）：富字段集——AllowedTools/DisallowedTools/AllowedModels/PermissionMode/SkipPermissions/Sandbox/ACPCommand/MaxTurns/MaxBudgetUSD/AllowedDirs/SystemPrompt/MCPConfig/ConfigEnv/ConfigBlocklist/ContinueSession/ForkSession/Resume* 等（共 32 字段）。**不在入口层构造**——`SessionStartParams` 无这些字段；`SessionInfo` 在 `Bridge.buildWorkerInfo`（`bridge.go:1092`）内、`StartSession` 执行中从 DB 记录 + workspace store + bridge 默认值构造，再传给 `worker.Start`。
+- **关键推论（F8）**：入口层只能影响 `SessionStartParams` 字段；PermissionMode/Sandbox/AllowedModels 等 SessionInfo 字段的归一化必须在 bridge 层接入，**不能**在 conn/api "MapToSessionInfo → StartSession"（StartSession 不接收 SessionInfo）。first-cut 因此只接入口层（见 §3.5）。
 
 ### 2.2 归一化来源（当前分散）
 | 维度 | 当前来源（碎片） |
 |------|------------------|
 | worker_type | 5 级 fallback：per-bot → platform(YAML) → platform(env) → messaging 共享默认 → 编译默认 `claude_code`（`config_defaults.go:propagatePlatform`） |
-| permission | `claude_code.permission_mode` / `codex_cli.sandbox`+`approval_mode` / `acp.auto_approve` / workspace 覆盖 / `worker.default_permission_mode`（4 层 tier：read-only\|workspace\|auto-edit\|bypass，默认 auto-edit） |
-| tools | allowed/disallowed（config + init metadata） |
-| sandbox | `codex_cli.sandbox`、per-bot 覆盖 |
-| budget/turns | `MaxBudgetUSD` / `MaxTurns`（worker 级 + session 级） |
-| models | `AllowedModels`（注：webchat WS 路径当前未设置，为**已存在的碎片**；first-cut **不**顺手注入，见 §6 Non-goals 与 §10 F1） |
+| permission | **session tier 由 bridge 解析**（`resolveWorkspacePermissionMode` bridge_worker.go:526 → `SessionInfo.PermissionMode` bridge.go:1109），各 worker 的 operator 配置（`claude_code.permission_mode` / `codex_cli.sandbox`+`approval_mode` / `acp.auto_approve` / OCS 无字段）作为 ceiling 被 worker 内联 clamp（见 §3.4）。`worker.default_permission_mode` 默认 `"workspace"`（config_defaults.go:83）。4 层 tier：read-only\|workspace\|auto-edit\|bypass。**WS 客户端不能指定 permission**（InitConfig 无此字段） |
+| tools | allowed/disallowed（config + init metadata；注：`DisallowedTools` 当前在创建时**丢失**，不入 SessionStartParams/DB） |
+| sandbox | `codex_cli.sandbox`、per-bot 覆盖（经 `PlatformKey[_sandbox]` 注入 SessionInfo） |
+| budget/turns | `MaxBudgetUSD` / `MaxTurns`（worker 级 + session 级；注：`InitConfig.MaxTurns` 当前在创建时丢失） |
+| models | `AllowedModels`（注：`SessionStartParams` **无此字段**、`buildWorkerInfo` 不设置、`InitConfig.Model` 不流入——webchat 路径完全断线，为**已存在的碎片**；first-cut **不**顺手注入，见 §6 Non-goals 与 §10 F1） |
 
-### 2.3 当前构造点（resolver 将统一的入口）
-- **WS init**：`internal/gateway/conn.go`（4 处：~629/670/705/764）
-- **REST create-session**：`internal/gateway/api.go:352`
-- 其他（first-cut 可选纳入）：`internal/messaging/bridge.go:105`、`internal/cron/executor.go:71`、`internal/admin/sessions.go:44`
+### 2.3 当前构造点（两个构造层）
+- **入口层（构造 `SessionStartParams`，first-cut 接入点）**：
+  - **WS init**：`internal/gateway/conn.go`（4 处：~629/670/705/764；`InitData`/`InitConfig` 见 init.go:21-47，**InitConfig 无 PermissionMode 字段**，含 Model/SystemPrompt/AllowedTools/DisallowedTools/MaxTurns/WorkDir）
+  - **REST create-session**：`internal/gateway/api.go:352`（handler `CreateSession` @ :191，请求体仅 WorkspaceID/ClientSessionID/Title/WorkerType @ :201）
+  - 两者最终都调 `Bridge.StartSession(ctx, SessionStartParams)`（bridge.go:233）
+- **bridge 层（构造 `SessionInfo`，first-cut 不动）**：`Bridge.buildWorkerInfo`（bridge.go:1092）从 DB 记录 + workspace store + bridge 默认值构造 SessionInfo（AllowedTools 从 DB 恢复、PermissionMode 从 ceiling/workspace 解析、Sandbox/ACPCommand 从 PlatformKey、ConfigEnv/ConfigBlocklist 从 worker config）；**不设置** AllowedModels/DisallowedTools/SystemPrompt/MaxTurns/MaxBudgetUSD/AllowedDirs/SkipPermissions（首次 Start 为零值）。
+- 其他入口（first-cut 不纳入）：`internal/messaging/bridge.go:105`、`internal/cron/executor.go:71`、`internal/admin/sessions.go:44`。
 
 ### 2.4 workspace 权限覆盖
-`Bridge.resolveWorkspacePermissionMode`（`internal/gateway/bridge_worker.go:526`）+ `defaultPermissionMode atomic.Value`（r3 #804）。first-cut 中，**调用方先解析 workspace 覆盖，再把结果作为输入传给 resolver**（保持 resolver 纯净、可表驱动测试，不依赖 store）。
+`Bridge.resolveWorkspacePermissionMode`（`internal/gateway/bridge_worker.go:526`）+ `defaultPermissionMode atomic.Value`（r3 #804，seed `"workspace"`）。**该解析发生在 bridge 层（buildWorkerInfo:1095），不在入口层**——入口层的 `SessionStartParams` 无 permission 字段。因此 first-cut 入口层归一化**不处理 permission**；AgentSpec 仍计算 `PolicySpec.PermissionMode` 作为契约（供 bridge 层后续接入与下游消费），但 first-cut 不把它写回任何生效路径。
 
 ---
 
@@ -150,6 +154,9 @@ type InitMetadata struct {
 func MapToStartParams(spec AgentSpec, base worker.SessionStartParams) worker.SessionStartParams
 func MapToSessionInfo(spec AgentSpec, base worker.SessionInfo) worker.SessionInfo
 ```
+- **两个 mapper 的接入层不同（修订 F8）**：
+  - `MapToStartParams`：first-cut **接入生效路径**——在入口层（conn.go / api.go）由共享 `buildInput → Resolve → MapToStartParams` 构造 `SessionStartParams`，shadow 验证后替换旧内联构造。
+  - `MapToSessionInfo`：first-cut **仅提供 + 单测，作为契约**，**不接入**生效路径——因为 `SessionInfo` 在 bridge 层 `buildWorkerInfo`（bridge.go:1092）构造、且该函数服务**所有**会话路径（messaging/cron/resume/admin）。把 AgentSpec 接入 bridge 是更高风险的独立变更，列为后续 slice（见 §9 后续衔接）。first-cut 中 PolicySpec/SandboxSpec/BudgetSpec 被 Resolve 计算（契约完整 + 供 shadow 对比与下游消费），但其 SessionInfo 写入在 first-cut 不生效。
 - **PermissionMode tier → worker 专属语义（修订 F2）**：取证表明当前**不存在**单一的"tier → worker 启动参数"统一映射函数可供委托。现有 permission 相关代码是**运行时请求处理**，而非启动参数映射：`permissionModeFromCodexEffective`（codexcli:809）、`preparePermissionModeRequest`（claudecode:686）、`handleSetPermissionMode`（acp:958）、`MapPermissionRequest`（acp/mapper:407）、`setPermissionMode`（opencodeserver/commands:249）。各 worker 的 tier→启动参数映射目前**内联在各自 adapter** 里。
   - 因此 first-cut **收窄** AgentSpec 的职责：AgentSpec 只产出**归一化的 permission tier**（`PolicySpec.PermissionMode`），tier→各 worker 原生启动参数的翻译**保留在各 adapter 既有内联路径**，MapTo* 仅把 tier 写入 `SessionInfo.PermissionMode` 等现有字段，**不**在 agentspec 内重写映射。
   - 若后续要消除内联分歧，属独立 pre-work（"抽取共享 tier→native 映射"），**不在 first-cut 范围**；first-cut 的行为必须与现状逐 worker 一致（§4 矩阵逐行断言）。
@@ -159,6 +166,8 @@ func MapToSessionInfo(spec AgentSpec, base worker.SessionInfo) worker.SessionInf
 ### 3.4.1 字段所有权与优先级（修订 F6）
 
 MapTo* 的"幂等覆盖"必须明确**哪些字段由 AgentSpec 拥有（会覆盖 base）**、**哪些字段属保留路径（base 原样保留）**，否则幂等性无法测试、易误清非归一化字段。
+
+> **first-cut 接入范围（修订 F8）**：下表中仅 `SessionStartParams` 字段（`WorkerType`、`AllowedTools`，及其余入口层 identity 字段 UserID/BotID/BotName/WorkDir/Platform/PlatformKey/Title/ClientKey/WorkspaceID/InjectExclude 的透传）经 `MapToStartParams` **接入生效路径**；`SessionInfo` 专属字段（`PermissionMode`/`SkipPermissions`/`DisallowedTools`/`AllowedModels`/`Sandbox`/`AllowedDirs`/`MaxTurns`/`MaxBudgetUSD`）在 first-cut 仅为**契约 + 单测**（`MapToSessionInfo`），不写入生效路径，留待 bridge 层后续 slice。
 
 **AgentSpec 拥有字段**（MapTo* 用 AgentSpec 值覆盖 base；AgentSpec 零值语义为"不覆盖/沿用 base"，不写空）：
 
@@ -184,10 +193,12 @@ MapTo* 的"幂等覆盖"必须明确**哪些字段由 AgentSpec 拥有（会覆�
 - 保留路径字段：base 恒胜，AgentSpec 不参与。
 - resume 语义特殊：resume/fork 字段**只在 base 出现时生效**，AgentSpec 永不覆盖（避免归一化破坏断点续传）。
 
-### 3.5 集成（first-cut 仅两处，保证 WS≡REST）
-- `internal/gateway/conn.go`（WS init）与 `internal/gateway/api.go:352`（REST create-session）改为：共用同一 `buildInput()` 采集 `Input` → `Resolve` → `MapToStartParams/MapToSessionInfo` → 现有 `StartSession`。
+### 3.5 集成（first-cut 仅入口层两处，保证 WS≡REST，修订 F8）
+- `internal/gateway/conn.go`（WS init，4 处 ~629/670/705/764）与 `internal/gateway/api.go:352`（REST create-session）改为：共用同一 `buildInput()` 采集 `Input` → `Resolve` → **`MapToStartParams`** → `Bridge.StartSession(ctx, SessionStartParams)`。
+- **first-cut 不接 bridge 层**（修订 F8）：`SessionInfo` 由 `Bridge.buildWorkerInfo`（bridge.go:1092）构造、服务所有会话路径；`MapToSessionInfo` 在 first-cut **仅提供 + 单测**（契约），不接入生效路径。PermissionMode/Sandbox/AllowedModels 等 SessionInfo 字现行 bridge 解析逻辑**原样保留**，first-cut 不改其行为。
+- **shadow 模式（修订 F7）**：集成初期 `buildInput → Resolve → MapToStartParams` 的产物与旧内联构造的 `SessionStartParams` **并行对比**（旧构造为权威，AgentSpec 旁路 diff 记录、不生效）；diff 归零/可解释后切换 AgentSpec 产物为权威，保留回退旧路径的开关。
 - **等价性不变量（修订 F4）**：对纯函数 resolver 而言"WS≡REST 等价"若不约束输入采集就是**同义反复**。真正的等价性保证落在 **`buildInput()` 共用**上——两路径必须把**语义相同的请求**映射成**相同的 `Input`**，再由纯函数 `Resolve` 产出相同 AgentSpec。
-  - **已存在的分歧（必须正视，不得掩盖）**：取证显示 WS init（`conn.go:629`）会传 `AllowedTools: initData.Config.AllowedTools`，而 REST create（`api.go:352`）**不**传 AllowedTools。这是一个先于本设计的真实行为差异。
+  - **已存在的分歧（必须正视，不得掩盖）**：取证显示 WS init（`conn.go:629`）会传 `AllowedTools: initData.Config.AllowedTools`，而 REST create（`api.go:352`）**不**传 AllowedTools（REST 请求体 api.go:201 仅有 WorkspaceID/ClientSessionID/Title/WorkerType）。这是一个先于本设计的真实行为差异。
   - **first-cut 处置**：`buildInput()` 对两路径采用**同一套字段抽取逻辑**；若某字段（如 AllowedTools）在 REST 请求体中本无对应来源，则 `Input.InitMeta.AllowedTools` 为 nil（未声明），而非凭空注入——**保持现状语义，不借等价性之名引入行为变更**。若决定让 REST 也接受 AllowedTools，那是**独立的行为变更**，需单列并在验收中显式标注，不混入本等价性不变量。
   - 等价性测试因此断言：**给定两个字段语义等价的请求对象，WS 与 REST 各自的 `buildInput()` 产出相等的 `Input`** → `Resolve` 产出相等的 AgentSpec。
 - messaging/cron/admin 路径 first-cut **不改**（保留现状），后续按需纳入（避免一次性大改）。
@@ -205,15 +216,19 @@ MapTo* 的"幂等覆盖"必须明确**哪些字段由 AgentSpec 拥有（会覆�
 
 每行至少一个表驱动用例：仅设 worker_type 的旧配置 → 正确默认；显式覆盖 → 覆盖生效；未知 type → error。
 
+> **矩阵解读（修订 F2/F8）**：permission/sandbox/model 列描述的是**各 worker 侧 operator 配置现状**（CC 单字段 / Codex Sandbox+ApprovalMode / ACP AutoApprove / OCS 无字段），**非** first-cut AgentSpec 归一化产物。first-cut 表驱动测试实际断言的是：`WorkerType` 归一化（5 级 fallback）+ `AllowedTools` 透传 + 未知 type 拒绝 + secret-free + WS≡REST 等价。permission/sandbox/model 的完整归一化是 `MapToSessionInfo` 契约（单测覆盖），bridge 层接入留待后续 slice。
+
 ---
 
 ## 5. 验收标准（对齐 #847）
 
-- [ ] 表驱动测试覆盖 4 个 worker type 的归一化与映射。
+- [ ] 表驱动测试覆盖 4 个 worker type 的 `WorkerType` 归一化（5 级 fallback 逐级断言，修订 F3）+ `AllowedTools` 透传 + 未知 type 拒绝。
 - [ ] 仅设 `worker_type` 的旧配置仍能启动 session（向后兼容）。
 - [ ] 未知 worker type 在 `Resolve` 边界被拒绝（error）。
 - [ ] AgentSpec 可 log/audit 且**不含 secret**（断言无 key/env 值字段）。
 - [ ] WS init 与 REST create-session **共用 `buildInput()`**；对字段语义等价的请求，两路径产出相等 `Input` 进而相等 AgentSpec（等价性测试，修订 F4）。AllowedTools 等 REST 无来源的字段保持 nil，不得借等价性注入（F1）。
+- [ ] **入口层 shadow 验证（修订 F7/F8）**：`buildInput → Resolve → MapToStartParams` 与旧内联构造的 `SessionStartParams` 并行 diff 归零/可解释；回退开关可用。bridge 层 `SessionInfo` 构造行为**不变**（first-cut 不接 bridge）。
+- [ ] `MapToSessionInfo` 作为契约提供并单测（幂等 + 保留路径字段不触碰，§3.4.1），但 first-cut **不接入**生效路径。
 - [ ] `docs/reference/configuration.md` 与 `docs/v2/API-DESIGN.md` 更新。
 - [ ] `make check` 与 `make docs-build` 通过。
 
@@ -237,7 +252,7 @@ MapTo* 的"幂等覆盖"必须明确**哪些字段由 AgentSpec 拥有（会覆�
 | worker_type 无单一解析入口 | 仅 `propagatePlatform` 落一级，无 `ResolveWorkerType`（修订 F3） | pre-work (a) config 增薄 `ResolveWorkerType` 收敛 5 级链，或 (b) agentspec 内镜像解析 + 逐级回归；行为不得偏离现状 |
 | WS≡REST 等价性 | 两路径输入采集可能漂移；REST 不传 AllowedTools 是先存分歧 | 共用 `buildInput()`（修订 F4）；REST 无来源字段保持 nil，不借等价性注入行为变更 |
 | 无灰度/回滚路径 | 直接替换构造路径风险集中（修订 F7） | 采用 shadow 模式：并行计算 AgentSpec 与旧路径产物对比、记录 diff 观测后再切换；回滚=回退到旧构造路径（§10 F7） |
-| workspace 覆盖输入耦合 | resolver 不应依赖 store | workspace permission 由调用方解析后作为 Input 字段传入 |
+| workspace 覆盖输入耦合 | resolver 不应依赖 store | workspace permission 由调用方解析后作为 `Input.WorkspacePerm` 传入（修订 F8：first-cut 入口层 buildInput 传 `""`——permission 实际在 bridge 层 `resolveWorkspacePermissionMode` 解析；该 Input 字段为契约/`MapToSessionInfo` 单测/后续 bridge 接入保留） |
 
 ## 8. 测试计划
 - `internal/agentspec/resolver_test.go`：表驱动，4 worker × {默认/显式覆盖/未知 type}；secret-free 断言；WS≡REST 等价性（共用 `buildInput()`，字段语义等价请求 → 相等 `Input` → 相等 AgentSpec，修订 F4）。
@@ -247,6 +262,7 @@ MapTo* 的"幂等覆盖"必须明确**哪些字段由 AgentSpec 拥有（会覆�
 - 回归：现有 gateway/conn/api/session 测试不破（`make check`）。
 
 ## 9. 后续衔接
+- **bridge 层 SessionInfo 接入（first-cut 后续 slice，修订 F8）**：把 `MapToSessionInfo` 接入 `Bridge.buildWorkerInfo`（bridge.go:1092），让 AgentSpec 的 Policy/Sandbox/Budget 归一化在 SessionInfo 层生效；因该函数服务所有会话路径（messaging/cron/resume/admin），需独立的 shadow 验证与逐路径回归，**不在 first-cut**。
 - #848 在 AgentSpec.IdentityRefs 之上定义 `AgentIdentity` 值对象并落 `context_json`。
 - #849/#850 从 AgentSpec 派生 runtime metadata keys（agent_id/worker_type/workspace_id）。
 - #866 持久化 `EffectiveAgentSpecSnapshot`（secret-free 序列化）。
@@ -264,6 +280,7 @@ MapTo* 的"幂等覆盖"必须明确**哪些字段由 AgentSpec 拥有（会覆�
 | **F5** | LOW | §3.1 称"必须新增 agentspec 包解决 import cycle" | 依赖为**单向**（worker→config；config 不 import worker；gateway 两者都 import），新包**非强制** | 改述为"推荐，偏好非约束"，补 3 条理由（隔离/可测/稳定 import 目标）（§3.1/§7） |
 | **F6** | LOW | "映射幂等覆盖"语义欠精确 | — | 新增 §3.4.1 字段所有权表：AgentSpec 拥有字段 vs 保留路径字段（resume/MCPConfig/SystemPrompt/ConfigEnv），含优先级冲突规则（resume 恒由 base 生效） |
 | **F7** | LOW | `Input.InitMetadata` 未定义；无灰度/回滚 | — | §3.3 定义 `InitMetadata`（显式 vs 未声明区分）；§7/§8 增 shadow 模式并行 diff + 回滚预案 |
+| **F8** | HIGH | §3.5 "conn/api: Resolve → MapToStartParams/**MapToSessionInfo** → StartSession" | **StartSession 只接收 `SessionStartParams`，不接收 `SessionInfo`**（bridge.go:233）；`SessionInfo` 在 `Bridge.buildWorkerInfo`（bridge.go:1092）内构造、服务所有会话路径。permission/sandbox/AllowedModels 是 **bridge 层**职责（PermissionMode 从 DB ceiling + `resolveWorkspacePermissionMode`，WS 客户端无法指定——InitConfig 无此字段）。原 §3.5 集成模型**事实错误** | first-cut 收窄到**入口层**：只接 `MapToStartParams`（构造 SessionStartParams），shadow 验证；`MapToSessionInfo` 仅契约 + 单测，bridge 层 SessionInfo 接入列为后续 slice。§2.1/§2.3/§2.4/§3.4/§3.5/§4/§5 全面对齐 |
 
 **未改动的有效断言**（取证通过，保留）：
 - 映射目标 `worker.SessionStartParams`/`SessionInfo` 字段布局（§2.1）与 HEAD 一致。

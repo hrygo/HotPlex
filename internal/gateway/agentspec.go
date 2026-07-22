@@ -1,0 +1,72 @@
+package gateway
+
+import (
+	"log/slog"
+	"slices"
+
+	"github.com/hrygo/hotplex/internal/agentspec"
+	"github.com/hrygo/hotplex/internal/worker"
+)
+
+// BuildWebChatInput assembles the agentspec.Input for a webchat session-creation
+// entry. It is the single shared "buildInput" used by both the WS init path and
+// the REST create-session path (design spec §3.5, findings F4/F8): the two
+// entries differ only in their INPUTS — WS carries initData.AllowedTools while
+// REST has no AllowedTools source (nil) — so the WS≡REST equivalence reduces to
+// "same semantic request → same Input → same AgentSpec" via the pure Resolver.
+//
+// workerType is the entry's already-resolved value (WS: initData.WorkerType;
+// REST: body > query > workspace.WorkerPreference > default). Config is not
+// needed: webchat worker_type is request-driven, not the config 5-level fallback
+// (that applies only to messaging platforms).
+func BuildWebChatInput(workerType worker.WorkerType, allowedTools []string, userID, workspaceID string) agentspec.Input {
+	return agentspec.Input{
+		InitMeta: agentspec.InitMetadata{
+			WorkerType:   string(workerType),
+			AllowedTools: allowedTools,
+		},
+		Platform:    platformWebChat,
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+	}
+}
+
+// ShadowCompareStartParams runs the agentspec normalization for a webchat entry
+// and logs any divergence from the legacy SessionStartParams. It is purely
+// OBSERVATIONAL in first-cut: it recovers from any panic and never influences
+// the params actually used (the legacy construction stays authoritative — design
+// spec §3.5, finding F8). It exists to prove WS≡REST equivalence in production
+// ahead of switching the agentspec path to authoritative in a follow-up slice.
+//
+// Divergences are logged at two levels:
+//   - resolve errors (e.g. an unknown worker_type the live WS path tolerates but
+//     the resolver's boundary rejects) → Debug: an expected, explained divergence
+//     reserved for a future validation-unification decision.
+//   - field mismatches on the AgentSpec-owned StartParams fields (WorkerType,
+//     AllowedTools) → Warn: a genuine surprise worth investigating.
+func ShadowCompareStartParams(log *slog.Logger, in agentspec.Input, legacy worker.SessionStartParams) {
+	if log == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debug("agentspec shadow: recovered panic", "recover", r)
+		}
+	}()
+
+	spec, err := (agentspec.Resolver{}).Resolve(in)
+	if err != nil {
+		log.Debug("agentspec shadow: resolve divergence",
+			"err", err, "legacy_worker_type", legacy.WorkerType)
+		return
+	}
+
+	if worker.WorkerType(spec.Worker.Type) != legacy.WorkerType {
+		log.Warn("agentspec shadow: worker_type divergence",
+			"agentspec", spec.Worker.Type, "legacy", legacy.WorkerType)
+	}
+	if !slices.Equal(spec.Policy.AllowedTools, legacy.AllowedTools) {
+		log.Warn("agentspec shadow: allowed_tools divergence",
+			"agentspec", spec.Policy.AllowedTools, "legacy", legacy.AllowedTools)
+	}
+}

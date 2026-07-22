@@ -349,7 +349,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = g.sm.DeletePhysical(r.Context(), id)
 	}
 
-	if err := g.bridge.StartSession(r.Context(), worker.SessionStartParams{
+	startParams := worker.SessionStartParams{
 		ID:          id,
 		UserID:      userID,
 		BotID:       botID,
@@ -359,7 +359,13 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		Title:       title,
 		ClientKey:   clientSessionID,
 		WorkspaceID: sessionWorkspaceID,
-	}); err != nil {
+	}
+	// AgentSpec shadow (#847, findings F4/F8): observationally verify the
+	// normalized construction agrees with this legacy shape. REST has no
+	// AllowedTools source (nil) — the documented WS≠REST divergence. The legacy
+	// params stay authoritative in first-cut.
+	ShadowCompareStartParams(g.log, BuildWebChatInput(wt, nil, userID, sessionWorkspaceID), startParams)
+	if err := g.bridge.StartSession(r.Context(), startParams); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to create session")
 		return

@@ -141,7 +141,7 @@ func Default() *Config {
 		Messaging: MessagingConfig{
 			TurnSummaryEnabled: true,
 			// Shared defaults — propagated to platforms via propagateMessagingDefaults().
-			WorkerType: "claude_code",
+			WorkerType: DefaultWorkerType,
 			STTConfig: STTConfig{
 				Provider:     "local",
 				LocalCmd:     "python3 " + filepath.Join(HotplexHome(), "scripts", "stt_server.py"),

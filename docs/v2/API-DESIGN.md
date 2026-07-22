@@ -84,6 +84,18 @@ budget:
 | `Budget.MaxTurns` | SessionInfo/worker config |
 | `Budget.MaxBudgetUSD` | Claude Code/Codex budget 参数 |
 
+### First-Cut 实现状态（#847）
+
+#847 交付了上述模型的**第一个落地切片**（`internal/agentspec` 包），是 v2 依赖链的根。它与本节"理想形态"的差异和边界如下：
+
+- **结构**：first-cut 采用 `AgentSpec = WorkerSpec + PolicySpec + SandboxSpec + BudgetSpec + IdentityRefs`（只读、secret-free）。`Name`/`Provider`/`Metadata` 尚未引入；`Identity` 仅持 ID 引用（`AgentIdentity` 值对象是 #848）。
+- **归一化器**：`agentspec.Resolver.Resolve(Input) (AgentSpec, error)` 为纯函数（worker_type 校验可注入，permission tier 校验为静态映射），便于表驱动测试与 WS≡REST 等价性证明。
+- **worker_type**：messaging 平台走 `config.ResolveWorkerType(platform, botName)` 的 5 级 fallback（per-bot → platform YAML/env → messaging 共享默认 → 编译默认 `claude_code`）；**WebChat 为请求驱动，不走 config fallback**（body/query → workspace.WorkerPreference → default）。
+- **映射**：`MapToStartParams` / `MapToSessionInfo` 幂等覆盖现有 `worker.SessionStartParams` / `worker.SessionInfo`，不改 Worker 接口。字段所有权见设计 spec §3.4.1。
+- **接入范围（F8）**：first-cut 仅把 `MapToStartParams` 接入 **WebChat 入口层**（WS init + REST create），且以 **shadow 模式**运行（旁路对比旧构造、记录 diff，旧路径仍为权威，零行为变更）。`SessionInfo` 由 bridge 层 `buildWorkerInfo` 构造、服务所有会话路径，故 `MapToSessionInfo` first-cut **仅提供+单测（契约），不接入生效路径**——bridge 接入为后续 slice。
+- **明确不做（first-cut）**：不注入 `AllowedModels`（F1，行为变更）；不在 agentspec 内重写 permission tier→worker 原生参数映射（F2，保留在各 adapter 内联）；不改 messaging/cron/admin 路径。
+- 详见设计 spec：`docs/superpowers/specs/2026-07-21-agentspec-runtime-model-design.md`（含独立审查修订记录 F1-F8）。
+
 ## Agent Identity
 
 Agent identity 绑定在 session 上，并传播到 event、audit、trace。
