@@ -119,11 +119,15 @@ func (f *Facade) Load(ctx context.Context, sessionID string, opts ContextLoadOpt
 		}
 	}
 
-	// Turns: best-effort. Negative limit skips. Zero → default.
+	// Turns: best-effort. Negative limit skips. Zero → default. Capped at
+	// MaxAllowedTurns so a misconfigured limit can't trigger an unbounded scan.
 	if f.turns != nil && opts.MaxTurns >= 0 {
 		limit := opts.MaxTurns
 		if limit == 0 {
 			limit = DefaultMaxTurns
+		}
+		if limit > MaxAllowedTurns {
+			limit = MaxAllowedTurns
 		}
 		turns, tErr := f.turns.RecentTurns(ctx, sessionID, limit)
 		if tErr != nil {
@@ -145,11 +149,15 @@ func (f *Facade) Load(ctx context.Context, sessionID string, opts ContextLoadOpt
 		}
 	}
 
-	// Events: best-effort. Negative limit skips. Zero → default.
+	// Events: best-effort. Negative limit skips. Zero → default. Capped at
+	// MaxAllowedEvents (same resource-bound guard as turns above).
 	if f.events != nil && opts.MaxEvents >= 0 {
 		limit := opts.MaxEvents
 		if limit == 0 {
 			limit = DefaultMaxEvents
+		}
+		if limit > MaxAllowedEvents {
+			limit = MaxAllowedEvents
 		}
 		events, eErr := f.events.RecentEvents(ctx, sessionID, limit)
 		if eErr != nil {

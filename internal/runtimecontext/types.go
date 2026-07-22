@@ -181,6 +181,15 @@ type ContextLoadOptions struct {
 const (
 	DefaultMaxTurns  = 20
 	DefaultMaxEvents = 50
+
+	// MaxAllowedTurns / MaxAllowedEvents cap a caller-supplied limit so a
+	// misconfigured huge MaxTurns/MaxEvents cannot turn Load into an unbounded
+	// scan (resource bound). Silently capped, not rejected: Load is a
+	// best-effort observer that never errors on an optional source, and a capped
+	// limit still returns the most-recent N. The caps are 50×/100× the defaults
+	// — generous for any diagnostics/history view.
+	MaxAllowedTurns  = 1000
+	MaxAllowedEvents = 5000
 )
 
 // ContextUpdate is reserved for a future read-write slice of the runtime-context

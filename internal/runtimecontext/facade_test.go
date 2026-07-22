@@ -186,6 +186,24 @@ func TestLoad_ExplicitLimitsRespected(t *testing.T) {
 	require.Equal(t, 7, er.lastLimit)
 }
 
+func TestLoad_LimitsCappedAtMaxAllowed(t *testing.T) {
+	t.Parallel()
+	er := &fakeEventReader{events: []EventSummary{}}
+	tr := &fakeTurnReader{turns: []TurnSummary{}}
+	f := NewFacade(&fakeSessionReader{sess: sampleSessionCtx()}, er, tr, &fakeWorkspaceReader{ws: &WorkspaceContext{ID: "ws-1"}}, quietLogger())
+
+	// Limits far above the cap are silently clamped — a misconfigured huge
+	// MaxTurns/MaxEvents must not turn Load into an unbounded scan, and Load
+	// never errors on an optional source's limit.
+	_, err := f.Load(context.Background(), "s1", ContextLoadOptions{
+		MaxTurns:  MaxAllowedTurns * 16,
+		MaxEvents: MaxAllowedEvents * 16,
+	})
+	require.NoError(t, err)
+	require.Equal(t, MaxAllowedTurns, tr.lastTurnsLimit, "turns limit capped")
+	require.Equal(t, MaxAllowedEvents, er.lastLimit, "events limit capped")
+}
+
 func TestLoad_BestEffort_EventsErrorIgnored(t *testing.T) {
 	t.Parallel()
 	er := &fakeEventReader{err: errors.New("eventstore transient")}
