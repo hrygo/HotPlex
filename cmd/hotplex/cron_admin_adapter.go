@@ -42,6 +42,9 @@ func (a *cronAdminAdapter) CreateJob(ctx context.Context, raw any) error {
 	if job.BotID == "" {
 		job.BotID = "system"
 	}
+	if job.Payload.Kind == "" {
+		job.Payload.Kind = cron.PayloadIsolatedSession
+	}
 	if job.Schedule.Kind != cron.ScheduleAt {
 		if job.MaxRuns <= 0 {
 			job.MaxRuns = 1000

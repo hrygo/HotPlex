@@ -109,7 +109,7 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
     }
 
     const payload: Record<string, unknown> = {
-      kind: 'agent_task',
+      kind: 'isolated_session',
       message: message.trim(),
     };
 
