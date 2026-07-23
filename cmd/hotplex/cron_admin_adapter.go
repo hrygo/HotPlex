@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/cron"
 	"github.com/hrygo/hotplex/internal/eventstore"
@@ -43,10 +44,10 @@ func (a *cronAdminAdapter) CreateJob(ctx context.Context, raw any) error {
 	}
 	if job.Schedule.Kind != cron.ScheduleAt {
 		if job.MaxRuns <= 0 {
-			job.MaxRuns = 10000
+			job.MaxRuns = 1000
 		}
 		if job.ExpiresAt == "" {
-			job.ExpiresAt = "2099-12-31T23:59:59Z"
+			job.ExpiresAt = time.Now().UTC().AddDate(1, 0, 0).Format(time.RFC3339)
 		}
 	}
 

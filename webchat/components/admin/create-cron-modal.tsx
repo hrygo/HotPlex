@@ -58,6 +58,7 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
   const [botSelection, setBotSelection] = useState<string>('system');
   const [customBotId, setCustomBotId] = useState('');
 
+  const [expiresAt, setExpiresAt] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +134,13 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
       const parsedMax = parseInt(maxRuns.trim(), 10);
       if (!isNaN(parsedMax) && parsedMax > 0) {
         body.max_runs = parsedMax;
+      }
+    }
+
+    if (expiresAt.trim()) {
+      const d = new Date(expiresAt.trim());
+      if (!isNaN(d.getTime())) {
+        body.expires_at = d.toISOString();
       }
     }
 
@@ -284,37 +292,38 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
             />
           </div>
 
-          {/* Target Bot Selector & Max Runs */}
+          {/* Target Bot Selector */}
+          <div>
+            <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+              {t('admin:cron.modal.label_bot_id', { defaultValue: 'Target Bot / Worker Engine' })}
+            </label>
+            <select
+              value={botSelection}
+              onChange={(e) => setBotSelection(e.target.value)}
+              className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors cursor-pointer"
+            >
+              <option value="system">🤖 Default System Worker (系统默认)</option>
+              {bots.map((b) => (
+                <option key={b.bot_id || b.name} value={b.bot_id || b.name}>
+                  {b.name} ({b.platform} — ID: {b.bot_id || b.name})
+                </option>
+              ))}
+              <option value="custom">✏️ Custom Bot ID...</option>
+            </select>
+
+            {botSelection === 'custom' && (
+              <input
+                type="text"
+                value={customBotId}
+                onChange={(e) => setCustomBotId(e.target.value)}
+                placeholder="Enter custom Bot ID"
+                className="w-full mt-2 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2 text-xs font-mono text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
+              />
+            )}
+          </div>
+
+          {/* Max Runs & Expires At */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
-                {t('admin:cron.modal.label_bot_id', { defaultValue: 'Target Bot / Worker Engine' })}
-              </label>
-              <select
-                value={botSelection}
-                onChange={(e) => setBotSelection(e.target.value)}
-                className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors cursor-pointer"
-              >
-                <option value="system">🤖 Default System Worker (系统默认)</option>
-                {bots.map((b) => (
-                  <option key={b.bot_id || b.name} value={b.bot_id || b.name}>
-                    {b.name} ({b.platform} — ID: {b.bot_id || b.name})
-                  </option>
-                ))}
-                <option value="custom">✏️ Custom Bot ID...</option>
-              </select>
-
-              {botSelection === 'custom' && (
-                <input
-                  type="text"
-                  value={customBotId}
-                  onChange={(e) => setCustomBotId(e.target.value)}
-                  placeholder="Enter custom Bot ID"
-                  className="w-full mt-2 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2 text-xs font-mono text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
-                />
-              )}
-            </div>
-
             <div>
               <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                 {t('admin:cron.modal.label_max_runs', { defaultValue: 'Max Runs (Execution Limit)' })}
@@ -323,10 +332,47 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
                 type="number"
                 value={maxRuns}
                 onChange={(e) => setMaxRuns(e.target.value)}
-                placeholder="Unlimited (Default 10000)"
+                placeholder={t('admin:cron.modal.placeholder_max_runs', { defaultValue: 'Default 1000 (默认 1000 次)' })}
                 min={1}
                 className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                {t('admin:cron.modal.label_expires_at', { defaultValue: 'Expiration Time (过期时间)' })}
+              </label>
+              <input
+                type="datetime-local"
+                value={expiresAt}
+                onChange={(e) => setExpiresAt(e.target.value)}
+                className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
+              />
+              <div className="flex items-center gap-1.5 pt-1">
+                <span className="text-[10px] text-[var(--text-faint)]">Preset:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() + 6);
+                    setExpiresAt(d.toISOString().slice(0, 16));
+                  }}
+                  className="px-2 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent-gold)] transition-colors"
+                >
+                  +6 Mo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setFullYear(d.getFullYear() + 1);
+                    setExpiresAt(d.toISOString().slice(0, 16));
+                  }}
+                  className="px-2 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent-gold)] transition-colors"
+                >
+                  +1 Yr (Default 12Mo)
+                </button>
+              </div>
             </div>
           </div>
 
