@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/skills";
 import { TabPanel } from "./tab-panel";
 import { useTranslation } from "react-i18next";
+import { useResource } from "@/hooks/use-resource";
 
 // Badge color helper — managed (writable) vs external (read-only) provenance.
 function Badge({
@@ -42,9 +43,11 @@ interface SkillsTabProps {
 
 export function SkillsTab({ workspace }: SkillsTabProps) {
     const { t } = useTranslation(["chat", "common"]);
-    const [skills, setSkills] = useState<Skill[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const { data: skillsData, loading, error, reload } = useResource<Skill[]>(
+        async () => (await listWorkspaceSkills(workspace.id)).skills ?? [],
+        [workspace.id],
+    );
+    const skills = skillsData ?? [];
 
     // Search and Pagination States
     const [search, setSearch] = useState("");
@@ -80,7 +83,6 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
     const [uploadError, setUploadError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const abortRef = useRef<AbortController | null>(null);
     const isMounted = useRef(false);
     const detailAbortRef = useRef<AbortController | null>(null);
 
@@ -96,37 +98,13 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         }, 5000);
     };
 
-    const load = useCallback(async () => {
-        abortRef.current?.abort();
-        const ctrl = new AbortController();
-        abortRef.current = ctrl;
-
-        if (isMounted.current) {
-            setLoading(true);
-            setError(null);
-        }
-
-        try {
-            const res = await listWorkspaceSkills(workspace.id, ctrl.signal);
-            if (ctrl.signal.aborted || !isMounted.current) return;
-            setSkills(res.skills || []);
-        } catch (err) {
-            if (ctrl.signal.aborted || !isMounted.current) return;
-            setError(err instanceof Error ? err.message : "Load failed");
-        } finally {
-            if (!ctrl.signal.aborted && isMounted.current) setLoading(false);
-        }
-    }, [workspace.id]);
-
     useEffect(() => {
         isMounted.current = true;
-        load();
         return () => {
             isMounted.current = false;
-            abortRef.current?.abort();
             if (statusTimer.current) clearTimeout(statusTimer.current);
         };
-    }, [load]);
+    }, []);
 
     const onPickFile = (f: File | null) => {
         if (f && !/\.zip$/i.test(f.name)) {
@@ -158,7 +136,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                 file,
                 replace,
             );
-            await load();
+            await reload();
             if (!isMounted.current) return;
             setShowUpload(false);
             setFile(null);
@@ -259,7 +237,7 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
         try {
             setActionLoading(name);
             await deleteWorkspaceSkill(workspace.id, name);
-            await load();
+            await reload();
             if (isMounted.current) {
                 showStatus(
                     "success",

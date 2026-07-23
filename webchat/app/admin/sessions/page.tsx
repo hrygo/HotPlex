@@ -83,27 +83,19 @@ export default function SessionsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (drawerSession?.id) {
-      setDrawerTab('overview');
-      loadDrawerData(drawerSession.id);
-    } else {
-      setDrawerDetail(null);
-      setDrawerStats(null);
-      setDrawerDebug(null);
-      setDrawerActivities([]);
-    }
-  }, [drawerSession?.id, loadDrawerData]);
+  const openDrawer = useCallback((session: AdminSessionInfo) => {
+    setDrawerSession(session);
+    setDrawerTab('overview');
+    loadDrawerData(session.id);
+  }, [loadDrawerData]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && drawerSession) {
-        setDrawerSession(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [drawerSession]);
+  const closeDrawer = useCallback(() => {
+    setDrawerSession(null);
+    setDrawerDetail(null);
+    setDrawerStats(null);
+    setDrawerDebug(null);
+    setDrawerActivities([]);
+  }, []);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -120,7 +112,7 @@ export default function SessionsPage() {
         if (updated) {
           setDrawerSession(updated);
         } else {
-          setDrawerSession(null); // Session was deleted
+          closeDrawer(); // Session was deleted
         }
       }
     } catch (err) {
@@ -128,7 +120,7 @@ export default function SessionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [drawerSession, t]);
+  }, [drawerSession, t, closeDrawer]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time fetch
@@ -240,7 +232,7 @@ export default function SessionsPage() {
       setSessions((prev) => prev.filter((s) => s.id !== id));
 
       if (fromDrawer || (drawerSession && drawerSession.id === id)) {
-        setDrawerSession(null);
+        closeDrawer();
       }
 
       showToast(t('admin:sessions.toast.deleted', { id: truncateId(id), defaultValue: `Session "${truncateId(id)}" successfully deleted.` }), 'success');
@@ -260,12 +252,12 @@ export default function SessionsPage() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setDrawerSession(null);
+        closeDrawer();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [closeDrawer]);
 
   return (
     <div className="relative min-h-screen bg-[var(--bg-base)] px-6 py-8">
@@ -577,7 +569,7 @@ export default function SessionsPage() {
                 return (
                   <div
                     key={session.id}
-                    onClick={() => setDrawerSession(session)}
+                    onClick={() => openDrawer(session)}
                     className={`grid ${gridCols} gap-3 px-5 py-3.5 transition-all items-center cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
                       isSelected
                         ? 'bg-[var(--bg-active)] border-l-2 border-l-[var(--accent-gold)] pl-[18px]'
@@ -751,7 +743,7 @@ export default function SessionsPage() {
           {/* Backdrop blur overlay */}
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 animate-[fadeInUp_0.2s_ease-out]"
-            onClick={() => setDrawerSession(null)}
+            onClick={() => closeDrawer()}
           />
 
           <div className="absolute inset-y-0 right-0 max-w-full flex">
@@ -781,7 +773,7 @@ export default function SessionsPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDrawerSession(null)}
+                      onClick={() => closeDrawer()}
                       className="p-1.5 rounded-full text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all"
                       title={t('admin:sessions.drawer.close', { defaultValue: 'Close inspector' })}
                     >

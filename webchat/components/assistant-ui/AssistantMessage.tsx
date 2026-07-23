@@ -180,7 +180,9 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const isError = message?.status === "error";
   const ext = getExt(message);
-  const content = ext.content || [];
+  // Stable fallback so the reasoningActive useMemo below keeps a stable dep
+  // while content is absent (otherwise `|| []` mints a new array each render).
+  const content = useMemo(() => ext.content || [], [ext.content]);
   const custom = ext.metadata?.custom;
   const isStreaming = ext.status?.type === "running" || custom?.progress === "thinking" || custom?.progress === "accepted";
 

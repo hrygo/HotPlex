@@ -313,7 +313,6 @@ export function SessionPanel({
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
-                                // eslint-disable-next-line react/no-danger-with-children
                             >
                                 <path
                                     strokeLinecap="round"

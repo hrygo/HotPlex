@@ -34,7 +34,9 @@ export default function APIKeysPage() {
     async () => (await listAPIKeys()) ?? [],
     [],
   );
-  const keys = data ?? [];
+  // Stable fallback reference so `filteredKeys` useMemo isn't invalidated each
+  // render while data is still loading.
+  const keys = useMemo(() => data ?? [], [data]);
   const [query, setQuery] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 

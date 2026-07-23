@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
@@ -21,12 +21,23 @@ export default function CronPage() {
     () => listCronJobs(),
     [],
   );
-  const jobList = jobs ?? [];
+  // Memoize the fallback so the downstream `filtered` useMemo doesn't see a
+  // fresh `[]` reference on every render while jobs is still loading.
+  const jobList = useMemo(() => jobs ?? [], [jobs]);
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+
+  // "Recently run" highlight needs a current timestamp. Refresh it on an
+  // interval so the 15s window decays, instead of calling Date.now() during
+  // render (react-hooks/purity).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, []);
 
   function formatSchedule(s: CronJob['schedule']): string {
     if (!s) return '—';
@@ -302,7 +313,7 @@ export default function CronPage() {
 
             {/* Table Rows */}
             {filtered.map((job) => {
-              const isRecentlyRun = actionLoading === job.id || Boolean(job.state?.last_run_at_ms && Date.now() - job.state.last_run_at_ms < 15000);
+              const isRecentlyRun = actionLoading === job.id || Boolean(job.state?.last_run_at_ms && now - job.state.last_run_at_ms < 15000);
               return (
                 <div
                   key={job.id}
