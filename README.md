@@ -44,7 +44,7 @@
 ### 🛡️ Security & Operations
 - 🔒 **Enterprise-Grade Security** — Timing-safe API key authentication, SSRF protection with DNS rebinding defense, command/tool/model allowlists, environment isolation, and path traversal prevention.
 - 📊 **End-to-End Observability** — 30+ Prometheus metrics, OpenTelemetry distributed tracing with W3C TraceContext propagation, and structured JSON logging.
-- 🛠️ **Self-Contained CLI** — 13 subcommands in one binary: `gateway`, `service` (systemd/launchd/SCM), `onboard` (guided setup), `doctor` (25 diagnostic checks), `cron`, `slack`, `config`, `update` (self-update), `dev`, `status`, `security`, `install`, `version`.
+- 🛠️ **Self-Contained CLI** — 13 subcommands in one binary: `gateway`, `service` (systemd/launchd/SCM), `onboard` (guided setup), `doctor` (27 diagnostic checks), `cron`, `slack`, `config`, `update` (self-update), `dev`, `status`, `security`, `install`, `version`.
 - 🔄 **Hot-Reload Configuration** — YAML + env var configuration with runtime hot-reload, field-level audit trail, and versioned rollback — no restarts for most changes.
 
 ## ⚡ Quick Start
