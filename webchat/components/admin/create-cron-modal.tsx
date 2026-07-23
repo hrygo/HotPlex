@@ -150,7 +150,12 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
       onSuccess();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin:cron.modal.error_create_failed', { defaultValue: 'Failed to create cron job' }));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes('already exists') || msg.includes('cron_jobs.name') || msg.includes('409') || msg.toLowerCase().includes('unique')) {
+        setError(t('admin:cron.modal.error_name_exists', { defaultValue: 'A cron job with this name already exists. Please use a unique name.' }));
+      } else {
+        setError(msg || t('admin:cron.modal.error_create_failed', { defaultValue: 'Failed to create cron job' }));
+      }
     } finally {
       setSubmitting(false);
     }

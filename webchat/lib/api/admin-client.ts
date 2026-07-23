@@ -105,11 +105,22 @@ async function adminFetchBearer<T>(
     throw err;
   }
 
+  return parseResponseJson<T>(res);
+}
+
+async function parseResponseJson<T>(res: Response): Promise<T> {
   if (res.status === 204 || res.status === 202) {
     return undefined as unknown as T;
   }
-
-  return res.json();
+  const text = await res.text();
+  if (!text || !text.trim()) {
+    return undefined as unknown as T;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text as unknown as T;
+  }
 }
 
 // Cookie channel: embedded webchat (same-origin session cookie). Backend
@@ -141,11 +152,7 @@ async function adminFetchCookie<T>(
     throw err;
   }
 
-  if (res.status === 204 || res.status === 202) {
-    return undefined as unknown as T;
-  }
-
-  return res.json();
+  return parseResponseJson<T>(res);
 }
 
 // ---------------------------------------------------------------------------

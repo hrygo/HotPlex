@@ -108,6 +108,7 @@ func (a *AdminAPI) HandleCronCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	a.log.Info("admin: cron job created", "admin", adminKeyPrefix(r))
 	w.WriteHeader(http.StatusCreated)
+	respondJSON(w, map[string]any{"status": "created"})
 }
 
 // HandleCronUpdate updates an existing cron job.

@@ -660,6 +660,7 @@
       "error_schedule_required": "Cron 表达式必填。",
       "error_duration_invalid": "无效的时间间隔 (例如 30m, 1h, 24h)。",
       "error_at_required": "目标 ISO 时间戳必填。",
+      "error_name_exists": "已存在同名定时任务，请使用唯一的任务名称。",
       "error_create_failed": "创建定时任务失败"
     },
     "empty": {
