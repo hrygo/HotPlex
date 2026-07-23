@@ -15,11 +15,43 @@ description: HotPlex Gateway 运行时诊断。从症状逐层缩小到根因：
 
 ---
 
+## 诊断工具箱：先用内置工具
+
+HotPlex 自带一整套诊断 CLI 与 Admin API，**优先使用它们；手动 `ps`/`lsof`/`sqlite3`/`grep` 是深度补充，不是首选**。按阶段查表：
+
+| 阶段 | 内置工具（首选） | 手动命令（补充） |
+|------|-----------------|----------------|
+| 环境/配置基线 | `hotplex doctor`（27 checker / 10 category） | — |
+| 安全审计 | `hotplex security`（TLS / SSRF / 访问策略） | — |
+| 进程存活 | `hotplex status`、`hotplex service status`、`curl :8888/health` | `ps`、`lsof`、PID 文件 |
+| Worker 健康 | `GET :9999/admin/health/workers` | 进程级 `ps` |
+| Session 状态 | `GET :9999/admin/sessions`、`/admin/debug/sessions/{id}` | `sqlite3`（只读） |
+| 清理异常 session | `POST :9999/admin/sessions/{id}/terminate` | 手动 kill |
+| 静默丢弃 | `GET :9999/admin/metrics` → `gateway_*_dropped_total` | 日志交叉验证 |
+| 日志 | `hotplex service logs -f`、`GET :9999/admin/logs` | `grep` 文件 |
+
+**Admin API 认证**：`:9999` 下所有 `/admin/*` 端点需 Bearer token（`HOTPLEX_ADMIN_TOKEN_1`；webchat 内嵌 admin 可走 cookie fallback，详见 CLAUDE.md「Admin 后台双通道鉴权」）：
+
+```bash
+TOK=$(grep -E '^HOTPLEX_ADMIN_TOKEN_1=' ~/.hotplex/.env | cut -d= -f2)
+curl -s -H "Authorization: Bearer $TOK" http://localhost:9999/admin/health/workers | jq .
+```
+
+无需 token 的探针：`GET :8888/health`（gateway 存活）、`GET :9999/admin/health/ready`（就绪）。
+
+**端口口径**：Gateway `:8888`（WebSocket + HTTP，同时承载嵌入式 WebChat SPA，即生产前端入口）；Admin API `:9999`（诊断/管理/`/admin/metrics`）；WebChat dev `:3000`（仅 `make dev`，生产用 :8888）。
+
+**诊断顺序**：先 `hotplex doctor` + `hotplex status` 建立环境与进程基线 → 再按下方第一~六步逐层深入；每一步都先试内置工具，再用手动命令。
+
+---
+
 ## 第一步：进程与端口
 
 为什么先查进程 — 进程不在，后面所有的日志和状态都可能过时。
 
-确认组件存活：Gateway（8888）、WebChat（3000）、Admin（9999）、Worker 子进程（`claude --session-id` / `--resume`、`codex`、`opencode-server`、ACP agent via stdio JSON-RPC）。
+**首选内置**：`hotplex status`（查 PID + service 来源 + ping `/health`，exit 0=运行/1=未运行）、`hotplex service status`、`curl http://localhost:8888/health`。秒级确认 Gateway 存活；不足再用下面的手动方法。
+
+确认组件存活：Gateway（8888，含嵌入式 WebChat）、Admin API（9999）、WebChat dev（3000，仅 `make dev`）、Worker 子进程（`claude --session-id` / `--resume`、`codex`、`opencode-server`、ACP agent via stdio JSON-RPC）。
 
 检查要点：
 - PID 文件（`~/.hotplex/.pids/`）中的 PID 是否对应实际进程 — 不对应说明进程异常退出但系统未清理
@@ -34,7 +66,9 @@ description: HotPlex Gateway 运行时诊断。从症状逐层缩小到根因：
 
 为什么查 session — HotPlex 的 session 状态是内存 + SQLite 双写，两处可能不同步，而大多数用户问题（"任务卡住"、"响应慢"）都能从 session 状态找到线索。
 
-查 `~/.hotplex/data/hotplex.db`，关注：
+**首选内置**：`GET /admin/sessions`（列表，替代手动 SQL 聚合）、`GET /admin/debug/sessions/{id}`（单个 session 全量调试：状态 / Worker / 事件）、`POST /admin/sessions/{id}/terminate`（清理 ORPHANED/ZOMBIE）。Admin API 读的是内存+DB 实时视图，比裸 SQL 更准。
+
+手动查 `~/.hotplex/data/hotplex.db` 仅在 Admin API 不可用时使用——**只读查询，切勿写入**：运行中的 Gateway 会回写 DB，并发写入会互相覆盖（详见 CLAUDE.md「运行库写入竞态」）。关注：
 - 各状态 session 数量：`SELECT state, COUNT(*) FROM sessions GROUP BY state`
 - 对 running/idle session：进程是否存活？Worker PID 匹配？
 - Worker session 持久化方式因 worker 类型而异：
