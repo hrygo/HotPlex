@@ -55,10 +55,41 @@
     "metrics": {
       "bots_label": "活跃代理 / 机器人",
       "bots_sub": "{{count}} 已连接，{{standby}} 备用",
-      "sessions_label": "WebSocket 会话",
-      "sessions_sub": "活跃 {{active}} / 总计 {{total}}",
+      "sessions_label": "会话池容量",
+      "sessions_sub": "活跃 {{active}} / 容量 {{max}} (总数 {{total}})",
       "cron_label": "定时任务 (Cron)",
-      "cron_sub": "已启用 {{count}} 个调度循环"
+      "cron_sub": "已启用 {{count}} 个调度循环",
+      "workspaces_label": "工作区与隔离",
+      "workspaces_sub": "共 {{count}} 个工作区已挂载",
+      "audit_label": "审计事件轨迹",
+      "audit_sub": "成功 {{success}} / 拒绝 {{denied}}"
+    },
+    "activity_stream": {
+      "title": "实时行为审计流",
+      "view_all": "查看全部审计日志 →",
+      "no_recent_activity": "暂无最近行为审计记录"
+    },
+    "workers_health": {
+      "title": "Worker 引擎健康度",
+      "status_running": "运行中",
+      "status_standby": "就绪 / 备用",
+      "dialect_label": "数据库方言",
+      "lock_wait": "写锁等待"
+    },
+    "shortcuts": {
+      "title": "系统快捷管理导航",
+      "bots_title": "机器人管理",
+      "bots_desc": "配置 Slack/飞书 通讯机器人",
+      "sessions_title": "会话检测器",
+      "sessions_desc": "监控与排查 Worker 执行会话",
+      "cron_title": "定时任务",
+      "cron_desc": "配置 Agent 定时循环脚本",
+      "workspaces_title": "工作区管理",
+      "workspaces_desc": "配置工作区目录与权限模式",
+      "audit_title": "行为审计",
+      "audit_desc": "检索与导出合规审计追踪记录",
+      "apikeys_title": "API 密钥",
+      "apikeys_desc": "管理管理员与服务 API Token"
     }
   },
   "nav": {

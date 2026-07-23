@@ -55,10 +55,41 @@
     "metrics": {
       "bots_label": "Active Agents / Bots",
       "bots_sub": "{{count}} connected, {{standby}} standby",
-      "sessions_label": "WebSocket Sessions",
-      "sessions_sub": "{{active}} active of {{total}} total",
+      "sessions_label": "Session Pool Capacity",
+      "sessions_sub": "{{active}} active / {{max}} max ({{total}} total)",
       "cron_label": "Scheduled Jobs (Cron)",
-      "cron_sub": "{{count}} scheduler loops enabled"
+      "cron_sub": "{{count}} scheduler loops enabled",
+      "workspaces_label": "Workspaces & Isolation",
+      "workspaces_sub": "{{count}} workspaces mounted",
+      "audit_label": "Audit Trail Events",
+      "audit_sub": "{{success}} passed / {{denied}} denied"
+    },
+    "activity_stream": {
+      "title": "Live Audit Activity Feed",
+      "view_all": "View All Audit Logs →",
+      "no_recent_activity": "No recent audit activity records"
+    },
+    "workers_health": {
+      "title": "Worker Engine Health",
+      "status_running": "Running",
+      "status_standby": "Ready / Standby",
+      "dialect_label": "Database Dialect",
+      "lock_wait": "Write Lock Wait"
+    },
+    "shortcuts": {
+      "title": "System Navigation & Quick Actions",
+      "bots_title": "Bot Management",
+      "bots_desc": "Configure Slack & Feishu messaging bots",
+      "sessions_title": "Session Inspector",
+      "sessions_desc": "Monitor & troubleshoot worker sessions",
+      "cron_title": "Cron Jobs",
+      "cron_desc": "Manage scheduled agent cron loops",
+      "workspaces_title": "Workspaces",
+      "workspaces_desc": "Configure working directories & permissions",
+      "audit_title": "Audit Logs",
+      "audit_desc": "Search & export security audit trails",
+      "apikeys_title": "API Keys",
+      "apikeys_desc": "Manage admin & service tokens"
     }
   },
   "nav": {
