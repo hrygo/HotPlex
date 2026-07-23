@@ -51,7 +51,7 @@ admin:
 | `session:read` | - | 🟢 Read | - | - | - | - | `GET /admin/sessions`<br>`GET /admin/sessions/{id}/stats` |
 | `session:write` | - | 🟠 Write | - | - | - | - | `POST /admin/sessions/{id}/terminate` |
 | `session:delete` | - | 🔴 Delete | - | - | - | - | `DELETE /admin/sessions/{id}` |
-| `stats:read` | - | - | 🟢 Read | - | - | - | `GET /admin/stats`<br>`GET /admin/metrics` |
+| `stats:read` | - | - | 🟢 Read | - | - | - | `GET /admin/stats`<br>`GET /admin/metrics`<br>`GET /admin/sessions/pool` |
 | `config:read` | - | - | - | 🟢 Read | - | - | `POST /admin/config/validate` |
 | `config:write` | - | - | - | 🟠 Write | - | - | `POST /admin/config/rollback` |
 | `admin:read` | - | - | - | - | 🟢 Read | 🟢 Read | `GET /admin/logs`<br>`GET /admin/debug/...`<br>`GET /admin/bots`<br>`GET /admin/cron/jobs` |
@@ -151,8 +151,11 @@ curl -H "Authorization: Bearer $TOKEN" \
 |------|------|-------|------|
 | GET | `/admin/stats` | `stats:read` | 网关聚合统计 |
 | GET | `/admin/metrics` | `stats:read` | Prometheus 格式指标 |
+| GET | `/admin/sessions/pool` | `stats:read` | Session pool 容量统计 |
 
 **GET /admin/stats** — 返回 `gateway`（uptime/websocket_connections/sessions_active/sessions_total）、`workers`（按 worker_type 分组统计）和 `database`（sessions_count）。
+
+**GET /admin/sessions/pool** — 返回 session pool 容量快照 `{"total":N,"max":N,"users":N}`：`total` 为当前活跃 session 数，`max` 为配置的 pool 上限（`pool.max_size`），`users` 为占用配额的去重用户数。供容量监控与配额告警使用。
 
 ### 配置管理
 
@@ -442,11 +445,14 @@ zip 格式、文件类型白名单与安全约束同上方「Skill 管理（admi
 |------|------|------|------|
 | GET | `/api/admin/users` | Cookie | 列出 workspace 用户 |
 | PATCH | `/api/admin/users/{id}` | Cookie | 启用/禁用用户（disable 后 per-request 即时拦截） |
+| POST | `/api/admin/users/{id}/password` | Cookie | 重置用户密码 |
 | POST | `/api/admin/invitations` | Cookie | 创建邀请码 |
 | GET | `/api/admin/invitations` | Cookie | 列出邀请 |
 | DELETE | `/api/admin/invitations/{id}` | Cookie | 删除邀请 |
 
 > **GET /api/admin/invitations** — 每条邀请额外返回服务器计算的 `is_expired`（`true` 表示邀请码**未被使用且已过期**），客户端无需自行比对 `expires_at` 与本地时钟，规避时钟漂移。
+
+> **POST /api/admin/users/{id}/password** — 请求体 JSON `{"password":"..."}`，最小长度 6 位（不足返回 `400 BAD_REQUEST`）。经 identity provider 哈希（`idp.HashPassword`）后写入 `users` 表，不回传哈希。需 CSRF 同源校验（同其它 `/api/admin/*` 写方法），成功返回 `200 OK`（无 body），写操作记入 admin 审计（action = `user.password_reset`）。
 
 > ⚠️ **注意区分**：此处的 `/api/admin/*`（端口 `8888`，Cookie 认证，WebChat workspace 维度）与本页上方「认证」章节描述的 Admin API（端口 `9999`，Bearer Token，网关运维维度）是**两套独立端点**，认证模型和作用域完全不同，不要混淆。
 
