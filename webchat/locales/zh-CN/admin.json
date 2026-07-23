@@ -109,6 +109,7 @@
   },
   "bots": {
     "title": "机器人管理",
+    "subtitle": "配置消息平台机器人、Agent 提示词规则与频道默认设置",
     "online_count": "{{count}} 在线",
     "create_title": "创建机器人",
     "loading": "正在加载机器人列表...",

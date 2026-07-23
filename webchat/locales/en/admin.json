@@ -109,6 +109,7 @@
   },
   "bots": {
     "title": "Bots",
+    "subtitle": "Configure messaging platform bots, agent prompt rules, and channel defaults",
     "online_count": "{{count}} online",
     "create_title": "Create Bot",
     "loading": "Loading bots...",
