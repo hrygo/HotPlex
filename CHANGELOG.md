@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.38.0] - 2026-07-23
+
+### Summary
+
+v1.38.0 是一次 minor 版本更新，交付了 **Wave 1 first-cut** 的五个运行时模型与可观测性 slice（#847/#848/#866/#852/#850），以及**完整的 webchat 后台管理控制台**。后端方面，AgentSpec 归一化运行时模型、AgentIdentity 绑定、EffectiveAgentSpec 快照持久化、RuntimeContext 只读 facade、语义键单一真相源共同构成 v2 依赖链的根；安全 review 中发现的 2 个无界 limit HIGH 问题已在发布前修复。前端方面，dashboard、sessions、bots、cron、users、api-keys 六个 /admin 子页面完成统一设计语言重构，cron 管理实现完整闭环 CRUD 操作（创建/编辑/启用/禁用/删除/执行历史）。cron 空平台字段现归一化为 "cron" 以保证 session audit 行可追溯。
+
+### Added
+
+- **Gateway Core**: AgentSpec 归一化运行时模型（#847）—— `WorkerSpec`+`PolicySpec`+`SandboxSpec`+`BudgetSpec`+`IdentityRefs` 纯 Resolver、idempotent mappers、shadow 模式接入 webchat 入口。
+- **Gateway Core**: AgentIdentity UUIDv5 派生绑定到 runtime session（#848）——折叠进 `context_json` 列（无迁移），三处统一 `agent_id` 传播。
+- **Gateway Core**: EffectiveAgentSpec 快照持久化（#866）——版本化 + SHA-256 内容哈希；resume/restart 重建运行时契约、`AllowedTools` 从快照恢复。
+- **RuntimeContext**: 只读 `Load` facade（#852）——四源聚合（eventstore/materialized turns/worker config/workspace），适配器边界隔离，`Save` 留后续 slice。
+- **Observability**: 语义键单一真相源（`keys.go`）+ 三层基数契约 + `span_id` 注入（`Hub.SendToSession`）+ 散落字面量迁移（#850）。
+- **WebChat UI**: 后台管理控制台完整覆盖——dashboard 实时指标流、sessions 详情 + inspector drawer、bots 主列表与子页面归一化、cron 完整闭环 CRUD（创建/编辑/启用/禁用/删除/执行历史）、users 管理控制台（含密码重置）、api-keys 管理页面，统一设计语言。
+- **Cron**: 新增 `max_runs` 和 `expires_at` 生命周期控制——modal 输入 + 后端默认值（1000 runs / 12 months）。
+- **Admin**: 用户管理后端端点——用户列表、密码重置、唯一约束错误处理。
+
+### Changed
+
+- **Cron**: 空平台字段归一化为 "cron"——纯定时任务 session.create audit 行有合法 platform 值；有投递目标的任务（slack/feishu）保留原值。
+- **WebChat UI**: Modal 配色与字体对齐系统设计标准。
+- **Admin**: 用户管理控制台对齐共享设计系统。
+
+### Fixed
+
+- **RuntimeContext**: Load 无界 limit 安全修复——`MaxAllowedTurns`/`MaxAllowedEvents` cap 防止无界扫描（security review, HIGH）。
+- **Agentspec**: 加固 identity 和 policy 持久化。
+- **Cron**: 执行历史 turn 统计聚合——跨所有衍生 cron 会话汇总。
+- **Cron**: `isRecentlyRun` JSX 布尔值渲染——修复 literal 0 显示问题。
+- **Cron**: 创建时 payload kind 修正为 `isolated_session`。
+- **Cron**: 默认 `owner_id` 填充与 target bot 下拉增强。
+- **Admin**: 唯一约束错误处理 + 空响应体 JSON 解析异常修复。
+
+### Security
+
+- **AgentSpec/Wave 1**: 安全 review 发现的 2 个 HIGH（无界 limit）已在发布前修复（`MaxAllowedTurns`/`MaxAllowedEvents` cap）；2 个 MEDIUM 评估为不适用（低基数关联键非凭证，store 错误无密钥）。
+
 ## [1.37.2] - 2026-07-21
 
 ### Summary
