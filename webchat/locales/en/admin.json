@@ -470,14 +470,15 @@
     }
   },
   "api_keys": {
-    "title": "API Keys",
+    "title": "API Key Credentials",
+    "subtitle": "Manage API authentication tokens for administrator and service client access",
     "key_count": "{{count}} key",
     "key_count_plural": "{{count}} keys",
     "loading": "Loading API keys...",
     "search_no_results": "No API keys matching \"{{query}}\"",
     "action": {
-      "create": "Create Key",
-      "create_first": "Create First Key",
+      "create": "Create API Key",
+      "create_first": "Create First API Key",
       "clear_search": "Clear search"
     },
     "validation": {
@@ -499,22 +500,25 @@
       "title": "No API keys configured yet."
     },
     "table": {
-      "api_key": "API Key",
-      "user_id": "User ID",
+      "api_key": "API Key Token",
+      "user_id": "User Identity",
       "description": "Description",
       "created": "Created",
       "actions": "Actions"
     },
     "dialog": {
-      "create_title": "Create API Key",
+      "create_title": "Generate New API Key",
+      "create_subtitle": "Issue a unique access token for a user or service identity",
       "warning_title": "Critical Security Warning",
       "warning_body": "For security reasons, this API key will be shown <strong class=\"text-[var(--text-primary)]\">ONLY ONCE</strong>. You will not be able to retrieve, view, or copy it again after closing this dialog.",
-      "confirm_saved": "I have copied & saved this key"
+      "confirm_saved": "I have safely copied & saved this key",
+      "user_id_hint": "Unique identity identifier for this API token owner",
+      "desc_hint": "e.g. Production automation service client"
     },
     "placeholder": {
-      "user_id": "e.g. alice",
-      "description": "Optional description",
-      "search": "Search by user ID or description..."
+      "user_id": "e.g. alice or service-bot",
+      "description": "Optional description for this key",
+      "search": "Search by user ID, description or key prefix..."
     }
   },
   "activity": {

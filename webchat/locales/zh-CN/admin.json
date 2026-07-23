@@ -470,14 +470,15 @@
     }
   },
   "api_keys": {
-    "title": "API 密钥",
+    "title": "API 密钥管理",
+    "subtitle": "管理网关管理员及服务客户端的 API 认证凭证",
     "key_count": "{{count}} 个密钥",
     "key_count_plural": "{{count}} 个密钥",
     "loading": "正在加载 API 密钥...",
     "search_no_results": "没有找到匹配 \"{{query}}\" 的 API 密钥",
     "action": {
-      "create": "创建密钥",
-      "create_first": "创建首个密钥",
+      "create": "创建 API 密钥",
+      "create_first": "创建首个 API 密钥",
       "clear_search": "清除搜索"
     },
     "validation": {
@@ -500,21 +501,24 @@
     },
     "table": {
       "api_key": "API 密钥",
-      "user_id": "用户 ID",
+      "user_id": "用户 ID / 标识",
       "description": "描述",
       "created": "创建时间",
       "actions": "操作"
     },
     "dialog": {
-      "create_title": "创建 API 密钥",
-      "warning_title": "严重安全警告",
-      "warning_body": "出于安全原因，此 API 密钥将仅显示 <strong>一次</strong>。关闭此对话框后，您将无法再次检索、查看或复制它。",
-      "confirm_saved": "我已复制并保存此密钥"
+      "create_title": "生成新的 API 密钥",
+      "create_subtitle": "为指定的用户标识或服务客户端创建唯一的访问 Token",
+      "warning_title": "重要安全提示",
+      "warning_body": "出于安全防范机制，此 API 密钥生成后将仅展示 <strong>一次</strong>。关闭弹窗后您将无法再次恢复、查看或复制完整 Key。",
+      "confirm_saved": "我已妥善复制并保存密钥",
+      "user_id_hint": "用于标识此 Token 所绑定的主用户 ID 或服务主体",
+      "desc_hint": "例如：生产环境服务访问凭证"
     },
     "placeholder": {
-      "user_id": "例如 alice",
-      "description": "可选描述",
-      "search": "按用户 ID 或描述搜索..."
+      "user_id": "例如 alice 或 service-bot",
+      "description": "可选填写凭证用途或描述信息",
+      "search": "按用户 ID、描述或 Key 前缀搜索..."
     }
   },
   "activity": {
