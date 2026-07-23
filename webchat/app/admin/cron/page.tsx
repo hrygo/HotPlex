@@ -302,7 +302,7 @@ export default function CronPage() {
 
             {/* Table Rows */}
             {filtered.map((job) => {
-              const isRecentlyRun = actionLoading === job.id || (job.state?.last_run_at_ms && Date.now() - job.state.last_run_at_ms < 15000);
+              const isRecentlyRun = actionLoading === job.id || Boolean(job.state?.last_run_at_ms && Date.now() - job.state.last_run_at_ms < 15000);
               return (
                 <div
                   key={job.id}
