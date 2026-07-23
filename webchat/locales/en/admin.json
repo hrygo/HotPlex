@@ -837,6 +837,11 @@
       "created_at": "Registered At",
       "actions": "Actions"
     },
-    "never_logged_in": "Never logged in"
+    "never_logged_in": "Never logged in",
+    "empty": {
+      "no_match": "No matching users found",
+      "no_users": "No users registered yet",
+      "no_invitations": "No invitation codes yet — click \"Generate Invite\" above to create one."
+    }
   }
 }

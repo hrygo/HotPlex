@@ -838,6 +838,11 @@
       "created_at": "注册时间",
       "actions": "操作"
     },
-    "never_logged_in": "从未登录"
+    "never_logged_in": "从未登录",
+    "empty": {
+      "no_match": "没有找到符合条件的用户",
+      "no_users": "尚无用户注册",
+      "no_invitations": "暂无邀请码，点击右上角「生成邀请码」创建。"
+    }
   }
 }
