@@ -36,7 +36,6 @@ type bridgeSM interface {
 	SessionTransitioner
 	SessionWorkerManager
 	SessionExpirer
-	SessionWorkspaceBinder
 }
 
 // Bridge connects the gateway to the session manager.
@@ -250,26 +249,12 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		observability.SessionStartDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	}()
 
-	// Create session in DB with bot_id and allowed_tools.
-	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkDir, p.Title, p.ClientKey)
+	// Create the session with its final workspace identity in one persistence
+	// operation so the create audit and runtime surfaces share the same AgentID.
+	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkspaceID, p.WorkDir, p.Title, p.ClientKey)
 	if err != nil {
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "create_failed")))
 		return fmt.Errorf("bridge: create session: %w", err)
-	}
-
-	// Bind session to workspace (WebChat multi-tenant, spec ①). No-op for
-	// platform/cron sessions where WorkspaceID is empty. Non-fatal on failure:
-	// the session is created unbound rather than aborted.
-	if p.WorkspaceID != "" {
-		if err := b.sm.SetWorkspaceID(ctx, p.ID, p.WorkspaceID); err != nil {
-			b.log.Warn("bridge: bind workspace failed", "session_id", p.ID, "workspace_id", p.WorkspaceID, "err", err)
-		} else {
-			// CreateWithBot returns a snapshot. SetWorkspaceID persists the binding in
-			// the manager, but it cannot mutate this snapshot. Keep the worker launch
-			// info in sync so the workspace permission ceiling is applied to the first
-			// worker, rather than only to later resumes.
-			si.WorkspaceID = p.WorkspaceID
-		}
 	}
 
 	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)

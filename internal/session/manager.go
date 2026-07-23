@@ -367,11 +367,14 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 
 // Create creates a new session and persists it to SQLite.
 func (m *Manager) Create(ctx context.Context, id, userID string, workerType worker.WorkerType, allowedTools []string, workDir, title string) (*SessionInfo, error) {
-	return m.CreateWithBot(ctx, id, userID, "", "", workerType, allowedTools, "", nil, workDir, title, "")
+	return m.CreateWithBot(ctx, id, userID, "", "", workerType, allowedTools, "", nil, "", workDir, title, "")
 }
 
-// CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
-func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
+// CreateWithBot creates a new session with explicit bot/workspace identity and
+// persists it atomically. Binding WorkspaceID before identity derivation keeps
+// the create audit, persisted identity, and first runtime metadata correlated by
+// the same AgentID.
+func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*SessionInfo, error) {
 	if len(clientKey) > MaxClientKeyLen {
 		return nil, fmt.Errorf("%w: length %d exceeds maximum %d", ErrClientKeyTooLong, len(clientKey), MaxClientKeyLen)
 	}
@@ -397,8 +400,9 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 		Title:        title,
 		Source:       source,
 		ClientKey:    clientKey,
+		WorkspaceID:  workspaceID,
 	}
-	// Bind the AgentIdentity snapshot (#848); re-bound when WorkspaceID is set.
+	// Bind the AgentIdentity snapshot (#848) from the final creation inputs.
 	bindIdentity(info)
 	// Capture the effective runtime policy snapshot (#866) so it survives
 	// restart and is not silently altered by later config drift.
@@ -505,10 +509,9 @@ func auditDetailJSON(botID, workerType string, id agentspec.AgentIdentity, snap 
 	return string(b)
 }
 
-// SetWorkspaceID binds a session to a workspace and persists the change (spec ①).
-// Called by the WebChat multi-tenant path (Bridge.StartSession) after CreateWithBot.
-// Empty workspaceID is a no-op (platform/cron sessions remain unbound — backward
-// compatible with the legacy 4-field session key).
+// SetWorkspaceID late-binds a legacy/unbound session to a workspace and persists
+// the change (spec ①). New sessions receive WorkspaceID in CreateWithBot so their
+// identity and create audit are atomic. Empty workspaceID is a no-op.
 func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) error {
 	if workspaceID == "" {
 		return nil
@@ -523,6 +526,8 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 	// Get/transitionState readers that access ms.info under ms.mu after
 	// releasing m.mu (review P1 fix — lock ordering: m.mu → ms.mu).
 	ms.mu.Lock()
+	previousWorkspaceID := ms.info.WorkspaceID
+	previousIdentity := ms.info.Identity
 	ms.info.WorkspaceID = workspaceID
 	bindIdentity(&ms.info) // re-bind now that the workspace anchor is known
 	info := ms.info
@@ -532,7 +537,8 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 		// Rollback in-memory on DB failure to prevent divergence.
 		m.mu.Lock()
 		ms.mu.Lock()
-		ms.info.WorkspaceID = ""
+		ms.info.WorkspaceID = previousWorkspaceID
+		ms.info.Identity = previousIdentity
 		ms.mu.Unlock()
 		m.mu.Unlock()
 		return err
@@ -1358,7 +1364,21 @@ func (m *Manager) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling s
 
 	ms.mu.Lock()
 	ms.info.PermissionCeiling = stored
+	if ms.info.SpecSnapshot != nil && ms.info.SpecSnapshot.PermissionMode != stored {
+		updated := ms.info.SpecSnapshot.WithPermissionMode(stored)
+		ms.info.SpecSnapshot = &updated
+	}
+	info := ms.info
 	ms.mu.Unlock()
+
+	// Persist whenever a snapshot exists, even if another concurrent call already
+	// refreshed the in-memory value. The targeted update preserves unrelated DB
+	// columns and makes a retry repair a prior failed snapshot write.
+	if info.SpecSnapshot != nil {
+		if err := m.store.UpdateSpecSnapshot(ctx, id, info.SpecSnapshot); err != nil {
+			return "", fmt.Errorf("session: persist permission snapshot: %w", err)
+		}
+	}
 	return stored, nil
 }
 

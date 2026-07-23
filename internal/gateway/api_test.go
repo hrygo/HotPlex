@@ -29,8 +29,8 @@ type mockAPISM struct {
 	mock.Mock
 }
 
-func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID, _ string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir string, title string, clientKey string) (*session.SessionInfo, error) {
-	args := m.Called(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
+func (m *mockAPISM) CreateWithBot(ctx context.Context, id, userID, botID, _ string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*session.SessionInfo, error) {
+	args := m.Called(ctx, id, userID, botID, wt, allowedTools, platform, platformKey, workspaceID, workDir, title, clientKey)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

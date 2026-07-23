@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 )
 
@@ -12,6 +14,11 @@ import (
 // detect, reject, or upgrade a legacy snapshot rather than silently
 // misinterpreting it. Persisted alongside the snapshot under the Version field.
 const SnapshotVersion = 1
+
+// ErrInvalidSnapshot marks a persisted effective-spec snapshot that cannot be
+// trusted or interpreted by this binary. Callers must fail closed instead of
+// treating it as a legacy session with no policy boundary.
+var ErrInvalidSnapshot = errors.New("agentspec: invalid snapshot")
 
 // SnapshotContextKey is the reserved key under session context_json where the
 // effective AgentSpec snapshot is persisted (#866). The leading underscore marks
@@ -143,6 +150,32 @@ func computeSnapshotHash(s EffectiveAgentSpecSnapshot) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// Validate verifies that a persisted snapshot is compatible with this binary
+// and that its fingerprint matches its effective policy fields.
+func (s EffectiveAgentSpecSnapshot) Validate() error {
+	if s.Version != SnapshotVersion {
+		return fmt.Errorf("%w: unsupported version %d", ErrInvalidSnapshot, s.Version)
+	}
+	if s.Hash == "" {
+		return fmt.Errorf("%w: missing hash", ErrInvalidSnapshot)
+	}
+	if expected := computeSnapshotHash(s); s.Hash != expected {
+		return fmt.Errorf("%w: hash mismatch", ErrInvalidSnapshot)
+	}
+	return nil
+}
+
+// WithPermissionMode returns a defensive copy with the effective permission
+// ceiling updated and the content hash recomputed.
+func (s EffectiveAgentSpecSnapshot) WithPermissionMode(mode string) EffectiveAgentSpecSnapshot {
+	s.PermissionMode = mode
+	s.AllowedTools = cloneStrings(s.AllowedTools)
+	s.DisallowedTools = cloneStrings(s.DisallowedTools)
+	s.AllowedDirs = cloneStrings(s.AllowedDirs)
+	s.Hash = computeSnapshotHash(s)
+	return s
+}
+
 // MergeSnapshotIntoContext returns a copy of ctx with the snapshot folded under
 // SnapshotContextKey. The original ctx is never mutated. A nil snapshot or nil
 // snapshot with nil ctx yields ctx unchanged (no snapshot is persisted, so legacy
@@ -163,30 +196,34 @@ func MergeSnapshotIntoContext(ctx map[string]any, snap *EffectiveAgentSpecSnapsh
 
 // ExtractSnapshotFromContext removes and returns the snapshot folded under
 // SnapshotContextKey (if present), mutating ctx in place to drop the reserved
-// key so callers reading ctx see only real context data. Returns nil when the
-// key is absent (legacy session → no persisted snapshot).
+// key so callers reading ctx see only real context data. It returns nil when the
+// key is absent (legacy session → no persisted snapshot), and ErrInvalidSnapshot
+// when the persisted value cannot be safely restored.
 //
 // Used by the session store at scan time: after a json round-trip the folded
 // value is a generic map[string]any, so it is re-encoded then decoded into the
 // typed EffectiveAgentSpecSnapshot. Mirrors ExtractFromContext (#848).
-func ExtractSnapshotFromContext(ctx map[string]any) *EffectiveAgentSpecSnapshot {
+func ExtractSnapshotFromContext(ctx map[string]any) (*EffectiveAgentSpecSnapshot, error) {
 	if ctx == nil {
-		return nil
+		return nil, nil
 	}
 	raw, ok := ctx[SnapshotContextKey]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("%w: marshal: %w", ErrInvalidSnapshot, err)
 	}
 	var snap EffectiveAgentSpecSnapshot
 	if err := json.Unmarshal(b, &snap); err != nil {
-		return nil
+		return nil, fmt.Errorf("%w: decode: %w", ErrInvalidSnapshot, err)
+	}
+	if err := snap.Validate(); err != nil {
+		return nil, err
 	}
 	delete(ctx, SnapshotContextKey)
-	return &snap
+	return &snap, nil
 }
 
 // RestoreAllowedTools reports the tools the snapshot says this session was

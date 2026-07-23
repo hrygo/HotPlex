@@ -99,7 +99,8 @@ func TestMergeExtractSnapshot(t *testing.T) {
 		t.Parallel()
 		ctx := MergeSnapshotIntoContext(map[string]any{"turn": 3}, &snap)
 		require.Contains(t, ctx, SnapshotContextKey)
-		got := ExtractSnapshotFromContext(ctx)
+		got, err := ExtractSnapshotFromContext(ctx)
+		require.NoError(t, err)
 		require.NotNil(t, got)
 		require.Equal(t, snap, *got)
 		require.NotContains(t, ctx, SnapshotContextKey, "reserved key popped after extract")
@@ -114,7 +115,9 @@ func TestMergeExtractSnapshot(t *testing.T) {
 		require.Len(t, out, 1)
 		require.EqualValues(t, 3, out["turn"])
 		require.NotContains(t, out, SnapshotContextKey)
-		require.Nil(t, ExtractSnapshotFromContext(ctx))
+		got, err := ExtractSnapshotFromContext(ctx)
+		require.NoError(t, err)
+		require.Nil(t, got)
 	})
 
 	t.Run("nil ctx with snapshot yields a single-key map", func(t *testing.T) {
@@ -126,10 +129,31 @@ func TestMergeExtractSnapshot(t *testing.T) {
 
 	t.Run("absent key returns nil (legacy)", func(t *testing.T) {
 		t.Parallel()
-		require.Nil(t, ExtractSnapshotFromContext(map[string]any{"turn": 3}))
-		require.Nil(t, ExtractSnapshotFromContext(map[string]any{}))
-		require.Nil(t, ExtractSnapshotFromContext(nil))
+		for _, ctx := range []map[string]any{{"turn": 3}, {}, nil} {
+			got, err := ExtractSnapshotFromContext(ctx)
+			require.NoError(t, err)
+			require.Nil(t, got)
+		}
 	})
+}
+
+func TestEffectiveAgentSpecSnapshot_Validate(t *testing.T) {
+	t.Parallel()
+
+	valid := SnapshotFromSpec(sampleSpec())
+	require.NoError(t, valid.Validate())
+
+	unknown := valid
+	unknown.Version++
+	require.ErrorIs(t, unknown.Validate(), ErrInvalidSnapshot)
+
+	tampered := valid
+	tampered.AllowedTools = append(tampered.AllowedTools, "MUTATED")
+	require.ErrorIs(t, tampered.Validate(), ErrInvalidSnapshot)
+
+	missingHash := valid
+	missingHash.Hash = ""
+	require.ErrorIs(t, missingHash.Validate(), ErrInvalidSnapshot)
 }
 
 // TestRestoreAllowedTools: the restore helper returns the whitelist (or nil for

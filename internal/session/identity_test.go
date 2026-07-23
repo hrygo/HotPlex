@@ -324,3 +324,30 @@ func TestManager_CreateBindsIdentity(t *testing.T) {
 	require.Equal(t, info.Identity.AgentID, got.Identity.AgentID)
 	require.NotContains(t, got.Context, agentspec.IdentityContextKey, "reserved key must not leak into Context")
 }
+
+func TestManager_CreateWithBotBindsWorkspaceBeforeIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := identityDB(t)
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer func() { _ = m.Close() }()
+
+	info, err := m.CreateWithBot(
+		ctx, "sess-workspace-id", "user1", "bot1", "helper",
+		worker.TypeClaudeCode, nil, "webchat", nil, "ws1", t.TempDir(), "title", "client1",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "ws1", info.WorkspaceID)
+	require.NotNil(t, info.Identity)
+	require.Equal(t, "ws1", info.Identity.WorkspaceID)
+	require.Equal(t,
+		agentspec.DeriveAgentID("user1", "ws1", "helper", string(worker.TypeClaudeCode)),
+		info.Identity.AgentID,
+	)
+
+	persisted, err := store.Get(ctx, info.ID)
+	require.NoError(t, err)
+	require.Equal(t, info.Identity.AgentID, persisted.EffectiveIdentity().AgentID,
+		"create audit and later runtime surfaces derive from the same persisted identity")
+}

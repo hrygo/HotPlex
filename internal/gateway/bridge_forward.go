@@ -25,6 +25,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // waitKillTimeout is the maximum time to wait for Worker.Wait() to return
@@ -65,6 +66,42 @@ func (b *Bridge) flogOf(fc *forwardContext) *slog.Logger {
 		return fc.flog
 	}
 	return b.log
+}
+
+func (b *Bridge) populateForwardSessionContext(span trace.Span, fc *forwardContext, sessionID string, workerType worker.WorkerType) {
+	if b.sm == nil || (b.collector == nil && !span.IsRecording()) {
+		return
+	}
+	si, err := b.sm.Get(context.Background(), sessionID)
+	if err != nil {
+		return
+	}
+	fc.sessPlatform = si.Platform
+	fc.sessOwner = si.OwnerID
+	if fc.sessOwner == "" {
+		fc.sessOwner = si.UserID
+	}
+
+	// Correlate the forward span by agent identity independently of event-store
+	// collection. Tracing and event persistence are separate optional features.
+	eff := si.EffectiveIdentity()
+	spanAttrs := []attribute.KeyValue{
+		attribute.String(agentspec.MetadataKeyAgentID, eff.AgentID),
+		attribute.String(agentspec.MetadataKeyWorkerType, string(workerType)),
+	}
+	if eff.UserID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyUserID, eff.UserID))
+	}
+	if eff.WorkspaceID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyWorkspaceID, eff.WorkspaceID))
+	}
+	if eff.Platform != "" {
+		spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyPlatform, eff.Platform))
+	}
+	if eff.Anonymous {
+		spanAttrs = append(spanAttrs, attribute.Bool("anonymous", true))
+	}
+	span.SetAttributes(spanAttrs...)
 }
 
 // forwardEvents proxies worker events to the hub with seq assignment.
@@ -121,39 +158,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		flog:          flog,
 	}
 
-	if b.collector != nil && b.sm != nil {
-		if si, err := b.sm.Get(context.Background(), sessionID); err == nil {
-			fc.sessPlatform = si.Platform
-			fc.sessOwner = si.OwnerID
-			if fc.sessOwner == "" {
-				fc.sessOwner = si.UserID
-			}
-			// #848: correlate the forward span by agent identity, under the same
-			// unified key names used by AEP metadata and audit detail_json. The
-			// high-cardinality agent_id/user_id/workspace_id are safe as trace
-			// attributes (they are NOT metric labels). EffectiveIdentity is the
-			// authoritative projection — bound identity, or derived for legacy
-			// sessions so they correlate identically to post-#848 ones.
-			eff := si.EffectiveIdentity()
-			spanAttrs := []attribute.KeyValue{
-				attribute.String(agentspec.MetadataKeyAgentID, eff.AgentID),
-				attribute.String(agentspec.MetadataKeyWorkerType, string(workerType)),
-			}
-			if eff.UserID != "" {
-				spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyUserID, eff.UserID))
-			}
-			if eff.WorkspaceID != "" {
-				spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyWorkspaceID, eff.WorkspaceID))
-			}
-			if eff.Platform != "" {
-				spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyPlatform, eff.Platform))
-			}
-			if eff.Anonymous {
-				spanAttrs = append(spanAttrs, attribute.Bool("anonymous", true))
-			}
-			span.SetAttributes(spanAttrs...)
-		}
-	}
+	b.populateForwardSessionContext(span, fc, sessionID, workerType)
 
 	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
 	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {

@@ -65,6 +65,94 @@ func TestSessionStore_SpecSnapshotRoundTrip(t *testing.T) {
 	require.NotContains(t, got.Context, agentspec.SnapshotContextKey, "reserved key must not leak into Context")
 }
 
+func TestSessionStore_InvalidSpecSnapshotFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "invalid inner shape",
+			raw:  `{"_agent_spec":{"v":1,"worker_type":"claude_code","allowed_tools":"Read","hash":"bad"}}`,
+		},
+		{
+			name: "unknown version",
+			raw:  `{"_agent_spec":{"v":2,"worker_type":"claude_code","allowed_tools":["Read"],"hash":"bad"}}`,
+		},
+		{
+			name: "hash mismatch",
+			raw:  `{"_agent_spec":{"v":1,"worker_type":"claude_code","allowed_tools":["Bash"],"hash":"0000000000000000"}}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store := identityDB(t)
+			ctx := context.Background()
+			now := time.Now()
+			id := "sess-invalid-snapshot-" + strings.ReplaceAll(tc.name, " ", "-")
+
+			require.NoError(t, store.Upsert(ctx, &SessionInfo{
+				ID: id, UserID: "u1", WorkerType: worker.TypeClaudeCode,
+				State: events.StateCreated, CreatedAt: now, UpdatedAt: now,
+			}))
+			_, err := store.db.ExecContext(ctx,
+				`UPDATE sessions SET context_json = ? WHERE id = ?`, tc.raw, id)
+			require.NoError(t, err)
+
+			_, err = store.Get(ctx, id)
+			require.Error(t, err,
+				"an invalid persisted policy must not be treated as an unrestricted legacy session")
+		})
+	}
+}
+
+func TestSQLiteStore_UpdateSpecSnapshotPreservesOtherFields(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := identityDB(t)
+	now := time.Now()
+	identity := agentspec.BuildAgentIdentity(agentspec.IdentityInput{
+		UserID: "u1", WorkspaceID: "ws1", WorkerType: string(worker.TypeClaudeCode),
+	})
+	stale := &SessionInfo{
+		ID: "sess-targeted-snapshot", UserID: "u1", WorkerType: worker.TypeClaudeCode,
+		WorkspaceID: "ws1", State: events.StateRunning, Title: "keep-title",
+		Context: map[string]any{"keep": "value"}, Identity: &identity,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, store.Upsert(ctx, stale))
+
+	snapshot := agentspec.SnapshotFromSpec(agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: string(worker.TypeClaudeCode)},
+		Policy: agentspec.PolicySpec{
+			PermissionMode: worker.PermissionModeWorkspace,
+			AllowedTools:   []string{"Read"},
+		},
+	})
+	require.NoError(t, store.UpdateSpecSnapshot(ctx, "sess-targeted-snapshot", &snapshot))
+
+	// Simulate a lifecycle write that captured SessionInfo before the targeted
+	// snapshot update. Its full-row Upsert must advance state/context without
+	// restoring the stale nil snapshot over the database's current contract.
+	stale.State = events.StateIdle
+	stale.Context = map[string]any{"keep": "updated"}
+	require.NoError(t, store.Upsert(ctx, stale))
+
+	got, err := store.Get(ctx, "sess-targeted-snapshot")
+	require.NoError(t, err)
+	require.Equal(t, events.StateIdle, got.State)
+	require.Equal(t, "keep-title", got.Title)
+	require.Equal(t, "updated", got.Context["keep"])
+	require.NotNil(t, got.Identity)
+	require.Equal(t, identity.AgentID, got.Identity.AgentID)
+	require.NotNil(t, got.SpecSnapshot)
+	require.Equal(t, snapshot.Hash, got.SpecSnapshot.Hash)
+}
+
 // TestSessionStore_SpecSnapshotLegacyBackwardsCompat: a session with no tool
 // whitelist (the common case, and all pre-#866 rows) binds no snapshot, remains
 // fully readable, and AllowedTools stays empty (= no restriction).

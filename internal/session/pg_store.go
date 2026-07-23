@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -57,6 +58,10 @@ func (s *pgStore) Upsert(ctx context.Context, info *SessionInfo) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := ensurePGLifecycleLock(ctx, tx, s.dialect.Rebind, info.ID); err != nil {
+		return err
+	}
+	ctxJSON, err = preservePersistedSpecSnapshot(ctx, tx, s.queries["store.get_context_json"], info.ID, ctxJSON)
+	if err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, s.queries["sessions.upsert_session"], upsertSessionArgs(info, ctxJSON, pkJSON)...)
@@ -120,6 +125,39 @@ func (s *pgStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling s
 		return "", fmt.Errorf("session store: get permission ceiling: %w", err)
 	}
 	return stored, nil
+}
+
+// UpdateSpecSnapshot atomically replaces only the reserved AgentSpec value in
+// context_json. PostgreSQL evaluates jsonb_set against the row version acquired
+// by this UPDATE, so unrelated JSON keys are preserved.
+func (s *pgStore) UpdateSpecSnapshot(ctx context.Context, id string, snapshot *agentspec.EffectiveAgentSpecSnapshot) error {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+
+	snapshotJSON, err := marshalSpecSnapshot(snapshot)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := ensurePGLifecycleLock(ctx, tx, s.dialect.Rebind, id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, s.queries["sessions.update_spec_snapshot_pg"], snapshotJSON, id)
+	if err != nil {
+		return fmt.Errorf("session store: update spec snapshot: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("session store: spec snapshot rows affected: %w", err)
+	}
+	if updated == 0 {
+		return ErrSessionNotFound
+	}
+	return tx.Commit()
 }
 
 // Get loads a session by ID. Returns ErrSessionNotFound if not found.

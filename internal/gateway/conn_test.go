@@ -256,7 +256,7 @@ func (*resumeCheckSM) GetWorker(string) worker.Worker { return nil }
 
 func (*resumeCheckSM) Transition(context.Context, string, events.SessionState) error { return nil }
 
-func (*resumeCheckSM) CreateWithBot(context.Context, string, string, string, string, worker.WorkerType, []string, string, map[string]string, string, string, string) (*session.SessionInfo, error) {
+func (*resumeCheckSM) CreateWithBot(context.Context, string, string, string, string, worker.WorkerType, []string, string, map[string]string, string, string, string, string) (*session.SessionInfo, error) {
 	return nil, errors.New("StartSession must not be called after an uncertain resume check")
 }
 
@@ -653,6 +653,11 @@ func (m *mockSessionStoreForBotID) UpdateWorkerSessionIDSQL(ctx context.Context,
 func (m *mockSessionStoreForBotID) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
 	args := m.Called(ctx, id, ceiling)
 	return args.String(0), args.Error(1)
+}
+
+func (m *mockSessionStoreForBotID) UpdateSpecSnapshot(ctx context.Context, id string, snapshot *agentspec.EffectiveAgentSpecSnapshot) error {
+	args := m.Called(ctx, id, snapshot)
+	return args.Error(0)
 }
 
 func (m *mockSessionStoreForBotID) Get(ctx context.Context, id string) (*session.SessionInfo, error) {
@@ -1323,8 +1328,8 @@ type mockBridgeSM struct {
 	mock.Mock
 }
 
-func (m *mockBridgeSM) CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error) {
-	args := m.Called(ctx, id, userID, botID, botName, wt, allowedTools, platform, platformKey, workDir, title, clientKey)
+func (m *mockBridgeSM) CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*session.SessionInfo, error) {
+	args := m.Called(ctx, id, userID, botID, botName, wt, allowedTools, platform, platformKey, workspaceID, workDir, title, clientKey)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -1623,7 +1628,7 @@ func TestBridge_StartSession_Success(t *testing.T) {
 		WorkerType: worker.TypeClaudeCode,
 		State:      events.StateCreated,
 	}
-	sm.On("CreateWithBot", mock.Anything, "sess_start", "user1", "", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
+	sm.On("CreateWithBot", mock.Anything, "sess_start", "user1", "", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, "", mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
 	sm.On("AttachWorker", "sess_start", mock.Anything).Return(nil)
 	sm.On("Transition", mock.Anything, "sess_start", events.StateRunning).Return(nil)
 
@@ -1650,10 +1655,8 @@ func TestBridge_StartSession_Success(t *testing.T) {
 }
 
 // TestBridge_StartSession_AppliesWorkspacePermissionModeToFirstWorker guards
-// the first-worker path: CreateWithBot returns a pre-binding snapshot, whereas
-// SetWorkspaceID updates the manager's internal session state. The worker must
-// receive the newly bound workspace ID so its read-only permission ceiling is
-// enforced before any input can be handled.
+// the first-worker path: CreateWithBot receives the final workspace ID, so the
+// worker must receive the same binding before any input can be handled.
 func TestBridge_StartSession_AppliesWorkspacePermissionModeToFirstWorker(t *testing.T) {
 	t.Parallel()
 
@@ -1665,13 +1668,13 @@ func TestBridge_StartSession_AppliesWorkspacePermissionModeToFirstWorker(t *test
 	sm.Test(t)
 
 	sessionInfo := &session.SessionInfo{
-		ID:         sessionID,
-		UserID:     "user1",
-		WorkerType: worker.TypeOpenCodeSrv,
-		State:      events.StateCreated,
+		ID:          sessionID,
+		UserID:      "user1",
+		WorkerType:  worker.TypeOpenCodeSrv,
+		State:       events.StateCreated,
+		WorkspaceID: workspaceID,
 	}
-	sm.On("CreateWithBot", mock.Anything, sessionID, "user1", "", "", worker.TypeOpenCodeSrv, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
-	sm.On("SetWorkspaceID", mock.Anything, sessionID, workspaceID).Return(nil)
+	sm.On("CreateWithBot", mock.Anything, sessionID, "user1", "", "", worker.TypeOpenCodeSrv, mock.Anything, mock.Anything, mock.Anything, workspaceID, mock.Anything, mock.Anything, mock.Anything).Return(sessionInfo, nil)
 	sm.On("AttachWorker", sessionID, mock.Anything).Return(nil)
 	sm.On("Transition", mock.Anything, sessionID, events.StateRunning).Return(nil)
 
@@ -1706,7 +1709,7 @@ func TestBridge_StartSession_CreateFails(t *testing.T) {
 	sm := &mockBridgeSM{Mock: mock.Mock{}}
 	sm.Test(t)
 
-	sm.On("CreateWithBot", mock.Anything, "sess_fail", "user1", "", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	sm.On("CreateWithBot", mock.Anything, "sess_fail", "user1", "", "", worker.TypeClaudeCode, mock.Anything, mock.Anything, mock.Anything, "", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("create failed"))
 
 	h := newTestHub(t)

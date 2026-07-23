@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -42,6 +43,11 @@ func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSess
 func (m *mockStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
 	args := m.Called(ctx, id, ceiling)
 	return args.String(0), args.Error(1)
+}
+
+func (m *mockStore) UpdateSpecSnapshot(ctx context.Context, id string, snapshot *agentspec.EffectiveAgentSpecSnapshot) error {
+	args := m.Called(ctx, id, snapshot)
+	return args.Error(0)
 }
 
 func (m *mockStore) Get(ctx context.Context, id string) (*SessionInfo, error) {
@@ -1344,6 +1350,45 @@ func TestManager_AttachWorker_SetWorkspaceID_Race(t *testing.T) {
 	wg.Wait()
 }
 
+func TestManager_SetWorkspaceID_RollsBackIdentityOnPersistFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("Upsert", ctx, mock.AnythingOfType("*session.SessionInfo")).
+		Return(errors.New("persist failed")).Once()
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	seed := SessionInfo{
+		ID:         "sess-workspace-rollback",
+		UserID:     "user1",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateCreated,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	bindIdentity(&seed)
+	originalIdentity := *seed.Identity
+	m.mu.Lock()
+	m.sessions[seed.ID] = &managedSession{info: seed}
+	m.mu.Unlock()
+
+	err = m.SetWorkspaceID(ctx, seed.ID, "ws-new")
+	require.Error(t, err)
+
+	got, getErr := m.Get(ctx, seed.ID)
+	require.NoError(t, getErr)
+	require.Empty(t, got.WorkspaceID)
+	require.NotNil(t, got.Identity)
+	require.Equal(t, originalIdentity, *got.Identity,
+		"failed workspace persistence must roll back the derived identity as well")
+}
+
 // TestManager_AttachWorker_QuotaNoDriftAfterWorkspaceChange: when SetWorkspaceID
 // flips ms.info.WorkspaceID between Acquire and Detach, the per-workspace quota
 // slot acquired at attach time must be released against the SAME workspace it
@@ -2582,6 +2627,97 @@ func TestManager_SetPermissionCeilingIfEmpty(t *testing.T) {
 	info, err := m.Get(ctx, "sess_ceiling")
 	require.NoError(t, err)
 	require.Equal(t, worker.PermissionModeReadOnly, info.PermissionCeiling)
+}
+
+func TestManager_SetPermissionCeilingIfEmpty_RefreshesSpecSnapshot(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("SetPermissionCeilingIfEmpty", ctx, "sess_snapshot_ceiling", worker.PermissionModeWorkspace).
+		Return(worker.PermissionModeWorkspace, nil)
+	store.On("UpdateSpecSnapshot", ctx, "sess_snapshot_ceiling", mock.AnythingOfType("*agentspec.EffectiveAgentSpecSnapshot")).Return(nil).Once()
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	snap := agentspec.SnapshotFromSpec(agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: string(worker.TypeClaudeCode)},
+		Policy: agentspec.PolicySpec{AllowedTools: []string{"Read"}},
+	})
+	originalHash := snap.Hash
+	now := time.Now()
+	m.mu.Lock()
+	m.sessions["sess_snapshot_ceiling"] = &managedSession{info: SessionInfo{
+		ID:           "sess_snapshot_ceiling",
+		UserID:       "user1",
+		WorkerType:   worker.TypeClaudeCode,
+		AllowedTools: []string{"Read"},
+		SpecSnapshot: &snap,
+		State:        events.StateRunning,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}}
+	m.mu.Unlock()
+
+	stored, err := m.SetPermissionCeilingIfEmpty(ctx, "sess_snapshot_ceiling", worker.PermissionModeWorkspace)
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeWorkspace, stored)
+
+	info, err := m.Get(ctx, "sess_snapshot_ceiling")
+	require.NoError(t, err)
+	require.NotNil(t, info.SpecSnapshot)
+	require.Equal(t, worker.PermissionModeWorkspace, info.SpecSnapshot.PermissionMode)
+	require.NotEqual(t, originalHash, info.SpecSnapshot.Hash,
+		"the fingerprint must change when the effective permission ceiling is captured")
+}
+
+func TestManager_SetPermissionCeilingIfEmpty_RetryPersistsRefreshedSnapshot(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := new(mockStore)
+	store.Test(t)
+	store.On("Close").Return(nil)
+	store.On("SetPermissionCeilingIfEmpty", ctx, "sess_snapshot_retry", worker.PermissionModeWorkspace).
+		Return(worker.PermissionModeWorkspace, nil).Twice()
+	store.On("UpdateSpecSnapshot", ctx, "sess_snapshot_retry", mock.AnythingOfType("*agentspec.EffectiveAgentSpecSnapshot")).
+		Return(errors.New("persist failed")).Once()
+	store.On("UpdateSpecSnapshot", ctx, "sess_snapshot_retry", mock.MatchedBy(func(snapshot *agentspec.EffectiveAgentSpecSnapshot) bool {
+		return snapshot != nil && snapshot.PermissionMode == worker.PermissionModeWorkspace
+	})).Return(nil).Once()
+
+	m, err := NewManager(ctx, nil, config.Default(), nil, store)
+	require.NoError(t, err)
+	defer m.Close()
+
+	snap := agentspec.SnapshotFromSpec(agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: string(worker.TypeClaudeCode)},
+		Policy: agentspec.PolicySpec{AllowedTools: []string{"Read"}},
+	})
+	now := time.Now()
+	m.mu.Lock()
+	m.sessions["sess_snapshot_retry"] = &managedSession{info: SessionInfo{
+		ID:           "sess_snapshot_retry",
+		UserID:       "user1",
+		WorkerType:   worker.TypeClaudeCode,
+		AllowedTools: []string{"Read"},
+		SpecSnapshot: &snap,
+		State:        events.StateRunning,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}}
+	m.mu.Unlock()
+
+	_, err = m.SetPermissionCeilingIfEmpty(ctx, "sess_snapshot_retry", worker.PermissionModeWorkspace)
+	require.ErrorContains(t, err, "persist permission snapshot")
+
+	stored, err := m.SetPermissionCeilingIfEmpty(ctx, "sess_snapshot_retry", worker.PermissionModeWorkspace)
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeWorkspace, stored)
 }
 
 func TestManager_SetPermissionCeilingIfEmpty_RejectsInvalidAndMissingSessions(t *testing.T) {

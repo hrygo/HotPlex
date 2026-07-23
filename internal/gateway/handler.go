@@ -1088,7 +1088,7 @@ type SessionReader interface {
 
 // SessionLifecycle provides session creation and deletion.
 type SessionLifecycle interface {
-	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*session.SessionInfo, error)
 	Delete(ctx context.Context, id string) error
 	DeletePhysical(ctx context.Context, id string) error
 }
@@ -1123,13 +1123,6 @@ type SessionAdmin interface {
 // sub-interfaces without pulling in the full SessionAdmin.
 type SessionExpirer interface {
 	ResetExpiry(ctx context.Context, id string) error
-}
-
-// SessionWorkspaceBinder binds a session to a workspace (WebChat multi-tenant, spec ①).
-// Kept as a separate sub-interface so apiSM (GatewayAPI) does not need it — only
-// bridgeSM composes it, since workspace binding happens inside Bridge.StartSession.
-type SessionWorkspaceBinder interface {
-	SetWorkspaceID(ctx context.Context, id, workspaceID string) error
 }
 
 // SessionManager composes all session sub-interfaces for full management.

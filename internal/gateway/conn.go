@@ -56,7 +56,7 @@ type connSM interface {
 	Get(ctx context.Context, id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker
 	Transition(ctx context.Context, id string, to events.SessionState) error
-	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*session.SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 }
 
@@ -667,7 +667,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	// Test mode: create directly via session manager.
-	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
+	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, c.workspaceID, workDir, initData.Title, clientKey)
 	if err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to create session")
@@ -698,7 +698,7 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 	_ = sm.DeletePhysical(context.Background(), sessionID)
 	if c.starter == nil {
 		// Test mode: re-create session directly since the old one was physically deleted.
-		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
+		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, c.workspaceID, workDir, initData.Title, clientKey)
 		if err != nil {
 			return nil, fmt.Errorf("recreate deleted session (test mode): %w", err)
 		}
