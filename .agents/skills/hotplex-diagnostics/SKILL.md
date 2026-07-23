@@ -90,6 +90,8 @@ curl -s -H "Authorization: Bearer $TOK" http://localhost:9999/admin/health/worke
 
 这是用户体验的核心能力 — 任务执行中用户看不到更新，但任务实际上还在跑。这种问题最隐蔽，因为 Worker 日志看起来一切正常。
 
+**快速入口**：`GET /admin/health/workers` 一次返回所有 Worker 进程的健康/活跃度；`GET /admin/metrics` 的 `gateway_deltas_dropped_total`、`gateway_platform_dropped_total` 计数器 >0 即确认有静默丢弃（见下方「静默中断」）。两者正常时，再用时间线交叉验证精确定位。
+
 ### 反馈链路
 
 事件从 Worker 到用户经历一条管道，任何环节断裂都导致用户端无反馈：
@@ -130,13 +132,15 @@ Worker stdout → readOutput/trySend → forwardEvents → Hub.SendToSession →
 2. **平台写缓冲溢出** — platform_writer 的 DropThreshold 被触发，只有 Prometheus 指标 `gateway_platform_dropped_total` 能检测到
 3. **飞书 flush 吞错** — streaming.go 的后台 flushLoop 中 `_ = c.Flush()` 静默吞掉所有错误
 
-如果 Prometheus 端点可用，检查 `gateway_deltas_dropped_total` 和 `gateway_platform_dropped_total` — 计数器 >0 说明有静默丢弃。
+Prometheus 端点即 `GET :9999/admin/metrics`（标准 Prometheus 文本格式）：`curl -s -H "Authorization: Bearer $TOK" http://localhost:9999/admin/metrics | grep -E 'gateway_(deltas|platform)_dropped_total'`。计数器 >0 说明有静默丢弃。
 
 ---
 
 ## 第四步：日志分析
 
 日志分析的关键不是找到多少 WARN/ERROR，而是理解每条异常的前因后果。
+
+**获取日志**：`hotplex service logs -f`（跟随输出）或 `GET /admin/logs`（HTTP 拉取）；文件默认 `~/.hotplex/logs/gateway.log`（仅 `log.file.enabled=true` 时落盘，否则只走 stderr）。前端日志看 `webchat.log`。
 
 ### 方法
 
@@ -226,7 +230,7 @@ TCP 连接数持续增长不回落暗示泄漏 — 可以用 `lsof -iTCP` 对比
 
 ## 跨平台适配
 
-所有命令需适配当前平台：`uname`（Linux/macOS）或 `OS=Windows_NT`（Windows）。
+内置 CLI（`status`/`doctor`/`security`/`service`）与 Admin API 本身跨平台，无需适配。仅下列手动补充命令需按平台分支：`uname`（Linux/macOS）或 `OS=Windows_NT`（Windows）。
 
 关键差异：`ps`/`lsof` → Windows 用 `tasklist`/`netstat -ano`；路径 `~/.hotplex/` → Windows 用 `%USERPROFILE%\.hotplex\`；`sqlite3` 跨平台一致但 Windows 需确认在 PATH。
 
