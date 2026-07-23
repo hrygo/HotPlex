@@ -1,7 +1,6 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ToolName } from "@/lib/tool-categories";
 
 interface CompactToolTabProps {
   toolName: string;

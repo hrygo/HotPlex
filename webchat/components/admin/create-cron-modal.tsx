@@ -73,7 +73,7 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError(null);
 

@@ -138,7 +138,7 @@ export function MembersTab({ currentUser }: MembersTabProps) {
     });
   };
 
-  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+  const handleResetPasswordSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!resetModal.user) return;
 

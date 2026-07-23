@@ -96,7 +96,7 @@ function InnerLoginPage() {
     checkUser();
   }, [router]);
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!loginUsername.trim() || !loginPassword) return;
 
@@ -115,7 +115,7 @@ function InnerLoginPage() {
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!inviteCode.trim() || !registerUsername.trim() || !registerPassword) return;
 

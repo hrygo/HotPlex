@@ -27,7 +27,6 @@ interface QuestionResponseCardProps {
 }
 
 export function QuestionResponseCard({
-  toolName,
   questions = [],
   status: initialStatus,
   interactionState,
@@ -73,7 +72,7 @@ export function QuestionResponseCard({
     setAnswers((prev) => ({ ...prev, [qId]: val }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!isInteractive) return;
 

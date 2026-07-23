@@ -234,35 +234,6 @@ export default function CronDetailPage() {
     }
   };
 
-  const handleToggle = async () => {
-    if (!job) return;
-    const next = !enabled;
-    const confirmed = await confirm(
-      next ? t('admin:cron.confirm.enable_title', { defaultValue: 'Enable Cron Job?' }) : t('admin:cron.confirm.disable_title', { defaultValue: 'Disable Cron Job?' }),
-      next
-        ? t('admin:cron.confirm.enable_body', { name: job.name, defaultValue: `Are you sure you want to enable cron job "${job.name}"?` })
-        : t('admin:cron.confirm.disable_body', { name: job.name, defaultValue: `Are you sure you want to disable cron job "${job.name}"?` })
-    );
-    if (!confirmed) return;
-    try {
-      setSaving(true);
-      await updateCronJob(job.id, { enabled: next });
-      setJob((prev) => (prev ? { ...prev, enabled: next } : prev));
-      setEnabled(next);
-      setHasChanges(false);
-      showToast(
-        next
-          ? t('admin:cron.toast.enabled', { name: job.name, defaultValue: `Cron job "${job.name}" enabled successfully.` })
-          : t('admin:cron.toast.disabled', { name: job.name, defaultValue: `Cron job "${job.name}" disabled successfully.` }),
-        'success'
-      );
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : t('admin:cron.error.toggle_failed', { defaultValue: 'Failed to toggle cron job' }), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleTrigger = async () => {
     if (!job) return;
     const confirmed = await confirm(

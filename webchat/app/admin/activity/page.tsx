@@ -155,7 +155,7 @@ export default function AdminActivityPage() {
   const [to, setTo] = useState('');
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize] = useState(50);
 
   // Reset page when filter search params change (avoid out-of-bounds offset queries)
   useEffect(() => {

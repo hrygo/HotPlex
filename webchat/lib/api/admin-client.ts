@@ -15,7 +15,7 @@
 
 import type { AdminConnection } from '@/lib/types/admin';
 
-import { BASE, authOpts } from './client';
+import { authOpts } from './client';
 import { parseApiError } from './errors';
 import { adminUrl } from '@/lib/config';
 

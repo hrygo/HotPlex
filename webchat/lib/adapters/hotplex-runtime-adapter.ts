@@ -1578,7 +1578,7 @@ export function useHotPlexRuntime({
         };
 
         // Subscribe to events
-        const handleConnected = (ack: { state?: string }) => {
+        const handleConnected = () => {
             sessionAlreadyConnectedRef.current = false;
             setConnectionState("connected");
 
@@ -2293,7 +2293,6 @@ export function useHotPlexRuntime({
                       .join("")
                 : "";
             if (!textContent.trim()) return;
-            const sid = sessionIdRef.current;
             if (turnActiveRef.current || stoppingRef.current) {
                 const result = enqueueFollowUp(textContent);
                 if (!result.ok && result.reason === "limit") {
@@ -2465,20 +2464,20 @@ export function useHotPlexRuntime({
             try {
                 switch (response.type) {
                     case "permission":
-                        await client.sendPermissionResponse(
+                        client.sendPermissionResponse(
                             toolCallId,
                             response.allowed ?? false,
                             response.reason,
                         );
                         break;
                     case "question":
-                        await client.sendQuestionResponse(
+                        client.sendQuestionResponse(
                             toolCallId,
                             response.answers ?? {},
                         );
                         break;
                     case "elicitation":
-                        await client.sendElicitationResponse(
+                        client.sendElicitationResponse(
                             toolCallId,
                             response.action ?? "cancel",
                             response.content,
