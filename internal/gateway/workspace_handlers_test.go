@@ -217,7 +217,9 @@ func TestWorkspace_PatchAgentConfigOverrides_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			// Serialized: subtests share one workspace and UpdateWorkspace uses an
+			// optimistic version CAS (WHERE updated_at=?); parallel PATCHes stale-read
+			// the version and lose the CAS → spurious 409 WORKSPACE_VERSION_MISMATCH.
 			w := env.patchWorkspace(t, cookie, ws.ID, tt.body)
 			require.Equal(t, tt.wantStatus, w.Code, "body=%s", w.Body.String())
 			if tt.wantCode != "" {
@@ -271,7 +273,9 @@ func TestWorkspace_PatchWorkerPreference_Whitelist(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			// Serialized: subtests share one workspace and UpdateWorkspace uses an
+			// optimistic version CAS (WHERE updated_at=?); parallel PATCHes stale-read
+			// the version and lose the CAS → spurious 409 WORKSPACE_VERSION_MISMATCH.
 			w := env.patchWorkspace(t, cookie, ws.ID, tt.body)
 			require.Equal(t, tt.wantStatus, w.Code, "body=%s", w.Body.String())
 			if tt.wantCode != "" {
@@ -329,7 +333,9 @@ func TestWorkspace_PatchPermissionMode_Whitelist(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			// Serialized: subtests share one workspace and UpdateWorkspace uses an
+			// optimistic version CAS (WHERE updated_at=?); parallel PATCHes stale-read
+			// the version and lose the CAS → spurious 409 WORKSPACE_VERSION_MISMATCH.
 			w := env.patchWorkspace(t, cookie, ws.ID, tt.body)
 			require.Equal(t, tt.wantStatus, w.Code, "body=%s", w.Body.String())
 			if tt.wantCode != "" {
