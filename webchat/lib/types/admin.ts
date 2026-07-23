@@ -84,6 +84,8 @@ export interface AdminSessionDetailResponse extends AdminSessionInfo {
   source?: string;
   client_key?: string;
   workspace_id?: string;
+  identity_link?: AuditIdentityLink;
+  identity_links?: Record<string, AuditIdentityLink>;
 }
 
 export interface SessionStatsItem {

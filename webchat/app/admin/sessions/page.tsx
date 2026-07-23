@@ -894,24 +894,43 @@ export default function SessionsPage() {
 
                       <div>
                         <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                          {t('admin:sessions.drawer.user_id', { defaultValue: 'Executing User ID' })}
+                          {t('admin:sessions.drawer.user_id', { defaultValue: 'Executing User Identity' })}
                         </span>
                         {(() => {
-                          const link = identityLinks[drawerSession.user_id];
+                          const uid = drawerSession.user_id;
+                          const link = identityLinks[uid] || drawerDetail?.identity_link;
                           const name = link?.display_name || link?.DisplayName;
+                          let friendlyName = name;
+                          if (!friendlyName) {
+                            if (uid.startsWith('ou_') || drawerDetail?.platform === 'feishu') {
+                              friendlyName = `飞书用户 (${uid.slice(0, 8)}...)`;
+                            } else if (uid.startsWith('U') || uid.startsWith('W') || drawerDetail?.platform === 'slack') {
+                              friendlyName = `Slack 用户 (${uid})`;
+                            } else if (uid === 'anonymous' || uid.startsWith('anon_')) {
+                              friendlyName = 'WebChat 匿名用户';
+                            } else if (uid === 'cron' || uid.startsWith('cron_')) {
+                              friendlyName = '系统 Cron 引擎';
+                            } else {
+                              friendlyName = `系统用户 (${uid})`;
+                            }
+                          }
                           return (
-                            <div className="min-w-0">
-                              {name && (
-                                <div className="text-xs font-medium text-[var(--text-primary)] truncate" title={name}>
-                                  {name}
-                                </div>
-                              )}
-                              <Link
-                                href={`/admin/activity?user_id=${encodeURIComponent(drawerSession.user_id)}`}
-                                className="text-xs font-mono text-[var(--accent-gold)] hover:underline break-all"
-                              >
-                                {drawerSession.user_id || '—'}
-                              </Link>
+                            <div className="min-w-0 space-y-1">
+                              <div className="text-xs font-bold text-[var(--text-primary)] truncate" title={friendlyName}>
+                                {friendlyName}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <code className="text-[10px] font-mono text-[var(--text-muted)] bg-white/5 px-1.5 py-0.5 rounded border border-[var(--border-subtle)] truncate max-w-[150px]">
+                                  {uid}
+                                </code>
+                                <Link
+                                  href={`/admin/activity?user_id=${encodeURIComponent(uid)}`}
+                                  className="text-[10px] font-semibold text-[var(--accent-gold)] hover:underline shrink-0"
+                                  title="Search audit logs for this user"
+                                >
+                                  {t('admin:sessions.detail.identity.view_user_activity', { defaultValue: 'Audit Logs →' })}
+                                </Link>
+                              </div>
                             </div>
                           );
                         })()}

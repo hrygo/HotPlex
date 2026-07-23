@@ -18,11 +18,80 @@ import type {
   SessionStatsResponse,
   SessionDebugInfo,
   AuditActivity,
+  AuditIdentityLink,
 } from '@/lib/types/admin';
 import { formatDateTime } from '@/lib/utils/format-time';
 import { useTranslation } from 'react-i18next';
 
 type TabKey = 'overview' | 'turns' | 'context' | 'activity';
+
+function getUserDisplayInfo(
+  userId: string,
+  platform?: string,
+  identityLink?: AuditIdentityLink,
+) {
+  const nameFromLink = identityLink?.display_name || identityLink?.DisplayName;
+  const principalId = identityLink?.principal_user_id || identityLink?.PrincipalUserID;
+  const email = identityLink?.email || identityLink?.Email;
+
+  if (nameFromLink) {
+    return {
+      displayName: nameFromLink,
+      subtitle: principalId ? `主账号: ${principalId}` : email || `User ID: ${userId}`,
+      platformLabel: (platform || identityLink?.provider || 'USER').toUpperCase(),
+      isResolved: true,
+      avatarChar: nameFromLink.charAt(0).toUpperCase(),
+    };
+  }
+
+  if (userId.startsWith('ou_') || platform === 'feishu') {
+    return {
+      displayName: `飞书平台用户 (${userId.length > 12 ? userId.slice(0, 10) + '...' : userId})`,
+      subtitle: `User ID: ${userId}`,
+      platformLabel: 'FEISHU',
+      isResolved: false,
+      avatarChar: '飞',
+    };
+  }
+
+  if (userId.startsWith('U') || userId.startsWith('W') || platform === 'slack') {
+    return {
+      displayName: `Slack 平台用户 (${userId})`,
+      subtitle: `User ID: ${userId}`,
+      platformLabel: 'SLACK',
+      isResolved: false,
+      avatarChar: 'S',
+    };
+  }
+
+  if (userId === 'anonymous' || userId.startsWith('anon_')) {
+    return {
+      displayName: 'WebChat 访客 / 匿名用户',
+      subtitle: `User ID: ${userId}`,
+      platformLabel: 'WEBCHAT',
+      isResolved: false,
+      avatarChar: '匿',
+    };
+  }
+
+  if (userId === 'cron' || userId.startsWith('cron_')) {
+    return {
+      displayName: '系统 Cron 调度引擎',
+      subtitle: `User ID: ${userId}`,
+      platformLabel: 'CRON',
+      isResolved: false,
+      avatarChar: '⏰',
+    };
+  }
+
+  return {
+    displayName: `系统用户 (${userId})`,
+    subtitle: `User ID: ${userId}`,
+    platformLabel: (platform || 'SYSTEM').toUpperCase(),
+    isResolved: false,
+    avatarChar: userId.charAt(0).toUpperCase(),
+  };
+}
 
 export default function SessionDetailPage() {
   const { t } = useTranslation();
@@ -100,6 +169,15 @@ export default function SessionDetailPage() {
       setTimeout(() => setCopyFeedback(false), 2000);
     } catch {
       showToast(t('admin:sessions.toast.copy_failed', { defaultValue: 'Failed to copy ID' }), 'error');
+    }
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(t('admin:sessions.toast.copied_text', { label, defaultValue: `Copied ${label} to clipboard` }), 'info');
+    } catch {
+      showToast(t('admin:sessions.toast.copy_failed', { defaultValue: 'Failed to copy' }), 'error');
     }
   };
 
@@ -387,59 +465,98 @@ export default function SessionDetailPage() {
           {/* TAB 1: OVERVIEW & ENVIRONMENT */}
           {activeTab === 'overview' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Identity & Owner Card */}
-              <div className="p-5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] space-y-4">
-                <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
-                  {t('admin:sessions.detail.system_info.identity_owner', { defaultValue: 'Identity & Owner' })}
-                </h3>
+              {/* User Identity & Owner Card */}
+              {(() => {
+                const uinfo = getUserDisplayInfo(session.user_id, session.platform, session.identity_link);
+                return (
+                  <div className="p-5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                        {t('admin:sessions.detail.system_info.identity_owner', { defaultValue: 'Executing User Identity' })}
+                      </h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-white/5 text-[var(--text-muted)] border border-[var(--border-subtle)]">
+                        {uinfo.platformLabel}
+                      </span>
+                    </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase block mb-1">
-                      {t('admin:sessions.detail.system_info.user_id', { defaultValue: 'Executing User ID' })}
-                    </span>
-                    <Link
-                      href={`/admin/activity?user_id=${encodeURIComponent(session.user_id)}`}
-                      className="text-xs font-mono font-bold text-[var(--accent-gold)] hover:underline break-all"
-                    >
-                      {session.user_id}
-                    </Link>
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] border border-[var(--accent-gold)]/20 flex items-center justify-center font-bold text-sm shrink-0">
+                        {uinfo.avatarChar}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-bold text-[var(--text-primary)] truncate">
+                          {uinfo.displayName}
+                        </h4>
+                        <p className="text-xs text-[var(--text-muted)] font-mono truncate">
+                          {uinfo.subtitle}
+                        </p>
+
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <code className="text-[11px] font-mono text-[var(--text-secondary)] bg-[var(--bg-base)] px-2 py-1 rounded border border-[var(--border-subtle)] truncate max-w-[200px]">
+                            {session.user_id}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(session.user_id, 'User ID')}
+                            className="px-2 py-1 text-[10px] font-semibold rounded bg-[var(--bg-base)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all shrink-0"
+                          >
+                            {t('admin:sessions.detail.action.copy_id', { defaultValue: 'Copy ID' })}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-[var(--border-subtle)] space-y-2 text-xs">
+                      {session.owner_id && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase">
+                            {t('admin:sessions.detail.system_info.owner_id', { defaultValue: 'Owner ID' })}
+                          </span>
+                          <code className="font-mono text-[var(--text-primary)]">
+                            {session.owner_id}
+                          </code>
+                        </div>
+                      )}
+
+                      {session.bot_id && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase">
+                            {t('admin:sessions.detail.system_info.bot_id', { defaultValue: 'Bot ID' })}
+                          </span>
+                          <code className="font-mono text-[var(--text-primary)]">
+                            {session.bot_id}
+                          </code>
+                        </div>
+                      )}
+
+                      {session.workspace_id && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase">
+                            {t('admin:sessions.detail.system_info.workspace_id', { defaultValue: 'Workspace ID' })}
+                          </span>
+                          <code className="font-mono text-[var(--text-primary)]">
+                            {session.workspace_id}
+                          </code>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Dedicated Audit Filter Link Button */}
+                    <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-end">
+                      <Link
+                        href={`/admin/activity?user_id=${encodeURIComponent(session.user_id)}`}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--accent-gold)] hover:underline"
+                        title={t('admin:sessions.detail.identity.view_activity_hint', { defaultValue: 'Search audit logs for this user' })}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                        </svg>
+                        {t('admin:sessions.detail.identity.view_user_activity', { defaultValue: 'Search User Audit Logs' })}
+                      </Link>
+                    </div>
                   </div>
-
-                  {session.owner_id && (
-                    <div>
-                      <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase block mb-1">
-                        {t('admin:sessions.detail.system_info.owner_id', { defaultValue: 'Owner ID' })}
-                      </span>
-                      <code className="text-xs font-mono text-[var(--text-primary)] break-all">
-                        {session.owner_id}
-                      </code>
-                    </div>
-                  )}
-
-                  {session.bot_id && (
-                    <div>
-                      <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase block mb-1">
-                        {t('admin:sessions.detail.system_info.bot_id', { defaultValue: 'Bot ID' })}
-                      </span>
-                      <code className="text-xs font-mono text-[var(--text-primary)] break-all">
-                        {session.bot_id}
-                      </code>
-                    </div>
-                  )}
-
-                  {session.workspace_id && (
-                    <div>
-                      <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase block mb-1">
-                        {t('admin:sessions.detail.system_info.workspace_id', { defaultValue: 'Workspace ID' })}
-                      </span>
-                      <code className="text-xs font-mono text-[var(--text-primary)] break-all">
-                        {session.workspace_id}
-                      </code>
-                    </div>
-                  )}
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Messaging Platform & Channel Card */}
               <div className="p-5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] space-y-4">
