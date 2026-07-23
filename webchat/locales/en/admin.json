@@ -98,6 +98,7 @@
     "dashboard": "Dashboard",
     "bots": "Bots",
     "sessions": "Sessions",
+    "users": "Users",
     "activity": "Activity",
     "workspaces": "Workspaces",
     "skills": "Skills",
@@ -802,5 +803,40 @@
       "delete_title": "Delete Skill",
       "delete_body": "Delete skill \"{{name}}\"? This removes it from the global skills directory and cannot be undone."
     }
+  },
+  "users": {
+    "title": "User Management",
+    "subtitle": "Manage registered accounts, toggle statuses, reset user passwords, and generate invitations",
+    "user_count": "{{count}} registered accounts",
+    "loading": "Loading users and invitations...",
+    "search_placeholder": "Search by username, display name, or ID...",
+    "action": {
+      "reset_password": "Reset Password",
+      "generate_invite": "+ Generate Invite",
+      "enable": "Enable Account",
+      "disable": "Disable Account"
+    },
+    "reset_modal": {
+      "title": "Reset User Password",
+      "subtitle": "Set a new password for account {{username}}",
+      "new_password_label": "New Password *",
+      "confirm_password_label": "Confirm New Password *",
+      "password_placeholder": "Enter new password (at least 6 chars)",
+      "confirm_placeholder": "Re-enter new password",
+      "min_length_hint": "Password must be at least 6 characters",
+      "password_mismatch": "Passwords do not match",
+      "resetting": "Submitting...",
+      "success": "Password reset successfully",
+      "failed": "Failed to reset password"
+    },
+    "table": {
+      "user": "User / Display Name",
+      "role": "Role",
+      "status": "Status",
+      "last_login": "Last Login",
+      "created_at": "Registered At",
+      "actions": "Actions"
+    },
+    "never_logged_in": "Never logged in"
   }
 }

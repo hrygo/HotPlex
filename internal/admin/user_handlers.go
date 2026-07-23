@@ -226,3 +226,43 @@ func (h *UserAdminHandlers) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 	}
 	w.WriteHeader(http.StatusOK)
 }
+
+type resetUserPasswordRequest struct {
+	Password string `json:"password"`
+}
+
+// ResetUserPassword: POST /api/admin/users/{id}/password
+func (h *UserAdminHandlers) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
+	_, ok := h.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "missing user id")
+		return
+	}
+	var req resetUserPasswordRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid body")
+		return
+	}
+	if len(req.Password) < 6 {
+		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", "password must be at least 6 characters")
+		return
+	}
+	if h.idp == nil {
+		web.WriteAppError(w, http.StatusServiceUnavailable, "NO_IDP", "no identity provider")
+		return
+	}
+	hash, err := h.idp.HashPassword(req.Password)
+	if err != nil {
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "hash password failed")
+		return
+	}
+	if err := h.store.UpdateUserPassword(r.Context(), id, hash, h.nowUnix()); err != nil {
+		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "update password failed")
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

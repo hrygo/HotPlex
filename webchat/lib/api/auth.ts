@@ -219,3 +219,17 @@ export async function adminUpdateUserStatus(id: string, status: 'active' | 'disa
     throw new Error(await extractApiError(res, `Update user status failed: ${res.status}`));
   }
 }
+
+// Admin: Reset User Password
+export async function adminResetUserPassword(id: string, password: string, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(`${BASE}/api/admin/users/${id}/password`, {
+    method: 'POST',
+    headers: withAuth({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ password }),
+    ...authOpts(),
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(await extractApiError(res, `Reset user password failed: ${res.status}`));
+  }
+}

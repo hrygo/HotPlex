@@ -18,7 +18,8 @@
     "approve": "同意",
     "reject": "拒绝",
     "refresh": "刷新",
-    "clear": "清除"
+    "clear": "清除",
+    "reset_password": "重置密码"
   },
   "status": {
     "loading": "加载中...",

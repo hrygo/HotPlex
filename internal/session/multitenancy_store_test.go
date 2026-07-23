@@ -50,6 +50,10 @@ func TestUsersStore_ListAndUpdateStatus(t *testing.T) {
 	require.NoError(t, store.UpdateUserStatus(ctx, "u-2", "disabled", 1800000000))
 	disabled, _ := store.GetUserByID(ctx, "u-2")
 	require.Equal(t, "disabled", disabled.Status)
+
+	require.NoError(t, store.UpdateUserPassword(ctx, "u-2", "new_hash_123", 1850000000))
+	updatedUser, _ := store.GetUserByID(ctx, "u-2")
+	require.Equal(t, "new_hash_123", updatedUser.PasswordHash)
 }
 
 func TestUsersStore_ListByIDs(t *testing.T) {

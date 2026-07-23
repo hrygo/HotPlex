@@ -33,6 +33,7 @@ const (
 	AuditConfigRollback                = "config.rollback"
 	AuditConfigValidate                = "config.validate"
 	AuditMemberStatusUpdate            = "member.status.update"
+	AuditUserPasswordReset             = "user.password_reset"
 	AuditInvitationCreate              = "invitation.create"
 	AuditInvitationDelete              = "invitation.delete"
 	AuditWorkspacePermissionModeUpdate = "workspace.permission_mode.update" // issue #807 admin console

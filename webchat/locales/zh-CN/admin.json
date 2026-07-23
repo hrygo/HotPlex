@@ -98,6 +98,7 @@
     "dashboard": "控制台",
     "bots": "机器人管理",
     "sessions": "会话管理",
+    "users": "用户管理",
     "activity": "行为审计",
     "workspaces": "工作区管理",
     "skills": "技能管理",
@@ -803,5 +804,40 @@
       "delete_title": "删除技能",
       "delete_body": "删除技能 \"{{name}}\"？此操作会从全局技能目录移除，不可撤销。"
     }
+  },
+  "users": {
+    "title": "用户管理",
+    "subtitle": "管理已注册账号、修改状态、重置用户密码与生成邀请码",
+    "user_count": "{{count}} 个注册账号",
+    "loading": "正在加载用户与邀请码...",
+    "search_placeholder": "搜索用户名、显示名称或 ID...",
+    "action": {
+      "reset_password": "重置密码",
+      "generate_invite": "+ 生成邀请码",
+      "enable": "启用账号",
+      "disable": "禁用账号"
+    },
+    "reset_modal": {
+      "title": "重置用户密码",
+      "subtitle": "管理员为账号 {{username}} 设置新密码",
+      "new_password_label": "新密码 *",
+      "confirm_password_label": "确认新密码 *",
+      "password_placeholder": "输入新密码 (至少 6 位)",
+      "confirm_placeholder": "再次输入新密码",
+      "min_length_hint": "密码必须至少包含 6 个字符",
+      "password_mismatch": "两次输入的密码不一致",
+      "resetting": "提交中...",
+      "success": "密码重置成功",
+      "failed": "重置密码失败"
+    },
+    "table": {
+      "user": "用户 / 显示名",
+      "role": "角色",
+      "status": "状态",
+      "last_login": "最后登录",
+      "created_at": "注册时间",
+      "actions": "操作"
+    },
+    "never_logged_in": "从未登录"
   }
 }
