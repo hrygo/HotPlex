@@ -5,7 +5,13 @@
  */
 
 import { adminFetch } from './admin-client';
-import type { AdminSessionInfo, AuditIdentityLink } from '@/lib/types/admin';
+import type {
+  AdminSessionInfo,
+  AdminSessionDetailResponse,
+  SessionStatsResponse,
+  SessionDebugResponse,
+  AuditIdentityLink,
+} from '@/lib/types/admin';
 
 export type SessionListResponse = {
   sessions: AdminSessionInfo[];
@@ -24,6 +30,18 @@ export function listSessions(
   return adminFetch<SessionListResponse>(
     `/admin/sessions?limit=${limit}&offset=${offset}`,
   );
+}
+
+export function getSessionDetail(id: string): Promise<AdminSessionDetailResponse> {
+  return adminFetch<AdminSessionDetailResponse>(`/admin/sessions/${encodeURIComponent(id)}`);
+}
+
+export function getSessionStats(id: string): Promise<SessionStatsResponse> {
+  return adminFetch<SessionStatsResponse>(`/admin/sessions/${encodeURIComponent(id)}/stats`);
+}
+
+export function getSessionDebug(id: string): Promise<SessionDebugResponse> {
+  return adminFetch<SessionDebugResponse>(`/admin/debug/sessions/${encodeURIComponent(id)}`);
 }
 
 export function terminateSession(id: string): Promise<void> {

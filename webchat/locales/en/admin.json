@@ -325,7 +325,28 @@
       "user_id": "Executing User ID",
       "work_dir": "Working directory",
       "started_at": "Started At",
-      "last_active": "Last Active At"
+      "last_active": "Last Active At",
+      "tab_overview": "Overview",
+      "tab_stats": "Tokens & Stats",
+      "tab_context": "Context & Config",
+      "tab_activity": "Audit Logs",
+      "live_worker": "Live Worker Process",
+      "worker_running": "Running (Connected)",
+      "worker_stopped": "Disconnected / Stopped",
+      "total_cost": "Est. Total Cost",
+      "total_tokens": "Total Tokens",
+      "token_input": "Input Tokens",
+      "token_output": "Output Tokens",
+      "cache_read": "Cache Read",
+      "cache_write": "Cache Write",
+      "no_turns_data": "No turn stats available",
+      "no_activity_data": "No audit activity logs for this session",
+      "platform_info": "Platform & Channel",
+      "allowed_tools": "Allowed Tools",
+      "no_tools_limit": "No restriction (All allowed)",
+      "expiration": "Expiration & Limits",
+      "idle_expires": "Idle Timeout",
+      "expires_at": "Absolute Expiry"
     },
     "confirm": {
       "terminate_title": "Terminate Session?",
@@ -344,10 +365,51 @@
     "detail": {
       "untitled": "Untitled Session",
       "no_id": "No session ID specified",
-      "loading": "Loading session...",
+      "loading": "Loading session metrics & details...",
       "error_load": "Failed to load session",
       "not_found": "Session not found",
-      "title_label": "Title"
+      "title_label": "Title",
+      "subtitle": "Inspect live worker status, token consumption, turn performance, and audit logs.",
+      "tab_overview": "Environment & Overview",
+      "tab_turns": "Turns & Performance",
+      "tab_context": "Context & Tools",
+      "tab_activity": "Audit Trail",
+      "kpi": {
+        "worker_status": "Worker Process State",
+        "turn_count": "Execution Turns",
+        "turn_sub": "{{success}} passed / {{failed}} failed",
+        "token_usage": "Total Token Consumption",
+        "token_sub": "In {{input}} / Out {{output}}",
+        "cost_est": "Est. API Cost",
+        "cost_sub": "Avg duration {{avgDuration}}",
+        "cache_efficiency": "Cache Hit Rate"
+      },
+      "turn_table": {
+        "turn_num": "Turn #",
+        "model": "Model",
+        "status": "Status",
+        "duration": "Latency",
+        "tokens": "Tokens (In/Out/Cache)",
+        "cost": "Cost",
+        "time": "Time",
+        "success": "Success",
+        "failed": "Failed"
+      },
+      "system_info": {
+        "identity_owner": "Identity & Owner",
+        "user_id": "User ID",
+        "owner_id": "Owner ID",
+        "principal_id": "Principal ID",
+        "bot_id": "Bot ID",
+        "workspace_id": "Workspace ID",
+        "messaging_platform": "Messaging Platform",
+        "platform_keys": "Platform Key Parameters",
+        "worker_env": "Worker Environment & Directory",
+        "worker_session_id": "Worker Session ID",
+        "client_key": "Client Key",
+        "source": "Source Channel",
+        "lifecycle_timers": "Lifecycle & Timers"
+      }
     }
   },
   "workspaces": {

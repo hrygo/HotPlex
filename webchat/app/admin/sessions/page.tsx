@@ -2,11 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { listSessions, terminateSession, deleteSession } from '@/lib/api/admin-sessions';
+import { listSessions, terminateSession, deleteSession, getSessionDetail, getSessionStats, getSessionDebug } from '@/lib/api/admin-sessions';
+import { listActivity } from '@/lib/api/admin-activity';
 import { MetricCard } from '@/components/admin/metric-card';
 import { SessionStatusBadge } from '@/components/admin/session-status-badge';
 import { useAdminUI } from '@/context/admin-ui-context';
-import type { AdminSessionInfo, AuditIdentityLink } from '@/lib/types/admin';
+import type {
+  AdminSessionInfo,
+  AdminSessionDetailResponse,
+  SessionStatsResponse,
+  SessionDebugInfo,
+  AuditActivity,
+  AuditIdentityLink,
+} from '@/lib/types/admin';
 import { formatRelative as formatTime, formatDateTime } from '@/lib/utils/format-time';
 import { useTranslation } from 'react-i18next';
 
@@ -17,6 +25,7 @@ import { useTranslation } from 'react-i18next';
 type SessionState = AdminSessionInfo['state'];
 type FilterOption = 'all' | SessionState;
 type SortOption = 'last_active' | 'created';
+type DrawerTab = 'overview' | 'stats' | 'context' | 'activity';
 
 function truncateId(id: string): string {
   if (id.length <= 12) return id;
@@ -39,8 +48,62 @@ export default function SessionsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [drawerSession, setDrawerSession] = useState<AdminSessionInfo | null>(null);
+  const [drawerDetail, setDrawerDetail] = useState<AdminSessionDetailResponse | null>(null);
+  const [drawerStats, setDrawerStats] = useState<SessionStatsResponse | null>(null);
+  const [drawerDebug, setDrawerDebug] = useState<SessionDebugInfo | null>(null);
+  const [drawerActivities, setDrawerActivities] = useState<AuditActivity[]>([]);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>('overview');
   const [copyIdFeedback, setCopyIdFeedback] = useState<string | null>(null);
   const [identityLinks, setIdentityLinks] = useState<Record<string, AuditIdentityLink>>({});
+
+  const loadDrawerData = useCallback(async (sessionId: string) => {
+    setDrawerLoading(true);
+    try {
+      const [detailRes, statsRes, debugRes, actRes] = await Promise.allSettled([
+        getSessionDetail(sessionId),
+        getSessionStats(sessionId),
+        getSessionDebug(sessionId),
+        listActivity({ sessionId, limit: 15 }),
+      ]);
+
+      if (detailRes.status === 'fulfilled') setDrawerDetail(detailRes.value);
+      else setDrawerDetail(null);
+
+      if (statsRes.status === 'fulfilled') setDrawerStats(statsRes.value);
+      else setDrawerStats(null);
+
+      if (debugRes.status === 'fulfilled') setDrawerDebug(debugRes.value.debug);
+      else setDrawerDebug(null);
+
+      if (actRes.status === 'fulfilled') setDrawerActivities(actRes.value.rows ?? []);
+      else setDrawerActivities([]);
+    } finally {
+      setDrawerLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (drawerSession?.id) {
+      setDrawerTab('overview');
+      loadDrawerData(drawerSession.id);
+    } else {
+      setDrawerDetail(null);
+      setDrawerStats(null);
+      setDrawerDebug(null);
+      setDrawerActivities([]);
+    }
+  }, [drawerSession?.id, loadDrawerData]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && drawerSession) {
+        setDrawerSession(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [drawerSession]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -687,140 +750,395 @@ export default function SessionsPage() {
         >
           {/* Backdrop blur overlay */}
           <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-300 animate-[fadeInUp_0.2s_ease-out]"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 animate-[fadeInUp_0.2s_ease-out]"
             onClick={() => setDrawerSession(null)}
           />
 
           <div className="absolute inset-y-0 right-0 max-w-full flex">
-            <div className="relative w-screen max-w-md bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] shadow-2xl flex flex-col justify-between transform transition-transform duration-300 translate-x-0 animate-[slideIn_0.22s_cubic-bezier(0.2,0.8,0.2,1)]">
+            <div className="relative w-screen max-w-xl bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] shadow-2xl flex flex-col justify-between transform transition-transform duration-300 translate-x-0 animate-[slideIn_0.22s_cubic-bezier(0.2,0.8,0.2,1)]">
               
-              {/* Header */}
-              <div className="px-6 pt-7 pb-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-bold text-[var(--text-faint)] uppercase tracking-wider font-mono">
-                      {t('admin:sessions.drawer.title', { defaultValue: 'Session Inspector' })}
-                    </h2>
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-gold)]" />
+              {/* Drawer Header */}
+              <div className="px-6 pt-6 pb-0 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-[var(--accent-gold)] shrink-0 animate-pulse" />
+                    <h1 className="text-base font-display font-bold text-[var(--text-primary)] truncate">
+                      {drawerSession.title || t('admin:sessions.detail.untitled', { defaultValue: 'Untitled Session' })}
+                    </h1>
+                    <SessionStatusBadge state={drawerSession.state} />
                   </div>
-                  <h1 className="text-md font-display font-bold text-[var(--text-primary)] mt-1 truncate max-w-[280px]">
-                    {drawerSession.title || t('admin:sessions.detail.untitled', { defaultValue: 'Untitled Session' })}
-                  </h1>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDrawerSession(null)}
-                  className="p-1.5 rounded-full text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all"
-                  title={t('admin:sessions.drawer.close', { defaultValue: 'Close inspector' })}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Body Metadata details */}
-              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-                
-                {/* ID with interactive Copy button */}
-                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                  <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                    {t('admin:sessions.drawer.full_id', { defaultValue: 'Full Session ID' })}
-                  </span>
-                  <div className="flex items-center justify-between gap-3">
-                    <code className="text-xs font-mono text-[var(--accent-gold)] break-all select-all font-semibold">
-                      {drawerSession.id}
-                    </code>
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
-                      onClick={(e) => handleCopyId(e, drawerSession.id)}
-                      className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-[var(--radius-xs)] bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 text-[9px] font-bold uppercase text-[var(--accent-gold)] hover:bg-[var(--accent-gold)]/20 transition-all"
+                      onClick={() => loadDrawerData(drawerSession.id)}
+                      disabled={drawerLoading}
+                      className="p-1.5 rounded-full text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all disabled:opacity-50"
+                      title={t('admin:sessions.action.refresh', { defaultValue: 'Refresh' })}
                     >
-                      {copyIdFeedback === drawerSession.id ? t('common:action.copied', { defaultValue: 'Copied' }) : t('common:action.copy', { defaultValue: 'Copy' })}
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-4 h-4 ${drawerLoading ? 'animate-spin' : ''}`}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDrawerSession(null)}
+                      className="p-1.5 rounded-full text-[var(--text-faint)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all"
+                      title={t('admin:sessions.drawer.close', { defaultValue: 'Close inspector' })}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
                     </button>
                   </div>
                 </div>
 
-                 {/* Info key-value block grid */}
-                <div className="grid grid-cols-2 gap-3.5">
-                  <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.state', { defaultValue: 'Execution State' })}
-                    </span>
-                    <SessionStatusBadge state={drawerSession.state} />
-                  </div>
-                  <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.turns', { defaultValue: 'Total turns' })}
-                    </span>
-                    <span className="text-xs text-[var(--text-primary)] font-bold">
-                      {drawerSession.turn_count ?? 0} <span className="text-[9px] font-normal text-[var(--text-muted)]">{t('admin:sessions.drawer.turns_completed', { defaultValue: 'turns completed' })}</span>
-                    </span>
-                  </div>
+                {/* Session ID Banner */}
+                <div className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] mb-4">
+                  <code className="text-xs font-mono text-[var(--accent-gold)] truncate font-medium">
+                    {drawerSession.id}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={(e) => handleCopyId(e, drawerSession.id)}
+                    className="shrink-0 text-[10px] font-bold uppercase text-[var(--accent-gold)] hover:underline"
+                  >
+                    {copyIdFeedback === drawerSession.id ? t('common:action.copied', { defaultValue: 'Copied' }) : t('common:action.copy', { defaultValue: 'Copy' })}
+                  </button>
                 </div>
 
-                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
-                  <div>
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.engine_type', { defaultValue: 'Worker engine type' })}
-                    </span>
-                    <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
-                      {drawerSession.worker_type || '—'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.user_id', { defaultValue: 'Executing User ID' })}
-                    </span>
-                    {(() => {
-                      const link = identityLinks[drawerSession.user_id];
-                      const name = link?.display_name || link?.DisplayName;
-                      return (
-                        <div className="min-w-0">
-                          {name && (
-                            <div className="text-xs font-medium text-[var(--text-primary)] truncate" title={name}>
-                              {name}
-                            </div>
-                          )}
-                          <div className="text-xs font-mono font-medium text-[var(--text-secondary)] break-all" title={drawerSession.user_id}>
-                            {drawerSession.user_id || '—'}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.work_dir', { defaultValue: 'Working directory' })}
-                    </span>
-                    <span className="text-xs font-mono text-[var(--text-muted)] break-all leading-normal" title={drawerSession.work_dir}>
-                      {drawerSession.work_dir || '—'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
-                  <div>
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.started_at', { defaultValue: 'Started At' })}
-                    </span>
-                    <span className="text-xs text-[var(--text-secondary)] font-medium">
-                      {formatDateTime(drawerSession.created_at)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
-                      {t('admin:sessions.drawer.last_active', { defaultValue: 'Last Active At' })}
-                    </span>
-                    <span className="text-xs text-[var(--text-secondary)] font-medium">
-                      {formatDateTime(drawerSession.updated_at)}
-                    </span>
-                  </div>
+                {/* Tabs */}
+                <div className="flex items-center gap-4 border-b border-transparent text-xs font-medium">
+                  {(['overview', 'stats', 'context', 'activity'] as DrawerTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setDrawerTab(tab)}
+                      className={`pb-2.5 px-1 border-b-2 transition-colors capitalize ${
+                        drawerTab === tab
+                          ? 'border-[var(--accent-gold)] text-[var(--accent-gold)] font-bold'
+                          : 'border-transparent text-[var(--text-faint)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      {t(`admin:sessions.drawer.tab_${tab}`, { defaultValue: tab })}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Bottom Actions */}
-              <div className="p-6 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-3">
+              {/* Drawer Body */}
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                {/* OVERVIEW TAB */}
+                {drawerTab === 'overview' && (
+                  <div className="space-y-4">
+                    {/* Key Stats Cards */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)]">
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-0.5">
+                          {t('admin:sessions.drawer.turns', { defaultValue: 'Total Turns' })}
+                        </span>
+                        <span className="text-sm font-bold text-[var(--text-primary)]">
+                          {drawerStats?.total_turns ?? drawerSession.turn_count ?? 0}
+                        </span>
+                        {drawerStats && (
+                          <span className="text-[10px] text-[var(--text-faint)] block mt-0.5">
+                            {drawerStats.success_turns} pass / {drawerStats.failed_turns} fail
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)]">
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-0.5">
+                          {t('admin:sessions.drawer.total_cost', { defaultValue: 'Est. Total Cost' })}
+                        </span>
+                        <span className="text-sm font-bold font-mono text-[var(--accent-emerald)]">
+                          ${(drawerStats?.total_cost_usd ?? 0).toFixed(4)}
+                        </span>
+                      </div>
+
+                      <div className="px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)]">
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-0.5">
+                          {t('admin:sessions.drawer.total_tokens', { defaultValue: 'Total Tokens' })}
+                        </span>
+                        <span className="text-sm font-bold font-mono text-[var(--text-primary)]">
+                          {((drawerStats?.total_tokens_in ?? 0) + (drawerStats?.total_tokens_out ?? 0)).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="px-3.5 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-hover)] border border-[var(--border-subtle)]">
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-0.5">
+                          {t('admin:sessions.drawer.live_worker', { defaultValue: 'Live Worker Process' })}
+                        </span>
+                        {drawerDebug?.has_worker ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--accent-emerald)]">
+                            <span className="w-2 h-2 rounded-full bg-[var(--accent-emerald)] animate-pulse" />
+                            {t('admin:sessions.drawer.worker_running', { defaultValue: 'Running' })}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-medium text-[var(--text-faint)]">
+                            {t('admin:sessions.drawer.worker_stopped', { defaultValue: 'Stopped' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metadata Breakdown */}
+                    <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+                      <div>
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                          {t('admin:sessions.drawer.engine_type', { defaultValue: 'Worker Engine Type' })}
+                        </span>
+                        <span className="text-xs font-mono font-bold text-[var(--text-primary)]">
+                          {drawerSession.worker_type || '—'}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                          {t('admin:sessions.drawer.user_id', { defaultValue: 'Executing User ID' })}
+                        </span>
+                        {(() => {
+                          const link = identityLinks[drawerSession.user_id];
+                          const name = link?.display_name || link?.DisplayName;
+                          return (
+                            <div className="min-w-0">
+                              {name && (
+                                <div className="text-xs font-medium text-[var(--text-primary)] truncate" title={name}>
+                                  {name}
+                                </div>
+                              )}
+                              <Link
+                                href={`/admin/activity?user_id=${encodeURIComponent(drawerSession.user_id)}`}
+                                className="text-xs font-mono text-[var(--accent-gold)] hover:underline break-all"
+                              >
+                                {drawerSession.user_id || '—'}
+                              </Link>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {drawerDetail?.platform && (
+                        <div>
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                            {t('admin:sessions.drawer.platform_info', { defaultValue: 'Platform & Channel' })}
+                          </span>
+                          <span className="text-xs font-bold capitalize text-[var(--text-primary)]">
+                            {drawerDetail.platform}
+                          </span>
+                          {drawerDetail.platform_key && (
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {Object.entries(drawerDetail.platform_key).map(([k, v]) => (
+                                <span key={k} className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+                                  {k}: {v}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div>
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                          {t('admin:sessions.drawer.work_dir', { defaultValue: 'Working Directory' })}
+                        </span>
+                        <span className="text-xs font-mono text-[var(--text-muted)] break-all select-all">
+                          {drawerSession.work_dir || '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Timestamps */}
+                    <div className="grid grid-cols-2 gap-3.5 px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+                      <div>
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                          {t('admin:sessions.drawer.started_at', { defaultValue: 'Started At' })}
+                        </span>
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">
+                          {formatDateTime(drawerSession.created_at)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                          {t('admin:sessions.drawer.last_active', { defaultValue: 'Last Active At' })}
+                        </span>
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">
+                          {formatDateTime(drawerSession.updated_at)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* STATS & TOKENS TAB */}
+                {drawerTab === 'stats' && (
+                  <div className="space-y-4">
+                    {drawerStats ? (
+                      <>
+                        <div className="p-4 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+                          <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                            Token Split Summary
+                          </h3>
+                          <div className="grid grid-cols-2 gap-3 text-xs">
+                            <div className="p-2.5 rounded bg-[var(--bg-hover)]">
+                              <span className="text-[10px] text-[var(--text-faint)] uppercase block">{t('admin:sessions.drawer.token_input', { defaultValue: 'Input' })}</span>
+                              <span className="font-mono font-bold text-[var(--text-primary)]">{drawerStats.total_tokens_in.toLocaleString()}</span>
+                            </div>
+                            <div className="p-2.5 rounded bg-[var(--bg-hover)]">
+                              <span className="text-[10px] text-[var(--text-faint)] uppercase block">{t('admin:sessions.drawer.token_output', { defaultValue: 'Output' })}</span>
+                              <span className="font-mono font-bold text-[var(--accent-emerald)]">{drawerStats.total_tokens_out.toLocaleString()}</span>
+                            </div>
+                            <div className="p-2.5 rounded bg-[var(--bg-hover)]">
+                              <span className="text-[10px] text-[var(--text-faint)] uppercase block">{t('admin:sessions.drawer.cache_read', { defaultValue: 'Cache Read' })}</span>
+                              <span className="font-mono font-bold text-[var(--accent-cyan)]">{drawerStats.total_tokens_cache_read.toLocaleString()}</span>
+                            </div>
+                            <div className="p-2.5 rounded bg-[var(--bg-hover)]">
+                              <span className="text-[10px] text-[var(--text-faint)] uppercase block">{t('admin:sessions.drawer.cache_write', { defaultValue: 'Cache Write' })}</span>
+                              <span className="font-mono font-bold text-[var(--accent-purple)]">{drawerStats.total_tokens_cache_write.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Turn list */}
+                        <div className="space-y-2">
+                          <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                            Per-Turn Breakdown ({drawerStats.turns?.length ?? 0})
+                          </h3>
+                          {drawerStats.turns && drawerStats.turns.length > 0 ? (
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                              {drawerStats.turns.map((turn) => (
+                                <div key={turn.seq} className="p-3 rounded-[var(--radius-sm)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] flex items-center justify-between text-xs">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-[var(--text-primary)] font-mono">Turn #{turn.turn_num}</span>
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${turn.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                                        {turn.success ? 'PASS' : 'FAIL'}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] text-[var(--text-faint)] font-mono mt-0.5">
+                                      {turn.model || 'llm'} • {turn.duration_ms}ms
+                                    </p>
+                                  </div>
+                                  <div className="text-right font-mono text-[11px]">
+                                    <p className="font-bold text-[var(--accent-emerald)]">${turn.cost_usd.toFixed(4)}</p>
+                                    <p className="text-[10px] text-[var(--text-faint)]">in:{turn.tokens_in} out:{turn.tokens_out}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-[var(--text-faint)] italic">{t('admin:sessions.drawer.no_turns_data', { defaultValue: 'No turn details recorded' })}</p>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-8 text-center text-xs text-[var(--text-faint)]">
+                        {drawerLoading ? t('admin:sessions.detail.loading', { defaultValue: 'Loading stats...' }) : t('admin:sessions.drawer.no_turns_data', { defaultValue: 'No turn stats available' })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* CONTEXT & CONFIG TAB */}
+                {drawerTab === 'context' && (
+                  <div className="space-y-4">
+                    <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+                      <div>
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                          {t('admin:sessions.drawer.allowed_tools', { defaultValue: 'Allowed Tools' })}
+                        </span>
+                        {drawerDetail?.allowed_tools && drawerDetail.allowed_tools.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {drawerDetail.allowed_tools.map((tool) => (
+                              <span key={tool} className="px-2 py-0.5 rounded text-xs font-mono bg-[var(--accent-gold)]/10 text-[var(--accent-gold)] border border-[var(--accent-gold)]/20">
+                                {tool}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--text-muted)] italic">
+                            {t('admin:sessions.drawer.no_tools_limit', { defaultValue: 'No restriction (All allowed)' })}
+                          </span>
+                        )}
+                      </div>
+
+                      {drawerDetail?.worker_session_id && (
+                        <div>
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                            Worker Session ID
+                          </span>
+                          <code className="text-xs font-mono text-[var(--text-primary)] break-all select-all">
+                            {drawerDetail.worker_session_id}
+                          </code>
+                        </div>
+                      )}
+
+                      {drawerDetail?.source && (
+                        <div>
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                            Source Channel
+                          </span>
+                          <span className="text-xs font-bold uppercase text-[var(--text-primary)]">
+                            {drawerDetail.source}
+                          </span>
+                        </div>
+                      )}
+
+                      {drawerDetail?.client_key && (
+                        <div>
+                          <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block mb-1">
+                            Client Key
+                          </span>
+                          <code className="text-xs font-mono text-[var(--text-muted)] break-all">
+                            {drawerDetail.client_key}
+                          </code>
+                        </div>
+                      )}
+                    </div>
+
+                    {drawerDetail?.context && Object.keys(drawerDetail.context).length > 0 && (
+                      <div className="p-4 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
+                        <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider block">
+                          Session Context Map
+                        </span>
+                        <pre className="text-[11px] font-mono text-[var(--text-secondary)] overflow-x-auto p-3 rounded bg-[var(--bg-hover)] border border-[var(--border-subtle)]">
+                          {JSON.stringify(drawerDetail.context, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* AUDIT LOG TAB */}
+                {drawerTab === 'activity' && (
+                  <div className="space-y-3">
+                    {drawerActivities.length > 0 ? (
+                      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {drawerActivities.map((act) => (
+                          <div key={act.id} className="p-3 rounded-[var(--radius-sm)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-[var(--text-primary)] font-mono">{act.action}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${act.outcome === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                                {act.outcome}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-[var(--text-faint)] font-mono">
+                              <span>User: {act.user_id}</span>
+                              <span>{formatDateTime(new Date(act.ts).toISOString())}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-xs text-[var(--text-faint)]">
+                        {drawerLoading ? t('admin:sessions.detail.loading', { defaultValue: 'Loading audit logs...' }) : t('admin:sessions.drawer.no_activity_data', { defaultValue: 'No audit logs found for this session' })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Actions Footer */}
+              <div className="p-5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-3">
                 <div className="flex gap-3">
                   {drawerSession.state !== 'terminated' && (
                     <button
@@ -851,7 +1169,7 @@ export default function SessionsPage() {
 
                 <Link
                   href={`/admin/sessions/detail?id=${encodeURIComponent(drawerSession.id)}`}
-                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] border border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-all text-center"
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 border border-[var(--accent-gold)]/20 hover:bg-[var(--accent-gold)]/20 transition-all text-center"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
