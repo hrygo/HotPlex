@@ -290,7 +290,7 @@ export default function CronPage() {
         {!loading && !error && filtered.length > 0 && (
           <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden shadow-sm">
             {/* Table Header */}
-            <div className="grid grid-cols-[minmax(0,1.5fr)_160px_90px_120px_120px_90px_160px] gap-3 px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-secondary)]">
+            <div className="grid grid-cols-[minmax(0,1.5fr)_140px_80px_110px_110px_80px_200px] gap-3 px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-secondary)]">
               <span>{t('admin:cron.table.name', { defaultValue: 'Job Name & Task' })}</span>
               <span>{t('admin:cron.table.schedule', { defaultValue: 'Schedule' })}</span>
               <span>{t('admin:cron.table.enabled', { defaultValue: 'Status' })}</span>
@@ -301,98 +301,116 @@ export default function CronPage() {
             </div>
 
             {/* Table Rows */}
-            {filtered.map((job) => (
-              <div
-                key={job.id}
-                className={`grid grid-cols-[minmax(0,1.5fr)_160px_90px_120px_120px_90px_160px] gap-3 px-5 py-3.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-65' : ''}`}
-              >
-                {/* Name & Payload Message */}
-                <div className="flex flex-col gap-1 min-w-0">
-                  <Link
-                    href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
-                    className="text-xs font-bold text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
-                  >
-                    {job.name}
-                  </Link>
-                  {job.payload?.message && (
-                    <span className="text-[11px] text-[var(--text-muted)] truncate" title={job.payload.message}>
-                      {job.payload.message}
-                    </span>
-                  )}
-                </div>
-
-                {/* Schedule Badge */}
-                <div>
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-mono font-medium bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-subtle)] truncate max-w-full" title={formatSchedule(job.schedule)}>
-                    {formatSchedule(job.schedule)}
-                  </span>
-                </div>
-
-                {/* Enabled Toggle Switch */}
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => handleToggle(job)}
-                    disabled={actionLoading === job.id}
-                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                      job.enabled
-                        ? 'bg-emerald-500'
-                        : 'bg-[var(--text-faint)]/40'
-                    }`}
-                    title={job.enabled ? t('admin:cron.action.disable_verb', { defaultValue: 'Disable' }) : t('admin:cron.action.enable_verb', { defaultValue: 'Enable' })}
-                  >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-                        job.enabled ? 'translate-x-4' : 'translate-x-0.5'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* Last Run */}
-                <span className="text-xs text-[var(--text-muted)] font-mono" title={job.state?.last_run_at_ms ? new Date(job.state.last_run_at_ms).toISOString() : undefined}>
-                  {formatTime(job.state?.last_run_at_ms)}
-                </span>
-
-                {/* Next Run */}
-                <span className="text-xs text-[var(--text-muted)] font-mono" title={job.state?.next_run_at_ms ? new Date(job.state.next_run_at_ms).toISOString() : undefined}>
-                  {job.enabled ? formatTime(job.state?.next_run_at_ms) : '—'}
-                </span>
-
-                {/* Runs count */}
-                <span className="text-xs font-mono text-[var(--text-primary)]">
-                  {job.state?.run_count ?? 0}
-                  {job.max_runs != null ? <span className="text-[var(--text-faint)]"> / {job.max_runs}</span> : null}
-                </span>
-
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleTrigger(job.id, job.name)}
-                    disabled={actionLoading === job.id || !job.enabled}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 hover:bg-[var(--accent-gold)]/20 transition-colors disabled:opacity-40"
-                    title={t('admin:cron.action.trigger', { defaultValue: 'Trigger manually' })}
-                  >
-                    {actionLoading === job.id ? (
-                      <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      '▶ Run'
+            {filtered.map((job) => {
+              const isRecentlyRun = actionLoading === job.id || (job.state?.last_run_at_ms && Date.now() - job.state.last_run_at_ms < 15000);
+              return (
+                <div
+                  key={job.id}
+                  className={`grid grid-cols-[minmax(0,1.5fr)_140px_80px_110px_110px_80px_200px] gap-3 px-5 py-3.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-65' : ''}`}
+                >
+                  {/* Name & Payload Message */}
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
+                        className="text-xs font-bold text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
+                      >
+                        {job.name}
+                      </Link>
+                      {isRecentlyRun && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse">
+                          🔄 Executing
+                        </span>
+                      )}
+                    </div>
+                    {job.payload?.message && (
+                      <span className="text-[11px] text-[var(--text-muted)] truncate" title={job.payload.message}>
+                        {job.payload.message}
+                      </span>
                     )}
-                  </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(job.id, job.name)}
-                    disabled={actionLoading === job.id}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-colors disabled:opacity-40"
-                    title={t('common:action.delete', { defaultValue: 'Delete job' })}
-                  >
-                    ✕
-                  </button>
+                  {/* Schedule Badge */}
+                  <div>
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-mono font-medium bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-subtle)] truncate max-w-full" title={formatSchedule(job.schedule)}>
+                      {formatSchedule(job.schedule)}
+                    </span>
+                  </div>
+
+                  {/* Enabled Toggle Switch */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(job)}
+                      disabled={actionLoading === job.id}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        job.enabled
+                          ? 'bg-emerald-500'
+                          : 'bg-[var(--text-faint)]/40'
+                      }`}
+                      title={job.enabled ? t('admin:cron.action.disable_verb', { defaultValue: 'Disable' }) : t('admin:cron.action.enable_verb', { defaultValue: 'Enable' })}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                          job.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Last Run */}
+                  <span className="text-xs text-[var(--text-muted)] font-mono" title={job.state?.last_run_at_ms ? new Date(job.state.last_run_at_ms).toISOString() : undefined}>
+                    {formatTime(job.state?.last_run_at_ms)}
+                  </span>
+
+                  {/* Next Run */}
+                  <span className="text-xs text-[var(--text-muted)] font-mono" title={job.state?.next_run_at_ms ? new Date(job.state.next_run_at_ms).toISOString() : undefined}>
+                    {job.enabled ? formatTime(job.state?.next_run_at_ms) : '—'}
+                  </span>
+
+                  {/* Runs count */}
+                  <span className="text-xs font-mono text-[var(--text-primary)]">
+                    {job.state?.run_count ?? 0}
+                    {job.max_runs != null ? <span className="text-[var(--text-faint)]"> / {job.max_runs}</span> : null}
+                  </span>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-1.5">
+                    <Link
+                      href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-[var(--text-secondary)] bg-[var(--bg-elevated)] hover:text-[var(--accent-gold)] hover:bg-[var(--bg-hover)] border border-[var(--border-subtle)] transition-colors"
+                      title={t('admin:cron.action.edit_detail', { defaultValue: 'Edit & View History' })}
+                    >
+                      ⚙️ Edit
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() => handleTrigger(job.id, job.name)}
+                      disabled={actionLoading === job.id || !job.enabled}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 hover:bg-[var(--accent-gold)]/20 transition-colors disabled:opacity-40"
+                      title={t('admin:cron.action.trigger', { defaultValue: 'Trigger manually' })}
+                    >
+                      {actionLoading === job.id ? (
+                        <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        '▶ Run'
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(job.id, job.name)}
+                      disabled={actionLoading === job.id}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-colors disabled:opacity-40"
+                      title={t('common:action.delete', { defaultValue: 'Delete job' })}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
