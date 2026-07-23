@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { listCronJobs, updateCronJob, deleteCronJob, triggerCronJob } from '@/lib/api/admin-cron';
 import { useAdminUI } from '@/context/admin-ui-context';
@@ -9,17 +9,10 @@ import { formatRelative as formatTime } from '@/lib/utils/format-time';
 import type { CronJob } from '@/lib/types/admin';
 import { useResource } from '@/hooks/use-resource';
 import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
+import { CreateCronModal } from '@/components/admin/create-cron-modal';
 import { useTranslation } from 'react-i18next';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 type FilterOption = 'all' | 'enabled' | 'disabled';
-
-// ---------------------------------------------------------------------------
-// Page Component
-// ---------------------------------------------------------------------------
 
 export default function CronPage() {
   const { t } = useTranslation();
@@ -29,8 +22,11 @@ export default function CronPage() {
     [],
   );
   const jobList = jobs ?? [];
+
+  const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   function formatSchedule(s: CronJob['schedule']): string {
     if (!s) return '—';
@@ -42,21 +38,24 @@ export default function CronPage() {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Derived data
-  // ---------------------------------------------------------------------------
+  const filtered = useMemo(() => {
+    return jobList.filter((j) => {
+      if (filter === 'enabled' && !j.enabled) return false;
+      if (filter === 'disabled' && j.enabled) return false;
 
-  const filtered = jobList.filter((j) => {
-    if (filter === 'all') return true;
-    if (filter === 'enabled') return j.enabled;
-    return !j.enabled;
-  });
+      if (!query.trim()) return true;
+      const q = query.toLowerCase();
+      return (
+        j.name.toLowerCase().includes(q) ||
+        (j.id && j.id.toLowerCase().includes(q)) ||
+        (j.payload?.message && j.payload.message.toLowerCase().includes(q)) ||
+        (j.bot_id && j.bot_id.toLowerCase().includes(q))
+      );
+    });
+  }, [jobList, filter, query]);
 
   const enabledCount = jobList.filter((j) => j.enabled).length;
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
+  const disabledCount = jobList.length - enabledCount;
 
   const handleToggle = async (job: CronJob) => {
     const next = !job.enabled;
@@ -95,6 +94,7 @@ export default function CronPage() {
       setActionLoading(id);
       await triggerCronJob(id);
       showToast(t('admin:cron.toast.triggered', { name, defaultValue: `Cron job "${name}" manually triggered.` }), 'success');
+      await reload();
     } catch (err) {
       showToast(err instanceof Error ? err.message : t('admin:cron.error.trigger_failed', { defaultValue: 'Failed to trigger cron job' }), 'error');
     } finally {
@@ -123,170 +123,272 @@ export default function CronPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] px-6 py-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-6xl mx-auto space-y-6">
+        
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
-              {t('admin:cron.title', { defaultValue: 'Cron Jobs' })}
-            </h1>
-            {!loading && !error && (
-              <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
-                {t('admin:cron.job_count', { enabled: enabledCount, total: jobList.length, defaultValue: `${enabledCount} enabled / ${jobList.length} total` })}
-              </span>
-            )}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-display font-bold text-[var(--text-primary)]">
+                {t('admin:cron.title', { defaultValue: 'Cron Scheduled Jobs' })}
+              </h1>
+              {!loading && !error && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-[var(--bg-hover)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+                    {jobList.length} Total
+                  </span>
+                  {enabledCount > 0 && (
+                    <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {enabledCount} active
+                    </span>
+                  )}
+                  {disabledCount > 0 && (
+                    <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      {disabledCount} disabled
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {t('admin:cron.subtitle', { defaultValue: 'Schedule recurring agent tasks, automated reminders, and cron triggers' })}
+            </p>
           </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-3">
-            {/* Filter */}
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as FilterOption)}
-              className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] outline-none transition-colors focus:border-[var(--accent-gold)]/40 cursor-pointer"
-            >
-              <option value="all">{t('admin:cron.filter.all', { defaultValue: 'All Jobs' })}</option>
-              <option value="enabled">{t('admin:cron.filter.enabled', { defaultValue: 'Enabled' })}</option>
-              <option value="disabled">{t('admin:cron.filter.disabled', { defaultValue: 'Disabled' })}</option>
-            </select>
-
-            {/* Refresh */}
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={reload}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40"
+              className="p-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all disabled:opacity-50"
+              title={t('common:action.refresh', { defaultValue: 'Refresh' })}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3.5 w-3.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={loading ? 'animate-spin' : ''}
+              >
+                <path d="M21 2v6h-6" />
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M3 22v-6h6" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
               </svg>
-              {t('common:action.refresh', { defaultValue: 'Refresh' })}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-xs font-bold bg-[var(--accent-gold)] text-[var(--bg-base)] transition-all hover:bg-[var(--accent-gold)]/90 shadow-sm"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              {t('admin:cron.action.create_job', { defaultValue: '+ Create Cron Job' })}
             </button>
           </div>
         </div>
 
-        {/* Loading */}
+        {/* Controls Bar: Search & Filter */}
+        {!loading && !error && jobList.length > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="relative flex-1 w-full">
+              <svg
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                type="text"
+                placeholder={t('admin:cron.placeholder.search', { defaultValue: 'Search cron jobs by name, ID, or prompt message...' })}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full pl-10 pr-10 py-2.5 rounded-[var(--radius-md)] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent-gold)] focus:ring-1 focus:ring-[var(--accent-gold)] transition-colors shadow-sm"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)] hover:text-[var(--text-primary)] p-1"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="1" y1="1" x2="13" y2="13" />
+                    <line x1="13" y1="1" x2="1" y2="13" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+              <select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as FilterOption)}
+                className="w-full sm:w-auto rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--accent-gold)] transition-colors cursor-pointer shadow-sm"
+              >
+                <option value="all">{t('admin:cron.filter.all', { defaultValue: 'All Jobs' })}</option>
+                <option value="enabled">{t('admin:cron.filter.enabled', { defaultValue: 'Enabled Jobs Only' })}</option>
+                <option value="disabled">{t('admin:cron.filter.disabled', { defaultValue: 'Disabled Jobs Only' })}</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* Loading State */}
         {loading && <LoadingState label={t('admin:cron.loading', { defaultValue: 'Loading cron jobs...' })} />}
 
-        {/* Error */}
+        {/* Error State */}
         {error && <ErrorState message={error} onRetry={reload} />}
 
-        {/* Empty state */}
-        {!loading && !error && filtered.length === 0 && (
+        {/* Empty State */}
+        {!loading && !error && jobList.length === 0 && (
           <EmptyState
-            title={filter !== 'all' 
-              ? t('admin:cron.empty.no_match', { filter, defaultValue: `No ${filter} cron jobs found.` }) 
-              : t('admin:cron.empty.no_jobs', { defaultValue: 'No cron jobs configured yet.' })}
+            title={t('admin:cron.empty.no_jobs', { defaultValue: 'No scheduled cron jobs configured yet' })}
+            description={t('admin:cron.empty.no_jobs_desc', { defaultValue: 'Create a scheduled cron job to run automated tasks or AI workflows.' })}
+            action={
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-xs font-bold bg-[var(--accent-gold)] text-[var(--bg-base)] transition-all hover:bg-[var(--accent-gold)]/90"
+              >
+                {t('admin:cron.action.create_job', { defaultValue: '+ Create Cron Job' })}
+              </button>
+            }
           />
         )}
 
-        {/* Table */}
+        {/* Search No Results */}
+        {!loading && !error && jobList.length > 0 && filtered.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)]">
+            <p className="text-xs text-[var(--text-muted)] mb-2">
+              {t('admin:cron.empty.no_match', { filter, defaultValue: `No cron jobs matching criteria.` })}
+            </p>
+            <button
+              type="button"
+              onClick={() => { setQuery(''); setFilter('all'); }}
+              className="text-xs font-bold text-[var(--accent-gold)] hover:underline"
+            >
+              {t('admin:cron.action.clear_search', { defaultValue: 'Clear search filters' })}
+            </button>
+          </div>
+        )}
+
+        {/* Jobs Table */}
         {!loading && !error && filtered.length > 0 && (
-          <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
-            {/* Table header */}
-            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('admin:cron.table.name', { defaultValue: 'Name' })}</span>
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('admin:cron.table.schedule', { defaultValue: 'Schedule' })}</span>
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('admin:cron.table.enabled', { defaultValue: 'Enabled' })}</span>
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('admin:cron.table.last_run', { defaultValue: 'Last Run' })}</span>
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('admin:cron.table.next_run', { defaultValue: 'Next Run' })}</span>
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('admin:cron.table.runs', { defaultValue: 'Runs' })}</span>
-              <span className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider text-right">{t('admin:cron.table.actions', { defaultValue: 'Actions' })}</span>
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden shadow-sm">
+            {/* Table Header */}
+            <div className="grid grid-cols-[minmax(0,1.5fr)_160px_90px_120px_120px_90px_160px] gap-3 px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-xs font-semibold text-[var(--text-secondary)]">
+              <span>{t('admin:cron.table.name', { defaultValue: 'Job Name & Task' })}</span>
+              <span>{t('admin:cron.table.schedule', { defaultValue: 'Schedule' })}</span>
+              <span>{t('admin:cron.table.enabled', { defaultValue: 'Status' })}</span>
+              <span>{t('admin:cron.table.last_run', { defaultValue: 'Last Run' })}</span>
+              <span>{t('admin:cron.table.next_run', { defaultValue: 'Next Run' })}</span>
+              <span>{t('admin:cron.table.runs', { defaultValue: 'Run Count' })}</span>
+              <span className="text-right">{t('admin:cron.table.actions', { defaultValue: 'Actions' })}</span>
             </div>
 
-            {/* Table rows */}
+            {/* Table Rows */}
             {filtered.map((job) => (
               <div
                 key={job.id}
-                className={`grid grid-cols-[minmax(0,1fr)_160px_80px_100px_100px_90px_180px] gap-2 px-4 py-2.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-60' : ''}`}
+                className={`grid grid-cols-[minmax(0,1.5fr)_160px_90px_120px_120px_90px_160px] gap-3 px-5 py-3.5 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-hover)] transition-colors items-center ${!job.enabled ? 'opacity-65' : ''}`}
               >
-                {/* Name */}
-                <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
+                {/* Name & Payload Message */}
+                <div className="flex flex-col gap-1 min-w-0">
                   <Link
                     href={`/admin/cron/detail?id=${encodeURIComponent(job.id)}`}
-                    className="text-xs font-medium text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
+                    className="text-xs font-bold text-[var(--accent-gold)] hover:text-[var(--accent-gold-bright)] truncate transition-colors"
                   >
                     {job.name}
                   </Link>
                   {job.payload?.message && (
-                    <span className="text-[10px] text-[var(--text-faint)] truncate" title={job.payload.message}>
+                    <span className="text-[11px] text-[var(--text-muted)] truncate" title={job.payload.message}>
                       {job.payload.message}
                     </span>
                   )}
                 </div>
 
-                {/* Schedule */}
-                <span className="text-xs font-mono text-[var(--text-muted)] truncate" title={formatSchedule(job.schedule)}>
-                  {formatSchedule(job.schedule)}
-                </span>
+                {/* Schedule Badge */}
+                <div>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-mono font-medium bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-subtle)] truncate max-w-full" title={formatSchedule(job.schedule)}>
+                    {formatSchedule(job.schedule)}
+                  </span>
+                </div>
 
-                {/* Enabled toggle */}
-                <button
-                  type="button"
-                  onClick={() => handleToggle(job)}
-                  disabled={actionLoading === job.id}
-                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                    job.enabled
-                      ? 'bg-[var(--accent-emerald)]'
-                      : 'bg-[var(--text-faint)]/30'
-                  }`}
-                  title={job.enabled ? t('admin:cron.action.disable_verb', { defaultValue: 'Disable' }) : t('admin:cron.action.enable_verb', { defaultValue: 'Enable' })}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-[var(--shadow-sm)] transition-transform ${
-                      job.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                {/* Enabled Toggle Switch */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggle(job)}
+                    disabled={actionLoading === job.id}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      job.enabled
+                        ? 'bg-emerald-500'
+                        : 'bg-[var(--text-faint)]/40'
                     }`}
-                  />
-                </button>
+                    title={job.enabled ? t('admin:cron.action.disable_verb', { defaultValue: 'Disable' }) : t('admin:cron.action.enable_verb', { defaultValue: 'Enable' })}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                        job.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
 
-                {/* Last run */}
-                <span className="text-xs text-[var(--text-muted)]" title={job.state?.last_run_at_ms ? new Date(job.state.last_run_at_ms).toISOString() : undefined}>
+                {/* Last Run */}
+                <span className="text-xs text-[var(--text-muted)] font-mono" title={job.state?.last_run_at_ms ? new Date(job.state.last_run_at_ms).toISOString() : undefined}>
                   {formatTime(job.state?.last_run_at_ms)}
                 </span>
 
-                {/* Next run */}
-                <span className="text-xs text-[var(--text-muted)]" title={job.state?.next_run_at_ms ? new Date(job.state.next_run_at_ms).toISOString() : undefined}>
-                  {job.enabled ? formatTime(job.state?.next_run_at_ms) : '--'}
+                {/* Next Run */}
+                <span className="text-xs text-[var(--text-muted)] font-mono" title={job.state?.next_run_at_ms ? new Date(job.state.next_run_at_ms).toISOString() : undefined}>
+                  {job.enabled ? formatTime(job.state?.next_run_at_ms) : '—'}
                 </span>
 
-                {/* Runs count / max */}
-                <span className="text-xs text-[var(--text-muted)]">
+                {/* Runs count */}
+                <span className="text-xs font-mono text-[var(--text-primary)]">
                   {job.state?.run_count ?? 0}
                   {job.max_runs != null ? <span className="text-[var(--text-faint)]"> / {job.max_runs}</span> : null}
                 </span>
 
                 {/* Actions */}
-                <div className="flex items-center justify-end gap-1.5">
-                  {/* Trigger */}
+                <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => handleTrigger(job.id, job.name)}
                     disabled={actionLoading === job.id || !job.enabled}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-sm)] text-[10px] font-bold uppercase tracking-wider text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 hover:bg-[var(--accent-gold)]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-[var(--accent-gold)] bg-[var(--accent-gold)]/10 hover:bg-[var(--accent-gold)]/20 transition-colors disabled:opacity-40"
                     title={t('admin:cron.action.trigger', { defaultValue: 'Trigger manually' })}
                   >
                     {actionLoading === job.id ? (
                       <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3 w-3">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
-                      </svg>
+                      '▶ Run'
                     )}
-                    {t('admin:cron.action.run', { defaultValue: 'Run' })}
                   </button>
 
-                  {/* Delete */}
                   <button
                     type="button"
                     onClick={() => handleDelete(job.id, job.name)}
                     disabled={actionLoading === job.id}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-sm)] text-[10px] font-bold uppercase tracking-wider text-[var(--accent-coral)] bg-[rgba(244,63,94,0.08)] hover:bg-[rgba(244,63,94,0.15)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-sm)] text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-colors disabled:opacity-40"
                     title={t('common:action.delete', { defaultValue: 'Delete job' })}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3 w-3">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                    </svg>
-                    {t('common:action.delete', { defaultValue: 'Delete' })}
+                    ✕
                   </button>
                 </div>
               </div>
@@ -294,6 +396,13 @@ export default function CronPage() {
           </div>
         )}
       </div>
+
+      {/* Creation Modal */}
+      <CreateCronModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onSuccess={() => reload()}
+      />
     </div>
   );
 }

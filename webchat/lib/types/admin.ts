@@ -236,6 +236,18 @@ export interface CronJob {
   state?: CronJobState;
 }
 
+export interface CronRunHistoryItem {
+  id?: string;
+  turn_index?: number;
+  generation?: number;
+  status?: string;
+  error?: string;
+  created_at?: string;
+  duration_ms?: number;
+  tokens_used?: number;
+  [key: string]: unknown;
+}
+
 // --- API Key ---
 
 export interface APIKeyUser {
