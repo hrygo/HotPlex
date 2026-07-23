@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createCronJob } from '@/lib/api/admin-cron';
+import { listBots } from '@/lib/api/admin-bots';
+import type { BotConfigEntry } from '@/lib/types/admin';
 import { useTranslation } from 'react-i18next';
 
 interface CreateCronModalProps {
@@ -50,11 +52,23 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
   const [scheduleVal, setScheduleVal] = useState('0 9 * * 1-5');
   const [message, setMessage] = useState('');
   const [maxRuns, setMaxRuns] = useState('');
-  const [botId, setBotId] = useState('');
-  const [enabled, setEnabled] = useState(true);
+  
+  // Bot selection state
+  const [bots, setBots] = useState<BotConfigEntry[]>([]);
+  const [botSelection, setBotSelection] = useState<string>('system');
+  const [customBotId, setCustomBotId] = useState('');
 
+  const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      listBots()
+        .then((data) => setBots(Array.isArray(data) ? data : []))
+        .catch(() => setBots([]));
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -98,8 +112,18 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
       message: message.trim(),
     };
 
+    // Determine target bot_id
+    let effectiveBotId = 'system';
+    if (botSelection === 'custom') {
+      effectiveBotId = customBotId.trim() || 'system';
+    } else if (botSelection) {
+      effectiveBotId = botSelection;
+    }
+
     const body: Record<string, unknown> = {
       name: name.trim(),
+      owner_id: 'admin',
+      bot_id: effectiveBotId,
       schedule: scheduleObj,
       payload,
       enabled,
@@ -110,9 +134,6 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
       if (!isNaN(parsedMax) && parsedMax > 0) {
         body.max_runs = parsedMax;
       }
-    }
-    if (botId.trim()) {
-      body.bot_id = botId.trim();
     }
 
     try {
@@ -263,31 +284,48 @@ export function CreateCronModal({ isOpen, onClose, onSuccess }: CreateCronModalP
             />
           </div>
 
-          {/* Max Runs & Bot Binding */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Target Bot Selector & Max Runs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
-                {t('admin:cron.modal.label_max_runs', { defaultValue: 'Max Runs (Optional)' })}
+                {t('admin:cron.modal.label_bot_id', { defaultValue: 'Target Bot / Worker Engine' })}
+              </label>
+              <select
+                value={botSelection}
+                onChange={(e) => setBotSelection(e.target.value)}
+                className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors cursor-pointer"
+              >
+                <option value="system">🤖 Default System Worker (系统默认)</option>
+                {bots.map((b) => (
+                  <option key={b.bot_id || b.name} value={b.bot_id || b.name}>
+                    {b.name} ({b.platform} — ID: {b.bot_id || b.name})
+                  </option>
+                ))}
+                <option value="custom">✏️ Custom Bot ID...</option>
+              </select>
+
+              {botSelection === 'custom' && (
+                <input
+                  type="text"
+                  value={customBotId}
+                  onChange={(e) => setCustomBotId(e.target.value)}
+                  placeholder="Enter custom Bot ID"
+                  className="w-full mt-2 rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2 text-xs font-mono text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
+                />
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                {t('admin:cron.modal.label_max_runs', { defaultValue: 'Max Runs (Execution Limit)' })}
               </label>
               <input
                 type="number"
                 value={maxRuns}
                 onChange={(e) => setMaxRuns(e.target.value)}
-                placeholder="Unlimited"
+                placeholder="Unlimited (Default 10000)"
                 min={1}
                 className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
-                {t('admin:cron.modal.label_bot_id', { defaultValue: 'Target Bot ID (Optional)' })}
-              </label>
-              <input
-                type="text"
-                value={botId}
-                onChange={(e) => setBotId(e.target.value)}
-                placeholder="e.g. dev-bot"
-                className="w-full rounded-[var(--radius-md)] bg-[var(--bg-elevated)] border border-[var(--border-default)] px-3.5 py-2.5 text-xs font-mono text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--accent-gold)] transition-colors"
               />
             </div>
           </div>

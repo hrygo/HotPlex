@@ -34,6 +34,22 @@ func (a *cronAdminAdapter) CreateJob(ctx context.Context, raw any) error {
 	if err := json.Unmarshal(data, &job); err != nil {
 		return fmt.Errorf("unmarshal job: %w", err)
 	}
+
+	if job.OwnerID == "" {
+		job.OwnerID = "admin"
+	}
+	if job.BotID == "" {
+		job.BotID = "system"
+	}
+	if job.Schedule.Kind != cron.ScheduleAt {
+		if job.MaxRuns <= 0 {
+			job.MaxRuns = 10000
+		}
+		if job.ExpiresAt == "" {
+			job.ExpiresAt = "2099-12-31T23:59:59Z"
+		}
+	}
+
 	return a.scheduler.CreateJob(ctx, &job)
 }
 
