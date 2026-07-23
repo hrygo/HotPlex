@@ -76,7 +76,7 @@ func setupRoutes(
 
 	var cronProvider admin.CronSchedulerProvider
 	if deps.CronScheduler != nil {
-		cronProvider = &cronAdminAdapter{scheduler: deps.CronScheduler, turnsStore: deps.EventStore}
+		cronProvider = &cronAdminAdapter{scheduler: deps.CronScheduler, turnsStore: deps.EventStore, sessionMgr: sm}
 	}
 
 	adminAPI := admin.New(admin.Deps{

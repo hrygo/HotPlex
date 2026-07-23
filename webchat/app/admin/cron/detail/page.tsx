@@ -129,7 +129,15 @@ export default function CronDetailPage() {
         // Fetch execution history
         setLoadingHistory(true);
         getCronRunHistory(found.id)
-          .then((runs) => setHistory(Array.isArray(runs) ? runs : []))
+          .then((runs) => {
+            if (Array.isArray(runs)) {
+              setHistory(runs);
+            } else if (runs && typeof runs === 'object' && Array.isArray((runs as any).turns)) {
+              setHistory((runs as any).turns);
+            } else {
+              setHistory([]);
+            }
+          })
           .catch(() => setHistory([]))
           .finally(() => setLoadingHistory(false));
       }
@@ -599,7 +607,15 @@ export default function CronDetailPage() {
             onClick={() => {
               setLoadingHistory(true);
               getCronRunHistory(job.id)
-                .then((runs) => setHistory(Array.isArray(runs) ? runs : []))
+                .then((runs) => {
+                  if (Array.isArray(runs)) {
+                    setHistory(runs);
+                  } else if (runs && typeof runs === 'object' && Array.isArray((runs as any).turns)) {
+                    setHistory((runs as any).turns);
+                  } else {
+                    setHistory([]);
+                  }
+                })
                 .catch(() => setHistory([]))
                 .finally(() => setLoadingHistory(false));
             }}
@@ -629,6 +645,7 @@ export default function CronDetailPage() {
                 <tr className="border-b border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold bg-[var(--bg-elevated)]">
                   <th className="py-2.5 px-3">Turn #</th>
                   <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3">Session Trace</th>
                   <th className="py-2.5 px-3">Duration</th>
                   <th className="py-2.5 px-3">Tokens</th>
                   <th className="py-2.5 px-3">Executed At</th>
@@ -647,6 +664,19 @@ export default function CronDetailPage() {
                       }`}>
                         {run.status || (run.error ? 'failed' : 'success')}
                       </span>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      {run.session_id ? (
+                        <Link
+                          href={`/admin/sessions/detail?id=${encodeURIComponent(run.session_id as string)}`}
+                          className="text-xs text-[var(--accent-gold)] hover:underline font-mono inline-flex items-center gap-1"
+                          title={`View Session Trace: ${run.session_id}`}
+                        >
+                          🔗 {String(run.session_id).slice(0, 8)}...
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="py-2.5 px-3 text-[var(--text-secondary)]">
                       {run.duration_ms ? formatDuration(run.duration_ms) : '—'}
