@@ -5,7 +5,7 @@ description: HotPlex 生产环境安装、配置、部署与故障排查。以 `
 
 # HotPlex 生产环境安装指引
 
-以 `hotplex doctor` 为诊断核心。**先诊断再行动**——不要手动逐项检查依赖，doctor 集成了 26 个 checker（10 个 category），让它先跑。
+以 `hotplex doctor` 为诊断核心。**先诊断再行动**——不要手动逐项检查依赖，doctor 集成了 27 个 checker（10 个 category），让它先跑。
 
 整个流程幂等，重复运行只处理缺失项。
 
@@ -92,6 +92,7 @@ hotplex doctor --json
 | | `env_vars` | ADMIN_TOKEN 缺失 | `.env` 中添加 |
 | dependencies | `worker_binary` | CLI 不在 PATH | 安装 CLI 或设 `worker.<type>.command` / `HOTPLEX_WORKER_<TYPE>_COMMAND` |
 | | `sqlite_path` | 数据目录不可写 | `mkdir -p ~/.hotplex/data && chmod 755 ~/.hotplex` |
+| | `opencode_server_resolve` | OCS 命令不在 PATH / 版本探测失败 / 解析为 wrapper 脚本（#900） | 确认 `opencode` 在 PATH；Windows 下 wrapper 会掩盖子进程 0xC0000142 退出码，直接 `opencode serve --port <unused>` 复现原始退出码 |
 | security | `admin_token` | Token 弱/空 | 替换为强随机值 |
 | | `file_permissions` | 配置文件权限过宽 | `chmod 600 ~/.hotplex/.env ~/.hotplex/config.yaml` |
 | | `env_in_git` | .env 被 git 追踪 | `git rm --cached .env` |
@@ -155,8 +156,8 @@ sudo hotplex service install --level system  # 系统级
 ```bash
 hotplex version                          # 版本号
 hotplex doctor                           # 全通过
-curl http://localhost:9999/admin/health  # Gateway（:9999）
-curl http://localhost:8888/              # WebChat（:8888）
+curl http://localhost:9999/admin/health  # Admin API（:9999）
+curl http://localhost:8888/              # Gateway + 嵌入式 WebChat（:8888）
 hotplex service logs -f                  # 平台连接正常
 ```
 

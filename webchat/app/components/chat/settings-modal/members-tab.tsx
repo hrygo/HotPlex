@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   adminListUsers,
   adminUpdateUserStatus,
+  adminResetUserPassword,
   adminListInvitations,
   adminCreateInvitation,
   adminDeleteInvitation,
@@ -21,7 +22,7 @@ interface MembersTabProps {
 }
 
 export function MembersTab({ currentUser }: MembersTabProps) {
-  const { t } = useTranslation(['chat', 'common']);
+  const { t } = useTranslation(['chat', 'common', 'admin']);
   const [users, setUsers] = useState<User[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,23 @@ export function MembersTab({ currentUser }: MembersTabProps) {
   const [actionMsg, setActionMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+
+  // Reset password modal state
+  const [resetModal, setResetModal] = useState<{
+    isOpen: boolean;
+    user: User | null;
+    newPassword: string;
+    confirmPassword: string;
+    error: string | null;
+    submitting: boolean;
+  }>({
+    isOpen: false,
+    user: null,
+    newPassword: '',
+    confirmPassword: '',
+    error: null,
+    submitting: false,
+  });
 
   // Flash timer ref so unmount clears the pending setState (PR #779 review P3-8).
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,7 +84,6 @@ export function MembersTab({ currentUser }: MembersTabProps) {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     load();
     return () => {
       abortRef.current?.abort();
@@ -96,6 +113,62 @@ export function MembersTab({ currentUser }: MembersTabProps) {
       flash('err', err instanceof Error ? err.message : t('chat:settings.error.update_failed'));
     } finally {
       setBusyUserId(null);
+    }
+  };
+
+  const openResetModal = (user: User) => {
+    setResetModal({
+      isOpen: true,
+      user,
+      newPassword: '',
+      confirmPassword: '',
+      error: null,
+      submitting: false,
+    });
+  };
+
+  const closeResetModal = () => {
+    setResetModal({
+      isOpen: false,
+      user: null,
+      newPassword: '',
+      confirmPassword: '',
+      error: null,
+      submitting: false,
+    });
+  };
+
+  const handleResetPasswordSubmit = async (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    if (!resetModal.user) return;
+
+    if (resetModal.newPassword.length < 6) {
+      setResetModal((prev) => ({
+        ...prev,
+        error: t('admin:users.reset_modal.min_length_hint'),
+      }));
+      return;
+    }
+
+    if (resetModal.newPassword !== resetModal.confirmPassword) {
+      setResetModal((prev) => ({
+        ...prev,
+        error: t('admin:users.reset_modal.password_mismatch'),
+      }));
+      return;
+    }
+
+    setResetModal((prev) => ({ ...prev, submitting: true, error: null }));
+    try {
+      await adminResetUserPassword(resetModal.user.id, resetModal.newPassword);
+      flash('ok', `${t('admin:users.reset_modal.success')} (${resetModal.user.username})`);
+      closeResetModal();
+    } catch (err) {
+      setResetModal((prev) => ({
+        ...prev,
+        submitting: false,
+        error: err instanceof Error ? err.message : t('admin:users.reset_modal.failed'),
+      }));
     }
   };
 
@@ -196,27 +269,36 @@ export function MembersTab({ currentUser }: MembersTabProps) {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleToggleUser(u)}
-                  disabled={busyUserId !== null}
-                  className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
-                    u.status === 'active' 
-                      ? 'bg-[var(--accent-coral)]/10 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/20 border border-[var(--accent-coral)]/15 active:scale-[0.98]' 
-                      : 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] hover:bg-[var(--accent-emerald)]/20 border border-[var(--accent-emerald)]/15 active:scale-[0.98]'
-                  }`}
-                >
-                  {busyUserId === u.id ? (
-                    <svg className="w-3 h-3 animate-spin mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  ) : u.status === 'active' ? (
-                    t('common:action.disable')
-                  ) : (
-                    t('common:action.enable')
-                  )}
-                </button>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openResetModal(u)}
+                    className="px-2.5 py-1.5 rounded-md text-[10px] font-bold bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:text-[var(--accent-gold)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] transition-all cursor-pointer active:scale-[0.98]"
+                  >
+                    {t('admin:users.action.reset_password', { defaultValue: '重置密码' })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleUser(u)}
+                    disabled={busyUserId !== null}
+                    className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+                      u.status === 'active' 
+                        ? 'bg-[var(--accent-coral)]/10 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/20 border border-[var(--accent-coral)]/15 active:scale-[0.98]' 
+                        : 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)] hover:bg-[var(--accent-emerald)]/20 border border-[var(--accent-emerald)]/15 active:scale-[0.98]'
+                    }`}
+                  >
+                    {busyUserId === u.id ? (
+                      <svg className="w-3 h-3 animate-spin mx-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    ) : u.status === 'active' ? (
+                      t('common:action.disable')
+                    ) : (
+                      t('common:action.enable')
+                    )}
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -249,7 +331,6 @@ export function MembersTab({ currentUser }: MembersTabProps) {
         <div className="space-y-2">
           {invitations.map((inv) => {
             const used = !!inv.used_at;
-            // eslint-disable-next-line react-hooks/purity -- expiry fallback vs current time; server-side is_expired takes precedence
             const expired = !used && (inv.is_expired ?? inv.expires_at * 1000 < Date.now());
             const state = used ? 'used' : expired ? 'expired' : 'active';
             const isCopied = copiedInviteId === inv.id;
@@ -316,6 +397,78 @@ export function MembersTab({ currentUser }: MembersTabProps) {
           )}
         </div>
       </section>
+
+      {/* Reset Password Modal */}
+      {resetModal.isOpen && resetModal.user && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-sm bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden p-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                {t('admin:users.reset_modal.title', { defaultValue: '重置用户密码' })}
+              </h3>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1">
+                {t('admin:users.reset_modal.subtitle', { username: resetModal.user.username, defaultValue: `管理员为账号 ${resetModal.user.username} 设置新密码` })}
+              </p>
+            </div>
+
+            {resetModal.error && (
+              <div className="p-2.5 rounded-lg bg-[rgba(244,63,94,0.08)] border border-[rgba(244,63,94,0.2)] text-[11px] text-[var(--accent-coral)] font-bold">
+                {resetModal.error}
+              </div>
+            )}
+
+            <form onSubmit={handleResetPasswordSubmit} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-[var(--text-primary)] mb-1">
+                  {t('admin:users.reset_modal.new_password_label', { defaultValue: '新密码 *' })}
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={resetModal.newPassword}
+                  onChange={(e) => setResetModal((prev) => ({ ...prev, newPassword: e.target.value }))}
+                  placeholder={t('admin:users.reset_modal.password_placeholder', { defaultValue: '输入新密码 (至少 6 位)' })}
+                  className="w-full px-3 py-1.5 text-xs bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[var(--text-primary)] mb-1">
+                  {t('admin:users.reset_modal.confirm_password_label', { defaultValue: '确认新密码 *' })}
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={resetModal.confirmPassword}
+                  onChange={(e) => setResetModal((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                  placeholder={t('admin:users.reset_modal.confirm_placeholder', { defaultValue: '再次输入新密码' })}
+                  className="w-full px-3 py-1.5 text-xs bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-gold)]"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeResetModal}
+                  disabled={resetModal.submitting}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                >
+                  {t('common:action.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetModal.submitting}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {resetModal.submitting
+                    ? t('admin:users.reset_modal.resetting', { defaultValue: '提交中...' })
+                    : t('admin:users.action.reset_password', { defaultValue: '重置密码' })}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </TabPanel>
   );
 }

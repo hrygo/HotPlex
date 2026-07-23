@@ -55,10 +55,8 @@ async function adminActivityFetch<T>(path: string): Promise<T> {
     const info = await parseApiError(res);
     const message = info.message || info.raw || `Admin request failed: ${res.status}`;
     const err = new Error(message);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (err as any).status = info.status;
     if (info.code) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (err as any).code = info.code;
     }
     throw err;

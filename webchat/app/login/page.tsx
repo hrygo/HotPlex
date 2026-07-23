@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BrandIcon } from '@/components/icons';
 import { httpBase } from '@/lib/config';
@@ -31,19 +31,19 @@ function InnerLoginPage() {
   const [providers, setProviders] = useState<OAuthProvider[]>([]);
   const [bootstrapped, setBootstrapped] = useState<boolean | null>(null);
 
-  const getErrorMessage = (code: string | null, defaultText?: string) => {
+  const getErrorMessage = useCallback((code: string | null, defaultText?: string) => {
     if (!code) return '';
     const isCode = /^[A-Z0-9_]+$/.test(code);
     if (!isCode) return code;
     return t([`auth:error.${code}`, `auth:error.default`] as any, { code, defaultValue: defaultText || '' });
-  };
+  }, [t]);
 
   useEffect(() => {
     if (authErrorParam) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(getErrorMessage(authErrorParam));
     }
-  }, [authErrorParam, t]);
+  }, [authErrorParam, t, getErrorMessage]);
 
   // Fetch OAuth Providers
   useEffect(() => {
@@ -96,7 +96,7 @@ function InnerLoginPage() {
     checkUser();
   }, [router]);
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!loginUsername.trim() || !loginPassword) return;
 
@@ -115,7 +115,7 @@ function InnerLoginPage() {
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!inviteCode.trim() || !registerUsername.trim() || !registerPassword) return;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 
@@ -163,7 +163,7 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
       {/* Horizontal Pills Row */}
       <div className="flex items-center justify-end gap-1.5 overflow-x-auto no-scrollbar py-1 w-full">
         <AnimatePresence initial={false} mode="popLayout">
-          {queue.items.map((item, index) => {
+          {queue.items.map((item) => {
             const sending = item.status === "sending";
             const failed = item.status === "failed";
             return (

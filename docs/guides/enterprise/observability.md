@@ -23,9 +23,11 @@ HotPlex 使用 `log/slog` JSON Handler 输出结构化日志，兼容 OTel Log D
 | `message` | 人类可读事件描述 |
 | `service.name` | 固定 `hotplex-gateway` |
 | `session_id` | 会话标识 |
+| `agent_id` | Agent 身份标识（#848 AgentIdentity 派生，跨 session/event/audit/trace 按 agent 关联） |
 | `user_id` | 用户标识 |
 | `bot_id` | Bot 实例标识 |
 | `trace_id` | 分布式追踪上下文（若存在） |
+| `span_id` | OTel span 标识（#850 Hub.SendToSession 注入，关联事件到精确 span） |
 
 ### 示例
 
@@ -36,9 +38,11 @@ HotPlex 使用 `log/slog` JSON Handler 输出结构化日志，兼容 OTel Log D
   "msg": "session created",
   "service.name": "hotplex-gateway",
   "session_id": "01234567-89ab-cdef",
+  "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "user_id": "U_ABC123",
   "bot_id": "B_XYZ789",
-  "trace_id": "abc123def456"
+  "trace_id": "abc123def456",
+  "span_id": "1234567890abcdef"
 }
 ```
 
@@ -225,9 +229,10 @@ OTEL_SERVICE_NAME=hotplex-gateway
 
 ### 上下文传播
 
-- Span 的 `trace_id` 和 `span_id` 自动注入 AEP Envelope 的 `metadata` 字段
+- Span 的 `trace_id` 和 `span_id` 由 `Hub.SendToSession` 注入 AEP Envelope 的 `metadata` 字段（#850：`span_id` 使下游能把事件关联到产出它的精确 span，而不止于 trace）
 - HTTP 端点通过 `otelhttp` 中间件自动注入/提取 W3C TraceContext
-- Gateway ↔ Worker 间通过 AEP Metadata 传递 trace_id
+- Gateway ↔ Worker 间通过 AEP Metadata 传递 `trace_id`
+- 所有语义键（`trace_id`、`span_id`、`agent_id`、`user_id`、`workspace_id`、`session_id`、`execution_id` 等）统一在 `internal/observability/keys.go` 定义，禁止散落字面量。高基数键（`agent_id`/`user_id`/`workspace_id`/`execution_id`/`session_id`）仅作 span 属性/slog 字段/AEP 元数据，严禁用作 metric label（防止 label 集爆炸）
 
 ### 采样策略
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -415,23 +416,28 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 	spanCtx, span := observability.Tracer().Start(ctx, "hub.send_to_session")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("session_id", env.SessionID),
-		attribute.String("event_type", string(env.Event.Type)),
-		attribute.String("priority", string(env.Priority)),
+		attribute.String(observability.KeySessionID, env.SessionID),
+		attribute.String(observability.KeyEventType, string(env.Event.Type)),
+		attribute.String(observability.KeyPriority, string(env.Priority)),
 	)
 
-	// Inject trace_id into AEP metadata.
+	// Inject trace_id + span_id into AEP metadata so a downstream consumer can
+	// correlate an event to the precise span that produced it.
 	// Copy-on-write: if Metadata is shared, create a new map to avoid data races
 	// when the same envelope is processed by multiple goroutines.
 	if sc := trace.SpanContextFromContext(spanCtx); sc.IsValid() {
+		traceID := sc.TraceID().String()
+		spanID := sc.SpanID().String()
 		if env.Metadata == nil {
-			env.Metadata = map[string]any{"trace_id": sc.TraceID().String()}
-		} else {
-			copied := make(map[string]any, len(env.Metadata)+1)
-			for k, v := range env.Metadata {
-				copied[k] = v
+			env.Metadata = map[string]any{
+				observability.KeyTraceID: traceID,
+				observability.KeySpanID:  spanID,
 			}
-			copied["trace_id"] = sc.TraceID().String()
+		} else {
+			copied := make(map[string]any, len(env.Metadata)+2)
+			maps.Copy(copied, env.Metadata)
+			copied[observability.KeyTraceID] = traceID
+			copied[observability.KeySpanID] = spanID
 			env.Metadata = copied
 		}
 	}

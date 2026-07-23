@@ -18,7 +18,8 @@
     "approve": "Approve",
     "reject": "Reject",
     "refresh": "Refresh",
-    "clear": "Clear"
+    "clear": "Clear",
+    "reset_password": "Reset Password"
   },
   "status": {
     "loading": "Loading...",

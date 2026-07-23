@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/observability"
@@ -248,6 +250,91 @@ type SessionInfo struct {
 	// Worker after a successful Start/Resume. It is immutable for the lifetime
 	// of this session and survives gateway restarts and Worker replacement.
 	PermissionCeiling string `json:"permission_ceiling,omitempty"`
+	// Identity is the bound AgentIdentity value object (#848): the stable,
+	// secret-free identity snapshot persisted under context_json (no dedicated
+	// column). Nil for sessions created before #848 — callers use
+	// EffectiveIdentity(), which derives an equivalent identity on the fly so
+	// legacy sessions remain correlatable. It is independent of Context (which
+	// /reset clears): identity is session-level and survives a context reset.
+	Identity *agentspec.AgentIdentity `json:"-"`
+	// SpecSnapshot is the effective AgentSpec snapshot (#866): the versioned,
+	// secret-free projection of the runtime policy that governed this session at
+	// start time, persisted under context_json (no dedicated column). On resume
+	// it is the source of truth for the effective policy — a config change does
+	// NOT silently alter it — and AllowedTools is restored from it (the one
+	// effective-policy field that is otherwise in-memory only). Nil for sessions
+	// with no tool whitelist or created before #866 (legacy fallback: no
+	// restore, AllowedTools stays empty = no restriction). Independent of
+	// Context (/reset clears Context but the snapshot survives, like Identity).
+	SpecSnapshot *agentspec.EffectiveAgentSpecSnapshot `json:"-"`
+}
+
+// EffectiveIdentity returns the bound identity if one was persisted, otherwise
+// derives an equivalent AgentIdentity from this SessionInfo's existing fields.
+// The derived AgentID is deterministic, so a legacy session (Identity == nil)
+// correlates identically to one created after #848. Existing owner/workspace
+// checks remain authoritative — this is an observation/correlation view only.
+func (s SessionInfo) EffectiveIdentity() agentspec.AgentIdentity {
+	if s.Identity != nil {
+		return *s.Identity
+	}
+	return agentspec.BuildAgentIdentity(agentspec.IdentityInput{
+		UserID:      s.UserID,
+		WorkspaceID: s.WorkspaceID,
+		BotID:       s.BotID,
+		BotName:     s.BotName,
+		Platform:    s.Platform,
+		WorkerType:  string(s.WorkerType),
+	})
+}
+
+// bindIdentity derives a fresh AgentIdentity snapshot from info's current fields
+// and attaches it. It is called at creation and whenever an identity-bearing
+// field (notably WorkspaceID, which WebChat binds after creation) changes, so
+// the persisted identity stays consistent with the session references. It always
+// re-derives from fields rather than reusing a cached value, so a late-bound
+// workspace corrects an identity that was first bound without one.
+func bindIdentity(info *SessionInfo) {
+	if info == nil {
+		return
+	}
+	id := agentspec.BuildAgentIdentity(agentspec.IdentityInput{
+		UserID:      info.UserID,
+		WorkspaceID: info.WorkspaceID,
+		BotID:       info.BotID,
+		BotName:     info.BotName,
+		Platform:    info.Platform,
+		WorkerType:  string(info.WorkerType),
+	})
+	info.Identity = &id
+}
+
+// bindSpecSnapshot captures the effective runtime policy as a persisted snapshot
+// (#866). It is called at creation so the policy that governed the session is
+// frozen: on resume the snapshot — not mutable config — is the source of truth,
+// so a config change does not silently alter an existing session's effective
+// policy (issue #866 AC2).
+//
+// First-cut binding captures the effective fields available on SessionInfo at
+// create time (WorkerType, AllowedTools, and the permission ceiling once the
+// worker reports it). A snapshot is bound only when there is an effective tool
+// whitelist to persist — otherwise the session is tool-unrestricted and a
+// snapshot would add bytes without value (legacy-equivalent: nil → no restore).
+// The full effective spec (sandbox/budget/model) is captured once the
+// agentspec resolver becomes authoritative on the live path (follow-up slice).
+func bindSpecSnapshot(info *SessionInfo) {
+	if info == nil || len(info.AllowedTools) == 0 {
+		return
+	}
+	spec := agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: string(info.WorkerType)},
+		Policy: agentspec.PolicySpec{
+			PermissionMode: info.PermissionCeiling,
+			AllowedTools:   append([]string(nil), info.AllowedTools...),
+		},
+	}
+	snap := agentspec.SnapshotFromSpec(spec)
+	info.SpecSnapshot = &snap
 }
 
 // NewManager creates a new session manager using the provided Store.
@@ -280,11 +367,14 @@ func NewManager(ctx context.Context, log *slog.Logger, cfg *config.Config, cfgSt
 
 // Create creates a new session and persists it to SQLite.
 func (m *Manager) Create(ctx context.Context, id, userID string, workerType worker.WorkerType, allowedTools []string, workDir, title string) (*SessionInfo, error) {
-	return m.CreateWithBot(ctx, id, userID, "", "", workerType, allowedTools, "", nil, workDir, title, "")
+	return m.CreateWithBot(ctx, id, userID, "", "", workerType, allowedTools, "", nil, "", workDir, title, "")
 }
 
-// CreateWithBot creates a new session with explicit bot_id and persists it to SQLite.
-func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*SessionInfo, error) {
+// CreateWithBot creates a new session with explicit bot/workspace identity and
+// persists it atomically. Binding WorkspaceID before identity derivation keeps
+// the create audit, persisted identity, and first runtime metadata correlated by
+// the same AgentID.
+func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName string, workerType worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*SessionInfo, error) {
 	if len(clientKey) > MaxClientKeyLen {
 		return nil, fmt.Errorf("%w: length %d exceeds maximum %d", ErrClientKeyTooLong, len(clientKey), MaxClientKeyLen)
 	}
@@ -310,10 +400,16 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 		Title:        title,
 		Source:       source,
 		ClientKey:    clientKey,
+		WorkspaceID:  workspaceID,
 	}
+	// Bind the AgentIdentity snapshot (#848) from the final creation inputs.
+	bindIdentity(info)
+	// Capture the effective runtime policy snapshot (#866) so it survives
+	// restart and is not silently altered by later config drift.
+	bindSpecSnapshot(info)
 
 	if err := m.store.Upsert(ctx, info); err != nil {
-		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure)
+		m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeFailure, info.EffectiveIdentity(), info.SpecSnapshot)
 		return nil, err
 	}
 
@@ -324,17 +420,16 @@ func (m *Manager) CreateWithBot(ctx context.Context, id, userID, botID, botName 
 	m.log.Info("session: created", "session_id", id, "user_id", userID, "worker_type", workerType, "bot_id", botID)
 	observability.SessionCreated().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(workerType))))
 	sessionsActiveGauge(string(events.StateCreated)).Add(1)
-	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess)
+	m.emitSessionCreateAudit(userID, botID, platform, id, string(workerType), audit.OutcomeSuccess, info.EffectiveIdentity(), info.SpecSnapshot)
 	return info, nil
 }
 
 // emitSessionCreateAudit enqueues a session.create audit event.
 // Uses context.Background() so audit never blocks the caller.
-func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string) {
+func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity, snap *agentspec.EffectiveAgentSpecSnapshot) {
 	if m.auditCollector == nil {
 		return
 	}
-	detailJSON := fmt.Sprintf(`{"bot_id":%q,"worker_type":%q}`, botID, workerType)
 	_ = m.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:           time.Now().UnixMilli(),
 		UserID:       userID,
@@ -345,17 +440,16 @@ func (m *Manager) emitSessionCreateAudit(userID, botID, platform, sessionID, wor
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   detailJSON,
+		DetailJSON:   auditDetailJSON(botID, workerType, id, snap),
 	})
 }
 
 // emitSessionDeleteAudit enqueues a session.delete audit event.
 // Uses context.Background() so audit never blocks the caller.
-func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string) {
+func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, workerType, outcome string, id agentspec.AgentIdentity, snap *agentspec.EffectiveAgentSpecSnapshot) {
 	if m.auditCollector == nil {
 		return
 	}
-	detailJSON := fmt.Sprintf(`{"bot_id":%q,"worker_type":%q}`, botID, workerType)
 	_ = m.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:           time.Now().UnixMilli(),
 		UserID:       userID,
@@ -366,14 +460,58 @@ func (m *Manager) emitSessionDeleteAudit(userID, botID, platform, sessionID, wor
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   detailJSON,
+		DetailJSON:   auditDetailJSON(botID, workerType, id, snap),
 	})
 }
 
-// SetWorkspaceID binds a session to a workspace and persists the change (spec ①).
-// Called by the WebChat multi-tenant path (Bridge.StartSession) after CreateWithBot.
-// Empty workspaceID is a no-op (platform/cron sessions remain unbound — backward
-// compatible with the legacy 4-field session key).
+// AuditDetailFields returns the secret-free field map for a session audit
+// event's detail_json. It carries the unified identity correlation keys (#848):
+// agent_id is always present (the primary cross-surface key), and worker_type /
+// user_id / workspace_id / platform use the SAME key names as AEP metadata and
+// trace attributes, so a single agent correlates across all three surfaces.
+// bot_id is an audit-specific key. Keys with empty values are omitted to keep
+// platform/anonymous-session payloads minimal. Callers may extend the map (e.g.
+// add an "error" field) before marshalling.
+func AuditDetailFields(botID, workerType string, id agentspec.AgentIdentity) map[string]any {
+	detail := map[string]any{
+		agentspec.MetadataKeyAgentID:    id.AgentID,
+		agentspec.MetadataKeyWorkerType: workerType,
+	}
+	if botID != "" {
+		detail["bot_id"] = botID
+	}
+	if id.UserID != "" {
+		detail[agentspec.MetadataKeyUserID] = id.UserID
+	}
+	if id.WorkspaceID != "" {
+		detail[agentspec.MetadataKeyWorkspaceID] = id.WorkspaceID
+	}
+	if id.Platform != "" {
+		detail[agentspec.MetadataKeyPlatform] = id.Platform
+	}
+	if id.Anonymous {
+		detail["anonymous"] = true
+	}
+	return detail
+}
+
+// auditDetailJSON marshals AuditDetailFields (plus the effective-spec fingerprint
+// when a snapshot is bound) into the detail_json string. The map only holds
+// strings/bools/ints, so marshal cannot fail in practice; the fallback keeps the
+// primary correlation key if it ever does.
+func auditDetailJSON(botID, workerType string, id agentspec.AgentIdentity, snap *agentspec.EffectiveAgentSpecSnapshot) string {
+	detail := AuditDetailFields(botID, workerType, id)
+	snap.StampMetadata(detail)
+	b, err := json.Marshal(detail)
+	if err != nil {
+		return fmt.Sprintf(`{%q:%q}`, agentspec.MetadataKeyAgentID, id.AgentID)
+	}
+	return string(b)
+}
+
+// SetWorkspaceID late-binds a legacy/unbound session to a workspace and persists
+// the change (spec ①). New sessions receive WorkspaceID in CreateWithBot so their
+// identity and create audit are atomic. Empty workspaceID is a no-op.
 func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) error {
 	if workspaceID == "" {
 		return nil
@@ -388,7 +526,10 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 	// Get/transitionState readers that access ms.info under ms.mu after
 	// releasing m.mu (review P1 fix — lock ordering: m.mu → ms.mu).
 	ms.mu.Lock()
+	previousWorkspaceID := ms.info.WorkspaceID
+	previousIdentity := ms.info.Identity
 	ms.info.WorkspaceID = workspaceID
+	bindIdentity(&ms.info) // re-bind now that the workspace anchor is known
 	info := ms.info
 	ms.mu.Unlock()
 	m.mu.Unlock()
@@ -396,7 +537,8 @@ func (m *Manager) SetWorkspaceID(ctx context.Context, id, workspaceID string) er
 		// Rollback in-memory on DB failure to prevent divergence.
 		m.mu.Lock()
 		ms.mu.Lock()
-		ms.info.WorkspaceID = ""
+		ms.info.WorkspaceID = previousWorkspaceID
+		ms.info.Identity = previousIdentity
 		ms.mu.Unlock()
 		m.mu.Unlock()
 		return err
@@ -1021,7 +1163,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 			current.mu.Unlock()
 		}
 		m.mu.Unlock()
-		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure)
+		m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeFailure, candidate.EffectiveIdentity(), candidate.SpecSnapshot)
 		return persistErr
 	}
 
@@ -1054,7 +1196,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 
 	m.log.Info("session: deleted", "session_id", id)
-	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess)
+	m.emitSessionDeleteAudit(uid, botID, platform, id, string(workerType), audit.OutcomeSuccess, candidate.EffectiveIdentity(), candidate.SpecSnapshot)
 	return nil
 }
 
@@ -1222,7 +1364,21 @@ func (m *Manager) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling s
 
 	ms.mu.Lock()
 	ms.info.PermissionCeiling = stored
+	if ms.info.SpecSnapshot != nil && ms.info.SpecSnapshot.PermissionMode != stored {
+		updated := ms.info.SpecSnapshot.WithPermissionMode(stored)
+		ms.info.SpecSnapshot = &updated
+	}
+	info := ms.info
 	ms.mu.Unlock()
+
+	// Persist whenever a snapshot exists, even if another concurrent call already
+	// refreshed the in-memory value. The targeted update preserves unrelated DB
+	// columns and makes a retry repair a prior failed snapshot write.
+	if info.SpecSnapshot != nil {
+		if err := m.store.UpdateSpecSnapshot(ctx, id, info.SpecSnapshot); err != nil {
+			return "", fmt.Errorf("session: persist permission snapshot: %w", err)
+		}
+	}
 	return stored, nil
 }
 

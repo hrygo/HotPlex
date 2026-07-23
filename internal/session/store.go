@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/sqlutil"
@@ -20,6 +21,7 @@ type Store interface {
 	Upsert(ctx context.Context, info *SessionInfo) error
 	UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSessionID string) error
 	SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error)
+	UpdateSpecSnapshot(ctx context.Context, id string, snapshot *agentspec.EffectiveAgentSpecSnapshot) error
 	Get(ctx context.Context, id string) (*SessionInfo, error)
 	List(ctx context.Context, userID, platform, workspaceID string, limit, offset int) ([]*SessionInfo, error)
 	GetExpiredMaxLifetime(ctx context.Context, now time.Time) ([]string, error)
@@ -65,9 +67,20 @@ func NewSQLiteStore(ctx context.Context, cfg *config.Config, writeMu *sqlutil.Wr
 }
 
 // marshalSessionJSON serializes the Context and PlatformKey fields for Upsert.
+// The bound AgentIdentity (#848) and effective AgentSpec snapshot (#866), when
+// present, are folded into the context_json blob under reserved keys — the
+// in-memory Context is not mutated, so both survive a /reset (which clears
+// Context) and re-persist on the next Upsert.
 func marshalSessionJSON(info *SessionInfo) (ctxJSON, pkJSON []byte, err error) {
-	if info.Context != nil {
-		ctxJSON, err = json.Marshal(info.Context)
+	ctx := info.Context
+	if info.Identity != nil {
+		ctx = agentspec.MergeIntoContext(ctx, info.Identity)
+	}
+	if info.SpecSnapshot != nil {
+		ctx = agentspec.MergeSnapshotIntoContext(ctx, info.SpecSnapshot)
+	}
+	if ctx != nil {
+		ctxJSON, err = json.Marshal(ctx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("session store: marshal context: %w", err)
 		}
@@ -105,6 +118,10 @@ func (s *SQLiteStore) Upsert(ctx context.Context, info *SessionInfo) error {
 		}
 		defer func() { _ = tx.Rollback() }()
 		if err := ensureSQLiteLifecycleLock(ctx, tx, info.ID); err != nil {
+			return err
+		}
+		ctxJSON, err = preservePersistedSpecSnapshot(ctx, tx, queries["store.get_context_json"], info.ID, ctxJSON)
+		if err != nil {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, queries["sessions.upsert_session"], upsertSessionArgs(info, ctxJSON, pkJSON)...)
@@ -174,6 +191,94 @@ func (s *SQLiteStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceili
 	return stored, err
 }
 
+// UpdateSpecSnapshot atomically replaces only the reserved AgentSpec value in
+// context_json. It deliberately avoids Upsert so a snapshot refresh cannot
+// overwrite concurrent lifecycle or context changes with a stale SessionInfo.
+func (s *SQLiteStore) UpdateSpecSnapshot(ctx context.Context, id string, snapshot *agentspec.EffectiveAgentSpecSnapshot) error {
+	ctx, cancel := upsertTimeout(ctx)
+	defer cancel()
+
+	snapshotJSON, err := marshalSpecSnapshot(snapshot)
+	if err != nil {
+		return err
+	}
+	return s.writeMu.WithLock(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := ensureSQLiteLifecycleLock(ctx, tx, id); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, queries["sessions.update_spec_snapshot"], snapshotJSON, id)
+		if err != nil {
+			return fmt.Errorf("session store: update spec snapshot: %w", err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("session store: spec snapshot rows affected: %w", err)
+		}
+		if updated == 0 {
+			return ErrSessionNotFound
+		}
+		return tx.Commit()
+	})
+}
+
+func marshalSpecSnapshot(snapshot *agentspec.EffectiveAgentSpecSnapshot) (string, error) {
+	if snapshot == nil {
+		return "", fmt.Errorf("session store: marshal spec snapshot: %w", agentspec.ErrInvalidSnapshot)
+	}
+	if err := snapshot.Validate(); err != nil {
+		return "", fmt.Errorf("session store: validate spec snapshot: %w", err)
+	}
+	b, err := json.Marshal(snapshot)
+	if err != nil {
+		return "", fmt.Errorf("session store: marshal spec snapshot: %w", err)
+	}
+	return string(b), nil
+}
+
+// preservePersistedSpecSnapshot copies the database's current reserved snapshot
+// into an incoming context blob. Callers hold the per-session lifecycle lock, so
+// a stale full-row Upsert cannot race a targeted snapshot refresh in either
+// direction. Snapshot changes are exclusively performed by UpdateSpecSnapshot.
+func preservePersistedSpecSnapshot(ctx context.Context, tx *sql.Tx, query, id string, incoming []byte) ([]byte, error) {
+	var persistedJSON sql.NullString
+	if err := tx.QueryRowContext(ctx, query, id).Scan(&persistedJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return incoming, nil
+		}
+		return nil, fmt.Errorf("session store: load persisted spec snapshot: %w", err)
+	}
+	if !persistedJSON.Valid || persistedJSON.String == "" {
+		return incoming, nil
+	}
+
+	var persisted map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(persistedJSON.String), &persisted); err != nil {
+		return nil, fmt.Errorf("session store: decode persisted context: %w", err)
+	}
+	rawSnapshot, ok := persisted[agentspec.SnapshotContextKey]
+	if !ok {
+		return incoming, nil
+	}
+
+	merged := make(map[string]json.RawMessage)
+	if len(incoming) > 0 {
+		if err := json.Unmarshal(incoming, &merged); err != nil {
+			return nil, fmt.Errorf("session store: decode incoming context: %w", err)
+		}
+	}
+	merged[agentspec.SnapshotContextKey] = rawSnapshot
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return nil, fmt.Errorf("session store: preserve spec snapshot: %w", err)
+	}
+	return out, nil
+}
+
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanSession(sc rowScanner) (*SessionInfo, error) {
@@ -203,6 +308,35 @@ func scanSession(sc rowScanner) (*SessionInfo, error) {
 	if ctxJSON.Valid && ctxJSON.String != "" {
 		if err := json.Unmarshal([]byte(ctxJSON.String), &info.Context); err != nil {
 			return nil, fmt.Errorf("session store: unmarshal context: %w", err)
+		}
+		// Pop the bound identity out of Context into the typed field. Legacy
+		// rows without the reserved key are untouched (Identity stays nil); when
+		// identity was the only entry the emptied map is normalized back to nil
+		// so a context-less session still round-trips to a NULL column.
+		if id := agentspec.ExtractFromContext(info.Context); id != nil {
+			info.Identity = id
+			if len(info.Context) == 0 {
+				info.Context = nil
+			}
+		}
+		// Pop the effective AgentSpec snapshot out of Context and, when present,
+		// restore the effective tool whitelist (#866 AC1). AllowedTools is
+		// in-memory only — it has no column — so without this restore a resumed
+		// session would silently lose its tool boundary across a restart. Legacy
+		// rows without the reserved key are untouched (SpecSnapshot stays nil,
+		// AllowedTools stays empty = no restriction).
+		snap, err := agentspec.ExtractSnapshotFromContext(info.Context)
+		if err != nil {
+			return nil, fmt.Errorf("session store: extract agent spec snapshot: %w", err)
+		}
+		if snap != nil {
+			info.SpecSnapshot = snap
+			if tools := snap.RestoreAllowedTools(); tools != nil {
+				info.AllowedTools = tools
+			}
+			if len(info.Context) == 0 {
+				info.Context = nil
+			}
 		}
 	}
 	if platformKeyStr.Valid && platformKeyStr.String != "" {

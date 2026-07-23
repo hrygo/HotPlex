@@ -68,6 +68,17 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		wt = worker.TypeClaudeCode // Default
 	}
 
+	// Normalize a job without a messaging delivery target to the "cron"
+	// platform. CronJob.SessionKey already derives under "cron"; aligning the
+	// session platform keeps the session.create audit row (and per-platform
+	// metrics) populated instead of empty for pure scheduled tasks. Jobs that
+	// deliver to slack/feishu keep their real platform so agent-config
+	// fallback still resolves correctly.
+	platform := job.Platform
+	if platform == "" {
+		platform = "cron"
+	}
+
 	if err := e.bridge.StartSession(ctx, worker.SessionStartParams{
 		ID:           sessionKey,
 		UserID:       job.OwnerID,
@@ -76,7 +87,7 @@ func (e *Executor) Execute(ctx context.Context, job *CronJob, timeout time.Durat
 		WorkerType:   wt,
 		AllowedTools: job.Payload.AllowedTools,
 		WorkDir:      e.resolveWorkDir(job),
-		Platform:     job.Platform,
+		Platform:     platform,
 		PlatformKey:  platformKey,
 		Title:        title,
 	}); err != nil {

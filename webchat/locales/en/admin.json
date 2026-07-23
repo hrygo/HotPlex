@@ -55,10 +55,41 @@
     "metrics": {
       "bots_label": "Active Agents / Bots",
       "bots_sub": "{{count}} connected, {{standby}} standby",
-      "sessions_label": "WebSocket Sessions",
-      "sessions_sub": "{{active}} active of {{total}} total",
+      "sessions_label": "Session Pool Capacity",
+      "sessions_sub": "{{active}} active / {{max}} max ({{total}} total)",
       "cron_label": "Scheduled Jobs (Cron)",
-      "cron_sub": "{{count}} scheduler loops enabled"
+      "cron_sub": "{{count}} scheduler loops enabled",
+      "workspaces_label": "Workspaces & Isolation",
+      "workspaces_sub": "{{count}} workspaces mounted",
+      "audit_label": "Audit Trail Events",
+      "audit_sub": "{{success}} passed / {{denied}} denied"
+    },
+    "activity_stream": {
+      "title": "Live Audit Activity Feed",
+      "view_all": "View All Audit Logs →",
+      "no_recent_activity": "No recent audit activity records"
+    },
+    "workers_health": {
+      "title": "Worker Engine Health",
+      "status_running": "Running",
+      "status_standby": "Ready / Standby",
+      "dialect_label": "Database Dialect",
+      "lock_wait": "Write Lock Wait"
+    },
+    "shortcuts": {
+      "title": "System Navigation & Quick Actions",
+      "bots_title": "Bot Management",
+      "bots_desc": "Configure Slack & Feishu messaging bots",
+      "sessions_title": "Session Inspector",
+      "sessions_desc": "Monitor & troubleshoot worker sessions",
+      "cron_title": "Cron Jobs",
+      "cron_desc": "Manage scheduled agent cron loops",
+      "workspaces_title": "Workspaces",
+      "workspaces_desc": "Configure working directories & permissions",
+      "audit_title": "Audit Logs",
+      "audit_desc": "Search & export security audit trails",
+      "apikeys_title": "API Keys",
+      "apikeys_desc": "Manage admin & service tokens"
     }
   },
   "nav": {
@@ -67,6 +98,7 @@
     "dashboard": "Dashboard",
     "bots": "Bots",
     "sessions": "Sessions",
+    "users": "Users",
     "activity": "Activity",
     "workspaces": "Workspaces",
     "skills": "Skills",
@@ -78,6 +110,7 @@
   },
   "bots": {
     "title": "Bots",
+    "subtitle": "Configure messaging platform bots, agent prompt rules, and channel defaults",
     "online_count": "{{count}} online",
     "create_title": "Create Bot",
     "loading": "Loading bots...",
@@ -325,7 +358,28 @@
       "user_id": "Executing User ID",
       "work_dir": "Working directory",
       "started_at": "Started At",
-      "last_active": "Last Active At"
+      "last_active": "Last Active At",
+      "tab_overview": "Overview",
+      "tab_stats": "Tokens & Stats",
+      "tab_context": "Context & Config",
+      "tab_activity": "Audit Logs",
+      "live_worker": "Live Worker Process",
+      "worker_running": "Running (Connected)",
+      "worker_stopped": "Disconnected / Stopped",
+      "total_cost": "Est. Total Cost",
+      "total_tokens": "Total Tokens",
+      "token_input": "Input Tokens",
+      "token_output": "Output Tokens",
+      "cache_read": "Cache Read",
+      "cache_write": "Cache Write",
+      "no_turns_data": "No turn stats available",
+      "no_activity_data": "No audit activity logs for this session",
+      "platform_info": "Platform & Channel",
+      "allowed_tools": "Allowed Tools",
+      "no_tools_limit": "No restriction (All allowed)",
+      "expiration": "Expiration & Limits",
+      "idle_expires": "Idle Timeout",
+      "expires_at": "Absolute Expiry"
     },
     "confirm": {
       "terminate_title": "Terminate Session?",
@@ -344,10 +398,51 @@
     "detail": {
       "untitled": "Untitled Session",
       "no_id": "No session ID specified",
-      "loading": "Loading session...",
+      "loading": "Loading session metrics & details...",
       "error_load": "Failed to load session",
       "not_found": "Session not found",
-      "title_label": "Title"
+      "title_label": "Title",
+      "subtitle": "Inspect live worker status, token consumption, turn performance, and audit logs.",
+      "tab_overview": "Environment & Overview",
+      "tab_turns": "Turns & Performance",
+      "tab_context": "Context & Tools",
+      "tab_activity": "Audit Trail",
+      "kpi": {
+        "worker_status": "Worker Process State",
+        "turn_count": "Execution Turns",
+        "turn_sub": "{{success}} passed / {{failed}} failed",
+        "token_usage": "Total Token Consumption",
+        "token_sub": "In {{input}} / Out {{output}}",
+        "cost_est": "Est. API Cost",
+        "cost_sub": "Avg duration {{avgDuration}}",
+        "cache_efficiency": "Cache Hit Rate"
+      },
+      "turn_table": {
+        "turn_num": "Turn #",
+        "model": "Model",
+        "status": "Status",
+        "duration": "Latency",
+        "tokens": "Tokens (In/Out/Cache)",
+        "cost": "Cost",
+        "time": "Time",
+        "success": "Success",
+        "failed": "Failed"
+      },
+      "system_info": {
+        "identity_owner": "Identity & Owner",
+        "user_id": "User ID",
+        "owner_id": "Owner ID",
+        "principal_id": "Principal ID",
+        "bot_id": "Bot ID",
+        "workspace_id": "Workspace ID",
+        "messaging_platform": "Messaging Platform",
+        "platform_keys": "Platform Key Parameters",
+        "worker_env": "Worker Environment & Directory",
+        "worker_session_id": "Worker Session ID",
+        "client_key": "Client Key",
+        "source": "Source Channel",
+        "lifecycle_timers": "Lifecycle & Timers"
+      }
     }
   },
   "workspaces": {
@@ -377,14 +472,15 @@
     }
   },
   "api_keys": {
-    "title": "API Keys",
+    "title": "API Key Credentials",
+    "subtitle": "Manage API authentication tokens for administrator and service client access",
     "key_count": "{{count}} key",
     "key_count_plural": "{{count}} keys",
     "loading": "Loading API keys...",
     "search_no_results": "No API keys matching \"{{query}}\"",
     "action": {
-      "create": "Create Key",
-      "create_first": "Create First Key",
+      "create": "Create API Key",
+      "create_first": "Create First API Key",
       "clear_search": "Clear search"
     },
     "validation": {
@@ -406,22 +502,25 @@
       "title": "No API keys configured yet."
     },
     "table": {
-      "api_key": "API Key",
-      "user_id": "User ID",
+      "api_key": "API Key Token",
+      "user_id": "User Identity",
       "description": "Description",
       "created": "Created",
       "actions": "Actions"
     },
     "dialog": {
-      "create_title": "Create API Key",
+      "create_title": "Generate New API Key",
+      "create_subtitle": "Issue a unique access token for a user or service identity",
       "warning_title": "Critical Security Warning",
       "warning_body": "For security reasons, this API key will be shown <strong class=\"text-[var(--text-primary)]\">ONLY ONCE</strong>. You will not be able to retrieve, view, or copy it again after closing this dialog.",
-      "confirm_saved": "I have copied & saved this key"
+      "confirm_saved": "I have safely copied & saved this key",
+      "user_id_hint": "Unique identity identifier for this API token owner",
+      "desc_hint": "e.g. Production automation service client"
     },
     "placeholder": {
-      "user_id": "e.g. alice",
-      "description": "Optional description",
-      "search": "Search by user ID or description..."
+      "user_id": "e.g. alice or service-bot",
+      "description": "Optional description for this key",
+      "search": "Search by user ID, description or key prefix..."
     }
   },
   "activity": {
@@ -537,34 +636,57 @@
   },
   "cron": {
     "title": "Cron Jobs",
+    "subtitle": "Schedule recurring agent tasks, automated reminders, and cron triggers",
     "loading": "Loading cron jobs...",
     "job_count": "{{enabled}} enabled / {{total}} total",
     "filter": {
       "all": "All Jobs",
-      "enabled": "Enabled",
-      "disabled": "Disabled"
+      "enabled": "Enabled Jobs Only",
+      "disabled": "Disabled Jobs Only"
+    },
+    "placeholder": {
+      "search": "Search cron jobs by name, ID, or prompt message..."
+    },
+    "modal": {
+      "title": "Create Cron Scheduled Job",
+      "subtitle": "Schedule automated agent tasks or message triggers",
+      "label_name": "Job Name *",
+      "label_schedule": "Schedule Trigger *",
+      "label_message": "Task Message / Agent Prompt *",
+      "label_max_runs": "Max Runs (Optional)",
+      "label_bot_id": "Target Bot ID (Optional)",
+      "label_enabled": "Enable scheduled job immediately upon creation",
+      "error_name_required": "Job name is required.",
+      "error_message_required": "Task message/prompt is required.",
+      "error_schedule_required": "Cron expression is required.",
+      "error_duration_invalid": "Invalid interval duration (e.g. 30m, 1h, 24h).",
+      "error_at_required": "Target timestamp ISO format is required.",
+      "error_create_failed": "Failed to create cron job"
     },
     "empty": {
-      "no_jobs": "No cron jobs configured yet.",
-      "no_match": "No {{filter}} cron jobs found."
+      "no_jobs": "No scheduled cron jobs configured yet.",
+      "no_jobs_desc": "Create a scheduled cron job to run automated tasks or AI workflows.",
+      "no_match": "No cron jobs matching criteria."
     },
     "table": {
-      "name": "Name",
+      "name": "Job Name & Task",
       "schedule": "Schedule",
-      "enabled": "Enabled",
+      "enabled": "Status",
       "last_run": "Last Run",
       "next_run": "Next Run",
-      "runs": "Runs",
+      "runs": "Run Count",
       "actions": "Actions"
     },
     "schedule": {
       "every": "every {{duration}}"
     },
     "action": {
+      "create_job": "+ Create Cron Job",
       "enable_verb": "Enable",
       "disable_verb": "Disable",
       "trigger": "Trigger",
       "run": "Run",
+      "clear_search": "Clear search filters",
       "back_to_cron": "Back to Cron Jobs"
     },
     "confirm": {
@@ -595,21 +717,23 @@
       "loading": "Loading cron job...",
       "error_load": "Failed to load cron job",
       "not_found": "Cron job not found",
-      "configuration": "Configuration",
-      "field_schedule": "Schedule",
-      "field_message": "Message",
-      "field_max_runs": "Max Runs",
+      "configuration": "Cron Job Configuration",
+      "field_schedule": "Schedule Specification (cron:EXPR, every:DURATION, at:TIMESTAMP)",
+      "field_message": "Task Prompt / Message Payload",
+      "field_max_runs": "Max Runs (Execution Limit)",
       "placeholder_message": "Task message...",
       "placeholder_unlimited": "Unlimited",
       "invalid_schedule": "Invalid schedule format. Use cron:EXPR, every:DURATION, or at:TIMESTAMP.",
       "save_changes": "Save Changes",
       "discard": "Discard",
-      "details_heading": "Details",
+      "details_heading": "Job Metadata",
+      "history_title": "Run Execution History Logs",
+      "history_subtitle": "Execution turn statistics, durations, and error logs",
       "owner_id": "Owner ID",
-      "bot_id": "Bot ID",
-      "expires_at": "Expires At",
-      "run_count": "Run Count",
-      "last_run": "Last Run",
+      "bot_id": "Bound Bot ID",
+      "expires_at": "Expiration Time",
+      "run_count": "Run Count / Limit",
+      "last_run": "Last Execution",
       "next_run": "Next Run"
     }
   },
@@ -678,6 +802,46 @@
     "confirm": {
       "delete_title": "Delete Skill",
       "delete_body": "Delete skill \"{{name}}\"? This removes it from the global skills directory and cannot be undone."
+    }
+  },
+  "users": {
+    "title": "User Management",
+    "subtitle": "Manage registered accounts, toggle statuses, reset user passwords, and generate invitations",
+    "user_count": "{{count}} registered accounts",
+    "loading": "Loading users and invitations...",
+    "search_placeholder": "Search by username, display name, or ID...",
+    "action": {
+      "reset_password": "Reset Password",
+      "generate_invite": "+ Generate Invite",
+      "enable": "Enable Account",
+      "disable": "Disable Account"
+    },
+    "reset_modal": {
+      "title": "Reset User Password",
+      "subtitle": "Set a new password for account {{username}}",
+      "new_password_label": "New Password *",
+      "confirm_password_label": "Confirm New Password *",
+      "password_placeholder": "Enter new password (at least 6 chars)",
+      "confirm_placeholder": "Re-enter new password",
+      "min_length_hint": "Password must be at least 6 characters",
+      "password_mismatch": "Passwords do not match",
+      "resetting": "Submitting...",
+      "success": "Password reset successfully",
+      "failed": "Failed to reset password"
+    },
+    "table": {
+      "user": "User / Display Name",
+      "role": "Role",
+      "status": "Status",
+      "last_login": "Last Login",
+      "created_at": "Registered At",
+      "actions": "Actions"
+    },
+    "never_logged_in": "Never logged in",
+    "empty": {
+      "no_match": "No matching users found",
+      "no_users": "No users registered yet",
+      "no_invitations": "No invitation codes yet — click \"Generate Invite\" above to create one."
     }
   }
 }

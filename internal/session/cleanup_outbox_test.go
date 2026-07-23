@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -64,6 +65,15 @@ func TestSQLiteStore_MarkDeletedEnqueuesCleanupTask(t *testing.T) {
 	info.State = events.StateRunning
 	require.NoError(t, store.Upsert(ctx, info))
 
+	snapshot := agentspec.SnapshotFromSpec(agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: string(worker.TypeOpenCodeSrv)},
+		Policy: agentspec.PolicySpec{
+			PermissionMode: worker.PermissionModeWorkspace,
+			AllowedTools:   []string{"Read"},
+		},
+	})
+	require.NoError(t, store.UpdateSpecSnapshot(ctx, info.ID, &snapshot))
+
 	deleted := *info
 	deleted.State = events.StateDeleted
 	deleted.UpdatedAt = now.Add(time.Second)
@@ -72,6 +82,9 @@ func TestSQLiteStore_MarkDeletedEnqueuesCleanupTask(t *testing.T) {
 	stored, err := store.Get(ctx, info.ID)
 	require.NoError(t, err)
 	require.Equal(t, events.StateDeleted, stored.State)
+	require.NotNil(t, stored.SpecSnapshot)
+	require.Equal(t, snapshot.Hash, stored.SpecSnapshot.Hash,
+		"a stale delete candidate must preserve the targeted snapshot update")
 
 	claimNow := time.Now().Add(time.Second)
 	tasks, err := store.ClaimCleanupTasks(ctx, claimNow, claimNow.Add(time.Minute), 1)

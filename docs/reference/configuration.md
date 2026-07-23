@@ -586,6 +586,8 @@ agent_config.inject_exclude  ──→  messaging.slack.inject_exclude  ──�
 
 仅 zero-value 字段被填充，已有值不会被覆盖。
 
+> **worker_type 单一解析入口（#847）**：`config.ResolveWorkerType(platform, botName)` 把上述 `worker_type` 5 级 fallback（per-bot → platform YAML/env → messaging 共享默认 → 编译默认 `claude_code`）收敛为一个函数，供 AgentSpec 归一化层（`internal/agentspec`）消费。**仅适用于 messaging 平台会话**（slack/feishu/yuanxin）；WebChat 会话的 worker_type 是请求驱动的（`body/query → workspace.WorkerPreference → default`，见 Gateway API），不走此 fallback。
+
 ---
 
 ### 3.12 log — 日志

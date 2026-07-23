@@ -349,7 +349,7 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = g.sm.DeletePhysical(r.Context(), id)
 	}
 
-	if err := g.bridge.StartSession(r.Context(), worker.SessionStartParams{
+	startParams := worker.SessionStartParams{
 		ID:          id,
 		UserID:      userID,
 		BotID:       botID,
@@ -359,7 +359,13 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 		Title:       title,
 		ClientKey:   clientSessionID,
 		WorkspaceID: sessionWorkspaceID,
-	}); err != nil {
+	}
+	// AgentSpec shadow (#847, findings F4/F8): observationally verify the
+	// normalized construction agrees with this legacy shape. REST has no
+	// AllowedTools source (nil) — the documented WS≠REST divergence. The legacy
+	// params stay authoritative in first-cut.
+	ShadowCompareStartParams(g.log, BuildWebChatInput(wt, nil, userID, sessionWorkspaceID), startParams)
+	if err := g.bridge.StartSession(r.Context(), startParams); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to create session")
 		return
@@ -429,10 +435,15 @@ func (g *GatewayAPI) emitSessionDeleteAudit(r *http.Request, si *session.Session
 	if g.auditCollector == nil {
 		return
 	}
-	detail := ""
+	// #848: carry the unified identity keys so REST deletes correlate with WS/
+	// cron session events. errMsg (if any) is merged into the same payload.
+	// #866: stamp the effective-spec fingerprint when a snapshot was bound.
+	fields := session.AuditDetailFields(si.BotID, string(si.WorkerType), si.EffectiveIdentity())
+	si.SpecSnapshot.StampMetadata(fields)
 	if errMsg != "" {
-		detail = fmt.Sprintf(`{"error":%q}`, errMsg)
+		fields["error"] = errMsg
 	}
+	b, _ := json.Marshal(fields)
 	_ = g.auditCollector.Enqueue(context.Background(), &audit.UserActivity{
 		Ts:           time.Now().UnixMilli(),
 		UserID:       si.UserID,
@@ -443,7 +454,7 @@ func (g *GatewayAPI) emitSessionDeleteAudit(r *http.Request, si *session.Session
 		ResourceType: "session",
 		ResourceID:   sessionID,
 		Outcome:      outcome,
-		DetailJSON:   detail,
+		DetailJSON:   string(b),
 		IP:           r.RemoteAddr,
 		UserAgent:    r.UserAgent(),
 	})

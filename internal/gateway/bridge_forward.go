@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/messaging"
@@ -24,6 +25,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // waitKillTimeout is the maximum time to wait for Worker.Wait() to return
@@ -66,6 +68,42 @@ func (b *Bridge) flogOf(fc *forwardContext) *slog.Logger {
 	return b.log
 }
 
+func (b *Bridge) populateForwardSessionContext(span trace.Span, fc *forwardContext, sessionID string, workerType worker.WorkerType) {
+	if b.sm == nil || (b.collector == nil && !span.IsRecording()) {
+		return
+	}
+	si, err := b.sm.Get(context.Background(), sessionID)
+	if err != nil {
+		return
+	}
+	fc.sessPlatform = si.Platform
+	fc.sessOwner = si.OwnerID
+	if fc.sessOwner == "" {
+		fc.sessOwner = si.UserID
+	}
+
+	// Correlate the forward span by agent identity independently of event-store
+	// collection. Tracing and event persistence are separate optional features.
+	eff := si.EffectiveIdentity()
+	spanAttrs := []attribute.KeyValue{
+		attribute.String(agentspec.MetadataKeyAgentID, eff.AgentID),
+		attribute.String(agentspec.MetadataKeyWorkerType, string(workerType)),
+	}
+	if eff.UserID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyUserID, eff.UserID))
+	}
+	if eff.WorkspaceID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyWorkspaceID, eff.WorkspaceID))
+	}
+	if eff.Platform != "" {
+		spanAttrs = append(spanAttrs, attribute.String(agentspec.MetadataKeyPlatform, eff.Platform))
+	}
+	if eff.Anonymous {
+		spanAttrs = append(spanAttrs, attribute.Bool("anonymous", true))
+	}
+	span.SetAttributes(spanAttrs...)
+}
+
 // forwardEvents proxies worker events to the hub with seq assignment.
 // EVT-004: if msgStore is configured, it appends to the event log on done events.
 // AEP-020: after the recv channel closes, calls Worker.Wait() to determine exit
@@ -88,7 +126,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	defer span.End()
 	w := fb.worker
 	workerType := w.Type()
-	flog := b.log.With("trace_id", observability.TraceID(ctx))
+	flog := b.log.With(observability.KeyTraceID, observability.TraceID(ctx))
 	defer func() {
 		if r := recover(); r != nil {
 			observability.GatewayForwarderPanics().Add(context.Background(), 1,
@@ -120,15 +158,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		flog:          flog,
 	}
 
-	if b.collector != nil && b.sm != nil {
-		if si, err := b.sm.Get(context.Background(), sessionID); err == nil {
-			fc.sessPlatform = si.Platform
-			fc.sessOwner = si.OwnerID
-			if fc.sessOwner == "" {
-				fc.sessOwner = si.UserID
-			}
-		}
-	}
+	b.populateForwardSessionContext(span, fc, sessionID, workerType)
 
 	acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
 	if acc.Generation.Load() == 0 && acc.genInitialized.CompareAndSwap(false, true) {
@@ -476,7 +506,7 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 	// forwarder must never finish the newest open execution for the session.
 	if err := b.executionStore.FinishRuntime(context.Background(), rec.ExecutionID, fc.workerRunID, rtStatus, ""); err != nil {
 		b.flogOf(fc).Debug("bridge: finish runtime on done", "err", err,
-			"session_id", sessionID, "execution_id", rec.ExecutionID, "status", rtStatus)
+			"session_id", sessionID, observability.KeyExecutionID, rec.ExecutionID, "status", rtStatus)
 		if errors.Is(err, execution.ErrRunMismatch) {
 			return
 		}

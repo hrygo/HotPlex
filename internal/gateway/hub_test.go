@@ -13,8 +13,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/observability"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
@@ -1422,6 +1424,55 @@ func TestHub_SendToSession_PlatformConnOwnerID(t *testing.T) {
 		"OwnerID must survive Hub routing to platform conn")
 	require.Equal(t, events.PermissionRequest, received.Event.Type)
 	require.Equal(t, "s1", received.SessionID)
+}
+
+// TestHub_SendToSession_InjectsTraceAndSpanID verifies that SendToSession
+// injects BOTH trace_id and span_id into the envelope's AEP metadata (#850),
+// so a downstream consumer can correlate an event to the precise span that
+// produced it — not just the trace. Regression guard: the original code only
+// injected trace_id; span_id is the #850 addition.
+func TestHub_SendToSession_InjectsTraceAndSpanID(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+
+	// Seed a valid parent span context so SpanContextFromContext is valid
+	// inside SendToSession (the noop tracer propagates the parent's context).
+	// In production a real tracer provider makes hub.send_to_session its own
+	// span; here we only assert the injection fires and both keys are present.
+	tid, err := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	require.NoError(t, err)
+	sid, err := trace.SpanIDFromHex("b7ad6b7169203331")
+	require.NoError(t, err)
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: tid,
+		SpanID:  sid,
+		Remote:  true,
+	})
+	require.True(t, sc.IsValid())
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	env := events.NewEnvelope(aep.NewID(), "sess_trace", 0, events.State, events.StateData{State: events.StateIdle})
+	require.NoError(t, h.SendToSession(ctx, env))
+
+	require.NotNil(t, env.Metadata, "metadata must be populated with correlation ids")
+	traceID, ok := env.Metadata[observability.KeyTraceID].(string)
+	require.True(t, ok, "trace_id must be a string")
+	require.NotEmpty(t, traceID, "trace_id must be injected")
+	spanID, ok := env.Metadata[observability.KeySpanID].(string)
+	require.True(t, ok, "span_id must be a string")
+	require.NotEmpty(t, spanID, "span_id must be injected (#850)")
+}
+
+// TestHub_SendToSession_NoInjectionWithoutSpanContext verifies that when ctx
+// carries no valid span (the common test/no-tracer case), SendToSession leaves
+// metadata untouched — i.e. the injection is strictly opt-in to a real trace.
+func TestHub_SendToSession_NoInjectionWithoutSpanContext(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+
+	env := events.NewEnvelope(aep.NewID(), "sess_notrace", 0, events.State, events.StateData{State: events.StateIdle})
+	require.NoError(t, h.SendToSession(context.Background(), env))
+	require.Nil(t, env.Metadata, "no span context → metadata must stay nil")
 }
 
 // TestConn_WriteDispatch_DeltaIsGuaranteed verifies that message.delta events

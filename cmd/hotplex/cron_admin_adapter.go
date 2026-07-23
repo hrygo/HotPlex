@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/cron"
 	"github.com/hrygo/hotplex/internal/eventstore"
@@ -15,6 +16,7 @@ import (
 type cronAdminAdapter struct {
 	scheduler  *cron.Scheduler
 	turnsStore eventstore.TurnQuerier
+	sessionMgr *session.Manager
 }
 
 // Fields that must not be overwritten via admin API UpdateJob.
@@ -34,6 +36,25 @@ func (a *cronAdminAdapter) CreateJob(ctx context.Context, raw any) error {
 	if err := json.Unmarshal(data, &job); err != nil {
 		return fmt.Errorf("unmarshal job: %w", err)
 	}
+
+	if job.OwnerID == "" {
+		job.OwnerID = "admin"
+	}
+	if job.BotID == "" {
+		job.BotID = "system"
+	}
+	if job.Payload.Kind == "" {
+		job.Payload.Kind = cron.PayloadIsolatedSession
+	}
+	if job.Schedule.Kind != cron.ScheduleAt {
+		if job.MaxRuns <= 0 {
+			job.MaxRuns = 1000
+		}
+		if job.ExpiresAt == "" {
+			job.ExpiresAt = time.Now().UTC().AddDate(1, 0, 0).Format(time.RFC3339)
+		}
+	}
+
 	return a.scheduler.CreateJob(ctx, &job)
 }
 
@@ -108,7 +129,55 @@ func (a *cronAdminAdapter) RunHistory(ctx context.Context, id string) (any, erro
 	if a.turnsStore == nil {
 		return nil, fmt.Errorf("eventstore not available")
 	}
-	return a.turnsStore.QueryTurnStats(ctx, job.SessionKey())
+
+	var allTurns []map[string]any
+
+	// 1. Query direct job.SessionKey()
+	if stats, err := a.turnsStore.QueryTurnStats(ctx, job.SessionKey()); err == nil && stats != nil {
+		for _, item := range stats.Turns {
+			allTurns = append(allTurns, map[string]any{
+				"id":          fmt.Sprintf("%s-%d", stats.SessionID, item.TurnNum),
+				"session_id":  stats.SessionID,
+				"turn_index":  item.TurnNum,
+				"status":      map[bool]string{true: "success", false: "failed"}[item.Success],
+				"duration_ms": item.DurationMs,
+				"tokens_used": item.TokensIn + item.TokensOut,
+				"created_at":  time.UnixMilli(item.CreatedAt).Format(time.RFC3339),
+			})
+		}
+	}
+
+	// 2. Query sessions derived for this cron job
+	if a.sessionMgr != nil {
+		sessions, err := a.sessionMgr.List(ctx, "", "", "", 200, 0)
+		if err == nil {
+			for _, s := range sessions {
+				if s.ID == job.SessionKey() {
+					continue
+				}
+				if s.PlatformKey != nil && s.PlatformKey["cron_job_id"] == id {
+					if stats, err := a.turnsStore.QueryTurnStats(ctx, s.ID); err == nil && stats != nil {
+						for _, item := range stats.Turns {
+							allTurns = append(allTurns, map[string]any{
+								"id":          fmt.Sprintf("%s-%d", s.ID, item.TurnNum),
+								"session_id":  s.ID,
+								"turn_index":  item.TurnNum,
+								"status":      map[bool]string{true: "success", false: "failed"}[item.Success],
+								"duration_ms": item.DurationMs,
+								"tokens_used": item.TokensIn + item.TokensOut,
+								"created_at":  time.UnixMilli(item.CreatedAt).Format(time.RFC3339),
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if allTurns == nil {
+		allTurns = []map[string]any{}
+	}
+	return allTurns, nil
 }
 
 // cronAttachedRouter implements cron.AttachedSessionRouter using Bridge + SessionManager.

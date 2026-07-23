@@ -96,6 +96,7 @@ type UserWorkspaceStore interface {
 	HasAdmin(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]*security.User, error)
 	UpdateUserStatus(ctx context.Context, id, status string, now int64) error
+	UpdateUserPassword(ctx context.Context, id, passwordHash string, now int64) error
 	TouchUserLastLogin(ctx context.Context, userID string, now int64) error
 	// workspaces
 	CreateWorkspace(ctx context.Context, w *Workspace, now int64) error
@@ -323,6 +324,13 @@ func (s *SQLiteStore) ListByIDs(ctx context.Context, ids []string) (map[string]*
 func (s *SQLiteStore) UpdateUserStatus(ctx context.Context, id, status string, now int64) error {
 	return s.writeMu.WithLock(func() error {
 		_, err := s.db.ExecContext(ctx, queries["users.update_status"], status, now, id)
+		return err
+	})
+}
+
+func (s *SQLiteStore) UpdateUserPassword(ctx context.Context, id, passwordHash string, now int64) error {
+	return s.writeMu.WithLock(func() error {
+		_, err := s.db.ExecContext(ctx, queries["users.update_password"], passwordHash, now, id)
 		return err
 	})
 }

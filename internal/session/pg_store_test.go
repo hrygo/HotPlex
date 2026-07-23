@@ -11,6 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -39,6 +40,10 @@ func newPGMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 		"UPDATE sessions SET permission_ceiling = ? WHERE id = ? AND permission_ceiling = ''")
 	q["store.get_permission_ceiling"] = dbutil.DialectPostgres.Rebind(
 		"SELECT COALESCE(permission_ceiling, '') FROM sessions WHERE id = ?")
+	q["store.get_context_json"] = dbutil.DialectPostgres.Rebind(
+		queries["store.get_context_json"])
+	q["sessions.update_spec_snapshot_pg"] = dbutil.DialectPostgres.Rebind(
+		queries["sessions.update_spec_snapshot_pg"])
 
 	store := &pgStore{
 		db:      db,
@@ -118,6 +123,29 @@ func TestPGStore_SetPermissionCeilingIfEmpty(t *testing.T) {
 	stored, err := store.SetPermissionCeilingIfEmpty(t.Context(), "sess-1", "workspace")
 	require.NoError(t, err)
 	require.Equal(t, "workspace", stored)
+}
+
+func TestPGStore_UpdateSpecSnapshot(t *testing.T) {
+	t.Parallel()
+	store, mock, cleanup := newPGMock(t)
+	defer cleanup()
+
+	snapshot := agentspec.SnapshotFromSpec(agentspec.AgentSpec{
+		Worker: agentspec.WorkerSpec{Type: "claude_code"},
+		Policy: agentspec.PolicySpec{
+			PermissionMode: "workspace",
+			AllowedTools:   []string{"Read"},
+		},
+	})
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`)).
+		WithArgs("sess-1").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(store.queries["sessions.update_spec_snapshot_pg"])).
+		WithArgs(sqlmock.AnyArg(), "sess-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, store.UpdateSpecSnapshot(t.Context(), "sess-1", &snapshot))
 }
 
 func TestPGStore_DeleteTerminated(t *testing.T) {

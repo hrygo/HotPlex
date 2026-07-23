@@ -29,6 +29,7 @@ func newPGMultitenancyMock(t *testing.T) (*pgStore, sqlmock.Sqlmock, func()) {
 		"users.get_by_username":               d.Rebind("SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users WHERE username = ?"),
 		"users.list":                          d.Rebind("SELECT id, username, password_hash, role, display_name, status, created_at, updated_at, last_login_at FROM users ORDER BY created_at ASC LIMIT ? OFFSET ?"),
 		"users.update_status":                 d.Rebind("UPDATE users SET status = ?, updated_at = ? WHERE id = ?"),
+		"users.update_password":               d.Rebind("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?"),
 		"users.touch_last_login":              d.Rebind("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?"),
 		"workspaces.create":                   d.Rebind("INSERT INTO workspaces (id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at, permission_mode) VALUES (?, ?, ?, ?, NULL, NULL, 'active', ?, ?, ?)"),
 		"workspaces.get_by_id":                d.Rebind("SELECT id, owner_user_id, name, work_dir, agent_config_overrides, worker_preference, status, created_at, updated_at, permission_mode FROM workspaces WHERE id = ?"),

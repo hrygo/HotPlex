@@ -15,10 +15,12 @@ import (
 
 // mockBridge implements BridgeStarter for testing.
 type mockBridge struct {
-	startErr error
+	startErr  error
+	lastStart worker.SessionStartParams // captures params from the most recent StartSession call
 }
 
-func (m *mockBridge) StartSession(_ context.Context, _ worker.SessionStartParams) error {
+func (m *mockBridge) StartSession(_ context.Context, p worker.SessionStartParams) error {
+	m.lastStart = p
 	return m.startErr
 }
 
@@ -165,6 +167,49 @@ func TestExecutor_Execute_Success(t *testing.T) {
 	gotKey, err := e.Execute(context.Background(), testJob(), 5*time.Second)
 	require.NoError(t, err)
 	require.NotEmpty(t, gotKey)
+}
+
+// TestExecutor_Execute_NormalizesEmptyPlatformToCron verifies that a pure
+// scheduled task (no messaging delivery target) records the "cron" platform on
+// the session it starts, so the session.create audit row is populated instead
+// of carrying an empty platform. See CronJob.SessionKey, which already derives
+// under "cron".
+func TestExecutor_Execute_NormalizesEmptyPlatformToCron(t *testing.T) {
+	t.Parallel()
+
+	bridge := &mockBridge{}
+	sm := &mockSessionStateChecker{
+		defaultSession: &session.SessionInfo{State: "terminated"},
+		defaultWorker:  &mockWorker{},
+	}
+	e := NewExecutor(slog.Default(), bridge, sm, "")
+
+	job := testJob() // Platform is empty
+	_, err := e.Execute(context.Background(), job, 5*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "cron", bridge.lastStart.Platform,
+		"empty-platform cron job must be normalized to the cron platform for audit/metrics")
+}
+
+// TestExecutor_Execute_PreservesDeliveryPlatform verifies that a job with a
+// messaging delivery target keeps its real platform (needed for agent-config
+// fallback resolution) and is NOT clobbered by the empty-platform normalization.
+func TestExecutor_Execute_PreservesDeliveryPlatform(t *testing.T) {
+	t.Parallel()
+
+	bridge := &mockBridge{}
+	sm := &mockSessionStateChecker{
+		defaultSession: &session.SessionInfo{State: "terminated"},
+		defaultWorker:  &mockWorker{},
+	}
+	e := NewExecutor(slog.Default(), bridge, sm, "")
+
+	job := testJob()
+	job.Platform = "feishu"
+	job.PlatformKey = map[string]string{"chat_id": "oc_123"}
+	_, err := e.Execute(context.Background(), job, 5*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "feishu", bridge.lastStart.Platform)
 }
 
 func TestBuildDeliverySuffix_SilentJob(t *testing.T) {

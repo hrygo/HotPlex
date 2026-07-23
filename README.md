@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.37.2-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.38.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -44,7 +44,7 @@
 ### 🛡️ Security & Operations
 - 🔒 **Enterprise-Grade Security** — Timing-safe API key authentication, SSRF protection with DNS rebinding defense, command/tool/model allowlists, environment isolation, and path traversal prevention.
 - 📊 **End-to-End Observability** — 30+ Prometheus metrics, OpenTelemetry distributed tracing with W3C TraceContext propagation, and structured JSON logging.
-- 🛠️ **Self-Contained CLI** — 13 subcommands in one binary: `gateway`, `service` (systemd/launchd/SCM), `onboard` (guided setup), `doctor` (25 diagnostic checks), `cron`, `slack`, `config`, `update` (self-update), `dev`, `status`, `security`, `install`, `version`.
+- 🛠️ **Self-Contained CLI** — 13 subcommands in one binary: `gateway`, `service` (systemd/launchd/SCM), `onboard` (guided setup), `doctor` (27 diagnostic checks), `cron`, `slack`, `config`, `update` (self-update), `dev`, `status`, `security`, `install`, `version`.
 - 🔄 **Hot-Reload Configuration** — YAML + env var configuration with runtime hot-reload, field-level audit trail, and versioned rollback — no restarts for most changes.
 
 ## ⚡ Quick Start

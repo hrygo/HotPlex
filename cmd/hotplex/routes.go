@@ -76,7 +76,7 @@ func setupRoutes(
 
 	var cronProvider admin.CronSchedulerProvider
 	if deps.CronScheduler != nil {
-		cronProvider = &cronAdminAdapter{scheduler: deps.CronScheduler, turnsStore: deps.EventStore}
+		cronProvider = &cronAdminAdapter{scheduler: deps.CronScheduler, turnsStore: deps.EventStore, sessionMgr: sm}
 	}
 
 	adminAPI := admin.New(admin.Deps{
@@ -160,6 +160,7 @@ func setupRoutes(
 	adminMux.HandleFunc("POST /admin/restart", adminAPI.HandleRestart)
 
 	adminMux.HandleFunc("GET /admin/sessions", adminAPI.ListSessions)
+	adminMux.HandleFunc("GET /admin/sessions/pool", adminAPI.PoolStats)
 	adminMux.HandleFunc("GET /admin/sessions/{id}", adminAPI.GetSession)
 	adminMux.HandleFunc("DELETE /admin/sessions/{id}", adminAPI.DeleteSession)
 	adminMux.HandleFunc("POST /admin/sessions/{id}/terminate", adminAPI.TerminateSession)
@@ -294,6 +295,7 @@ func setupRoutes(
 		mux.Handle("DELETE /api/admin/invitations/{id}", corsMw(userAdmin.AuditWrite(admin.AuditInvitationDelete, csrfMw(http.HandlerFunc(userAdmin.DeleteInvitation)))))
 		mux.Handle("GET /api/admin/users", corsMw(http.HandlerFunc(userAdmin.ListUsers)))
 		mux.Handle("PATCH /api/admin/users/{id}", corsMw(userAdmin.AuditWrite(admin.AuditMemberStatusUpdate, csrfMw(http.HandlerFunc(userAdmin.UpdateUserStatus)))))
+		mux.Handle("POST /api/admin/users/{id}/password", corsMw(userAdmin.AuditWrite(admin.AuditUserPasswordReset, csrfMw(http.HandlerFunc(userAdmin.ResetUserPassword)))))
 
 		// Embedded admin activity console. The standalone admin server exposes
 		// the same handlers at /admin/* for Bearer-token clients; the webchat UI
@@ -317,6 +319,7 @@ func setupRoutes(
 		mux.Handle("OPTIONS /api/admin/users", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/users/", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/users/{id}", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+		mux.Handle("OPTIONS /api/admin/users/{id}/password", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/activity", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/activity/stats", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
 		mux.Handle("OPTIONS /api/admin/activity/export", corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))

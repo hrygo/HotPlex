@@ -30,7 +30,6 @@ interface ElicitationFormCardProps {
 }
 
 export function ElicitationFormCard({
-  toolName,
   message,
   mcpServerName,
   url,

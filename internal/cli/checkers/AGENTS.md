@@ -1,14 +1,15 @@
 # checkers — Diagnostic Checks for `hotplex doctor`
 
 ## OVERVIEW
-26 self-registering diagnostic checks across 10 categories. Each check implements `cli.Checker`, returns a single `cli.Diagnostic`, and registers itself in `init()` via `cli.DefaultRegistry.Register`. Powers `hotplex doctor [--fix]`.
+27 self-registering diagnostic checks across 10 categories. Each check implements `cli.Checker`, returns a single `cli.Diagnostic`, and registers itself in `init()` via `cli.DefaultRegistry.Register`. Powers `hotplex doctor [--fix]`.
 
 ## STRUCTURE
 ```
 checkers/
   config.go          # 5 config.* checks: exists, syntax, required, values, env_vars
   agentconfig.go     # 3 agent_config checks: suffix_deprecated, directory_structure, global_files
-  dependencies.go    # 2 dependencies.* checks: worker_binary, sqlite_path
+  dependencies.go    # 3 dependencies.* checks: worker_binary, sqlite_path, opencode_server_resolve
+  opencode_resolve.go # dependencies.opencode_server_resolve (#900): resolve + version probe + wrapper detection
   environment.go     # 3 environment.* checks: go_version, os_arch, build_tools
   messaging.go       # 3 messaging.* checks: slack_creds, feishu_creds, multi_bot_config
   runtime.go         # 4 runtime.* checks: disk_space, port_available, orphan_pids, data_dir_writable

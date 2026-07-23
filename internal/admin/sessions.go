@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -132,7 +133,23 @@ func (a *AdminAPI) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, si)
+	var userID string
+	if sInfo, ok := si.(*session.SessionInfo); ok {
+		userID = sInfo.UserID
+	}
+	identityLinks := a.buildIdentityLinks(r.Context(), []string{userID})
+
+	data, _ := json.Marshal(si)
+	var resp map[string]any
+	_ = json.Unmarshal(data, &resp)
+	resp["identity_links"] = identityLinks
+	if userID != "" {
+		if link, ok := identityLinks[userID]; ok {
+			resp["identity_link"] = link
+		}
+	}
+
+	respondJSON(w, resp)
 }
 
 // DeleteSession deletes a session by ID.

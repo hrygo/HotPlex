@@ -56,7 +56,7 @@ type connSM interface {
 	Get(ctx context.Context, id string) (*session.SessionInfo, error)
 	GetWorker(id string) worker.Worker
 	Transition(ctx context.Context, id string, to events.SessionState) error
-	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workDir, title, clientKey string) (*session.SessionInfo, error)
+	CreateWithBot(ctx context.Context, id, userID, botID, botName string, wt worker.WorkerType, allowedTools []string, platform string, platformKey map[string]string, workspaceID, workDir, title, clientKey string) (*session.SessionInfo, error)
 	DeletePhysical(ctx context.Context, id string) error
 }
 
@@ -613,6 +613,30 @@ func (c *Conn) resolveSessionState(sessionID string, initData InitData, workDir 
 	}
 }
 
+// webchatStartParams builds the SessionStartParams for a fresh webchat session.
+// The three fresh-creation paths (not-found / start-created / recreate-deleted)
+// share this exact shape, so it is factored here. It also runs the agentspec
+// shadow comparison observationally (#847, findings F4/F8): the legacy params are
+// returned unchanged (behavior-preserving first-cut), while the shadow logs any
+// divergence between the normalized agentspec construction and the legacy one.
+func (c *Conn) webchatStartParams(sessionID string, initData InitData, workDir, clientKey string) worker.SessionStartParams {
+	p := worker.SessionStartParams{
+		ID:           sessionID,
+		UserID:       c.userID,
+		BotID:        c.botID,
+		WorkerType:   initData.WorkerType,
+		AllowedTools: initData.Config.AllowedTools,
+		WorkDir:      workDir,
+		Platform:     platformWebChat,
+		Title:        initData.Title,
+		ClientKey:    clientKey,
+		WorkspaceID:  c.workspaceID,
+	}
+	ShadowCompareStartParams(c.log,
+		BuildWebChatInput(initData.WorkerType, initData.Config.AllowedTools, c.userID, c.workspaceID), p)
+	return p
+}
+
 func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDir string, sm connSM, lookupErr error, clientKey string) (*session.SessionInfo, error) {
 	if errors.Is(lookupErr, session.ErrSessionCleanupPending) {
 		c.hub.InitThrottle.RecordFailure(sessionID)
@@ -626,18 +650,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	if c.starter != nil {
-		if err := c.starter.StartSession(context.Background(), worker.SessionStartParams{
-			ID:           sessionID,
-			UserID:       c.userID,
-			BotID:        c.botID,
-			WorkerType:   initData.WorkerType,
-			AllowedTools: initData.Config.AllowedTools,
-			WorkDir:      workDir,
-			Platform:     platformWebChat,
-			Title:        initData.Title,
-			ClientKey:    clientKey,
-			WorkspaceID:  c.workspaceID,
-		}); err != nil {
+		if err := c.starter.StartSession(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")
 			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -654,7 +667,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	// Test mode: create directly via session manager.
-	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
+	si, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, c.workspaceID, workDir, initData.Title, clientKey)
 	if err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to create session")
@@ -667,18 +680,7 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	if c.starter == nil {
 		return si, nil // no starter in test mode, session stays CREATED
 	}
-	if err := c.starter.StartSession(context.Background(), worker.SessionStartParams{
-		ID:           sessionID,
-		UserID:       c.userID,
-		BotID:        c.botID,
-		WorkerType:   initData.WorkerType,
-		AllowedTools: initData.Config.AllowedTools,
-		WorkDir:      workDir,
-		Platform:     platformWebChat,
-		Title:        initData.Title,
-		ClientKey:    clientKey,
-		WorkspaceID:  c.workspaceID,
-	}); err != nil {
+	if err := c.starter.StartSession(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -696,24 +698,13 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 	_ = sm.DeletePhysical(context.Background(), sessionID)
 	if c.starter == nil {
 		// Test mode: re-create session directly since the old one was physically deleted.
-		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, workDir, initData.Title, clientKey)
+		newSI, err := sm.CreateWithBot(context.Background(), sessionID, c.userID, c.botID, "", initData.WorkerType, initData.Config.AllowedTools, platformWebChat, nil, c.workspaceID, workDir, initData.Title, clientKey)
 		if err != nil {
 			return nil, fmt.Errorf("recreate deleted session (test mode): %w", err)
 		}
 		return newSI, nil
 	}
-	if err := c.starter.StartSession(context.Background(), worker.SessionStartParams{
-		ID:           sessionID,
-		UserID:       c.userID,
-		BotID:        c.botID,
-		WorkerType:   initData.WorkerType,
-		AllowedTools: initData.Config.AllowedTools,
-		WorkDir:      workDir,
-		Platform:     platformWebChat,
-		Title:        initData.Title,
-		ClientKey:    clientKey,
-		WorkspaceID:  c.workspaceID,
-	}); err != nil {
+	if err := c.starter.StartSession(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, fmt.Sprintf("failed to recreate deleted session: %v", err))
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -814,6 +805,9 @@ func (c *Conn) finalizeInit(sessionID string, si *session.SessionInfo, _ InitDat
 
 	ack := BuildInitAck(sessionID, si.State, si.WorkerType)
 	ack.Seq = c.hub.NextSeq(sessionID)
+	// #848: stamp the handshake with the agent identity so the client can
+	// correlate this session by agent identity from the first frame.
+	StampIdentityMetadata(ack, si)
 	if err := c.WriteCtx(context.Background(), ack); err != nil {
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
 		return fmt.Errorf("send init_ack: %w", err)

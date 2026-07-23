@@ -55,10 +55,41 @@
     "metrics": {
       "bots_label": "活跃代理 / 机器人",
       "bots_sub": "{{count}} 已连接，{{standby}} 备用",
-      "sessions_label": "WebSocket 会话",
-      "sessions_sub": "活跃 {{active}} / 总计 {{total}}",
+      "sessions_label": "会话池容量",
+      "sessions_sub": "活跃 {{active}} / 容量 {{max}} (总数 {{total}})",
       "cron_label": "定时任务 (Cron)",
-      "cron_sub": "已启用 {{count}} 个调度循环"
+      "cron_sub": "已启用 {{count}} 个调度循环",
+      "workspaces_label": "工作区与隔离",
+      "workspaces_sub": "共 {{count}} 个工作区已挂载",
+      "audit_label": "审计事件轨迹",
+      "audit_sub": "成功 {{success}} / 拒绝 {{denied}}"
+    },
+    "activity_stream": {
+      "title": "实时行为审计流",
+      "view_all": "查看全部审计日志 →",
+      "no_recent_activity": "暂无最近行为审计记录"
+    },
+    "workers_health": {
+      "title": "Worker 引擎健康度",
+      "status_running": "运行中",
+      "status_standby": "就绪 / 备用",
+      "dialect_label": "数据库方言",
+      "lock_wait": "写锁等待"
+    },
+    "shortcuts": {
+      "title": "系统快捷管理导航",
+      "bots_title": "机器人管理",
+      "bots_desc": "配置 Slack/飞书 通讯机器人",
+      "sessions_title": "会话检测器",
+      "sessions_desc": "监控与排查 Worker 执行会话",
+      "cron_title": "定时任务",
+      "cron_desc": "配置 Agent 定时循环脚本",
+      "workspaces_title": "工作区管理",
+      "workspaces_desc": "配置工作区目录与权限模式",
+      "audit_title": "行为审计",
+      "audit_desc": "检索与导出合规审计追踪记录",
+      "apikeys_title": "API 密钥",
+      "apikeys_desc": "管理管理员与服务 API Token"
     }
   },
   "nav": {
@@ -67,6 +98,7 @@
     "dashboard": "控制台",
     "bots": "机器人管理",
     "sessions": "会话管理",
+    "users": "用户管理",
     "activity": "行为审计",
     "workspaces": "工作区管理",
     "skills": "技能管理",
@@ -78,6 +110,7 @@
   },
   "bots": {
     "title": "机器人管理",
+    "subtitle": "配置消息平台机器人、Agent 提示词规则与频道默认设置",
     "online_count": "{{count}} 在线",
     "create_title": "创建机器人",
     "loading": "正在加载机器人列表...",
@@ -325,7 +358,28 @@
       "user_id": "执行用户 ID",
       "work_dir": "工作目录",
       "started_at": "启动时间",
-      "last_active": "最后活跃时间"
+      "last_active": "最后活跃时间",
+      "tab_overview": "基本概览",
+      "tab_stats": "Token & 性能",
+      "tab_context": "上下文 & 配置",
+      "tab_activity": "审计日志",
+      "live_worker": "实时 Worker 进程",
+      "worker_running": "运行中 (已连接)",
+      "worker_stopped": "未连接 / 已停止",
+      "total_cost": "总预估费用",
+      "total_tokens": "Total Tokens",
+      "token_input": "输入 Token",
+      "token_output": "输出 Token",
+      "cache_read": "缓存读取",
+      "cache_write": "缓存写入",
+      "no_turns_data": "暂无 Turn 统计数据",
+      "no_activity_data": "暂无此会话的行为审计日志",
+      "platform_info": "通讯平台 & 渠道",
+      "allowed_tools": "允许使用的工具",
+      "no_tools_limit": "无限制 (允许全部)",
+      "expiration": "过期 & 挂起限制",
+      "idle_expires": "空闲挂起超时",
+      "expires_at": "绝对过期时间"
     },
     "confirm": {
       "terminate_title": "终止会话？",
@@ -344,10 +398,51 @@
     "detail": {
       "untitled": "未命名会话",
       "no_id": "未指定会话 ID",
-      "loading": "正在加载会话详情...",
+      "loading": "正在加载会话详情与性能数据...",
       "error_load": "加载会话失败",
-      "not_found": "未找到会话",
-      "title_label": "标题"
+      "not_found": "未找到指定会话",
+      "title_label": "标题",
+      "subtitle": "查看实时 Worker 状态、Token 消耗、Turn 轮次明细与审计日志",
+      "tab_overview": "环境 & 概览",
+      "tab_turns": "Turn 轮次与性能",
+      "tab_context": "上下文 & 授权工具",
+      "tab_activity": "行为审计追踪",
+      "kpi": {
+        "worker_status": "Worker 进程状态",
+        "turn_count": "执行轮次",
+        "turn_sub": "成功 {{success}} / 失败 {{failed}}",
+        "token_usage": "Token 消耗总计",
+        "token_sub": "输入 {{input}} / 输出 {{output}}",
+        "cost_est": "预估 API 成本",
+        "cost_sub": "平均耗时 {{avgDuration}}",
+        "cache_efficiency": "缓存命中率"
+      },
+      "turn_table": {
+        "turn_num": "轮次",
+        "model": "模型",
+        "status": "状态",
+        "duration": "耗时",
+        "tokens": "Tokens (In/Out/Cache)",
+        "cost": "费用",
+        "time": "时间",
+        "success": "成功",
+        "failed": "失败"
+      },
+      "system_info": {
+        "identity_owner": "身份与所有者",
+        "user_id": "用户 ID",
+        "owner_id": "所有者 ID",
+        "principal_id": "主账号 ID",
+        "bot_id": "Bot ID",
+        "workspace_id": "工作区 ID",
+        "messaging_platform": "消息通讯平台",
+        "platform_keys": "平台映射参数",
+        "worker_env": "Worker 环境与目录",
+        "worker_session_id": "Worker Session ID",
+        "client_key": "客户端 Client Key",
+        "source": "来源通道",
+        "lifecycle_timers": "生命周期与计时器"
+      }
     }
   },
   "workspaces": {
@@ -377,14 +472,15 @@
     }
   },
   "api_keys": {
-    "title": "API 密钥",
+    "title": "API 密钥管理",
+    "subtitle": "管理网关管理员及服务客户端的 API 认证凭证",
     "key_count": "{{count}} 个密钥",
     "key_count_plural": "{{count}} 个密钥",
     "loading": "正在加载 API 密钥...",
     "search_no_results": "没有找到匹配 \"{{query}}\" 的 API 密钥",
     "action": {
-      "create": "创建密钥",
-      "create_first": "创建首个密钥",
+      "create": "创建 API 密钥",
+      "create_first": "创建首个 API 密钥",
       "clear_search": "清除搜索"
     },
     "validation": {
@@ -407,21 +503,24 @@
     },
     "table": {
       "api_key": "API 密钥",
-      "user_id": "用户 ID",
+      "user_id": "用户 ID / 标识",
       "description": "描述",
       "created": "创建时间",
       "actions": "操作"
     },
     "dialog": {
-      "create_title": "创建 API 密钥",
-      "warning_title": "严重安全警告",
-      "warning_body": "出于安全原因，此 API 密钥将仅显示 <strong>一次</strong>。关闭此对话框后，您将无法再次检索、查看或复制它。",
-      "confirm_saved": "我已复制并保存此密钥"
+      "create_title": "生成新的 API 密钥",
+      "create_subtitle": "为指定的用户标识或服务客户端创建唯一的访问 Token",
+      "warning_title": "重要安全提示",
+      "warning_body": "出于安全防范机制，此 API 密钥生成后将仅展示 <strong>一次</strong>。关闭弹窗后您将无法再次恢复、查看或复制完整 Key。",
+      "confirm_saved": "我已妥善复制并保存密钥",
+      "user_id_hint": "用于标识此 Token 所绑定的主用户 ID 或服务主体",
+      "desc_hint": "例如：生产环境服务访问凭证"
     },
     "placeholder": {
-      "user_id": "例如 alice",
-      "description": "可选描述",
-      "search": "按用户 ID 或描述搜索..."
+      "user_id": "例如 alice 或 service-bot",
+      "description": "可选填写凭证用途或描述信息",
+      "search": "按用户 ID、描述或 Key 前缀搜索..."
     }
   },
   "activity": {
@@ -537,6 +636,7 @@
   },
   "cron": {
     "title": "定时任务",
+    "subtitle": "配置定时 Agent 任务、自动化提醒与 Cron 触发器",
     "loading": "正在加载定时任务...",
     "job_count": "{{enabled}} 已启用 / {{total}} 总计",
     "filter": {
@@ -544,14 +644,35 @@
       "enabled": "已启用",
       "disabled": "已禁用"
     },
+    "placeholder": {
+      "search": "按任务名称、ID 或提示词消息搜索..."
+    },
+    "modal": {
+      "title": "创建 Cron 定时任务",
+      "subtitle": "设置定时 Agent 任务或消息触发器",
+      "label_name": "任务名称 *",
+      "label_schedule": "调度触发器 *",
+      "label_message": "任务消息 / Agent 提示词 *",
+      "label_max_runs": "最大运行次数 (可选)",
+      "label_bot_id": "目标 Bot ID (可选)",
+      "label_enabled": "创建后立即启用该定时任务",
+      "error_name_required": "任务名称必填。",
+      "error_message_required": "任务消息/提示词必填。",
+      "error_schedule_required": "Cron 表达式必填。",
+      "error_duration_invalid": "无效的时间间隔 (例如 30m, 1h, 24h)。",
+      "error_at_required": "目标 ISO 时间戳必填。",
+      "error_name_exists": "已存在同名定时任务，请使用唯一的任务名称。",
+      "error_create_failed": "创建定时任务失败"
+    },
     "empty": {
       "no_jobs": "尚未配置任何定时任务。",
-      "no_match": "没有找到{{filter}}的定时任务。"
+      "no_jobs_desc": "创建定时任务以自动执行任务或 AI 工作流。",
+      "no_match": "没有找到符合条件的定时任务。"
     },
     "table": {
-      "name": "名称",
+      "name": "名称与任务",
       "schedule": "调度计划",
-      "enabled": "启用",
+      "enabled": "状态",
       "last_run": "上次运行",
       "next_run": "下次运行",
       "runs": "运行次数",
@@ -561,10 +682,12 @@
       "every": "每 {{duration}}"
     },
     "action": {
+      "create_job": "+ 新建 Cron 任务",
       "enable_verb": "启用",
       "disable_verb": "禁用",
       "trigger": "触发",
       "run": "运行",
+      "clear_search": "清除筛选条件",
       "back_to_cron": "返回定时任务列表"
     },
     "confirm": {
@@ -604,11 +727,13 @@
       "invalid_schedule": "调度格式无效。请使用 cron:表达式、every:时长 或 at:时间戳。",
       "save_changes": "保存更改",
       "discard": "放弃",
-      "details_heading": "详情",
+      "details_heading": "任务元数据",
+      "history_title": "运行执行历史日志",
+      "history_subtitle": "执行轮次统计、运行耗时与错误日志",
       "owner_id": "所有者 ID",
-      "bot_id": "Bot ID",
+      "bot_id": "绑定 Bot ID",
       "expires_at": "过期时间",
-      "run_count": "运行次数",
+      "run_count": "运行次数 / 限制",
       "last_run": "上次运行",
       "next_run": "下次运行"
     }
@@ -678,6 +803,46 @@
     "confirm": {
       "delete_title": "删除技能",
       "delete_body": "删除技能 \"{{name}}\"？此操作会从全局技能目录移除，不可撤销。"
+    }
+  },
+  "users": {
+    "title": "用户管理",
+    "subtitle": "管理已注册账号、修改状态、重置用户密码与生成邀请码",
+    "user_count": "{{count}} 个注册账号",
+    "loading": "正在加载用户与邀请码...",
+    "search_placeholder": "搜索用户名、显示名称或 ID...",
+    "action": {
+      "reset_password": "重置密码",
+      "generate_invite": "+ 生成邀请码",
+      "enable": "启用账号",
+      "disable": "禁用账号"
+    },
+    "reset_modal": {
+      "title": "重置用户密码",
+      "subtitle": "管理员为账号 {{username}} 设置新密码",
+      "new_password_label": "新密码 *",
+      "confirm_password_label": "确认新密码 *",
+      "password_placeholder": "输入新密码 (至少 6 位)",
+      "confirm_placeholder": "再次输入新密码",
+      "min_length_hint": "密码必须至少包含 6 个字符",
+      "password_mismatch": "两次输入的密码不一致",
+      "resetting": "提交中...",
+      "success": "密码重置成功",
+      "failed": "重置密码失败"
+    },
+    "table": {
+      "user": "用户 / 显示名",
+      "role": "角色",
+      "status": "状态",
+      "last_login": "最后登录",
+      "created_at": "注册时间",
+      "actions": "操作"
+    },
+    "never_logged_in": "从未登录",
+    "empty": {
+      "no_match": "没有找到符合条件的用户",
+      "no_users": "尚无用户注册",
+      "no_invitations": "暂无邀请码，点击右上角「生成邀请码」创建。"
     }
   }
 }

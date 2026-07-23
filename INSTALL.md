@@ -187,11 +187,14 @@ For source-build users or in-place binary updates. Not a download — copies the
 
 ## Configuration (Post-Install)
 
-After binary installation, run the setup wizard:
+After binary installation, run the setup wizard, then verify with diagnostics:
 
 ```bash
-hotplex onboard
+hotplex onboard     # interactive setup: secrets, worker, platforms, .env, agent templates
+hotplex doctor      # verify the full environment (run after every onboard)
 ```
+
+`onboard` is idempotent — re-running detects existing config and offers to keep, fully reset, or reconfigure selected steps. Its final `verify` step covers 8 core categories; `hotplex doctor` is the complete 10-category check (adds optional TTS and the `worker.claude_auto_mode` capability probe).
 
 ### Required Secrets
 
@@ -235,9 +238,9 @@ messaging:
 
 | Service | Port | Protocol |
 |---------|------|----------|
-| Gateway | 8888 | WebSocket + HTTP |
-| Admin API | 9999 | HTTP |
-| WebChat dev | 3000 | HTTP (dev only) |
+| Gateway | 8888 | WebSocket + HTTP（同时承载嵌入式 WebChat SPA，生产前端入口） |
+| Admin API | 9999 | HTTP（`/admin/health` 健康检查） |
+| WebChat dev | 3000 | HTTP（仅 `make dev`；生产环境 WebChat 由 :8888 提供） |
 
 ### Data Directories
 
@@ -261,15 +264,21 @@ hotplex version
 # 2. Config is valid
 hotplex config validate
 
-# 3. Gateway starts
+# 3. Full environment diagnostics — the authoritative check
+hotplex doctor
+# Expected: 0 failures across 27 checks / 10 categories.
+# Auto-resolve: `hotplex doctor --fix`; detail: `hotplex doctor -v`.
+
+# 4. Gateway starts
 hotplex gateway start -d    # daemon mode
 hotplex gateway status      # check running
 
-# 4. Health check
+# 5. Health check (Admin API on :9999)
 curl http://localhost:9999/admin/health
 
-# 5. WebSocket endpoint
-# ws://localhost:8888 (needs API key)
+# 6. WebSocket + WebChat (Gateway on :8888)
+#   ws://localhost:8888  (needs API key)
+#   open http://localhost:8888  for the embedded WebChat UI
 ```
 
 ## Next Steps

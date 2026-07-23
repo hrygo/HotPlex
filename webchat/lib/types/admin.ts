@@ -70,6 +70,72 @@ export interface AdminSessionInfo {
   turn_count?: number;
 }
 
+export interface AdminSessionDetailResponse extends AdminSessionInfo {
+  owner_id?: string;
+  bot_id?: string;
+  bot_name?: string;
+  expires_at?: string;
+  idle_expires_at?: string;
+  context?: Record<string, unknown>;
+  worker_session_id?: string;
+  allowed_tools?: string[];
+  platform?: string;
+  platform_key?: Record<string, string>;
+  source?: string;
+  client_key?: string;
+  workspace_id?: string;
+  identity_link?: AuditIdentityLink;
+  identity_links?: Record<string, AuditIdentityLink>;
+}
+
+export interface SessionStatsItem {
+  turn_num: number;
+  seq: number;
+  success: boolean;
+  duration_ms: number;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_input: number;
+  tokens_cache_write: number;
+  tokens_cache_read: number;
+  tokens_out: number;
+  model?: string;
+  source?: string;
+  created_at: number;
+}
+
+export interface SessionStatsResponse {
+  session_id: string;
+  generation: number;
+  total_turns: number;
+  success_turns: number;
+  failed_turns: number;
+  total_duration_ms: number;
+  total_cost_usd: number;
+  total_tokens_in: number;
+  total_tokens_input: number;
+  total_tokens_cache_write: number;
+  total_tokens_cache_read: number;
+  total_tokens_out: number;
+  turns?: SessionStatsItem[];
+}
+
+export interface SessionDebugInfo {
+  available: boolean;
+  has_worker: boolean;
+  turn_count: number;
+  last_seq_sent: number;
+  worker_health?: string;
+  runtime_only?: boolean;
+  db_turn_count?: number | null;
+  db_last_seq?: number | null;
+}
+
+export interface SessionDebugResponse {
+  session: AdminSessionDetailResponse;
+  debug: SessionDebugInfo;
+}
+
 // --- Audit Activity ---
 
 export interface AuditActivity {
@@ -168,6 +234,18 @@ export interface CronJob {
   max_runs?: number;
   expires_at?: string;
   state?: CronJobState;
+}
+
+export interface CronRunHistoryItem {
+  id?: string;
+  turn_index?: number;
+  generation?: number;
+  status?: string;
+  error?: string;
+  created_at?: string;
+  duration_ms?: number;
+  tokens_used?: number;
+  [key: string]: unknown;
 }
 
 // --- API Key ---

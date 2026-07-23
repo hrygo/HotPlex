@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/cron"
@@ -449,6 +450,11 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 func respondStoreError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
 	if errors.Is(err, ErrUserIDExists) {
 		web.WriteAppError(w, http.StatusConflict, "CONFLICT", "user_id already exists")
+		return
+	}
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed: cron_jobs.name") ||
+		strings.Contains(err.Error(), "cron_jobs.name")) {
+		web.WriteAppError(w, http.StatusConflict, "CONFLICT", "job name already exists")
 		return
 	}
 	if errors.Is(err, sql.ErrNoRows) ||

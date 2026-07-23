@@ -1,6 +1,8 @@
 # HotPlex 2.0 实施状态与整体方案（对账修订版）
 
-> **状态**:  living document · **基线**: v1.37.2 · **首次对账**: 2026-07-21
+> **状态**:  living document · **基线**: v1.37.2 · **首次对账**: 2026-07-21 · **更新**: 2026-07-22
+>
+> **2026-07-23 进度**：Wave 1 链首 #847 / #848 / #866 + #850（span/key 标准化 first cut）+ Wave 2 #852 的 first cut 均已实现（PR #924，5 slice，`make check` 全绿，刻意不合并）。剩余范围与**刻意延后决策**（含理由）见 §四「本轮交付与刻意延后」。
 > 本文把 `docs/v2/` 既有规划（ROADMAP / IMPLEMENTATION-ROADMAP / GITHUB-MILESTONES）与**当前代码实际状态**对账，修正"规划写于 v1.32.2、部分工作已由 #878 epic 交付"的偏差。规划原则与 Wave 划分仍以既有文档为准，本文只做状态修订与排序。
 
 ---
@@ -24,11 +26,11 @@
 | **#878** epic | 可靠性 epic | ✅ **已验证并关闭**（2026-07-21） | Slice6 矩阵全绿：SQLite `make check` + real-PG（docker pg16）多实例/迁移/审计；PG-CI 接入已决定不做（#923 not planned），本地 docker 按需验证 |
 | **#849** runtime events | Wave1 / Milestone A | 🟡 最小 3 事件已由 epic Slice5 交付 | 收窄：security/context/policy 事件分类 |
 | **#851** execution queue | Wave2 / Milestone B | 🟡 单活跃门已由 epic Slice4 交付 | 收窄：完整 ExecutionQueue 抽象 |
-| **#850** tracing/metrics | Wave1 / Milestone A | 🟡 部分 execution 指标已有 | runtime span attributes 标准化 + 低基数语义 key |
-| **#847** AgentSpec | Wave1 / **链首** | ❌ 未启动 | 全量 first cut（归一化器 + resolver） |
-| **#848** AgentIdentity | Wave1 | ❌ 未启动 | 全量（依赖 #847；需确认/补 session `context_json`） |
-| **#852** RuntimeContext | Wave2 | ❌ 未启动 | 全量只读 Load facade（依赖 #848/#849） |
-| **#866** 持久化快照 | Wave1 延伸 | ❌ 未启动 | 全量（依赖 #847/#848） |
+| **#850** tracing/metrics | Wave1 / Milestone A | 🟡 first cut 已实现（PR #924） | 已交付：`observability/keys.go` 单一真相源 + 基数契约 + `span_id` 注入（满足 trace 关联 AC）+ `trace_id`/`execution_id` 字面量迁移；剩余：`worker_type`(40+)/`session_id`(60+) 全量迁移 |
+| **#847** AgentSpec | Wave1 / **链首** | ✅ 已实现（PR #924） | first cut 交付：归一化运行时模型 + 无密钥值对象（commit fdc77915） |
+| **#848** AgentIdentity | Wave1 | ✅ 已实现（PR #924） | first cut 交付：身份绑定 + context_json 折叠（无迁移，commit c75cfb5a） |
+| **#852** RuntimeContext | Wave2 | ✅ 已实现（PR #924） | 只读 Load facade 交付（四源 + 适配器边界，commit 0239992a）；Save 留待后续 slice |
+| **#866** 持久化快照 | Wave1 延伸 | ✅ 已实现（PR #924） | 快照值对象 + context_json 折叠 + 恢复 + 审计指纹（无迁移，commit dd9482dc） |
 | **#868** Execution Cockpit | Wave3 | ❌ 未启动 | 依赖多已由 epic 满足；epic 关闭后解锁 |
 | **#877** fence escape hatch | epic 后续 | ❌ 未启动 | 被 #878 阻塞；epic 关闭后解锁（2-3 天） |
 | **#867** worker env allowlist | 独立安全轨 | ❌ 未启动（BuildEnv 仍 blocklist） | 全量，跨三平台，可并行 |
@@ -93,6 +95,27 @@
 - **#867 worker env allowlist + 隔离 profile**（~2-3 天，跨三平台，独立可并行）。
 - **#871 release 门禁 + SBOM + 签名**（~3-5 天，建议 #869 后）。
 - **#870 Coding Ops Recipes**（延后，需 #847/#849/#851 稳定）。
+
+### 本轮交付与刻意延后（PR #924，2026-07-23）
+
+**已交付（Wave 1 链首 first-cut 聚合，5 slice，全 TDD + `make check` + `make docs-build` 全绿，刻意不合并）**：
+
+| Issue | Slice | Commit |
+|-------|-------|--------|
+| #847 | AgentSpec 归一化运行时模型 | `fdc77915` |
+| #848 | AgentIdentity 绑定 runtime session | `c75cfb5a` |
+| #866 | 有效 AgentSpec 快照持久化 | `dd9482dc` |
+| #852 | 只读 RuntimeContext facade | `0239992a` |
+| #850 | 语义键单一真相源 + `span_id` 注入 | `5674bd07` |
+
+**刻意延后（有据，非遗漏）**：
+
+| Issue / 项 | 延后理由 | 承接 |
+|------------|----------|------|
+| **#850 剩余**（worker_type 67 / session_id 190 全量字面量迁移） | 跨 20+ 包的机械 sweep，含**必须排除**的 JSON tag（`` `json:"worker_type"` `` / `` `json:"session_id"` ``）——塞进链首 PR 会稀释审查叙事、危及 AEP wire 编码；`keys.go` 契约 + 迁移模式已在 trace_id/execution_id 上演示 | 独立 PR 精细逐文件审查 |
+| **#849 剩余**（security/context/policy 事件分类） | 事件命名须先与 **#869 canonical schema** 对齐——否则连夜推进会引入可能返工的协议面（AEP wire 不可轻动） | 等 #869 启动后对齐命名再扩展 |
+| **#851 剩余**（完整 ExecutionQueue：FIFO / attempt / retry / timeout / queue state） | 超时、重试、queue state 语义需与现有 turn timeout、LLM retry、crash synthetic turn 协调一致，属设计决策非机械实现 | 单活跃门 first cut 已由 #878 交付；等调度语义对齐 |
+| **#867** worker env allowlist + 隔离 profile | **allowlist 完整性风险**：漏一个合法 env var 会静默打断 worker；须跨三平台（Linux/macOS/Windows）逐项验证 PATH/HOME/locale/temp 且有兼容模式迁移路径 | 独立安全轨，非 Wave 1 关键路径，任意时间可插入 |
 
 ---
 

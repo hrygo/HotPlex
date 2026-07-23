@@ -11,6 +11,36 @@ description: "HotPlex Gateway 暴露的所有 OTel 指标完整参考"
 
 HotPlex Gateway 通过 `internal/observability/` 包使用 OTel Meter API 注册指标。所有指标前缀为 `hotplex.`（点分隔符），通过 OTel Prometheus Exporter 以标准 Prometheus 格式暴露。应用代码零直接依赖 `prometheus/client_golang`。
 
+## 语义键与基数契约
+
+> 单一真相源：`internal/observability/keys.go`。跨 AEP 事件元数据、slog 日志字段、OTel span/metric 属性的字符串键名必须取自此处，禁止散落字面量（`worker_type` 曾出现 40+ 次、`session_id` 60+ 次、`execution_id` 12 次、`trace_id` 3 次且无常量）。
+
+HotPlex 的三平面关联（AEP 事件元数据、结构化日志、分布式追踪/指标）共享同一套语义键。`keys.go` 把它们集中为常量，并以机器可校验的方式声明基数契约：
+
+**低基数键（metric-safe）** — 可自由用作 metric label、slog 字段、span 属性、AEP 元数据：
+
+| 键 | 用途 |
+|----|------|
+| `worker_type` | `claude_code` / `codex_cli` / `opencode_server` / `acp` |
+| `platform` | `webchat` / `feishu` / `slack` / `yuanxin` / `cron` |
+| `reason` / `status` / `result` | 终止 / 状态 / 结果枚举 |
+| `exit_code` / `raw_exit_code` | Worker 退出分类 / OS 原始退出码 |
+| `delivery_status` / `runtime_status` / `terminal_status` | 执行投递 / 运行时 / turn 终态枚举 |
+| `stage` / `first_output` / `tool` | turn 阶段 / 首输出类型 / 工具名（受注册表约束） |
+| `error_type` / `event_type` / `direction` | 错误分类 / AEP 事件 Kind / 入站·出站 |
+
+**高基数键（禁止作 metric label）** — 仅可作 span 属性、slog 字段、AEP 元数据、审计 detail：
+
+| 键 | 说明 |
+|----|------|
+| `agent_id` / `user_id` / `workspace_id` | 身份与多租户锚（值与 `agentspec.MetadataKey*` 同源，由 `keys_consistency_test.go` 锁定不漂移，#848） |
+| `execution_id` | 单次输入执行 id（#878） |
+| `session_id` | Gateway 会话 id |
+
+**关联标识** — `trace_id` 与 `span_id` 由 `Hub.SendToSession` 注入 AEP 元数据（#850 在原有 `trace_id` 基础上补 `span_id`），使下游能把事件关联到产出它的精确 span，而不止于 trace。两者在采样窗口内低基数，但不作 metric label（无有意义的分布划分）。
+
+基数契约由 `MetricSafeKeys` 白名单 + `IsMetricSafe()` 在代码层强制；`keys_metric_test.go` 断言无高基数键混入白名单，`keys_consistency_test.go` 断言身份键与 agentspec 不漂移。新增 metric label 是显式行为，须同步更新本节。下文每张指标表的 label 均须来自上述低基数键集合。
+
 ## 采集端点
 
 指标通过 Admin API 暴露：

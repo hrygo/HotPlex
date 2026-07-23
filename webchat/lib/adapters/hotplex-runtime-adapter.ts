@@ -422,7 +422,6 @@ export function useHotPlexRuntime({
     useEffect(() => {
         if (!sessionId) return;
         sessionIdRef.current = sessionId;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- reset pager before fetching history
         setHistoryHasMore(true);
 
         const controller = new AbortController();
@@ -1579,7 +1578,7 @@ export function useHotPlexRuntime({
         };
 
         // Subscribe to events
-        const handleConnected = (ack: { state?: string }) => {
+        const handleConnected = () => {
             sessionAlreadyConnectedRef.current = false;
             setConnectionState("connected");
 
@@ -1836,7 +1835,6 @@ export function useHotPlexRuntime({
         client.on("elicitationRequest", handleElicitationRequest);
         client.on("elicitationResponse", handleElicitationResponse);
 
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- connection lifecycle state
         setConnectionState("connecting");
         client
             .connect(sessionId)
@@ -1910,6 +1908,10 @@ export function useHotPlexRuntime({
             client.off("elicitationResponse", handleElicitationResponse);
             // eslint-disable-next-line react-hooks/exhaustive-deps -- interactionMapRef is a stable singleton map
             interactionMapRef.current.clear();
+            // interactionAckTimersRef holds timers added dynamically by event
+            // handlers after setup, so cleanup must drain the current map at
+            // teardown — copying a setup-time snapshot would leak late timers.
+            // eslint-disable-next-line react-hooks/exhaustive-deps
             for (const timer of interactionAckTimersRef.current.values()) {
                 clearTimeout(timer);
             }
@@ -2291,7 +2293,6 @@ export function useHotPlexRuntime({
                       .join("")
                 : "";
             if (!textContent.trim()) return;
-            const sid = sessionIdRef.current;
             if (turnActiveRef.current || stoppingRef.current) {
                 const result = enqueueFollowUp(textContent);
                 if (!result.ok && result.reason === "limit") {
@@ -2321,7 +2322,7 @@ export function useHotPlexRuntime({
                 throw new Error(i18n.t("chat:error.send_failed_connection"));
             }
         },
-        [dispatchInput, enqueueFollowUp, queueStore],
+        [dispatchInput, enqueueFollowUp],
     );
 
     const handleCancel = useCallback(async () => {
@@ -2463,20 +2464,20 @@ export function useHotPlexRuntime({
             try {
                 switch (response.type) {
                     case "permission":
-                        await client.sendPermissionResponse(
+                        client.sendPermissionResponse(
                             toolCallId,
                             response.allowed ?? false,
                             response.reason,
                         );
                         break;
                     case "question":
-                        await client.sendQuestionResponse(
+                        client.sendQuestionResponse(
                             toolCallId,
                             response.answers ?? {},
                         );
                         break;
                     case "elicitation":
-                        await client.sendElicitationResponse(
+                        client.sendElicitationResponse(
                             toolCallId,
                             response.action ?? "cancel",
                             response.content,

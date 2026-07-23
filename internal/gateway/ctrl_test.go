@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
@@ -43,6 +44,11 @@ func (m *mockStore) UpdateWorkerSessionIDSQL(ctx context.Context, id, workerSess
 func (m *mockStore) SetPermissionCeilingIfEmpty(ctx context.Context, id, ceiling string) (string, error) {
 	args := m.Called(ctx, id, ceiling)
 	return args.String(0), args.Error(1)
+}
+
+func (m *mockStore) UpdateSpecSnapshot(ctx context.Context, id string, snapshot *agentspec.EffectiveAgentSpecSnapshot) error {
+	args := m.Called(ctx, id, snapshot)
+	return args.Error(0)
 }
 
 func (m *mockStore) Get(ctx context.Context, id string) (*session.SessionInfo, error) {

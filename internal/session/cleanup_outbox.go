@@ -226,6 +226,10 @@ func (s *SQLiteStore) MarkDeletedWithCleanup(ctx context.Context, info *SessionI
 		if err := ensureSQLiteLifecycleLock(ctx, tx, info.ID); err != nil {
 			return err
 		}
+		ctxJSON, err = preservePersistedSpecSnapshot(ctx, tx, queries["store.get_context_json"], info.ID, ctxJSON)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, queries["sessions.upsert_session"], upsertSessionArgs(info, ctxJSON, pkJSON)...); err != nil {
 			if isCleanupPendingError(err) {
 				return ErrSessionCleanupPending
@@ -358,6 +362,10 @@ func (s *pgStore) MarkDeletedWithCleanup(ctx context.Context, info *SessionInfo)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := ensurePGLifecycleLock(ctx, tx, s.dialect.Rebind, info.ID); err != nil {
+		return err
+	}
+	ctxJSON, err = preservePersistedSpecSnapshot(ctx, tx, s.queries["store.get_context_json"], info.ID, ctxJSON)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, s.queries["sessions.upsert_session"], upsertSessionArgs(info, ctxJSON, pkJSON)...); err != nil {

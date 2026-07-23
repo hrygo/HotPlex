@@ -278,34 +278,30 @@ export default function AdminSkillsPage() {
   };
 
   return (
-    <div className="min-h-full bg-[var(--bg-base)] p-6">
-      <div className="max-w-5xl mx-auto space-y-5">
+    <div className="relative min-h-screen bg-[var(--bg-base)] px-6 py-8">
+      {/* Background ambient gradient glow */}
+      <div className="pointer-events-none fixed inset-0 z-0 bg-mesh opacity-30" />
+      <div className="pointer-events-none fixed inset-0 z-0 noise-overlay" />
+
+      <div className="relative z-10 max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-xl font-display font-bold text-[var(--text-primary)]">
-                  {t('admin:skills.title', { defaultValue: 'Skills' })}
-                </h1>
-                {!loading && !error && (
-                  <span className="text-[11px] font-mono font-bold text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)]">
-                    {total}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">
-                {t('admin:skills.subtitle', { defaultValue: 'Manage global skills under ~/.agents/skills. External skills (.claude/.hotplex) are read-only.' })}
-              </p>
-            </div>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl font-display font-bold tracking-tight text-[var(--text-primary)]">
+              {t('admin:skills.title', { defaultValue: 'Skills' })}
+            </h1>
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              {t('admin:skills.subtitle', { defaultValue: 'Manage global skills under ~/.agents/skills. External skills (.claude/.hotplex) are read-only.' })}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={reload}
               disabled={loading}
-              className="inline-flex items-center justify-center w-8 h-8 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] text-[var(--text-faint)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
               title={t('common:action.refresh', { defaultValue: 'Refresh' })}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-all active:scale-95 disabled:opacity-40 shadow-[var(--shadow-sm)]"
             >
               <svg
                 width="14"
@@ -325,50 +321,63 @@ export default function AdminSkillsPage() {
               </svg>
             </button>
             <button
+              type="button"
               onClick={() => setShowCreateText(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[var(--radius-sm)] text-xs font-bold border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all active:scale-95 shadow-[var(--shadow-sm)]"
             >
               + {t('admin:skills.action.create_text', { defaultValue: 'New Skill' })}
             </button>
             <button
+              type="button"
               onClick={() => setShowUpload(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-bold uppercase tracking-wider bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[var(--radius-sm)] text-xs font-bold bg-[var(--accent-gold)] text-black hover:bg-[var(--accent-gold-bright)] transition-all active:scale-95 shadow-[var(--shadow-sm)]"
             >
               {t('admin:skills.action.upload', { defaultValue: 'Upload Skill' })}
             </button>
           </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="relative">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            placeholder={t('admin:skills.search_placeholder', { defaultValue: 'Search skill name or description…' })}
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 pl-9 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:border-[var(--accent-gold)] focus:outline-none transition-colors"
-          />
-          <svg
-            className="absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)] pointer-events-none"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          {search && (
-            <button
-              onClick={() => {
-                setSearch('');
+        {/* Toolbar: search + count */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 bg-[var(--bg-glass)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] p-3 backdrop-blur-md shadow-[var(--shadow-sm)]">
+          <div className="relative w-full sm:w-64">
+            <svg
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-faint)] pointer-events-none"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
                 setPage(1);
               }}
-              className="absolute right-3 top-2.5 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            >
-              ✕
-            </button>
+              placeholder={t('admin:skills.search_placeholder', { defaultValue: 'Search skill name or description…' })}
+              className="w-full pl-8 pr-7 py-1.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-base)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none transition-all focus:border-[var(--accent-gold)]/40"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setPage(1);
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-faint)] hover:text-[var(--text-primary)] transition-colors p-0.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {!loading && !error && (
+            <span className="text-[11px] font-mono text-[var(--text-faint)] px-2 py-0.5 rounded-full bg-[var(--bg-hover)] self-start sm:self-auto">
+              {total}
+            </span>
           )}
         </div>
 

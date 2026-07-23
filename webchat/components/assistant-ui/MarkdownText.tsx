@@ -152,7 +152,7 @@ export function MarkdownText({ text }: { text: string }) {
                 remarkPlugins={[remarkGfm]}
                 components={{
                     pre: ({ children }) => <>{children}</>,
-                    code: ({ className, children, ...props }) => {
+                    code: ({ className, children }) => {
                         const raw = String(children).replace(/\n$/, "");
                         const langMatch = /language-(\w+)/.exec(
                             className ?? "",
