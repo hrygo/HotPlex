@@ -150,9 +150,6 @@ type Worker struct {
 	// Goroutine lifecycle
 	cancel context.CancelFunc
 
-	// Seq generation (atomic, no mutex needed)
-	seq atomic.Int64
-
 	// tempFiles tracks temp files created for --*-file flags (system prompt,
 	// MCP config). Cleaned up in Terminate. Using files avoids Windows cmd.exe
 	// mangling XML/JSON characters (<, >) in inline arguments.
@@ -268,7 +265,6 @@ func (w *Worker) startLocked(_ context.Context, session worker.SessionInfo, resu
 
 	w.sessionID = session.SessionID
 	w.projectDir = session.ProjectDir
-	w.seq.Store(0)
 
 	// Preserve original session info for ResetContext (only on first Start).
 	if w.origSession.SessionID == "" {
@@ -1106,7 +1102,10 @@ func (w *Worker) trySend(env *events.Envelope) {
 
 // nextSeq generates the next sequence number.
 func (w *Worker) nextSeq() int64 {
-	return w.seq.Add(1)
+	// Return 0 so the bridge assigns Hub SeqGen (the sole authority when
+	// eventstore is enabled). A local counter restarts from 1 on every Worker
+	// launch and collides with persisted events on resume (issue #879).
+	return 0
 }
 
 // writeTempFile writes content to a temp file and tracks it for cleanup.
