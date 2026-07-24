@@ -72,3 +72,33 @@ def test_corpus_unknown_kind_safely_ignorable():
     env = json.loads(unknown.read_text())
     assert env["event"]["type"] == "custom.future_event"
     # No exception means forward-compatible parsing works.
+
+
+def test_control_action_includes_stop():
+    """ControlAction must include the 'stop' action added in AEP v1."""
+    from hotplex_client.types import ControlAction
+
+    assert ControlAction.STOP == "stop"
+
+
+def test_data_types_importable():
+    """All AEP data types must be importable from the SDK."""
+    from hotplex_client.types import (
+        InputAckData,
+        RuntimeExecutionData,
+        InternalResetData,
+    )
+
+    # Verify they can be instantiated with expected fields.
+    ack = InputAckData(
+        client_message_id="evt_1",
+        execution_id="exec_1",
+        status="delivered",
+    )
+    assert ack.status == "delivered"
+
+    rt = RuntimeExecutionData(execution_id="exec_1", status="started")
+    assert rt.status == "started"
+
+    ir = InternalResetData(generation=2)
+    assert ir.generation == 2

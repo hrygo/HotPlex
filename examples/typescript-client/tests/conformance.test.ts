@@ -11,7 +11,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { AEP_VERSION } from '../src/constants.js';
+import { AEP_VERSION, EventKind } from '../src/constants.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -55,6 +55,20 @@ describe('AEP corpus conformance', () => {
       stableKinds.add(event['type'] as string);
     }
     expect(stableKinds.size).toBeGreaterThanOrEqual(32);
+  });
+
+  it('EventKind constants cover all non-edge-case corpus kinds', () => {
+    const registeredValues = new Set(Object.values(EventKind));
+    const missing: string[] = [];
+    for (const { name, envelope } of CORPUS) {
+      if (name.startsWith('9')) continue; // skip edge-case fixtures
+      const event = envelope['event'] as Record<string, unknown>;
+      const kind = event['type'] as string;
+      if (!registeredValues.has(kind)) {
+        missing.push(kind);
+      }
+    }
+    expect(missing, `EventKind missing values: ${missing.join(', ')}`).toEqual([]);
   });
 
   it('unknown kind is safely ignorable (forward compatibility)', () => {

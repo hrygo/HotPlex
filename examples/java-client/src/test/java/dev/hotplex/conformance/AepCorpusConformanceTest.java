@@ -11,6 +11,8 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import dev.hotplex.protocol.EventKind;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -85,5 +87,23 @@ class AepCorpusConformanceTest {
         Assumptions.assumeTrue(Files.exists(unknown), "unknown-kind fixture not found");
         JsonNode env = MAPPER.readTree(unknown.toFile());
         assertEquals("custom.future_event", env.get("event").get("type").asText());
+    }
+
+    @Test
+    @DisplayName("EventKind enum covers all non-edge-case corpus kinds")
+    void eventKindCoversAllCorpusKinds() throws IOException {
+        List<String> missing = new ArrayList<>();
+        for (Path f : corpusFiles) {
+            if (f.getFileName().toString().startsWith("9")) continue;
+            JsonNode env = MAPPER.readTree(f.toFile());
+            String kind = env.get("event").get("type").asText();
+            try {
+                EventKind.fromValue(kind);
+            } catch (IllegalArgumentException e) {
+                missing.add(kind);
+            }
+        }
+        assertTrue(missing.isEmpty(),
+                "EventKind enum missing values: " + String.join(", ", missing));
     }
 }

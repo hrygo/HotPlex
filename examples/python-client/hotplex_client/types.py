@@ -59,6 +59,7 @@ class ControlAction(StrEnum):
     RESET = "reset"
     GC = "gc"
     CD = "cd"
+    STOP = "stop"
 
 
 class ErrorCode(StrEnum):
@@ -418,6 +419,35 @@ class ModeUpdateData:
     """mode_update event payload (mode switch)."""
 
     current_mode_id: str
+
+
+@dataclass
+class InputAckData:
+    """input.ack event payload (durable input acceptance/delivery acknowledgement)."""
+
+    client_message_id: str
+    execution_id: str
+    status: str  # accepted / delivered / unknown / failed
+    duplicate: bool = False
+    error_code: str | None = None
+
+
+@dataclass
+class RuntimeExecutionData:
+    """runtime.execution.* event payload (S->C additive)."""
+
+    execution_id: str
+    status: str
+    error_code: str | None = None
+    started_at: int | None = None
+    finished_at: int | None = None
+
+
+@dataclass
+class InternalResetData:
+    """internal_reset event payload (worker in-place reset notification)."""
+
+    generation: int
 
 
 @dataclass

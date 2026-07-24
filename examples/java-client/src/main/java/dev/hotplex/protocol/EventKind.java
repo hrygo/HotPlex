@@ -7,6 +7,7 @@ public enum EventKind {
     Error("error"),
     State("state"),
     Input("input"),
+    InputAck("input.ack"),
     Done("done"),
     Message("message"),
     MessageStart("message.start"),
@@ -34,6 +35,10 @@ public enum EventKind {
     ToolUpdate("tool_update"),
     Plan("plan"),
     ModeUpdate("mode_update"),
+    InternalReset("internal_reset"),
+    RuntimeExecutionStarted("runtime.execution.started"),
+    RuntimeExecutionCompleted("runtime.execution.completed"),
+    RuntimeExecutionFailed("runtime.execution.failed"),
     Init("init");
 
     private final String value;
