@@ -370,41 +370,60 @@ jobs:
           args: --timeout=10m
 
   # ── AEP Schema & Cross-SDK Conformance (issue #869) ────────────────────
-  aep-conformance:
+  # Each SDK runs as a parallel job; all depend only on large-file-guard.
+  aep-schema-go:
     needs: [large-file-guard]
-    name: AEP Schema & SDK Conformance
+    name: AEP Schema (Go)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-
       - uses: ./.github/actions/setup-go-webchat
         with:
           build-webchat: 'false'
+      - run: go test ./pkg/aep/schema/... -count=1 -race -v
 
-      - name: Go schema & corpus tests
-        run: go test ./pkg/aep/schema/... -count=1 -race -v
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
+  aep-schema-typescript:
+    needs: [large-file-guard]
+    name: AEP Conformance (TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: TypeScript SDK conformance
-        working-directory: examples/typescript-client
+          node-version: '22'
+      - working-directory: examples/typescript-client
         run: |
           npm ci
           npx vitest run tests/conformance
 
-      - name: Python SDK conformance
-        working-directory: examples/python-client
+  aep-schema-python:
+    needs: [large-file-guard]
+    name: AEP Conformance (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - working-directory: examples/python-client
         run: |
-          python -m pip install --upgrade pip
           pip install -e ".[dev]" 2>/dev/null || pip install -e .
           python -m pytest tests/test_conformance.py -v
 
-      - name: Java SDK conformance
-        working-directory: examples/java-client
+  aep-schema-java:
+    needs: [large-file-guard]
+    name: AEP Conformance (Java)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - working-directory: examples/java-client
         run: |
           mvn -B test -Dtest="dev.hotplex.conformance.AepCorpusConformanceTest" -DfailIfNoTests=false
