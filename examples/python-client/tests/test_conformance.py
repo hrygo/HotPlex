@@ -6,7 +6,6 @@ Unknown additive kinds must not raise errors (forward compatibility).
 """
 
 import json
-import os
 from pathlib import Path
 
 import pytest

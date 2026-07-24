@@ -1,38 +1,38 @@
 name: CI
 
 on:
- push:
-   branches: [main]
-   paths:
-     - '**.go'
-     - 'go.mod'
-     - 'go.sum'
-     - 'Makefile'
-     - 'scripts/**'
-     - 'webchat/**'
-     - 'internal/webchat/**'
-     - 'configs/**'
-     - 'docs/**/*.md'
-     - 'cmd/build-docs/**'
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'webchat/**'
+      - 'internal/webchat/**'
+      - 'configs/**'
+      - 'docs/**/*.md'
+      - 'cmd/build-docs/**'
       - 'pkg/aep/schema/**'
       - 'examples/**'
-     - '.github/workflows/**'
- pull_request:
-   branches: [main]
-   paths:
-     - '**.go'
-     - 'go.mod'
-     - 'go.sum'
-     - 'Makefile'
-     - 'scripts/**'
-     - 'webchat/**'
-     - 'internal/webchat/**'
-     - 'configs/**'
-     - 'docs/**/*.md'
-     - 'cmd/build-docs/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'webchat/**'
+      - 'internal/webchat/**'
+      - 'configs/**'
+      - 'docs/**/*.md'
+      - 'cmd/build-docs/**'
       - 'pkg/aep/schema/**'
       - 'examples/**'
-     - '.github/workflows/**'
+      - '.github/workflows/**'
 
 env:
   # TODO: remove after Node 24 becomes the default runtime for GitHub Actions
