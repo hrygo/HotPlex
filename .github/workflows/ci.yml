@@ -385,6 +385,12 @@ jobs:
       - name: Go schema & corpus tests
         run: go test ./pkg/aep/schema/... -count=1 -race -v
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: TypeScript SDK conformance
         working-directory: examples/typescript-client
         run: |
