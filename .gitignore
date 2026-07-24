@@ -4,10 +4,9 @@
 
 # --- Core & Binaries ---
 bin/
-hotplex
-hotplex-*
-hotplex.pid
-!cmd/hotplex
+/hotplex
+/hotplex-*
+/hotplex.pid
 .docs-patrol-baseline
 !.agent/skills/hotplex-*/
 *.test
