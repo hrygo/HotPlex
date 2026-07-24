@@ -1,53 +1,59 @@
-# HotPlex 下一迭代规划（Iteration N+1）
+# HotPlex 下一迭代规划（Iteration N+2）
 
-> **主题**: Wave 1 契约启动 —— 推进 v2 依赖链链首
-> **周期**: ~1 周（5-6 工程日）· **基线**: v1.37.2 · **规划日期**: 2026-07-22（#923 关闭后修订）
-> **范围决策**: 核心（#847 + #848）
-> **依据**: `docs/v2/IMPLEMENTATION-STATUS-AND-PLAN.md` 关键路径 `#878✅ → #847 → #848 → #849剩余 → ...`
+> **主题**: 协议锁定 + 可靠性加固
+> **周期**: ~1.5 周（8-9 工程日）· **基线**: v1.38.0 (main@2c6240b4) · **规划日期**: 2026-07-24
+> **前置完成**: Wave 1 链首 #847/#848/#850/#852/#866 已合并（PR #924）· #878 epic 已关闭
+> **范围决策**: 核心（#869 + #877）· 快速收尾（#927）
+> **依据**: `docs/v2/IMPLEMENTATION-STATUS-AND-PLAN.md` 四收窄与刻意延后决策
 
 ---
 
 ## 一、迭代目标
 
-1. **推进关键路径**：实施 #847 AgentSpec（链首），其合并后衔接 #848 AgentIdentity。
-2. **PG 验证策略**：PG 测试接入 CI 已决定**不做**（#923 not planned）；涉及 PG 的变更（如 #848 的 `context_json` 迁移）须本地 docker 跑 `-tags pg -p 1` 验证，并写入 PR checklist 作为补偿控制。
-3. **保持向后兼容**：旧配置仅设 `worker_type` 仍能启动；AEP wire / Worker 接口不变。
+1. **锁定协议面**：实施 #869 AEP canonical schema，为 #849 剩余范围（事件分类扩展）和 #871 release 门禁解除命名层面的阻塞。
+2. **加固可靠性**：实施 #877 fenced execution escape hatch，消除 #878 epic 留下的"永久 fenced session"病态路径。
+3. **保持加性兼容**：AEP v1 wire contract 不变；新事件/schema 对旧客户端透明。
 
 ---
 
 ## 二、迭代内容
 
-### 必做（核心，关键路径）
+### 快速收尾（Day 0）
 | # | Issue | 工作量 | 依赖 | 说明 |
 |---|-------|--------|------|------|
-| 1 | **#847 AgentSpec 实施** | 3-5d | 设计已就绪（待评审） | 按 `docs/superpowers/specs/2026-07-21-agentspec-runtime-model-design.md` §5 验收；TDD；表驱动覆盖 4 worker；新增 `internal/agentspec` 包。**实施前先修订独立审查发现 F1-F7**（尤其 F1 移除 AllowedModels 行为变更、F2 permission 映射 pre-work） |
+| 0 | **#927 docs(patrol)** | 0.5d | 无 | 补 `reference/admin-api.md` 两个端点：`POST /api/admin/users/{id}/password` + `GET /admin/sessions/pool`；`make docs-build` 绿 |
 
-### 衔接（#847 合并后启动）
+### 核心轨 A - 协议锁定（#869）
 | # | Issue | 工作量 | 依赖 | 说明 |
 |---|-------|--------|------|------|
-| 2 | **#848 AgentIdentity** | 2-3d | #847 | AgentIdentity 值对象落 session `context_json`，贯穿 AEP/audit/trace；需先核实/补 `context_json` 列（SQLite+PG 成对迁移，**含本地 docker PG 验证**） |
+| 1 | **#869 AEP canonical schema + 跨 SDK 一致性** | 3-4d | 无（#849 命名协调） | canonical schema 源自 Go 契约 -> golden envelope 语料（required/optional/unknown/compatibility）-> Go/TS/Python/Java 同语料 CI -> schema-diff 加性/破坏分类 -> AEP v1 加性兼容保持。**本 issue 是 #849 剩余 + #871 的前置门** |
+
+### 核心轨 B - 可靠性加固（#877）
+| # | Issue | 工作量 | 依赖 | 说明 |
+|---|-------|--------|------|------|
+| 2 | **#877 fence escape hatch** | 2-3d | 无（#878 已关闭解锁） | 代码已确认 fence 机制就位（`fence_reason` / `ClearFenceAfterFreshStart` / `ErrExecutionFenced`），但**无 `fence_created_at`、无超时强制清除、无 admin 覆盖**。实施 Option A（时间界自动清除）+ Option B（admin 手动覆盖 + 审计） |
 
 ---
 
 ## 三、排序与日程
 
 ```
-Day 1   评审 #847 设计 spec → 定稿（含独立审查 F1-F7 修订）
-Day 1-4 #847 实施（TDD：internal/agentspec 包 + resolver + mapper + 4-worker 表驱动 + WS≡REST 等价性 + secret-free 断言）
-Day 4-6 #848 实施（#847 合并后；context_json 迁移 + identity 贯穿；本地 docker 跑 -tags pg -p 1 验证 PG 迁移）
+Day 0   #927 doc patrol（补 2 个 admin API 端点到 reference/admin-api.md）
+Day 1-4 #869 AEP canonical schema（设计 spec -> schema 定义 -> golden corpus -> 4-SDK CI -> schema-diff）
+Day 1-3 #877 fence escape hatch（与 #869 可并行：fence_created_at + 时间界清除 + admin 端点 + 审计 + 测试）
 ```
 
-**为什么这个顺序**：#847 是依赖链根，必须在其下游之前；#848 紧跟 #847 复用其 AgentSpec 字段。#848 含 PG 迁移，CI 不跑 PG（#923 not planned），须本地 docker 验证。若 #847 延期，#848 顺延至下迭代，不强求同迭代完成。
+**为什么这两条轨**：#869 是当前关键路径瓶颈--#849 剩余明确"事件命名须先与 #869 canonical schema 对齐"才扩展，#871 release 门禁软阻塞于 #869。#877 自 #878 关闭后已解锁，独立于协议轨，两条线无共享文件可并行。总计 6-8 工程日 + 0.5d 收尾。
 
 ---
 
 ## 四、验收门禁（Definition of Done）
 
-- [ ] #847 验收标准全过（spec §5）：4-worker 表驱动、旧配置兼容、未知 type 边界拒绝、secret-free、WS≡REST 等价、`docs/reference/configuration.md` + `docs/v2/API-DESIGN.md` 更新。
-- [ ] #848 验收：workspace owner 校验不破、旧 session 可读、anonymous 有确定性 identity、AEP/audit/trace 可按 session+identity 关联、`context_json` 向后兼容且 secret-free。
-- [ ] #848 的 PG 迁移经本地 docker `-tags pg -p 1` 验证通过（CI 不跑 PG，见 #923 not planned）。
+- [ ] #927: `reference/admin-api.md` 补全 2 个端点；`make docs-build` 绿（62 篇无断链）。
+- [ ] #869: 一个 corpus 被 Go/TS/Python/Java 测试消费；runtime 事件覆盖；未知加性 kind 安全可忽略；field/tag drift 失败 CI 且 diff 可读；生成确定性强；协议 + SDK 文档更新。
+- [ ] #877: fenced session 不超过配置最大存活时间（默认 30min 可调）；force-clear 设 `unknown` + 独立 reason（`FENCE_FORCE_CLEARED` / `FENCE_ADMIN_CLEARED`）；不重投原始输入；admin 覆盖走现有 Bearer+scope 鉴权 + 审计日志；force-clear 发射 `runtime.execution.failed` 事件；测试覆盖自动清除、手动清除、审计、事件发射、清除后接受新输入。
 - [ ] 每个 PR：`make check` + `make docs-build` 通过。
-- [ ] 迭代末：#847/#848 关闭，CI 绿。
+- [ ] 迭代末：#869/#877/#927 关闭，CI 绿。
 
 ---
 
@@ -55,20 +61,38 @@ Day 4-6 #848 实施（#847 合并后；context_json 迁移 + identity 贯穿；�
 
 | 风险 | 缓解 |
 |------|------|
-| #847 设计评审发现结构需调整 | Day 1 先评审定稿再实施；spec §7 + 独立审查 F1-F7 已列待决项 |
-| #847 "reuse 现有映射"假设不成立（F2/F3） | permission tier→worker 映射、worker_type 5 级 fallback 可能无单一可复用入口；实施前落到具体函数，查无实据者列为 pre-work |
-| #848 依赖 session `context_json` 列可能不存在 | 实施前先核实；需 SQLite+PG 成对迁移（CLAUDE.md 迁移规范） |
-| #848 PG 迁移无 CI 兜底（#923 not planned） | 本地 docker 跑 `-tags pg -p 1` 验证；写入 PR checklist |
-| 单迭代 #847+#848 偏紧 | #848 为"衔接"项，#847 延期则顺延，不强求 |
+| #869 schema-diff 误报加性/破坏 | 先在已知 breaking 改动上验证分类器；golden corpus 含显式 compatibility case |
+| #869 跨 SDK CI 矩阵复杂 | 先只做 schema + Go 消费；TS/Python/Java 分阶段接入，first cut 只验 Go |
+| #877 force-clear 语义与 #878 fence 保证冲突 | 严格遵守 AC：force-clear 只设 `unknown`，永不设 `completed`/`delivered`；不触发重投；非默认关闭需显式 opt-in |
+| #877 最大存活时间默认值不当 | 30min 是保守起点；operator 可调；disabled 仅显式 opt-in |
+| #869 + #877 并行 PR 审查负担 | 两条轨文件不交叉（#869: `pkg/events` + `examples/` + CI；#877: `internal/execution/` + `internal/gateway/commands.go` + admin handler） |
 
 ---
 
 ## 六、不在本迭代（后续候选 / 已决定不做）
 
-- **#923 PG 测试接入 CI**（已关闭 **not planned**）—— 决定不做；PG 变更靠本地 docker 按需验证 + PR checklist 补偿控制。若重估：CI 跑 pg-tagged 测试须 `-p 1`（共享库防 goose 踩踏）。
-- **#867 worker env allowlist**（安全平行轨，跨三平台，~2-3d）—— 与 Wave 1 契约主题连贯性低，独立排期。
-- **pre-push hook test-short flaky 治理**（dev-ex，~0.5-1d）。
-- **#849 剩余 / #850 / #852 / #866**（Wave 1/2 后续，#848 之后）。
-- **#869 AEP schema**（独立基建，#849 命名稳定后）。
-- **#870 Coding Ops Recipes**（延后，需 #847/#849/#851 稳定）。
-- **#871 release 门禁**（软阻塞于 #869）。
+| Issue / 项 | 延后理由 | 承接 |
+|------------|----------|------|
+| **#849 剩余**（security/context/policy 事件分类） | 事件命名须先与 #869 canonical schema 对齐--本迭代 #869 落地后即可衔接 | 下迭代紧接 |
+| **#851 剩余**（完整 ExecutionQueue: FIFO/attempt/retry/timeout/queue state） | 超时/重试/queue state 语义需与现有 turn timeout x LLM retry x crash synthetic turn 协调，属设计决策非机械实现 | 需专项设计 |
+| **#868 Execution Cockpit** | 依赖 #849 剩余 + #851 剩余的 queue state 暴露 | 两轨完成后 |
+| **#867 worker env allowlist + 隔离 profile** | allowlist 完整性风险：漏一个合法 env var 会静默打断 worker；须跨三平台逐项验证 PATH/HOME/locale/temp 且有兼容模式迁移路径 | 独立安全轨，下迭代可插入 |
+| **#871 release 门禁 + SBOM + 签名** | 建议在 #869 落地后，确保 SDK conformance 检查可作为 release 门禁 | #869 后 |
+| **#870 Coding Ops Recipes** | 需 #847✅/#849/#851 稳定 | 多轨完成后 |
+
+---
+
+## 七、依赖全景图（当前状态）
+
+```
+已完成:  #878✅ -> #847✅ -> #848✅ -> #850✅ -> #852✅ -> #866✅
+                   #878✅ 交付 #849 first-cut + #851 first-cut
+
+本迭代:  #869 -------------------------- 协议锁定（解锁 #849剩余 + #871）
+         #877 -------------------------- 可靠性加固（独立，#878 解锁）
+         #927 -------------------------- doc 收尾
+
+下迭代:  #849剩余 <-(需#869) -> #850剩余（字面量迁移）
+         #851剩余 <-(需调度设计) -> #868 Cockpit
+平行轨:  #867（独立安全）· #871（#869后）· #870（延后）
+```

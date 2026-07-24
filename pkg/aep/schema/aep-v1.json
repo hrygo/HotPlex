@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hotplex.dev/aep/v1/schema.json",
+  "title": "AEP v1 Canonical Schema",
+  "description": "Machine-readable source of truth for the Agent Event Protocol v1 wire contract. Derived from and verified against pkg/events/events.go.",
+  "version": "aep/v1",
+  "schema_revision": 1,
+  "envelope": {
+    "type": "object",
+    "required": ["version", "id", "seq", "session_id", "timestamp", "event"],
+    "properties": {
+      "version": { "type": "string", "const": "aep/v1" },
+      "id": { "type": "string", "description": "evt_<uuid>" },
+      "seq": { "type": "integer", "minimum": 0 },
+      "priority": { "type": "string", "enum": ["control", "data"], "optional": true },
+      "session_id": { "type": "string", "description": "sess_<uuid>" },
+      "timestamp": { "type": "integer", "description": "Unix milliseconds" },
+      "event": { "$ref": "#/$defs/Event" },
+      "metadata": { "type": "object", "optional": true }
+    }
+  },
+  "metadata_keys": [
+    { "key": "trace_id", "type": "string", "stability": "stable" },
+    { "key": "span_id", "type": "string", "stability": "stable" },
+    { "key": "execution_id", "type": "string", "stability": "stable" },
+    { "key": "agent_id", "type": "string", "stability": "additive" },
+    { "key": "workspace_id", "type": "string", "stability": "additive" },
+    { "key": "worker_type", "type": "string", "stability": "additive" }
+  ],
+  "kinds": {
+    "init":                   { "direction": "C2S", "stability": "stable",   "data_type": "map" },
+    "error":                  { "direction": "S2C", "stability": "stable",   "data_type": "ErrorData" },
+    "state":                  { "direction": "S2C", "stability": "stable",   "data_type": "StateData" },
+    "input":                  { "direction": "C2S", "stability": "stable",   "data_type": "InputData" },
+    "input.ack":              { "direction": "S2C", "stability": "stable",   "data_type": "InputAckData" },
+    "done":                   { "direction": "S2C", "stability": "stable",   "data_type": "DoneData" },
+    "message":                { "direction": "S2C", "stability": "stable",   "data_type": "MessageData" },
+    "message.start":          { "direction": "S2C", "stability": "stable",   "data_type": "MessageStartData" },
+    "message.delta":          { "direction": "S2C", "stability": "stable",   "data_type": "MessageDeltaData" },
+    "message.end":            { "direction": "S2C", "stability": "stable",   "data_type": "MessageEndData" },
+    "tool_call":              { "direction": "S2C", "stability": "stable",   "data_type": "ToolCallData" },
+    "tool_result":            { "direction": "S2C", "stability": "stable",   "data_type": "ToolResultData" },
+    "reasoning":              { "direction": "S2C", "stability": "stable",   "data_type": "ReasoningData" },
+    "step":                   { "direction": "S2C", "stability": "stable",   "data_type": "StepData" },
+    "raw":                    { "direction": "S2C", "stability": "stable",   "data_type": "RawData" },
+    "permission_request":     { "direction": "S2C", "stability": "stable",   "data_type": "PermissionRequestData" },
+    "permission_response":    { "direction": "C2S", "stability": "stable",   "data_type": "PermissionResponseData" },
+    "question_request":       { "direction": "S2C", "stability": "stable",   "data_type": "QuestionRequestData" },
+    "question_response":      { "direction": "C2S", "stability": "stable",   "data_type": "QuestionResponseData" },
+    "elicitation_request":    { "direction": "S2C", "stability": "stable",   "data_type": "ElicitationRequestData" },
+    "elicitation_response":   { "direction": "C2S", "stability": "stable",   "data_type": "ElicitationResponseData" },
+    "ping":                   { "direction": "C2S", "stability": "stable",   "data_type": "none" },
+    "pong":                   { "direction": "S2C", "stability": "stable",   "data_type": "none" },
+    "control":                { "direction": "S2C", "stability": "stable",   "data_type": "ControlData" },
+    "context_usage":          { "direction": "S2C", "stability": "stable",   "data_type": "ContextUsageData" },
+    "skills_list":            { "direction": "S2C", "stability": "stable",   "data_type": "SkillsListData" },
+    "mcp_status":             { "direction": "S2C", "stability": "stable",   "data_type": "MCPStatusData" },
+    "worker_command":         { "direction": "C2S", "stability": "stable",   "data_type": "WorkerCommandData" },
+    "internal_reset":         { "direction": "S2C", "stability": "additive", "data_type": "InternalResetData" },
+    "tool_update":            { "direction": "S2C", "stability": "stable",   "data_type": "ToolUpdateData" },
+    "plan":                   { "direction": "S2C", "stability": "stable",   "data_type": "PlanData" },
+    "mode_update":            { "direction": "S2C", "stability": "stable",   "data_type": "ModeUpdateData" },
+    "runtime.execution.started":   { "direction": "S2C", "stability": "additive", "data_type": "RuntimeExecutionData" },
+    "runtime.execution.completed": { "direction": "S2C", "stability": "additive", "data_type": "RuntimeExecutionData" },
+    "runtime.execution.failed":    { "direction": "S2C", "stability": "additive", "data_type": "RuntimeExecutionData" }
+  },
+  "$defs": {
+    "Event": {
+      "type": "object",
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "type": "string", "description": "One of the registered kinds" },
+        "data": { "type": ["object", "array", "string", "number", "boolean", "null"] }
+      }
+    }
+  }
+}

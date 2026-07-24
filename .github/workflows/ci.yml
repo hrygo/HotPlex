@@ -1,34 +1,38 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Makefile'
-      - 'scripts/**'
-      - 'webchat/**'
-      - 'internal/webchat/**'
-      - 'configs/**'
-      - 'docs/**/*.md'
-      - 'cmd/build-docs/**'
-      - '.github/workflows/**'
-  pull_request:
-    branches: [main]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Makefile'
-      - 'scripts/**'
-      - 'webchat/**'
-      - 'internal/webchat/**'
-      - 'configs/**'
-      - 'docs/**/*.md'
-      - 'cmd/build-docs/**'
-      - '.github/workflows/**'
+ push:
+   branches: [main]
+   paths:
+     - '**.go'
+     - 'go.mod'
+     - 'go.sum'
+     - 'Makefile'
+     - 'scripts/**'
+     - 'webchat/**'
+     - 'internal/webchat/**'
+     - 'configs/**'
+     - 'docs/**/*.md'
+     - 'cmd/build-docs/**'
+      - 'pkg/aep/schema/**'
+      - 'examples/**'
+     - '.github/workflows/**'
+ pull_request:
+   branches: [main]
+   paths:
+     - '**.go'
+     - 'go.mod'
+     - 'go.sum'
+     - 'Makefile'
+     - 'scripts/**'
+     - 'webchat/**'
+     - 'internal/webchat/**'
+     - 'configs/**'
+     - 'docs/**/*.md'
+     - 'cmd/build-docs/**'
+      - 'pkg/aep/schema/**'
+      - 'examples/**'
+     - '.github/workflows/**'
 
 env:
   # TODO: remove after Node 24 becomes the default runtime for GitHub Actions
@@ -364,3 +368,37 @@ jobs:
         with:
           version: v2.11.4
           args: --timeout=10m
+
+  # ── AEP Schema & Cross-SDK Conformance (issue #869) ────────────────────
+  aep-conformance:
+    needs: [large-file-guard]
+    name: AEP Schema & SDK Conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-go-webchat
+        with:
+          build-webchat: 'false'
+
+      - name: Go schema & corpus tests
+        run: go test ./pkg/aep/schema/... -count=1 -race -v
+
+      - name: TypeScript SDK conformance
+        working-directory: examples/typescript-client
+        run: |
+          npm ci
+          npx vitest run tests/conformance
+
+      - name: Python SDK conformance
+        working-directory: examples/python-client
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -e .
+          python -m pytest tests/test_conformance.py -v
+
+      - name: Java SDK conformance
+        working-directory: examples/java-client
+        run: |
+          mvn -B test -Dtest="dev.hotplex.conformance.AepCorpusConformanceTest" -DfailIfNoTests=false
