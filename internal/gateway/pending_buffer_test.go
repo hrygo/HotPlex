@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -98,4 +100,88 @@ func TestCloneForReplay_NewIDs(t *testing.T) {
 	require.Equal(t, "new content", c.Event.Data.(map[string]any)["content"])
 	require.Equal(t, "s", c.SessionID) // 复用 session
 	require.Zero(t, c.Seq)             // 由 hub 重分配
+}
+
+// newTestBridgeForPending builds a minimal Bridge for pending-buffer cleanup
+// tests. Only Log is needed — ClearPending/ClearAllPending are pure in-memory
+// operations and don't touch Hub/SM.
+func newTestBridgeForPending(t *testing.T) *Bridge {
+	t.Helper()
+	return NewBridge(BridgeDeps{Log: slog.Default()})
+}
+
+// TestPendingClearedOnSessionEnd verifies the per-session cleanup contract:
+// after Bridge.ClearPending(sid), a subsequent DrainAndMerge(sid) returns
+// ok=false so stale supplements cannot replay into a dead session. Mirrors
+// the contract called from sm.OnTerminate in cmd/hotplex/gateway_run.go.
+func TestPendingClearedOnSessionEnd(t *testing.T) {
+	t.Parallel()
+	b := newTestBridgeForPending(t)
+	env := newInputEnvelope(t, "s1", "x")
+	b.pending.Append("s1", "x", env)
+	// Sanity: buffer holds one entry before clear.
+	_, _, ok := b.pending.DrainAndMerge("s1")
+	require.True(t, ok, "pre-clear: expected one buffered supplement")
+
+	// Repopulate (drain removed it) and clear via the Bridge-level method.
+	b.pending.Append("s1", "x", env)
+	b.ClearPending("s1")
+	_, _, ok = b.pending.DrainAndMerge("s1")
+	require.False(t, ok, "post-clear: expected buffer empty for s1")
+}
+
+// TestPendingClearedOnSessionEnd_OnlyTargetSession verifies ClearPending(sid)
+// does not disturb other sessions' buffers.
+func TestPendingClearedOnSessionEnd_OnlyTargetSession(t *testing.T) {
+	t.Parallel()
+	b := newTestBridgeForPending(t)
+	env := newInputEnvelope(t, "s", "x")
+	b.pending.Append("s1", "x", env)
+	b.pending.Append("s2", "y", env)
+
+	b.ClearPending("s1")
+
+	_, _, ok := b.pending.DrainAndMerge("s1")
+	require.False(t, ok, "s1 should be cleared")
+	_, _, ok = b.pending.DrainAndMerge("s2")
+	require.True(t, ok, "s2 should be untouched")
+}
+
+// TestClearAllPendingOnShutdown verifies the global cleanup contract: after
+// Bridge.ClearAllPending(), every session's buffer is empty. This mirrors the
+// call made in Bridge.Shutdown so stale supplements don't survive a gateway
+// restart's in-memory state (buffer is not persisted).
+func TestClearAllPendingOnShutdown(t *testing.T) {
+	t.Parallel()
+	b := newTestBridgeForPending(t)
+	env := newInputEnvelope(t, "s", "x")
+	b.pending.Append("s1", "a", env)
+	b.pending.Append("s2", "b", env)
+	b.pending.Append("s3", "c", env)
+
+	b.ClearAllPending()
+
+	for _, sid := range []string{"s1", "s2", "s3"} {
+		_, _, ok := b.pending.DrainAndMerge(sid)
+		require.False(t, ok, "post-ClearAllPending: %s should be empty", sid)
+	}
+}
+
+// TestBridge_ShutdownClearsAllPending drives Bridge.Shutdown (the real hook)
+// and verifies it clears the buffer via the internal ClearAllPending call.
+func TestBridge_ShutdownClearsAllPending(t *testing.T) {
+	t.Parallel()
+	b := newTestBridgeForPending(t)
+	env := newInputEnvelope(t, "s", "x")
+	b.pending.Append("s1", "a", env)
+	b.pending.Append("s2", "b", env)
+
+	// Shutdown uses context.Background for the test; no forwarders are
+	// registered so WaitForwarders returns immediately.
+	b.Shutdown(context.Background())
+
+	for _, sid := range []string{"s1", "s2"} {
+		_, _, ok := b.pending.DrainAndMerge(sid)
+		require.False(t, ok, "post-Shutdown: %s should be empty", sid)
+	}
 }
