@@ -87,6 +87,7 @@ var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
 var _ worker.SystemPromptUpdater = (*AppServerWorker)(nil)
 var _ worker.PermissionCeilingReporter = (*AppServerWorker)(nil)
+var _ worker.MidTurnInjector = (*AppServerWorker)(nil)
 
 type appState int
 
@@ -536,6 +537,30 @@ func (w *AppServerWorker) StopCurrentTurn(ctx context.Context) error {
 	}
 	w.MarkStopped()
 	return w.manager.InterruptTurn(tid, turnID)
+}
+
+// InjectMidTurn steers the active turn with supplemental user input via the
+// app-server turn/steer RPC. Unlike Input (turn/start), it does not start a
+// new turn and does not update lastInput. Returns an error if no turn is
+// active so the gateway can fall back to pending-buffer replay.
+//
+// SteerTurn is the first caller of the already-implemented manager RPC
+// (manager.go:1093); this method is the SESSION_BUSY mid-turn wiring point
+// probed by the gateway via the worker.MidTurnInjector interface assertion.
+// Lock pattern mirrors StopCurrentTurn: snapshot threadID/turnID under w.mu,
+// release the lock, empty-check, then call SteerTurn outside the lock. Does
+// NOT call SetLastIO — a mid-turn inject is supplemental, not the turn's
+// primary input (crash recovery must not replay it).
+func (w *AppServerWorker) InjectMidTurn(ctx context.Context, content string, metadata map[string]any) error {
+	w.mu.Lock()
+	tid := w.threadID
+	turnID := w.turnID
+	w.mu.Unlock()
+	if tid == "" || turnID == "" {
+		return fmt.Errorf("codexcli: no active turn to steer")
+	}
+	_, err := w.manager.SteerTurn(tid, turnID, content)
+	return err
 }
 
 func (w *AppServerWorker) Kill() error {
