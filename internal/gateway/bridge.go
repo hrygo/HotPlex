@@ -81,6 +81,13 @@ type Bridge struct {
 	// fast path; write lock is used for create/delete/reset operations.
 	accumMu sync.RWMutex
 
+	// pending buffers user supplements that arrived while a session was busy,
+	// for workers that lack mid-turn support (acp/ocs fallback). PendingBuffer
+	// has its own internal mu, so no separate guard here. Initialized in
+	// NewBridge; nil-safe proxy methods (BufferPending/ClearPending/...).
+	pending  *PendingBuffer
+	replayer PendingReplayer // late-injected (Bridge built before Handler)
+
 	crashTracker   map[string]*crashHistory // per-session crash loop detection
 	crashTrackerMu sync.Mutex
 
@@ -140,6 +147,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		executionStore:     deps.ExecutionStore,
 		repairer:           deps.Repairer,
 		turnTTFT:           newTurnTTFTTracker(),
+		pending:            NewPendingBuffer(),
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))
@@ -226,6 +234,40 @@ func (b *Bridge) GetWorkspaceByID(ctx context.Context, id string) (*session.Work
 // (issue #833 P2, spec §5.2). Optional: nil leaves tool-call audit disabled.
 func (b *Bridge) SetAuditCollector(ac *audit.Collector) {
 	b.auditCollector = ac
+}
+
+// PendingReplayer replays a buffered supplement as a fresh input turn.
+// Implemented by Handler (which owns deliverToWorker); injected after Bridge
+// construction via SetPendingReplayer because Bridge is built before Handler.
+type PendingReplayer interface {
+	DeliverReplay(ctx context.Context, env *events.Envelope) error
+}
+
+// SetPendingReplayer late-injects the replay target (Handler). Optional: nil
+// leaves done-time replay disabled (supplements buffered but not replayed).
+func (b *Bridge) SetPendingReplayer(r PendingReplayer) { b.replayer = r }
+
+// BufferPending appends a busy-supplement for the fallback path (worker lacks
+// mid-turn support). Called from Handler's SESSION_BUSY branch.
+func (b *Bridge) BufferPending(sessionID string, env *events.Envelope, content string) {
+	if b.pending != nil {
+		b.pending.Append(sessionID, content, env)
+	}
+}
+
+// ClearPending drops buffered supplements for one session. Called when the
+// session is reset/deleted.
+func (b *Bridge) ClearPending(sessionID string) {
+	if b.pending != nil {
+		b.pending.Clear(sessionID)
+	}
+}
+
+// ClearAllPending drops all buffered supplements. Called on bridge shutdown.
+func (b *Bridge) ClearAllPending() {
+	if b.pending != nil {
+		b.pending.ClearAll()
+	}
 }
 
 // StartSession creates a new session and starts a worker.
