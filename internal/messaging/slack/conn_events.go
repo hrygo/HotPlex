@@ -116,6 +116,15 @@ func (c *SlackConn) handleSkillsList(ctx context.Context, env *events.Envelope) 
 }
 
 func (c *SlackConn) handleStandaloneMessage(ctx context.Context, env *events.Envelope) error {
+	// Supplement path: gateway accepted a mid-turn supplement and signals via
+	// metadata. Render the i18n busy text synchronously and return before the
+	// normal display path, which would silently drop the (empty) Content.
+	// Synchronous (not goroutine-launch) so callers see send failures and tests
+	// can observe the reached path; the supplement text is a one-shot short msg.
+	if mode, _ := env.Metadata["supplement_mode"].(string); mode != "" {
+		return c.writeWithPostMessage(ctx, slackSupplementText(mode), false)
+	}
+
 	var text string
 	if msgData, ok := env.Event.Data.(events.MessageData); ok && msgData.Content != "" {
 		text = messaging.SanitizeText(msgData.Content)
@@ -132,6 +141,19 @@ func (c *SlackConn) handleStandaloneMessage(ctx context.Context, env *events.Env
 		}()
 	}
 	return nil
+}
+
+// slackSupplementText returns the English i18n text for a mid-turn supplement
+// accepted by the gateway's busy branch. `injected` means the supplement was
+// merged into the running turn; any other mode (typically `buffered`) means it
+// was queued for the next turn. The fallback is the buffered text — promising
+// future handling — so an unexpected mode never falsely implies the supplement
+// is already being processed.
+func slackSupplementText(mode string) string {
+	if mode == "injected" {
+		return "⏳ Got it — processing within the current task."
+	}
+	return "⏳ Got it — will process automatically once the current task finishes."
 }
 
 func (c *SlackConn) handleDefaultText(ctx context.Context, env *events.Envelope) error {

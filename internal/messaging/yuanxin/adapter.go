@@ -538,6 +538,19 @@ func (a *Adapter) SendResponse(ctx context.Context, conn *YuanxinConn, content s
 	return err
 }
 
+// yuanxinSupplementText returns the Chinese i18n text for a mid-turn supplement
+// accepted by the gateway's busy branch. `injected` means the supplement was
+// merged into the running turn; any other mode (typically `buffered`) means it
+// was queued for the next turn. The fallback is the buffered text — promising
+// future handling — so an unexpected mode never falsely implies the supplement
+// is already being processed.
+func yuanxinSupplementText(mode string) string {
+	if mode == "injected" {
+		return "⏳ 已收到，正在当前任务中一并处理"
+	}
+	return "⏳ 已收到，当前任务完成后会自动处理"
+}
+
 const maxTextBuilderSize = 1 << 20
 
 type YuanxinConn struct {
@@ -585,6 +598,15 @@ func (c *YuanxinConn) GetMetadata() map[string]any {
 func (c *YuanxinConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if env == nil {
 		return fmt.Errorf("yuanxin: nil envelope")
+	}
+
+	// Supplement path: gateway accepted a mid-turn supplement and signals via
+	// metadata. Render the i18n busy text and return before the normal display
+	// path. The gateway only sets supplement_mode on `message` envelopes with
+	// empty Content, so the metadata alone is the signal — no event-type gate
+	// needed. Checked before the switch since Message has no dedicated case.
+	if mode, _ := env.Metadata["supplement_mode"].(string); mode != "" {
+		return c.adapter.SendResponse(ctx, c, yuanxinSupplementText(mode))
 	}
 
 	c.adapter.Log.Debug("yuanxin: WriteCtx called",
