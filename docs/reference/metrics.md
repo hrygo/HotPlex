@@ -291,6 +291,8 @@ rate(hotplex_cron_duration_sum[5m]) / rate(hotplex_cron_duration_count[5m])
 | `hotplex.execution.duplicate` | Counter | 幂等去重（相同 Envelope ID + payload 静默抑制） |
 | `hotplex.execution.conflict` | Counter | Payload 冲突（相同 Envelope ID，不同 SHA-256 hash） |
 | `hotplex.execution.session_busy` | Counter | Active gate 拒绝（session 已有 pending/running execution） |
+| `hotplex.execution.mid_turn_injected` | Counter | 用户追问在 busy 时被透传注入当前 turn（worker 支持 mid-turn） |
+| `hotplex.execution.supplement_buffered` | Counter | 用户追问在 busy 时被暂存待 done 后重投（worker 不支持 mid-turn 的兜底） |
 | `hotplex.execution.delivery_outcome` | Counter | Worker 投递结果，label: `delivery_status`（delivered / unknown / failed） |
 | `hotplex.execution.runtime_outcome` | Counter | Worker 运行终态，label: `runtime_status`（completed / failed / unknown） |
 | `hotplex.execution.delivery_latency` | Histogram | accept 到 delivery outcome 耗时（秒），bounds: 0.01–10 |
