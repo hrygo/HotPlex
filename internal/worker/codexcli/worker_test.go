@@ -707,6 +707,72 @@ func TestAppServerWorkerInputNoThreadID(t *testing.T) {
 	require.Contains(t, err.Error(), "not started")
 }
 
+// ─── InjectMidTurn Tests (SESSION_BUSY mid-turn passthrough) ──────────────
+
+// TestInjectMidTurn_SteersActiveTurn verifies InjectMidTurn delegates to
+// manager.SteerTurn with the worker's snapshot threadID + turnID and the
+// injected text. The codex package has no mock manager — manager is a concrete
+// *CodexAppServerManager — so we mirror the real-manager + fake-stdin pattern
+// used by TestInputCallsTurnStart / TestRespondServerRequest: SteerTurn's Call
+// writes the JSON-RPC frame to stdin (captured in a strings.Builder) and then
+// times out waiting for a response. The captured frame proves SteerTurn was
+// invoked with the right args; the surfaced error proves InjectMidTurn
+// delegates the RPC (and does not swallow it).
+func TestInjectMidTurn_SteersActiveTurn(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	var buf strings.Builder
+	mgr.stdin = struct {
+		io.Writer
+		io.Closer
+	}{
+		Writer: &buf,
+		Closer: io.NopCloser(nil),
+	}
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+
+	wk := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr_1",
+		turnID:     "turn_1",
+	}
+
+	err := wk.InjectMidTurn(context.Background(), "more info", nil)
+	// SteerTurn's Call times out (no real codex process responds), proving the
+	// RPC path was taken. InjectMidTurn must surface — not swallow — the error.
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "turn/steer")
+
+	// The JSON-RPC request written to stdin is the observable proof that
+	// SteerTurn was called with the worker's snapshot IDs and injected text.
+	written := buf.String()
+	require.Contains(t, written, `"method":"turn/steer"`)
+	require.Contains(t, written, `"threadId":"thr_1"`)
+	require.Contains(t, written, `"expectedTurnId":"turn_1"`)
+	require.Contains(t, written, `"more info"`)
+}
+
+// TestInjectMidTurn_NoActiveTurn verifies InjectMidTurn returns an error when
+// no turn is active (threadID/turnID empty), so the gateway falls back to
+// pending-buffer replay. Mirrors StopCurrentTurn's empty-turn guard.
+func TestInjectMidTurn_NoActiveTurn(t *testing.T) {
+	t.Parallel()
+
+	w := newTestAppServerWorker(t)
+	// threadID/turnID left empty — no active turn to steer.
+	err := w.InjectMidTurn(context.Background(), "x", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active turn")
+}
+
 // ─── appConn tests ────────────────────────────────────────────────────────
 
 func TestAppConnSendRecvClose(t *testing.T) {
