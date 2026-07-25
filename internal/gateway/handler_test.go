@@ -1278,3 +1278,90 @@ func TestHandleInput_NormalInput_CaptureInbound(t *testing.T) {
 	require.Equal(t, "inbound", page.Events[0].Direction)
 	require.Equal(t, int64(7), page.Events[0].Seq)
 }
+
+// ─── handleSupplementOnBusy (SESSION_BUSY mid-turn) tests ────────────────────
+
+// mockMidTurnWorker extends mockWorkerForHandler with InjectMidTurn, satisfying
+// worker.MidTurnInjector so the handler's SESSION_BUSY branch takes the
+// passthrough path.
+type mockMidTurnWorker struct {
+	mockWorkerForHandler
+	injectErr   error
+	injected    string
+	injectCount int
+}
+
+func (m *mockMidTurnWorker) InjectMidTurn(_ context.Context, content string, _ map[string]any) error {
+	m.injectCount++
+	m.injected = content
+	return m.injectErr
+}
+
+// newBusyTestHandler wires a Handler with a mock SessionManager, a real Hub
+// (so NextSeq/SendToSession work without Run()), and a real Bridge (so the
+// PendingBuffer is exercised). The returned sm is pre-set to return the given
+// worker from GetWorker; callers can substitute it via sm.Mock expectations.
+func newBusyTestHandler(t *testing.T, w worker.Worker) (*Handler, *mockInputSM, *Hub, *Bridge) {
+	t.Helper()
+	sm := new(mockInputSM)
+	sm.Test(t)
+	if w != nil {
+		sm.On("GetWorker", mock.Anything).Return(w).Maybe()
+	}
+	hub := newCtrlHub(t)
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: sm})
+	h := &Handler{
+		log:    slog.Default(),
+		hub:    hub,
+		sm:     sm,
+		bridge: bridge,
+	}
+	return h, sm, hub, bridge
+}
+
+func TestHandleSupplementOnBusy_Passthrough(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{}
+	h, _, _, bridge := newBusyTestHandler(t, mw)
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.Equal(t, "追问", mw.injected, "InjectMidTurn must receive the supplement")
+	require.Equal(t, 1, mw.injectCount, "InjectMidTurn must be called exactly once")
+
+	// Passthrough must NOT buffer the supplement.
+	_, _, ok := bridge.pending.DrainAndMerge("s")
+	require.False(t, ok, "passthrough path must not buffer")
+}
+
+func TestHandleSupplementOnBusy_FallbackBuffer(t *testing.T) {
+	t.Parallel()
+	// mockWorkerForHandler does NOT implement worker.MidTurnInjector, so the
+	// handler must fall back to the pending buffer.
+	w := new(mockWorkerForHandler)
+	h, _, _, bridge := newBusyTestHandler(t, w)
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+
+	merged, _, ok := bridge.pending.DrainAndMerge("s")
+	require.True(t, ok, "fallback path must buffer the supplement")
+	require.Equal(t, "追问", merged)
+}
+
+func TestHandleSupplementOnBusy_InjectFailureFallsBack(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{injectErr: errors.New("turn ended")}
+	h, _, _, bridge := newBusyTestHandler(t, mw)
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.Equal(t, 1, mw.injectCount, "InjectMidTurn must be attempted")
+
+	merged, _, ok := bridge.pending.DrainAndMerge("s")
+	require.True(t, ok, "failed inject must fall back to buffer")
+	require.Equal(t, "追问", merged)
+}

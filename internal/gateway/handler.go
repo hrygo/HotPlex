@@ -514,6 +514,64 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 	return false, nil
 }
 
+// handleSupplementOnBusy routes a SESSION_BUSY input to mid-turn passthrough
+// (when the worker implements MidTurnInjector and the turn is still live) or
+// the fallback pending buffer. Falls back to the legacy SESSION_BUSY error
+// only when bridge buffering is unavailable.
+//
+// Decision order:
+//  1. Worker implements MidTurnInjector AND !IsStopped → InjectMidTurn.
+//     Success → metric + capture + "injected" notify + return nil.
+//     Failure → log and fall through to buffer.
+//  2. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
+//  3. Otherwise → legacy sendErrorf SESSION_BUSY.
+func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string) error {
+	if w := h.sm.GetWorker(env.SessionID); w != nil {
+		if inj, ok := w.(worker.MidTurnInjector); ok && !w.IsStopped() {
+			if err := inj.InjectMidTurn(ctx, content, nil); err == nil {
+				observability.MidTurnInjected().Add(ctx, 1)
+				if h.bridge != nil {
+					h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
+				}
+				h.notifySupplement(ctx, env.SessionID, "injected")
+				return nil
+			} else {
+				h.log.Warn("gateway: mid-turn inject failed, falling back to buffer",
+					"session_id", env.SessionID, "err", err)
+			}
+		}
+	}
+	if h.bridge != nil {
+		h.bridge.BufferPending(env.SessionID, env, content)
+		observability.SupplementBuffered().Add(ctx, 1)
+		h.notifySupplement(ctx, env.SessionID, "buffered")
+		return nil
+	}
+	return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
+}
+
+// notifySupplement broadcasts a marker `message` envelope so platform conns
+// (Slack/Feishu/Webchat) can render their own i18n "supplement accepted"
+// text. Metadata["supplement_mode"] carries the mode ("injected"|"buffered");
+// Content is empty — conns substitute their own localized text (Task 10).
+// Best-effort: delivery failures are not surfaced to the user.
+func (h *Handler) notifySupplement(ctx context.Context, sessionID, mode string) {
+	env := events.NewEnvelope(aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+		events.Message, events.MessageData{Content: ""})
+	env.Metadata = map[string]any{"supplement_mode": mode}
+	_ = h.hub.SendToSession(ctx, env)
+}
+
+// DeliverReplay replays a buffered supplement as a fresh input turn.
+// Implements bridge.PendingReplayer; the active gate is already released by
+// the prior done, so deliverToWorker's accept path will succeed. The content
+// is extracted from the envelope's Data map (preserved by cloneForReplay).
+func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error {
+	data, _ := env.Event.Data.(map[string]any)
+	content, _ := data["content"].(string)
+	return h.deliverToWorker(ctx, env, content)
+}
+
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
@@ -536,7 +594,7 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		if errors.Is(err, execution.ErrSessionBusy) {
 			observability.ExecutionSessionBusy().Add(ctx, 1)
 			h.cancelRetryIfNeeded(env.SessionID)
-			return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
+			return h.handleSupplementOnBusy(ctx, env, content)
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
 		// A genuine new input failed to durably register; cancel any in-flight
@@ -1269,3 +1327,7 @@ func interactionResponseMetadata(kind events.Kind, data any) (map[string]any, er
 
 	return metadata, nil
 }
+
+// Compile-time assertion: *Handler satisfies bridge.PendingReplayer so the
+// bridge can late-inject it via SetPendingReplayer for done-time replay.
+var _ PendingReplayer = (*Handler)(nil)
