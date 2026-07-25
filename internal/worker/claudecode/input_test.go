@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -102,4 +103,46 @@ func TestConn_Stdin_SetLastInput_Integration(t *testing.T) {
 
 	// Drain pipe.
 	_, _ = r.Read(make([]byte, 4096))
+}
+
+// TestInjectMidTurn_WritesStdinWithoutSetLastInput verifies the two defining
+// properties of (*Worker).InjectMidTurn:
+//
+//  1. It writes the same stream-json user frame to stdin that Input would
+//     (so Claude Code headless --print --input-format stream-json absorbs it
+//     into the running turn rather than queuing a new one).
+//  2. It does NOT update crash-recovery lastInput — bridge_worker.go replays
+//     lastInput on resume failure, and a mid-turn supplement must never be
+//     re-delivered as the turn's primary input.
+//
+// The pipe-backed *base.Conn triggers the production stdin-write path (the
+// mock-conn fallback in Input is for non-base connections). Pattern mirrors
+// TestCompact_ProcessNotRunning in worker_coverage_test.go.
+func TestInjectMidTurn_WritesStdinWithoutSetLastInput(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	baseConn := base.NewConn(slog.Default(), w, "user1", "sess1")
+	ww := New()
+	ww.testConn = baseConn
+
+	content := "BONUS: tell me 7+8"
+	require.NoError(t, ww.InjectMidTurn(t.Context(), content, nil))
+
+	// Close the write end so io.ReadAll returns; the conn's stdin field is
+	// left pointing at the closed fd, which is fine — the test is done.
+	require.NoError(t, w.Close())
+
+	frame, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.NotEmpty(t, frame)
+
+	require.Contains(t, string(frame), content)
+	require.Contains(t, string(frame), `"type":"user"`)
+
+	// Critical correctness invariant: InjectMidTurn must NOT update lastInput.
+	require.Empty(t, baseConn.LastInput(), "InjectMidTurn must not SetLastInput")
 }
