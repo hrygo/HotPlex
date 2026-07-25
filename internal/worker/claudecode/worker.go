@@ -30,6 +30,7 @@ import (
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
 var _ worker.PermissionCeilingReporter = (*Worker)(nil)
+var _ worker.MidTurnInjector = (*Worker)(nil)
 var _ base.MetadataHandler = (*Worker)(nil)
 
 // trySender is a named interface for non-blocking envelope send.
@@ -586,6 +587,47 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		}
 	}
 
+	w.SetLastIO(time.Now())
+	return nil
+}
+
+// InjectMidTurn delivers a user message into the active turn by writing the
+// same stream-json user frame to stdin. Claude Code (headless --print
+// --input-format stream-json) absorbs it into the running turn rather than
+// queuing a new one (verified by mid-turn injection probe, 2026-07-25).
+//
+// Unlike Input, it MUST NOT call SetLastInput: this is a supplemental inject,
+// not the turn's primary input — crash recovery (bridge_worker.go) replays
+// lastInput and must not replay a mid-turn supplement.
+func (w *Worker) InjectMidTurn(ctx context.Context, content string, metadata map[string]any) error {
+	conn := w.Conn()
+	if conn == nil {
+		return fmt.Errorf("claudecode: not started")
+	}
+	baseConn, ok := conn.(*base.Conn)
+	if !ok {
+		return fmt.Errorf("claudecode: inject requires base conn")
+	}
+	stdin, mu := baseConn.StdinUnlocked()
+	if stdin == nil {
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
+	}
+	// Mutex acquired inside the closure for the same orphan-write reason as Input
+	// (see Input comment, worker.go:544-554).
+	if err := base.WriteWithCtxBounded(ctx, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return writeStreamInputLocked(stdin, content)
+	}); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return &worker.WorkerError{
+				Kind:    worker.ErrKindUnavailable,
+				Message: "claudecode: stdin write stalled (worker not reading input)",
+				Cause:   err,
+			}
+		}
+		return fmt.Errorf("claudecode: inject mid-turn: %w", err)
+	}
 	w.SetLastIO(time.Now())
 	return nil
 }
