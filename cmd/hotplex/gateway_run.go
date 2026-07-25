@@ -557,6 +557,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	handler.SetAuditCollector(auditCollector)
 	hub.SetAuditCollector(auditCollector)
 	bridge.SetAuditCollector(auditCollector) // tool.call audit (issue #833 P2)
+	bridge.SetPendingReplayer(handler)       // SESSION_BUSY mid-turn replay (done-time fallback)
 
 	if cfg.Worker.AutoRetry.Enabled {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
