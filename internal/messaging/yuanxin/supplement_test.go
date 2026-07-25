@@ -1,0 +1,80 @@
+package yuanxin
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/pkg/events"
+)
+
+// TestYuanxinSupplementText verifies the Chinese i18n text mapping per supplement
+// mode. injected: merged into the running turn. buffered: queued for next turn.
+// Any other mode falls back to the buffered text (safe default).
+func TestYuanxinSupplementText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode string
+		want string
+	}{
+		{"injected merged into current turn", "injected", "⏳ 已收到，正在当前任务中一并处理"},
+		{"buffered for next turn", "buffered", "⏳ 已收到，当前任务完成后会自动处理"},
+		{"unknown mode falls back to buffered text", "unknown", "⏳ 已收到，当前任务完成后会自动处理"},
+		{"empty mode falls back to buffered text", "", "⏳ 已收到，当前任务完成后会自动处理"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, yuanxinSupplementText(tt.mode))
+		})
+	}
+}
+
+// TestWriteCtx_SupplementMode_RendersI18nText verifies that an envelope carrying
+// supplement_mode metadata triggers the i18n supplement text send instead of the
+// normal display path (which would silently drop empty Content).
+//
+// Detection is verified by the SendResponse error ("producer not initialized"
+// in the test harness). Without the early return, WriteCtx would return nil
+// silently (empty Content → ExtractResponseText returns ok=false).
+func TestWriteCtx_SupplementMode_RendersI18nText(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter()
+	conn := NewYuanxinConn(a, "ch-test", "th-test", "/tmp")
+
+	for _, mode := range []string{"injected", "buffered"} {
+		env := &events.Envelope{
+			SessionID: "s-test",
+			Event:     events.Event{Type: events.Message},
+			Metadata:  map[string]any{"supplement_mode": mode},
+		}
+		err := conn.WriteCtx(context.Background(), env)
+		// The supplement path reaches SendResponse, which fails predictably
+		// with "producer not initialized" in the test harness. Without the
+		// supplement check, WriteCtx would return nil (empty Content).
+		require.Error(t, err, "mode=%s should reach SendResponse", mode)
+		require.Contains(t, err.Error(), "producer not initialized",
+			"mode=%s should trigger SendResponse via supplement path", mode)
+	}
+}
+
+// TestWriteCtx_SupplementMode_NoMetadataFallsThrough confirms that an envelope
+// WITHOUT supplement_mode metadata is handled by the normal display path
+// (returns nil for empty Content, does not call SendResponse).
+func TestWriteCtx_SupplementMode_NoMetadataFallsThrough(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter()
+	conn := NewYuanxinConn(a, "ch-test", "th-test", "/tmp")
+
+	env := &events.Envelope{
+		SessionID: "s-test",
+		Event:     events.Event{Type: events.Message},
+	}
+	err := conn.WriteCtx(context.Background(), env)
+	require.NoError(t, err, "Message without supplement_mode and empty Content returns nil")
+}

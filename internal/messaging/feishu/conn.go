@@ -450,6 +450,17 @@ func (c *FeishuConn) handleStatusEvent(ctx context.Context, env *events.Envelope
 }
 
 func (c *FeishuConn) handleMessageEvent(ctx context.Context, env *events.Envelope) error {
+	// Supplement path: gateway accepted a mid-turn supplement and signals via
+	// metadata. Render the i18n busy text and return before the normal display
+	// path, which would silently drop the (empty) Content.
+	if mode, _ := env.Metadata["supplement_mode"].(string); mode != "" {
+		text := feishuSupplementText(mode)
+		c.mu.RLock()
+		chatID := c.chatID
+		c.mu.RUnlock()
+		return c.adapter.sendTextMessage(ctx, chatID, text)
+	}
+
 	var content string
 	if msgData, ok := env.Event.Data.(events.MessageData); ok {
 		content = msgData.Content
@@ -460,6 +471,19 @@ func (c *FeishuConn) handleMessageEvent(ctx context.Context, env *events.Envelop
 		return nil
 	}
 	return c.sendOrReply(ctx, OptimizeMarkdownStyle(SanitizeForCard(messaging.SanitizeText(content))))
+}
+
+// feishuSupplementText returns the Chinese i18n text for a mid-turn supplement
+// accepted by the gateway's busy branch. `injected` means the supplement was
+// merged into the running turn; any other mode (typically `buffered`) means it
+// was queued for the next turn. The fallback is the buffered text — promising
+// future handling — so an unexpected mode never falsely implies the supplement
+// is already being processed.
+func feishuSupplementText(mode string) string {
+	if mode == "injected" {
+		return "⏳ 已收到，正在当前任务中一并处理"
+	}
+	return "⏳ 已收到，当前任务完成后会自动处理"
 }
 
 func (c *FeishuConn) Close() error {
