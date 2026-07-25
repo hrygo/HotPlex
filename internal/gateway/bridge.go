@@ -930,6 +930,13 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 		b.compressCache.Delete(key)
 		return true
 	})
+	// Drop any buffered mid-turn supplements so stale entries don't survive
+	// shutdown. The buffer is in-memory (not persisted), but clearing here
+	// keeps the Bridge's post-Shutdown state coherent if anything re-enters
+	// the Bridge during the tear-down tail (e.g. a late handler callback).
+	// Task 11 cleanup path; runs after forwarders drain so a racing
+	// DrainAndMerge in replay completes first.
+	b.ClearAllPending()
 }
 
 // MarkClosed sets the closed flag and cancels the shutdown context so that:
