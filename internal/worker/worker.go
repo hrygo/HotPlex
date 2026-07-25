@@ -167,6 +167,20 @@ type PermissionCeilingReporter interface {
 	PermissionCeiling() (string, bool)
 }
 
+// MidTurnInjector is implemented by workers that can accept a user message
+// mid-turn — injecting it into the currently running turn rather than starting
+// a new one. Gateway probes this via type assertion at the SESSION_BUSY branch;
+// workers that don't implement it fall back to pending-buffer replay.
+//
+// Implementations MUST NOT update crash-recovery lastInput: a mid-turn inject
+// is supplemental, not the turn's primary input.
+type MidTurnInjector interface {
+	// InjectMidTurn delivers a user message into the active turn of the worker.
+	// It must return an error if the turn is no longer active (caller falls back
+	// to pending-buffer replay).
+	InjectMidTurn(ctx context.Context, content string, metadata map[string]any) error
+}
+
 // ResetResult describes the outcome of a ResetContext call.
 // Gateway reads this to decide orchestration without knowing Worker internals.
 type ResetResult struct {
