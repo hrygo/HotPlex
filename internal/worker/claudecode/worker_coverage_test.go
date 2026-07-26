@@ -343,12 +343,12 @@ func TestNextSeq_Monotonic(t *testing.T) {
 	t.Parallel()
 
 	w := New()
-	vals := make([]int64, 5)
-	for i := range vals {
-		vals[i] = w.nextSeq()
-	}
-	for i := 1; i < len(vals); i++ {
-		require.Equal(t, vals[i-1]+1, vals[i], "seq must be monotonically increasing")
+	// nextSeq now returns 0 to delegate seq assignment to the bridge's Hub
+	// SeqGen. A local counter restarts from 1 on every Worker launch and
+	// collides with persisted events on resume (issue #879).
+	for i := 0; i < 5; i++ {
+		require.Equal(t, int64(0), w.nextSeq(),
+			"nextSeq must return 0 so bridge assigns Hub SeqGen")
 	}
 }
 

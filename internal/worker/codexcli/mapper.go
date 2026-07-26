@@ -14,7 +14,6 @@ import (
 
 type Mapper struct {
 	sessionID string
-	seq       atomic.Int64
 	tracker   *messageTracker
 	// lastUsage tracks the per-turn token usage from thread/tokenUsage/updated
 	// (the "last" breakdown). It is reset on turn/started, so it represents the
@@ -961,7 +960,10 @@ func (m *Mapper) LastContextUsage() map[string]any {
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 func (m *Mapper) nextSeq() int64 {
-	return m.seq.Add(1)
+	// Return 0 so the bridge assigns Hub SeqGen (the sole authority when
+	// eventstore is enabled). A local counter restarts from 1 on every Worker
+	// launch and collides with persisted events on resume (issue #879).
+	return 0
 }
 
 // Reset clears internal tracking state. Kept for direct unit tests; production

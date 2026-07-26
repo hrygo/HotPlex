@@ -26,8 +26,7 @@ type ACPMapper struct {
 	log        *slog.Logger
 	msgActive  atomic.Bool // true when inside a message stream (first chunk received, not yet ended)
 	turnActive atomic.Bool // true while a prompt turn is in progress
-	seq        atomic.Int64
-	msgID      string // pre-computed "msg_" + sessionID, avoids allocation on hot path
+	msgID      string      // pre-computed "msg_" + sessionID, avoids allocation on hot path
 
 	// usageSnapshot caches the latest usage_update for ControlRequester queries.
 	// Accumulated across multiple usage_update notifications within a turn.
@@ -459,7 +458,10 @@ func (m *ACPMapper) MapPermissionRequest(req *JSONRPCRequest) *PermissionMapResu
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 func (m *ACPMapper) nextSeq() int64 {
-	return m.seq.Add(1)
+	// Return 0 so the bridge assigns Hub SeqGen (the sole authority when
+	// eventstore is enabled). A local counter restarts from 1 on every Worker
+	// launch and collides with persisted events on resume (issue #879).
+	return 0
 }
 
 func (m *ACPMapper) newEnvelope(kind events.Kind, data any) *events.Envelope {

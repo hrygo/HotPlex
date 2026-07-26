@@ -515,4 +515,6 @@ type ErrorData struct {
 ## 参考
 
 - [AEP 协议](aep-protocol.md)：协议完整规范
+- [Canonical Schema](../../pkg/aep/schema/aep-v1.json)：机器可读 Kind 注册表与 Envelope 结构（issue #869）
+- [Golden Corpus](../../pkg/aep/schema/corpus/)：每个 Kind 的 golden fixture，跨 SDK conformance 测试共享
 - [Session 管理](../guides/developer/session-management.md)：Session 生命周期

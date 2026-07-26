@@ -325,12 +325,17 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	env = events.Clone(env)
 	env.SessionID = sessionID
 	env.OwnerID = fc.sessOwner
-	if env.Seq == 0 {
-		if b.collector != nil {
-			env.Seq = b.hub.NextSeqHeld(sessionID)
-		} else {
-			env.Seq = b.hub.NextSeq(sessionID)
-		}
+	// When eventstore is enabled, Hub SeqGen is the sole authority for seq
+	// allocation. Worker-local counters (ACP/Codex mappers) restart from 1 on
+	// every Worker launch and collide with persisted events on resume (issue
+	// #879 regression). Always override regardless of what the Worker set.
+	// When eventstore is disabled, only assign if the Worker left seq=0 (OCS
+	// pattern); a Worker-provided seq is used as-is to preserve ordering in
+	// non-durable deployments.
+	if b.collector != nil {
+		env.Seq = b.hub.NextSeqHeld(sessionID)
+	} else if env.Seq == 0 {
+		env.Seq = b.hub.NextSeq(sessionID)
 	}
 
 	// Buffer error events for potential LLM retry.

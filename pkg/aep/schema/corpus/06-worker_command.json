@@ -1,0 +1,13 @@
+{
+  "version": "aep/v1",
+  "id": "evt_00000000-0000-4000-8000-000000000001",
+  "seq": 0,
+  "session_id": "sess_00000000-0000-4000-8000-000000000001",
+  "timestamp": 1710000000000,
+  "event": {
+    "type": "worker_command",
+    "data": {
+      "command": "context_usage"
+    }
+  }
+}

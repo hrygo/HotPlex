@@ -560,3 +560,31 @@ Heartbeat:      ping ←→ pong
 **必须支持**：`init`、`input`、`control`、`ping`、`init_ack`、`message.delta`、`state`、`error`、`done`、`pong`
 
 **可选扩展**：`input.ack`、`runtime.execution.*`、`message.start/end`、`message`、`tool_call/result`、`tool_update`、`plan`、`mode_update`、`reasoning`、`step`、`raw`、`permission_*`、`question_*`、`elicitation_*`、`context_usage`、`mcp_status`、`worker_command`
+
+## Canonical Schema 与跨 SDK 一致性
+
+AEP v1 的机器可读规范位于 `pkg/aep/schema/aep-v1.json`，包含完整的 Kind 注册表（方向、稳定性标记、Data 类型映射）、Envelope 结构定义和 metadata key 注册表。
+
+### Golden Corpus
+
+`pkg/aep/schema/corpus/` 目录包含每个 Kind 的 golden envelope fixture，以及前向兼容性边界用例（未知 Kind、额外字段、缺失可选字段）。所有 SDK 的 conformance 测试消费同一份 corpus。
+
+### Schema-Diff 门禁
+
+Go 测试 `TestCorpusDeterministicRegeneration` 从当前 Go 类型重新生成 corpus 并与已提交版本逐字节比较。如果 `pkg/events/events.go` 中的 Kind 常量或 Data 结构体发生变化，测试会失败，要求 PR 作者有意更新 schema 和 corpus：
+
+```bash
+# 重新生成 corpus
+go run ./cmd/gen-corpus
+```
+
+### SDK 一致性
+
+| SDK | 测试文件 |
+|-----|---------|
+| Go | `pkg/aep/schema/schema_test.go` |
+| TypeScript | `examples/typescript-client/tests/conformance.test.ts` |
+| Python | `examples/python-client/tests/test_conformance.py` |
+| Java | `examples/java-client/src/test/java/dev/hotplex/conformance/AepCorpusConformanceTest.java` |
+
+CI 在 `aep-conformance` job 中运行全部四个 SDK 的一致性测试。新增 Kind 时，所有 SDK 的 conformance 测试会显示缺失的类型。

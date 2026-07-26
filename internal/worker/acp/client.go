@@ -87,13 +87,35 @@ func (c *ACPClient) NewSession(ctx context.Context, cwd string, mcpServers any) 
 // LoadSession restores an existing ACP session.
 func (c *ACPClient) LoadSession(ctx context.Context, sessionID, cwd string, mcpServers any) (*SessionResult, error) {
 	params := map[string]any{"sessionId": sessionID, "cwd": cwd, "mcpServers": normalizeMCPServers(mcpServers)}
-	return c.callSessionMethod(ctx, "session/load", params, "load session")
+	resp, err := c.call(ctx, "session/load", params)
+	if err != nil {
+		return nil, fmt.Errorf("acp load session: %w", err)
+	}
+	var result SessionResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("acp load session: unmarshal: %w", err)
+	}
+	// ACP spec: LoadSessionResponse has no sessionId field — the loaded
+	// session keeps the ID the client passed in. Echo it back so callers
+	// (worker.go) get a non-empty SessionID as expected.
+	result.SessionID = sessionID
+	return &result, nil
 }
 
 // ResumeSession resumes an interrupted ACP session.
 func (c *ACPClient) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers any) (*SessionResult, error) {
 	params := map[string]any{"sessionId": sessionID, "cwd": cwd, "mcpServers": normalizeMCPServers(mcpServers)}
-	return c.callSessionMethod(ctx, "session/resume", params, "resume session")
+	resp, err := c.call(ctx, "session/resume", params)
+	if err != nil {
+		return nil, fmt.Errorf("acp resume session: %w", err)
+	}
+	var result SessionResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("acp resume session: unmarshal: %w", err)
+	}
+	// Same as LoadSession: ResumeSessionResponse has no sessionId field.
+	result.SessionID = sessionID
+	return &result, nil
 }
 
 // Prompt sends a user message to the active session and waits for the response.

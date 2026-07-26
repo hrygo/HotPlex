@@ -264,6 +264,29 @@ export interface ModeUpdateData {
   current_mode_id: string;
 }
 
+// Durable input acceptance/delivery acknowledgement (from pkg/events/events.go)
+export interface InputAckData {
+  client_message_id: string;
+  execution_id: string;
+  status: 'accepted' | 'delivered' | 'unknown' | 'failed';
+  duplicate?: boolean;
+  error_code?: string;
+}
+
+// Runtime execution event payload (from pkg/events/events.go)
+export interface RuntimeExecutionData {
+  execution_id: string;
+  status: string;
+  error_code?: string;
+  started_at?: number;
+  finished_at?: number;
+}
+
+// Worker in-place reset notification (from pkg/events/events.go)
+export interface InternalResetData {
+  generation: number;
+}
+
 // ============================================================================
 // Control Data (from pkg/events/events.go:229-237)
 // ============================================================================
@@ -402,6 +425,11 @@ export interface ServerEventDataMap {
   [EventKind.ToolUpdate]: ToolUpdateData;
   [EventKind.Plan]: PlanData;
   [EventKind.ModeUpdate]: ModeUpdateData;
+  [EventKind.InputAck]: InputAckData;
+  [EventKind.InternalReset]: InternalResetData;
+  [EventKind.RuntimeExecutionStarted]: RuntimeExecutionData;
+  [EventKind.RuntimeExecutionCompleted]: RuntimeExecutionData;
+  [EventKind.RuntimeExecutionFailed]: RuntimeExecutionData;
 }
 
 export interface ServerEventEnvelopeMap {

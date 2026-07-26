@@ -3,9 +3,11 @@ export const AEP_VERSION = 'aep/v1';
 
 // Event kinds (from pkg/events/events.go:14-34)
 export const EventKind = {
+  Init: 'init',
   Error: 'error',
   State: 'state',
   Input: 'input',
+  InputAck: 'input.ack',
   Done: 'done',
   Message: 'message',
   MessageStart: 'message.start',
@@ -32,6 +34,10 @@ export const EventKind = {
   ToolUpdate: 'tool_update',
   Plan: 'plan',
   ModeUpdate: 'mode_update',
+  InternalReset: 'internal_reset',
+  RuntimeExecutionStarted: 'runtime.execution.started',
+  RuntimeExecutionCompleted: 'runtime.execution.completed',
+  RuntimeExecutionFailed: 'runtime.execution.failed',
 } as const;
 
 export type EventKind = typeof EventKind[keyof typeof EventKind];
@@ -105,6 +111,7 @@ export const ControlAction = {
   Reset: 'reset',
   GC: 'gc',
   CD: 'cd',
+  Stop: 'stop',
 } as const;
 
 export type ControlAction = typeof ControlAction[keyof typeof ControlAction];
