@@ -27,6 +27,7 @@ type fakeExecutionStore struct {
 	errorCode    string
 	statusCalls  int
 	openRecord   *execution.Record
+	activeRecord *execution.Record // when set, ActiveBySession reports the gate as held
 	markRunID    string
 	markErr      error
 	finishRunID  string
@@ -73,6 +74,9 @@ func (s *fakeExecutionStore) FinishRuntime(_ context.Context, _ string, runID st
 	return s.finishErr
 }
 func (s *fakeExecutionStore) ActiveBySession(context.Context, string) (*execution.Record, error) {
+	if s.activeRecord != nil {
+		return s.activeRecord, nil
+	}
 	return nil, execution.ErrNotFound
 }
 func (s *fakeExecutionStore) OpenBySession(context.Context, string) (*execution.Record, error) {

@@ -528,6 +528,23 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string) error {
 	if w := h.sm.GetWorker(env.SessionID); w != nil {
 		if inj, ok := w.(worker.MidTurnInjector); ok && !w.IsStopped() {
+			// Re-check the active gate immediately before injecting. A race
+			// window exists between the SESSION_BUSY detection (in
+			// acceptInputExecutionWithRetry above) and this inject: if the
+			// running turn's Done arrived in between and released the gate,
+			// injecting now would write the supplement as the PRIMARY input of
+			// a new unsolicited CC turn — CC headless stays alive reading stdin
+			// after Done — producing a ghost turn with no execution record. If
+			// the gate is already released, route to the normal delivery path so
+			// the supplement becomes a proper new turn. (Codex avoids this via
+			// SteerTurn's expectedTurnID; CC has no turn-liveness signal, so we
+			// re-check here. A residual sub-millisecond window between this check
+			// and the stdin write remains by design.)
+			if h.executionStore != nil {
+				if _, aerr := h.executionStore.ActiveBySession(ctx, env.SessionID); errors.Is(aerr, execution.ErrNotFound) {
+					return h.deliverToWorker(ctx, env, content)
+				}
+			}
 			if err := inj.InjectMidTurn(ctx, content, nil); err == nil {
 				observability.MidTurnInjected().Add(ctx, 1)
 				if h.bridge != nil {
