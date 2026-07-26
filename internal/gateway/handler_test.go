@@ -1365,3 +1365,50 @@ func TestHandleSupplementOnBusy_InjectFailureFallsBack(t *testing.T) {
 	require.True(t, ok, "failed inject must fall back to buffer")
 	require.Equal(t, "追问", merged)
 }
+
+// TestHandleSupplementOnBusy_RaceGateStillHeld is the complement: the active
+// gate is still held (Done did NOT win the race), so the re-check passes and
+// InjectMidTurn proceeds normally.
+func TestHandleSupplementOnBusy_RaceGateStillHeld(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{}
+	h, _, _, bridge := newBusyTestHandler(t, mw)
+	h.executionStore = &fakeExecutionStore{activeRecord: testExecutionRecord(execution.StatusDelivered)}
+
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.Equal(t, 1, mw.injectCount, "gate held → InjectMidTurn must run")
+	require.Equal(t, "追问", mw.injected)
+
+	_, _, ok := bridge.pending.DrainAndMerge("s")
+	require.False(t, ok, "successful inject must not buffer")
+}
+
+// TestHandleSupplementOnBusy_GateReleasedBeforeInject covers the TOCTOU race
+// where the running turn's Done arrives between the SESSION_BUSY detection
+// (acceptInputExecutionWithRetry) and the mid-turn inject. CC headless stays
+// alive reading stdin after Done, so injecting then would start a ghost turn
+// with no execution record. The ActiveBySession re-check must route the
+// supplement to the normal delivery path (a proper new turn) instead. Here
+// sm.Get fails, so delegation is observed as an error — the key assertion is
+// that InjectMidTurn is never called once the gate is released.
+func TestHandleSupplementOnBusy_GateReleasedBeforeInject(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{}
+	h, sm, _, _ := newBusyTestHandler(t, mw)
+	// ActiveBySession reports the gate as released (ErrNotFound): Done won the
+	// race between SESSION_BUSY detection and the inject.
+	h.executionStore = &fakeExecutionStore{}
+	// deliverToWorker's first step is sm.Get; fail it so delegation is observed
+	// as an error without standing up a full delivery pipeline.
+	sm.On("Get", "s").Return(nil, errors.New("session gone")).Maybe()
+
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	err := h.handleSupplementOnBusy(t.Context(), env, "追问")
+	require.Error(t, err, "released gate must route to deliverToWorker")
+	require.Equal(t, 0, mw.injectCount, "must NOT inject once the active gate is released")
+}
