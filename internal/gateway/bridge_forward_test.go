@@ -77,9 +77,16 @@ func TestFinishRuntimeOnDone_ReplaysPending(t *testing.T) {
 
 	b.finishRuntimeOnDone("s-replay", fc, env)
 
-	require.Eventually(t, func() bool { return rp.calls.Load() == 1 },
-		time.Second, 10*time.Millisecond)
-	require.Equal(t, "追问", rp.lastContent.Load())
+	// Poll the actual asserted condition (call count AND replayed content) in a
+	// single predicate, rather than checking calls then content separately:
+	// calls.Add(1) happens before lastContent.Store inside DeliverReplay, so a
+	// standalone calls==1 gate can observe the call before the Store is visible,
+	// racing the subsequent content assertion under -race load.
+	require.Eventually(t, func() bool {
+		c, _ := rp.lastContent.Load().(string)
+		return rp.calls.Load() == 1 && c == "追问"
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, "追问", rp.lastContent.Load().(string))
 }
 
 // TestFinishRuntimeOnDone_NoPendingNoReplay verifies that with an empty
