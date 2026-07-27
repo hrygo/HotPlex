@@ -57,7 +57,7 @@ HotPlex 使用 `log/slog` JSON Handler 输出结构化日志，兼容 OTel Log D
 
 ## 2. OTel 原生指标体系
 
-HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API 注册 58+ 个指标，前缀为 `hotplex.`。应用代码零直接依赖 `prometheus/client_golang`。
+HotPlex 使用统一的 `internal/observability/` 包，通过 OTel Meter API 注册 60+ 个指标，前缀为 `hotplex.`。应用代码零直接依赖 `prometheus/client_golang`。
 
 指标通过 OTel Prometheus Exporter 以标准 Prometheus 格式暴露于 `GET /admin/metrics`，同时支持通过 OTLP gRPC 导出到 OTel Collector。
 
@@ -150,7 +150,9 @@ Durable ingress 的输入账本、owner lease 续约与终态修复子系统。
 | `hotplex.execution.accept` | Counter | — | 新输入被持久化接受 |
 | `hotplex.execution.duplicate` | Counter | — | 幂等去重（相同 ID + payload） |
 | `hotplex.execution.conflict` | Counter | — | Payload 冲突（相同 ID，不同 hash） |
-| `hotplex.execution.session_busy` | Counter | — | Active gate 拒绝（session 忙于此前 execution） |
+| `hotplex.execution.session_busy` | Counter | — | Active gate 拒绝（session 忙于此前 execution），转入 mid-turn 透传或暂存兜底 |
+| `hotplex.execution.mid_turn_injected` | Counter | — | busy 时追问被透传注入当前 turn（worker 支持 mid-turn，如 claude_code/codex_cli） |
+| `hotplex.execution.supplement_buffered` | Counter | — | busy 时追问被暂存，待 turn 完成后重投（worker 不支持 mid-turn 的兜底） |
 | `hotplex.execution.delivery_outcome` | Counter | `delivery_status` | Worker 投递结果（delivered/unknown/failed） |
 | `hotplex.execution.runtime_outcome` | Counter | `runtime_status` | Worker 运行终态（completed/failed/unknown） |
 | `hotplex.execution.delivery_latency` | Histogram | — | accept 到 delivery outcome 耗时 |
