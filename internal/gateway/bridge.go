@@ -621,6 +621,21 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		si.State = events.StateRunning
 	}
 
+	// Hydrate SeqGen from persisted events before createAndLaunchWorker can
+	// allocate the first seq. Platform (messaging) sessions reach resume via
+	// StartPlatformSession → orphan resume, which never traverses the WebSocket
+	// performInit path that hydrates in conn.go. Without this, a session whose
+	// counter was released (RuntimeRelease → ReleaseSeq) restarts from 0 on
+	// resume and collides with durable history, causing recurring UNIQUE
+	// constraint failures on events(session_id, seq_guard_id, seq) (issue #879
+	// regression surviving #900 and 0231fc74, which only hardened the WS path).
+	// A DB error is logged but does not block resume: messaging has no retry
+	// semantics, and a stale counter is no worse than the pre-fix behavior.
+	if err := b.hub.EnsureSeqHydrated(id); err != nil {
+		b.log.Warn("bridge: seq hydration failed before resume; counter may collide with history",
+			"session_id", id, "err", err)
+	}
+
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:                ctx,

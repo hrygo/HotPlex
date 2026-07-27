@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -1141,4 +1142,61 @@ func TestBridge_HandleWorkerExit_StaleForwarderAfterDelete(t *testing.T) {
 	b.handleWorkerExit(oldWorker, params)
 
 	sm.AssertExpectations(t)
+}
+
+// TestBridge_ResumeSession_HydratesSeqFromEventstore verifies that resuming a
+// platform (messaging) session hydrates SeqGen from the eventstore before the
+// first NextSeq. Platform sessions reach resume via StartPlatformSession →
+// orphan resume, never traversing the WebSocket performInit path that hydrates
+// in conn.go. Without this hydrate, a session whose counter was released
+// (RuntimeRelease → ReleaseSeq) restarts near 0 and collides with durable
+// history, causing recurring UNIQUE constraint failures on
+// events(session_id, seq_guard_id, seq) — the issue #879 regression that
+// survived #900 and 0231fc74 because both only hardened the WS path.
+func TestBridge_ResumeSession_HydratesSeqFromEventstore(t *testing.T) {
+	t.Parallel()
+	const sessionID = "sess-resume-hydrate"
+
+	// Persisted history claims 9899 events; resume must seed the counter at
+	// 9899 so the next seq is 9900, not 1.
+	hub := newTestHub(t)
+	hub.SetSeqHydrator(&mockSeqHydrator{seq: 9899})
+	require.False(t, hub.seqGen.IsHydrated(sessionID), "counter must not be hydrated before resume")
+
+	resumedWorker := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+	}
+	sm := new(mockBridgeSM)
+	sm.On("Get", sessionID).Return(&session.SessionInfo{
+		ID: sessionID, UserID: "u1", WorkerType: worker.TypeClaudeCode,
+		State: events.StateTerminated, // orphan terminated → resume (bridge.go:758)
+	}, nil).Once()
+	sm.On("GetWorker", sessionID).Return(nil).Once()
+	sm.On("Transition", mock.Anything, sessionID, events.StateRunning).Return(nil).Once()
+	sm.On("AttachWorker", sessionID, mock.Anything).Return(nil).Once()
+	sm.On("ResetExpiry", mock.Anything, sessionID).Return(nil).Once()
+	// forwardEvents tears down via crash cleanup when the fake conn closes;
+	// report the worker as already-replaced so cleanup short-circuits.
+	sm.On("DetachWorkerIf", sessionID, mock.Anything).Return(false).Maybe()
+
+	b := NewBridge(BridgeDeps{Log: testLogger(t), Hub: hub, SM: sm})
+	b.SetWorkerFactory(&mockBridgeWorkerFactory{workers: []*mockBridgeWorker{resumedWorker}})
+
+	err := b.ResumeSession(context.Background(), sessionID, "")
+	require.NoError(t, err)
+
+	// Core regression assertion: resume hydrated SeqGen from the eventstore, so
+	// the next seq continues monotonically (9900+) instead of restarting near 0
+	// and colliding with persisted history.
+	require.True(t, hub.seqGen.IsHydrated(sessionID), "resume must hydrate SeqGen from eventstore")
+	require.GreaterOrEqual(t, hub.NextSeqPeek(sessionID), int64(9899),
+		"resume must seed counter at persisted max seq; without hydrate it restarts at 0 and collides (issue #879)")
+
+	sm.AssertExpectations(t)
+
+	// Tear down the forwardEvents goroutine spawned by createAndLaunchWorker.
+	b.closed.Store(true)
+	close(resumedWorker.conn.ch)
+	b.WaitForwarders(context.Background())
 }
