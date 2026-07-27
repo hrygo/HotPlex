@@ -59,7 +59,7 @@ CYAN   := \033[36m
 .PHONY: dev dev-start dev-stop dev-status dev-logs dev-reset
 .PHONY: pg-start pg-stop pg-status pg-logs pg-reset dev-pg
 .PHONY: gateway-start gateway-stop gateway-status gateway-logs
-.PHONY: webchat-dev webchat-stop webchat-embed webchat-rebuild
+.PHONY: webchat-dev webchat-stop webchat-embed webchat-rebuild webchat-reset
 .PHONY: docs-build docs-clean docs-lint swagger
 .PHONY: dev-build coverage test-slack-e2e
 .PHONY: test test-short lint fmt quality check clean
@@ -339,6 +339,15 @@ webchat-dev:
 webchat-stop:
 	@./scripts/dev.sh stop webchat
 
+# webchat-reset — stop webchat, wipe the Turbopack cache (.next), restart.
+# Fixes the dev-time CPU spin caused by a bloated/corrupt RocksDB cache
+# (.next/dev/cache/turbopack). Run this whenever next-server idles hot.
+webchat-reset:
+	@./scripts/dev.sh stop webchat
+	@rm -rf $(WEB_CHAT_DIR)/.next
+	@echo "  $(GREEN)✓$(RESET) Cleared $(WEB_CHAT_DIR)/.next (Turbopack cache)"
+	@./scripts/dev.sh start webchat
+
 webchat-embed:
 	@if [ ! -d $(WEB_CHAT_OUT)/_next ]; then \
 		echo "  $(CYAN)Webchat$(RESET)$(DIM) building from scratch...$(RESET)"; \
@@ -468,6 +477,7 @@ help:
 	@echo ""
 	@echo "  $(BOLD)🔄 Workflow"
 	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "dev-reset"   "Restart all services"
+	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "webchat-reset" "Clear .next & restart webchat"
 	@printf "    $(CYAN)make %-15s$(RESET)  %s\n" "quickstart"  "First-time setup"
 	@echo ""
 	@echo "  $(BOLD)🧹 Other"

@@ -32,6 +32,10 @@ function resolveWsUrl(): string {
   // Auto-detect when served from the same Go binary (zero-config).
   if (typeof window !== "undefined") {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // If running on next dev server (port 3000), default fallback should target gateway port 8888
+    if (window.location.port === "3000") {
+      return `${proto}//${window.location.hostname}:8888/ws`;
+    }
     return `${proto}//${window.location.host}/ws`;
   }
   return "ws://localhost:8888/ws";

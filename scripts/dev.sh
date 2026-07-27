@@ -271,7 +271,7 @@ start_webchat() {
     fi
 
     echo -e "  ${DIM}› Starting webchat (port $WEBCHAT_PORT)...${NC}"
-    (cd "$WEBCHAT_DIR" && exec nohup pnpm dev --port "$WEBCHAT_PORT" --hostname 127.0.0.1 >> "$WEBCHAT_LOG" 2>&1 < /dev/null) &
+    (cd "$WEBCHAT_DIR" && exec env HOTPLEX_WEBCHAT_WS_URL="${HOTPLEX_WEBCHAT_WS_URL:-ws://127.0.0.1:8888/ws}" nohup pnpm dev --port "$WEBCHAT_PORT" --hostname 127.0.0.1 >> "$WEBCHAT_LOG" 2>&1 < /dev/null) &
     echo $! > "$WEBCHAT_PID"
     sleep 3
 
