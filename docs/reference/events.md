@@ -164,6 +164,25 @@ type RuntimeExecutionData struct {
 发送。`runtime.execution.completed` 或 `runtime.execution.failed` 在 `done` 之后
 发送（作为 execution 账本的终态通知，与 run 结果分离）。
 
+#### `internal_reset` — Worker 原地重置通知
+
+`additive` 的 worker→gateway **内部协调事件，绝不转发给客户端**（`bridge_forward.go`
+拦截消费）。In-place-reset Worker（OCS、ACP）通过 API/RPC 完成原地状态重置后发出，
+Gateway accumulator 据此递增 generation、清零 turn 计数与 turn 文本缓冲。
+
+```go
+type InternalResetData struct {
+    Generation int64 `json:"generation"` // Worker 侧 reset generation 序号
+}
+```
+
+- **方向**：S → C（仅 Gateway 内部消费，客户端不可见）
+- **稳定性**：`additive`（未知消费者静默忽略）
+- **背压**：**不丢弃** — `base/conn.go` 的 `InjectWithTimeout` 提供 2s 超时，保证 normal load 下不被静默丢弃
+- **发送方**：OCS（`opencodeserver/worker.go`）、ACP（`acp/worker.go`）经 `LoadResetGeneration()` 读取后发出
+
+> **与 fork-based 重置的区别**：Claude Code 等 fork-based Worker 重置时 fork 新进程并替换 Conn；in-place Worker（OCS/ACP）复用同一进程，仅通过 `internal_reset` 向 Gateway 回执新 generation（`ConnReplaced=false`），用于同步内部统计。
+
 #### `state` — 状态变更
 
 ```go
