@@ -922,6 +922,22 @@ func TestResetSession_SuspendsRunBindingDuringConnectionReset(t *testing.T) {
 	require.Equal(t, "run-before-reset", runID, "in-place reset must restore the original run binding")
 }
 
+func TestResetSession_ClearsPendingSupplements(t *testing.T) {
+	t.Parallel()
+	sid := "session-reset-pending"
+	hub := newTestHub(t)
+	sm := new(mockBridgeSM)
+	w := &mockBridgeWorker{}
+	sm.On("GetWorker", sid).Return(w)
+	sm.On("Get", sid).Return(&session.SessionInfo{ID: sid, Platform: "webchat"}, nil)
+	b := NewBridge(BridgeDeps{Log: testLogger(t), Hub: hub, SM: sm})
+	b.pending.Append(sid, "旧上下文追问", newInputEnvelope(t, sid, "旧上下文追问"))
+
+	require.NoError(t, b.ResetSession(context.Background(), sid))
+	_, _, ok := b.pending.DrainAndMerge(sid)
+	require.False(t, ok, "reset must discard supplements from the old context")
+}
+
 func TestResetSession_ReloadsAgentConfig(t *testing.T) {
 	t.Parallel()
 

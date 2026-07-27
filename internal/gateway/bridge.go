@@ -85,8 +85,13 @@ type Bridge struct {
 	// for workers that lack mid-turn support (acp/ocs fallback). PendingBuffer
 	// has its own internal mu, so no separate guard here. Initialized in
 	// NewBridge; nil-safe proxy methods (BufferPending/ClearPending/...).
-	pending  *PendingBuffer
-	replayer PendingReplayer // late-injected (Bridge built before Handler)
+	pending        *PendingBuffer
+	replayer       PendingReplayer // late-injected (Bridge built before Handler)
+	replayMu       sync.Mutex
+	replayWG       sync.WaitGroup
+	replayClosed   bool
+	supplementGate sync.RWMutex
+	replayFences   [64]sync.RWMutex // fixed stripes; serialize replay/supplement with reset/terminate
 
 	crashTracker   map[string]*crashHistory // per-session crash loop detection
 	crashTrackerMu sync.Mutex
@@ -249,15 +254,53 @@ func (b *Bridge) SetPendingReplayer(r PendingReplayer) { b.replayer = r }
 
 // BufferPending appends a busy-supplement for the fallback path (worker lacks
 // mid-turn support). Called from Handler's SESSION_BUSY branch.
-func (b *Bridge) BufferPending(sessionID string, env *events.Envelope, content string) {
+func (b *Bridge) BufferPending(sessionID string, env *events.Envelope, content string) bool {
 	if b.pending != nil {
-		b.pending.Append(sessionID, content, env)
+		return b.pending.Append(sessionID, content, env)
 	}
+	return false
+}
+
+func (b *Bridge) BeginSupplement(sessionID, clientMessageID, payloadHash string) (*supplementLease, supplementDisposition) {
+	if b.pending == nil {
+		return nil, supplementNew
+	}
+	return b.pending.BeginSupplement(sessionID, clientMessageID, payloadHash)
+}
+
+func (b *Bridge) replayFence(sessionID string) *sync.RWMutex {
+	// FNV-1a is sufficient for lock striping and avoids retaining session IDs.
+	var hash uint32 = 2166136261
+	for i := 0; i < len(sessionID); i++ {
+		hash ^= uint32(sessionID[i])
+		hash *= 16777619
+	}
+	return &b.replayFences[hash%uint32(len(b.replayFences))]
+}
+
+func (b *Bridge) lockSupplementSession(sessionID string) (func(), bool) {
+	b.supplementGate.RLock()
+	b.replayMu.Lock()
+	closed := b.replayClosed
+	b.replayMu.Unlock()
+	if closed {
+		b.supplementGate.RUnlock()
+		return nil, false
+	}
+	fence := b.replayFence(sessionID)
+	fence.RLock()
+	return func() {
+		fence.RUnlock()
+		b.supplementGate.RUnlock()
+	}, true
 }
 
 // ClearPending drops buffered supplements for one session. Called when the
 // session is reset/deleted.
 func (b *Bridge) ClearPending(sessionID string) {
+	fence := b.replayFence(sessionID)
+	fence.Lock()
+	defer fence.Unlock()
 	if b.pending != nil {
 		b.pending.Clear(sessionID)
 	}
@@ -268,6 +311,76 @@ func (b *Bridge) ClearAllPending() {
 	if b.pending != nil {
 		b.pending.ClearAll()
 	}
+}
+
+// HandleRepairSuccess resumes supplement replay after a runtime terminal write
+// is repaired and the durable active gate is finally released.
+func (b *Bridge) HandleRepairSuccess(intent execution.RepairIntent) {
+	if intent.Kind == execution.RepairRuntime && intent.SessionID != "" {
+		b.replayPending(intent.SessionID)
+	}
+}
+
+func (b *Bridge) replayPending(sessionID string) {
+	if b.pending == nil || b.replayer == nil || b.closed.Load() {
+		return
+	}
+	merged, repr, token, ok := b.pending.DrainForReplay(sessionID)
+	if !ok {
+		return
+	}
+	replayEnv := cloneForReplay(repr, merged)
+
+	b.replayMu.Lock()
+	if b.replayClosed {
+		b.replayMu.Unlock()
+		return
+	}
+	b.replayWG.Add(1)
+	b.replayMu.Unlock()
+
+	go func() {
+		defer b.replayWG.Done()
+		fence := b.replayFence(sessionID)
+		fence.RLock()
+		defer fence.RUnlock()
+		replayCtx, current := b.pending.ReplayContext(sessionID, token)
+		if !current {
+			return
+		}
+		if err := b.replayer.DeliverReplay(replayCtx, replayEnv); err != nil {
+			b.log.Warn("bridge: supplement replay failed", "session_id", sessionID, "err", err)
+			if !b.closed.Load() {
+				b.pending.RequeueIfCurrent(sessionID, token, merged, replayEnv)
+			}
+			return
+		}
+		b.pending.CompleteReplay(sessionID, token)
+	}()
+}
+
+func (b *Bridge) WaitPendingReplays(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		b.replayWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		b.log.Warn("bridge: shutdown timed out, supplement replays still running")
+	}
+}
+
+// StopPendingReplays prevents repair callbacks or Done handlers from starting
+// new replay work and cancels every in-flight per-session replay context.
+func (b *Bridge) StopPendingReplays() {
+	b.supplementGate.Lock()
+	defer b.supplementGate.Unlock()
+	b.replayMu.Lock()
+	b.replayClosed = true
+	b.replayMu.Unlock()
+	b.ClearAllPending()
 }
 
 // StartSession creates a new session and starts a worker.
@@ -714,6 +827,9 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if w == nil {
 		return fmt.Errorf("bridge: reset: no worker for session %s", sessionID)
 	}
+	fence := b.replayFence(sessionID)
+	fence.Lock()
+	defer fence.Unlock()
 
 	// ResetContext may replace the Worker's connection before returning. Remove
 	// the old run binding first so concurrent input fails closed instead of being
@@ -725,6 +841,12 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 			b.restoreWorkerRun(sessionID, suspendedBinding)
 		}
 		return fmt.Errorf("bridge: reset worker: %w", err)
+	}
+	// A successful reset establishes a new conversation context under the same
+	// session ID. Discard supplements and invalidate in-flight replay tokens from
+	// the old context before the replacement forwarder can emit events.
+	if b.pending != nil {
+		b.pending.Clear(sessionID)
 	}
 	workerRunID := ""
 	if result.ConnReplaced {
@@ -925,6 +1047,7 @@ func isWorkerInUseError(err error) bool {
 func (b *Bridge) Shutdown(ctx context.Context) {
 	b.MarkClosed()
 	b.WaitForwarders(ctx)
+	b.WaitPendingReplays(ctx)
 	// Clear compressCache after all async compression goroutines have finished.
 	b.compressCache.Range(func(key, _ any) bool {
 		b.compressCache.Delete(key)
@@ -948,6 +1071,7 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 // in-flight message handler creates a worker that is immediately killed.
 func (b *Bridge) MarkClosed() {
 	b.closed.Store(true)
+	b.StopPendingReplays()
 	b.shutdownCancel()
 }
 

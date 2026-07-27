@@ -550,6 +550,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		ExecutionStore:         stores.execution,
 		Repairer:               repairer,
 	})
+	repairer.SetSuccessHook(bridge.HandleRepairSuccess)
 
 	// One-time validation sweep: surface stale/invalid agent_config_overrides
 	// written before spec ② write-time validation (#749). Non-blocking.
@@ -1368,6 +1369,15 @@ func shutdownGateway(
 		}
 		shutdownCancel()
 	}()
+
+	// Fence supplement replay before closing Hub/adapters. Repairer.Shutdown
+	// drains its backlog and may otherwise invoke the runtime-success hook while
+	// the gateway is already tearing down, which could start a fresh delivery.
+	if deps.Repairer != nil {
+		deps.Repairer.SetSuccessHook(nil)
+	}
+	deps.Bridge.StopPendingReplays()
+	deps.Bridge.WaitPendingReplays(shutdownCtx)
 
 	if err := deps.Hub.Shutdown(shutdownCtx); err != nil {
 		log.Warn("gateway: hub shutdown", "err", err)

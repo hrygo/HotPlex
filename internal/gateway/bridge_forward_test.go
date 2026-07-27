@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -22,9 +23,15 @@ type fakeReplayer struct {
 	calls       atomic.Int32
 	lastContent atomic.Value // string
 	callCh      chan struct{}
+	err         error
+	releaseCh   chan struct{}
+	finishedCh  chan struct{}
 }
 
-func (r *fakeReplayer) DeliverReplay(_ context.Context, env *events.Envelope) error {
+func (r *fakeReplayer) DeliverReplay(ctx context.Context, env *events.Envelope) error {
+	if r.finishedCh != nil {
+		defer close(r.finishedCh)
+	}
 	r.calls.Add(1)
 	if data, ok := env.Event.Data.(map[string]any); ok {
 		if c, _ := data["content"].(string); c != "" {
@@ -38,7 +45,14 @@ func (r *fakeReplayer) DeliverReplay(_ context.Context, env *events.Envelope) er
 			close(r.callCh)
 		}
 	}
-	return nil
+	if r.releaseCh != nil {
+		select {
+		case <-r.releaseCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return r.err
 }
 
 // newDoneBridgeWithOpenExec builds a Bridge + forwardContext + Done envelope
@@ -113,4 +127,96 @@ func TestFinishRuntimeOnDone_NoPendingNoReplay(t *testing.T) {
 		default:
 		}
 	})
+}
+
+func TestRuntimeRepairSuccess_ReplaysPending(t *testing.T) {
+	t.Parallel()
+	b, fc, env, store := newDoneBridgeWithOpenExec(t, "s-repair-replay")
+	store.finishErr = errors.New("db temporarily unavailable")
+	rp := &fakeReplayer{}
+	b.SetPendingReplayer(rp)
+	b.pending.Append("s-repair-replay", "追问", newInputEnvelope(t, "s-repair-replay", "x"))
+
+	b.finishRuntimeOnDone("s-repair-replay", fc, env)
+	require.Equal(t, int32(0), rp.calls.Load())
+
+	b.HandleRepairSuccess(execution.RepairIntent{
+		SessionID: "s-repair-replay",
+		Kind:      execution.RepairRuntime,
+	})
+	require.Eventually(t, func() bool {
+		return rp.calls.Load() == 1
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestReplayFailure_DoesNotRequeueAfterSessionClear(t *testing.T) {
+	t.Parallel()
+	b, fc, env, _ := newDoneBridgeWithOpenExec(t, "s-replay-clear")
+	rp := &fakeReplayer{
+		err:        errors.New("session terminated"),
+		callCh:     make(chan struct{}),
+		releaseCh:  make(chan struct{}),
+		finishedCh: make(chan struct{}),
+	}
+	b.SetPendingReplayer(rp)
+	b.pending.Append("s-replay-clear", "追问", newInputEnvelope(t, "s-replay-clear", "x"))
+
+	b.finishRuntimeOnDone("s-replay-clear", fc, env)
+	select {
+	case <-rp.callCh:
+	case <-time.After(time.Second):
+		t.Fatal("replay did not start")
+	}
+	clearDone := make(chan struct{})
+	go func() {
+		b.ClearPending("s-replay-clear")
+		close(clearDone)
+	}()
+	select {
+	case <-clearDone:
+		t.Fatal("session clear crossed an in-flight replay fence")
+	default:
+	}
+	close(rp.releaseCh)
+	select {
+	case <-rp.finishedCh:
+	case <-time.After(time.Second):
+		t.Fatal("replay did not finish")
+	}
+	<-clearDone
+
+	_, _, ok := b.pending.DrainAndMerge("s-replay-clear")
+	require.False(t, ok, "a failed stale replay must not resurrect cleared content")
+}
+
+func TestReplayClearedBeforeDispatchDoesNotReachNewContext(t *testing.T) {
+	t.Parallel()
+	b, _, _, _ := newDoneBridgeWithOpenExec(t, "s-replay-reset")
+	rp := &fakeReplayer{}
+	b.SetPendingReplayer(rp)
+	b.pending.Append("s-replay-reset", "旧上下文追问", newInputEnvelope(t, "s-replay-reset", "x"))
+
+	fence := b.replayFence("s-replay-reset")
+	fence.Lock()
+	b.replayPending("s-replay-reset")
+	// ResetSession performs this clear while holding the same write fence.
+	b.pending.Clear("s-replay-reset")
+	fence.Unlock()
+	b.WaitPendingReplays(t.Context())
+
+	require.Zero(t, rp.calls.Load(), "stale replay must be fenced before delivery into reset context")
+}
+
+func TestStopPendingReplaysBlocksRepairCallback(t *testing.T) {
+	t.Parallel()
+	b, _, _, _ := newDoneBridgeWithOpenExec(t, "s-replay-shutdown")
+	rp := &fakeReplayer{}
+	b.SetPendingReplayer(rp)
+	b.pending.Append("s-replay-shutdown", "追问", newInputEnvelope(t, "s-replay-shutdown", "x"))
+
+	b.StopPendingReplays()
+	b.HandleRepairSuccess(execution.RepairIntent{SessionID: "s-replay-shutdown", Kind: execution.RepairRuntime})
+	b.WaitPendingReplays(t.Context())
+
+	require.Zero(t, rp.calls.Load(), "shutdown must reject replay work from a late repair callback")
 }

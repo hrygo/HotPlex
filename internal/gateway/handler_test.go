@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -1335,6 +1336,65 @@ func TestHandleSupplementOnBusy_Passthrough(t *testing.T) {
 	require.False(t, ok, "passthrough path must not buffer")
 }
 
+func TestHandleSupplementOnBusy_AcknowledgesAndDeduplicates(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{}
+	h, _, hub, _ := newBusyTestHandler(t, mw)
+	conn := &mockPlatformConn{}
+	hub.JoinPlatformSession("s", conn)
+
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.Equal(t, 1, mw.injectCount, "same client_message_id must not be injected twice")
+
+	require.Eventually(t, func() bool {
+		acks := 0
+		duplicateSeen := false
+		for _, got := range conn.envelopes() {
+			if got.Event.Type != events.InputAck {
+				continue
+			}
+			data, ok := got.Event.Data.(events.InputAckData)
+			if !ok || data.ClientMessageID != clientMessageID(env) || data.Status != events.ExecutionStatusDelivered {
+				return false
+			}
+			acks++
+			duplicateSeen = duplicateSeen || data.Duplicate
+		}
+		return acks == 2 && duplicateSeen
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestHandleSupplementOnBusy_RejectsSameIDWithDifferentPayload(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{}
+	h, _, hub, _ := newBusyTestHandler(t, mw)
+	conn := &mockPlatformConn{}
+	hub.JoinPlatformSession("s", conn)
+
+	first := newInputEnvelope(t, "s", "first")
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), first, "first"))
+	conflict := events.Clone(first)
+	conflict.Event.Data.(map[string]any)["content"] = "different"
+	err := h.handleSupplementOnBusy(t.Context(), conflict, "different")
+	require.Error(t, err)
+	require.Equal(t, 1, mw.injectCount, "payload conflict must not be injected")
+
+	require.Eventually(t, func() bool {
+		for _, got := range conn.envelopes() {
+			if got.Event.Type != events.Error {
+				continue
+			}
+			data, ok := got.Event.Data.(events.ErrorData)
+			return ok && data.Code == events.ErrCodeInvalidMessage
+		}
+		return false
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestHandleSupplementOnBusy_FallbackBuffer(t *testing.T) {
 	t.Parallel()
 	// mockWorkerForHandler does NOT implement worker.MidTurnInjector, so the
@@ -1349,6 +1409,39 @@ func TestHandleSupplementOnBusy_FallbackBuffer(t *testing.T) {
 	merged, _, ok := bridge.pending.DrainAndMerge("s")
 	require.True(t, ok, "fallback path must buffer the supplement")
 	require.Equal(t, "追问", merged)
+}
+
+func TestHandleSupplementOnBusy_FullBufferReturnsFailureWithoutAck(t *testing.T) {
+	t.Parallel()
+	w := new(mockWorkerForHandler)
+	h, _, hub, bridge := newBusyTestHandler(t, w)
+	conn := &mockPlatformConn{}
+	hub.JoinPlatformSession("s", conn)
+	for i := 0; i < maxPendingPerSession; i++ {
+		env := newInputEnvelope(t, "s", fmt.Sprintf("pending-%d", i))
+		require.True(t, bridge.pending.Append("s", fmt.Sprintf("pending-%d", i), env))
+	}
+
+	overflow := newInputEnvelope(t, "s", "overflow")
+	overflow.Event.Data.(map[string]any)["client_message_id"] = "overflow-id"
+	err := h.handleSupplementOnBusy(t.Context(), overflow, "overflow")
+	require.Error(t, err)
+
+	require.Eventually(t, func() bool {
+		errorSeen := false
+		for _, got := range conn.envelopes() {
+			switch got.Event.Type {
+			case events.InputAck:
+				data, ok := got.Event.Data.(events.InputAckData)
+				if ok && data.ClientMessageID == "overflow-id" {
+					return false
+				}
+			case events.Error:
+				errorSeen = true
+			}
+		}
+		return errorSeen
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestHandleSupplementOnBusy_InjectFailureFallsBack(t *testing.T) {
@@ -1411,4 +1504,38 @@ func TestHandleSupplementOnBusy_GateReleasedBeforeInject(t *testing.T) {
 	err := h.handleSupplementOnBusy(t.Context(), env, "追问")
 	require.Error(t, err, "released gate must route to deliverToWorker")
 	require.Equal(t, 0, mw.injectCount, "must NOT inject once the active gate is released")
+}
+
+func TestHandleSupplementOnBusy_GateReleasedDuringInject(t *testing.T) {
+	t.Parallel()
+	mw := &mockMidTurnWorker{injectErr: errors.New("turn ended")}
+	h, sm, _, bridge := newBusyTestHandler(t, mw)
+	h.executionStore = &fakeExecutionStore{activeResults: []*execution.Record{
+		testExecutionRecord(execution.StatusDelivered),
+		nil,
+	}}
+	sm.On("Get", "s").Return(nil, errors.New("session gone")).Maybe()
+
+	env := newInputEnvelope(t, "s", "追问")
+	env.Seq = 5
+
+	err := h.handleSupplementOnBusy(t.Context(), env, "追问")
+	require.Error(t, err, "gate released during inject must route through normal delivery")
+	require.Equal(t, 1, mw.injectCount)
+	_, _, ok := bridge.pending.DrainAndMerge("s")
+	require.False(t, ok, "released gate must not leave the supplement buffered")
+}
+
+func TestDeliverReplay_BusyReturnsForOuterRequeue(t *testing.T) {
+	t.Parallel()
+	w := new(mockWorkerForHandler)
+	h, sm, _, bridge := newBusyTestHandler(t, w)
+	h.executionStore = &fakeExecutionStore{acceptErr: execution.ErrSessionBusy}
+	sm.On("Get", "s").Return(&session.SessionInfo{ID: "s", State: events.StateRunning}, nil).Maybe()
+
+	env := newInputEnvelope(t, "s", "replay")
+	err := h.DeliverReplay(t.Context(), env)
+	require.ErrorIs(t, err, execution.ErrSessionBusy)
+	_, _, ok := bridge.pending.DrainAndMerge("s")
+	require.False(t, ok, "DeliverReplay must not recursively enter supplement buffering")
 }

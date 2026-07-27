@@ -130,6 +130,45 @@ func TestRepairer_SuccessfulProcessing(t *testing.T) {
 	r.Shutdown(context.Background())
 }
 
+func TestRepairer_RuntimeSuccessHook(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newRepairTestStore(t)
+	ensureRepairSession(t, sessionStore, "session-hook")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rec, _, err := store.Accept(ctx, AcceptRequest{
+		SessionID: "session-hook", ClientMessageID: "msg-hook", PayloadHash: "h",
+		OwnerInstanceID: testOwner, WorkerRunID: testRun,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetDelivery(ctx, rec.ExecutionID, testOwner, StatusDelivered, ""))
+	require.NoError(t, store.MarkRunning(ctx, rec.ExecutionID, testOwner, testRun))
+
+	hookCh := make(chan RepairIntent, 1)
+	r := NewRepairer(store, fastRepairConfig(), nil)
+	r.SetSuccessHook(func(intent RepairIntent) {
+		hookCh <- intent
+	})
+	r.Start(ctx)
+	r.Enqueue(RepairIntent{
+		ExecutionID: rec.ExecutionID,
+		SessionID:   "session-hook",
+		WorkerRunID: testRun,
+		Kind:        RepairRuntime,
+		Status:      string(RuntimeCompleted),
+	})
+
+	select {
+	case got := <-hookCh:
+		require.Equal(t, "session-hook", got.SessionID)
+		require.Equal(t, RepairRuntime, got.Kind)
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime repair success hook was not called")
+	}
+	r.Shutdown(context.Background())
+}
+
 func TestRepairer_RetryAfterFailure(t *testing.T) {
 	t.Parallel()
 	store, sessionStore := newRepairTestStore(t)

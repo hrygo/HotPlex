@@ -56,24 +56,29 @@ func TestPendingBuffer_DrainAndMerge(t *testing.T) {
 	}
 }
 
-func TestPendingBuffer_DedupAdjacentAndCap(t *testing.T) {
+func TestPendingBuffer_PreservesDuplicatesAndRejectsAtCap(t *testing.T) {
 	t.Parallel()
 	pb := NewPendingBuffer()
 	env := newInputEnvelope(t, "s", "x")
-	// 相邻完全相同去重
-	pb.Append("s", "同", env)
-	pb.Append("s", "同", env)
+	// 不按内容去重：不同 client_message_id 的相同消息都已获得独立 ACK，
+	// 因此必须都保留。
+	require.True(t, pb.Append("s", "同", env))
+	require.True(t, pb.Append("s", "同", env))
 	merged, _, _ := pb.DrainAndMerge("s")
-	require.Equal(t, "同", merged) // 只剩一条
+	require.Contains(t, merged, "2 条消息")
+	require.Contains(t, merged, "1. 同")
+	require.Contains(t, merged, "2. 同")
 
-	// 上限 20：塞 25 条，只保留最新 20，合并后编号 1..20
-	for i := 0; i < 25; i++ {
-		pb.Append("s", fmt.Sprintf("m%d", i), env)
+	// 上限 20：前 20 条成功，第 21 条明确拒绝；不能驱逐已确认消息。
+	for i := 0; i < maxPendingPerSession; i++ {
+		require.True(t, pb.Append("s", fmt.Sprintf("m%d", i), env))
 	}
+	require.False(t, pb.Append("s", "overflow", env))
 	merged, _, _ = pb.DrainAndMerge("s")
 	require.Contains(t, merged, "20 条消息")
-	require.Contains(t, merged, "1. m5") // 最旧保留的是 m5（丢 m0..m4）
-	require.Contains(t, merged, "20. m24")
+	require.Contains(t, merged, "1. m0")
+	require.Contains(t, merged, "20. m19")
+	require.NotContains(t, merged, "overflow")
 }
 
 func TestPendingBuffer_Concurrent(t *testing.T) {
@@ -87,6 +92,71 @@ func TestPendingBuffer_Concurrent(t *testing.T) {
 	}
 	for i := 0; i < 100; i++ {
 		<-done
+	}
+}
+
+func TestPendingBuffer_SupplementReservationWaitsAndChecksPayload(t *testing.T) {
+	t.Parallel()
+	pb := NewPendingBuffer()
+	lease, state := pb.BeginSupplement("s", "msg-1", "hash-a")
+	require.Equal(t, supplementNew, state)
+
+	resultCh := make(chan supplementDisposition, 1)
+	go func() {
+		_, got := pb.BeginSupplement("s", "msg-1", "hash-a")
+		resultCh <- got
+	}()
+	select {
+	case <-resultCh:
+		t.Fatal("duplicate observed a provisional reservation before it committed")
+	default:
+	}
+
+	lease.Commit(supplementInjected)
+	require.Equal(t, supplementInjected, <-resultCh)
+
+	_, conflict := pb.BeginSupplement("s", "msg-1", "hash-b")
+	require.Equal(t, supplementConflict, conflict)
+}
+
+func TestPendingBuffer_AbortedReservationLetsWaiterRetry(t *testing.T) {
+	t.Parallel()
+	pb := NewPendingBuffer()
+	lease, state := pb.BeginSupplement("s", "msg-1", "hash-a")
+	require.Equal(t, supplementNew, state)
+
+	resultCh := make(chan supplementDisposition, 1)
+	leaseCh := make(chan *supplementLease, 1)
+	go func() {
+		next, got := pb.BeginSupplement("s", "msg-1", "hash-a")
+		leaseCh <- next
+		resultCh <- got
+	}()
+	lease.Abort()
+	next := <-leaseCh
+	require.Equal(t, supplementNew, <-resultCh)
+	next.Commit(supplementBuffered)
+}
+
+func TestPendingBuffer_ProvisionalReservationsAreBounded(t *testing.T) {
+	t.Parallel()
+	pb := NewPendingBuffer()
+	leases := make([]*supplementLease, 0, maxAcceptedSupplementsPerSession)
+	for i := 0; i < maxAcceptedSupplementsPerSession; i++ {
+		lease, state := pb.BeginSupplement("s", fmt.Sprintf("msg-%d", i), fmt.Sprintf("hash-%d", i))
+		require.Equal(t, supplementNew, state)
+		leases = append(leases, lease)
+	}
+	lease, state := pb.BeginSupplement("s", "overflow", "hash-overflow")
+	require.Nil(t, lease)
+	require.Equal(t, supplementCapacity, state)
+
+	leases[0].Abort()
+	replacement, state := pb.BeginSupplement("s", "replacement", "hash-replacement")
+	require.Equal(t, supplementNew, state)
+	replacement.Abort()
+	for _, held := range leases[1:] {
+		held.Abort()
 	}
 }
 

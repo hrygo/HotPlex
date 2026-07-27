@@ -114,12 +114,19 @@ ACK 丢失等投递结果不明的情况下重发时，必须复用原 Envelope�
 同一 Session 内，相同 ID + 相同 payload 不会再次调用 Worker，相同 ID + 不同
 payload 会返回 `INVALID_MESSAGE`。消息平台适配器使用平台原生 message ID。
 
-`failed` 或 `SESSION_BUSY` 表示本次投递已明确失败，后续逻辑重试应使用新 ID。
+`failed` 或未被 Gateway 补充消息机制接管的 `SESSION_BUSY` 表示本次投递已明确失败，
+后续逻辑重试应使用新 ID。Session 正在执行时，Gateway 可将追加输入注入当前 turn，
+或在内存中暂存并在当前 turn 结束后重投；这两种情况都会返回终态
+`input.ack(delivered)`，重发相同 ID 时返回 `duplicate: true` 且不会再次注入或暂存。
 `unknown` 表示可能已产生副作用：复用原 ID 只会查询现状；若用户明确接受重复风险
 并决定再次执行，则必须创建新 ID。
 
-只有实际投递给 Worker 的普通输入进入持久化账本；Gateway 自身处理的帮助、
-控制和 Worker 命令不产生 `input.ack`。
+只有实际投递给 Worker 的普通输入进入持久化账本。忙碌期间的补充消息使用有界的
+进程内去重记录，并直接返回终态 ACK；该记录不会跨 Gateway 重启持久化。Gateway
+自身处理的帮助、控制和 Worker 命令不产生 `input.ack`。
+
+每个 Session 最多保留 20 条待重放补充（包含正在投递的重放）；容量已满时新补充会
+收到 `SESSION_BUSY` 错误且不会收到 `input.ack(delivered)`，已确认条目不会被驱逐。
 
 ### permission_response（权限响应）
 
@@ -479,7 +486,7 @@ Worker 请求人类介入的结构化交互事件。默认 5 分钟超时自动�
 |------|------|
 | `SESSION_NOT_FOUND` | Session 不存在 |
 | `SESSION_EXPIRED` | Session 已过期 |
-| `SESSION_BUSY` | 正在执行，拒绝新 input |
+| `SESSION_BUSY` | 正在执行且补充消息未被注入或暂存，因而拒绝新 input |
 | `SESSION_ALREADY_CONNECTED` | 此 session 已有直接 `/ws` 连接；当前连接不可用，等待原连接关闭后再显式、串行重试（内置 WebChat 与企业 WS 集成都适用） |
 | `SESSION_TERMINATED` | Session 已终止 |
 | `SESSION_INVALIDATED` | Session 被失效 |

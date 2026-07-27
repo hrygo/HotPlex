@@ -19,7 +19,9 @@
 1. **worker 支持 mid-turn（CC、codex）→ 透传**：把追问直接注入当前 running turn（写 worker stdin / 调 `turn/steer`），不创建新 execution、不占 active gate 槽、不暂存。worker 自决如何在当前 turn 内处理——符合"hotplex 不做 input 控制、由 worker 自身决定"的原则。
 2. **worker 不支持（ocs 待定、acp 协议层不可能）→ 兜底**：gateway 暂存 + done 后合并重投（即 `pending-replay` 设计，保留为 fallback）。
 
-**不修改 active gate 单活跃约束**（partial unique index 不动），**不修改 AEP wire contract**。
+**不修改 active gate 单活跃约束**（partial unique index 不动），**不新增 AEP wire 类型**。
+补充消息复用现有 `input.ack`：首次注入或暂存返回终态 `delivered`，相同
+`client_message_id` 重发返回 `duplicate: true`，不会再次产生副作用。
 
 ## 背景与已证实问题
 
@@ -155,7 +157,7 @@ type pendingEntry struct {
 
 | 方法 | 行为 |
 |---|---|
-| `BufferPending(sid, env, content)` | 追加；相邻完全相同 content 去重；超 `maxPendingPerSession`（默认 20）丢最旧保最新 |
+| `BufferPending(sid, env, content)` | 容量内追加并返回成功；达到 `maxPendingPerSession`（默认 20，包含在途重放）时明确拒绝新消息，不驱逐任何已确认条目 |
 | `DrainAndMerge(sid) (merged string, repr *Envelope, ok bool)` | 原子取出并清空；单条原样、多条加合并头+编号；repr 取最后一条 envelope 作重投模板 |
 | `Clear(sid)` / `ClearAll()` | 清理 |
 
@@ -230,19 +232,21 @@ if merged, repr, ok := b.pending.DrainAndMerge(sessionID); ok && b.replayer != n
 | `ReplayPendingIfNeeded`（done 重投）后 | `DrainAndMerge` 已清空 |
 | 各渠道 `conn.Close` | `Clear(sessionID)` |
 | `PlatformAdapter.CloseSharedState` | `ClearAll()` |
-| reset | sessionID 变更，旧 buffer 随旧 conn.Close 清理；新 session 天然隔离 |
+| reset | 原地清空该 session 的 pending buffer，并使在途重放 token 失效，避免失败回补复活旧消息 |
 
 **不主动超时**：长任务不应丢消息；生命周期由 session 兜底。
 
 ## 边界与异常
 
-- **透传 mid-turn input 不进 execution ledger**（不占 active gate 槽），但加 metric（`mid_turn_injected_total` / `supplement_buffered_total`）+ `CaptureInboundEvent` 保最低可观测。重启时透传 mid-turn 状态无持久化（CC 自身 agentic loop 持有），可接受。
+- **补充消息 ACK 与去重**：mid-turn input 不进 execution ledger（不占 active gate 槽），但 Gateway 为其维护有界的进程内 `client_message_id` 去重记录，并复用现有 `input.ack` 返回终态确认。ACK 丢失后在同一 Gateway 进程内重发不会再次注入或暂存；进程重启后记录不保留。
+- **最低可观测**：透传增加 metric（`mid_turn_injected_total` / `supplement_buffered_total`）并调用 `CaptureInboundEvent`。
 - **透传不污染崩溃恢复 lastInput**：CC `InjectMidTurn` 必须复用 `writeStreamInputLocked`（`input.go:43`）的 stdin 写内核，**不得调完整 `w.Input`**——否则 `SetLastInput` 会把 mid-turn 内容写入 lastInput，崩溃恢复（`bridge_worker.go` 重投 lastInput）将误重投 mid-turn 而非原 turn input。codex `InjectMidTurn` 走 `SteerTurn`、不经 `turn/start`，同样不更新 lastInput。
 - **重投用新 id**：`events.CloneForReplay` 生成新 `client_message_id`，避免去重误判。
 - **多 session 隔离**：buffer 按 `sessionID`，天然隔离。
 - **重投又 busy**：递归 `BufferPending`，等下一个 done。
-- **透传失败回退**（codex 极小竞态、CC stdin 写失败）：`InjectMidTurn` 返回 error → gateway 落入兜底。
-- **reset 期间**：旧 buffer 随旧 conn.Close 清理；新 session 无 pending。
+- **透传失败回退**：`InjectMidTurn` 返回 error 后 Gateway 再查 active gate；若原 turn 已结束，则按普通新 turn 投递，否则落入兜底。CC 在 Worker 内以 active-turn fence 将 `Done` 与 stdin 注入串行化，关闭检查与写入之间的 ghost-turn 窗口。
+- **runtime 修复后重放**：`FinishRuntime` 直接成功或经 repairer 异步修复成功，都会触发 pending replay；repairer 成功回调只在终态已持久化后发出。
+- **reset 期间**：同一 session ID 的 pending buffer 被显式清空；生命周期 token 防止更早的失败重放重新入队。
 - **合并后 Worker 处理失败**：属正常 turn 错误，走各渠道现有 error 展示，不影响 pending 机制。
 - **Worker 卡死永不 done**：lease 过期 → fence → fresh worker；兜底 buffer 残留由 `conn.Close`/`CloseSharedState` 兜底清理。
 
@@ -253,10 +257,13 @@ if merged, repr, ok := b.pending.DrainAndMerge(sessionID); ok && b.replayer != n
 - **透传失败回退**：`InjectMidTurn` 返回 error → 落入 `BufferPending`。
 - **兜底完整链路**：busy → buffer → done → `DrainAndMerge` → 合并重投（基座单测，mock worker 不实现 `MidTurnInjector`）。
 - **合并顺序与编号格式**；单条原样（无合并头）。
-- **上限 20 截断**（保最新）；相邻完全相同 content 去重；不同 content 不去重。
+- **上限 20 拒绝**：前 20 条保留，第 21 条返回明确失败且不发送 delivered ACK；即使内容相同，只要 client message ID 不同也分别保留。
 - **重投新 id**；`seq` 由 Handle 重分配。
 - **worker 能力探测**：实现 `MidTurnInjector` 走透传；不实现走兜底。
 - **并发**：`BufferPending` 与 `DrainAndMerge` 并发安全（`-race`）；透传 stdin 写与 control 写的锁复用。
+- **ACK 去重**：首次补充返回 `input.ack(delivered)`；相同 ID 重发返回 `duplicate: true`，注入/暂存只发生一次。
+- **终态竞态**：CC `Done` 先于注入时拒绝 mid-turn 写并改走普通投递，不产生 ghost turn。
+- **修复闭环**：runtime terminal repair 成功后触发 pending replay；失败重放与 `/reset` 并发时不得重新入队。
 - **三渠道文案**：injected / buffered 两 mode 各发对应文案；yuanxin 不再黑洞。
 - **清理**：reset / `conn.Close` / `CloseSharedState`。
 
@@ -268,7 +275,7 @@ if merged, repr, ok := b.pending.DrainAndMerge(sessionID); ok && b.replayer != n
 | `internal/worker/claudecode/worker.go` | 实现 `InjectMidTurn`（复用 `writeStreamInputLocked`） |
 | `internal/worker/codexcli/worker.go` | 实现 `InjectMidTurn`（调 `manager.SteerTurn`） |
 | `internal/gateway/handler.go` | `:536` busy 分支改造：透传/兜底决策；`notifySupplement`（hub 发 message+metadata）；`DeliverReplay`（实现 `PendingReplayer`） |
-| `internal/gateway/pending_buffer.go`（新） | `pendingEntry` + `PendingBuffer`：`BufferPending`/`DrainAndMerge`/`Clear`/`ClearAll`（去重+上限20）；私有 `cloneForReplay`（`events.Clone`+`aep.NewID`，写新 `client_message_id`） |
+| `internal/gateway/pending_buffer.go`（新） | `pendingEntry` + `PendingBuffer`：`BufferPending`/`DrainAndMerge`/`Clear`/`ClearAll`（按 ID 幂等、payload 冲突检测、容量20）；私有 `cloneForReplay`（`events.Clone`+`aep.NewID`，写新 `client_message_id`） |
 | `internal/gateway/bridge.go` | `pending *PendingBuffer` 字段；`PendingReplayer` 接口 + `SetPendingReplayer` late setter（仿 `SetAuditCollector:227`）；`Clear`/`ClearAll` 代理 |
 | `internal/gateway/bridge_forward.go` | `:527` done 成功后 `DrainAndMerge` + goroutine 异步 `replayer.DeliverReplay`（避开 seq lease） |
 | `cmd/hotplex/gateway_run.go` | `:557` 注入 `bridge.SetPendingReplayer(handler)` |
@@ -292,7 +299,7 @@ if merged, repr, ok := b.pending.DrainAndMerge(sessionID); ok && b.replayer != n
 | 透传即时反馈 | 发提示 | IM 渠道 worker 回复可能很久，用户需即时确认追问没丢 |
 | 透传 ledger | 不进（仅 metric） | 不占 active gate；mid-turn 状态由 worker agentic loop 持有 |
 | 超时 | 不主动超时 | 随 session 清理；长任务不应丢消息 |
-| 单 session 上限 | 20 条（兜底） | 防滥用与内存；超出保留最新 |
+| 单 session 上限 | 20 条（兜底，包含在途重放） | 防滥用与内存；满时拒绝新补充，绝不丢弃已返回 delivered ACK 的条目 |
 
 ## 非目标
 
@@ -306,6 +313,6 @@ if merged, repr, ok := b.pending.DrainAndMerge(sessionID); ok && b.replayer != n
 
 ## 与现有设计的关系
 
-- **演进 `2026-07-25-session-busy-pending-replay-design.md`**：其兜底（PendingBuffer / 合并重投）保留为本设计对不支持 worker 的 fallback；新增 mid-turn 透传为主路径。两者不矛盾，pending-replay 的合并格式、上限、去重逻辑直接复用。
+- **演进 `2026-07-25-session-busy-pending-replay-design.md`**：其兜底（PendingBuffer / 合并重投）保留为本设计对不支持 worker 的 fallback；新增 mid-turn 透传为主路径。合并格式继续复用，但容量策略改为“满时明确拒绝”，幂等改为按 client message ID + payload hash 判定，避免确认后丢失。
 - **不冲突 `2026-07-16-webchat-follow-up-queue-design.md`**：该设计是 webchat **前端**页面级 FIFO 队列（stop-and-send），明确边界"不修改 Slack/飞书/Cron 入站行为"；本设计是 **gateway/messaging 层** mid-turn，聚焦 IM 渠道。该设计 :98 "不引入 Worker 原生 mid-turn steering" 是其前端设计的边界选择（彼时未验证 CC 支持），不约束 IM 层——本设计以 CC 实测为据，在 IM 层引入 mid-turn。
 - **遵守 `2026-07-14-durable-ingress-reliability-closure-design.md`**：active gate 单活跃不变；透传注入当前 turn（不开第二个 execution），不触发"避免重复副作用"（该不变量针对重投，非注入）。

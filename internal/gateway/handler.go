@@ -522,10 +522,62 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 // Decision order:
 //  1. Worker implements MidTurnInjector AND !IsStopped → InjectMidTurn.
 //     Success → metric + capture + "injected" notify + return nil.
-//     Failure → log and fall through to buffer.
+//     Failure → re-check the gate; deliver as a new turn if released, otherwise
+//     fall through to the buffer.
 //  2. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
 //  3. Otherwise → legacy sendErrorf SESSION_BUSY.
 func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string) error {
+	if h.bridge == nil {
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
+	}
+	unlockSession, ok := h.bridge.lockSupplementSession(env.SessionID)
+	if !ok {
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionTerminated, "gateway is shutting down")
+	}
+	sessionLocked := true
+	defer func() {
+		if sessionLocked {
+			unlockSession()
+		}
+	}()
+
+	clientID := clientMessageID(env)
+	payloadHash, err := inputPayloadHash(env)
+	if err != nil {
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "cannot hash supplement payload")
+	}
+	lease, disposition := h.bridge.BeginSupplement(env.SessionID, clientID, payloadHash)
+	switch disposition {
+	case supplementConflict:
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage,
+			"client message id %q was already used with different input", clientID)
+	case supplementCapacity:
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "too many concurrent supplement attempts")
+	case supplementInjected, supplementBuffered:
+		h.ackSupplement(ctx, env, "", true)
+		return nil
+	case supplementNormal:
+		unlockSession()
+		sessionLocked = false
+		return h.deliverToWorker(ctx, env, content)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			lease.Abort()
+		}
+	}()
+	deliverAsNewTurn := func() (bool, error) {
+		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, false)
+		if errors.Is(err, execution.ErrSessionBusy) {
+			return false, nil
+		}
+		if err == nil {
+			lease.Commit(supplementNormal)
+			committed = true
+		}
+		return true, err
+	}
 	if w := h.sm.GetWorker(env.SessionID); w != nil {
 		if inj, ok := w.(worker.MidTurnInjector); ok && !w.IsStopped() {
 			// Re-check the active gate immediately before injecting. A race
@@ -536,13 +588,15 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 			// a new unsolicited CC turn — CC headless stays alive reading stdin
 			// after Done — producing a ghost turn with no execution record. If
 			// the gate is already released, route to the normal delivery path so
-			// the supplement becomes a proper new turn. (Codex avoids this via
-			// SteerTurn's expectedTurnID; CC has no turn-liveness signal, so we
-			// re-check here. A residual sub-millisecond window between this check
-			// and the stdin write remains by design.)
+			// the supplement becomes a proper new turn. Codex avoids this via
+			// SteerTurn's expectedTurnID; Claude Code uses a worker-local active-turn
+			// fence so InjectMidTurn rejects writes after Done even if the gate
+			// changes between this check and the stdin write.
 			if h.executionStore != nil {
 				if _, aerr := h.executionStore.ActiveBySession(ctx, env.SessionID); errors.Is(aerr, execution.ErrNotFound) {
-					return h.deliverToWorker(ctx, env, content)
+					if handled, deliverErr := deliverAsNewTurn(); handled {
+						return deliverErr
+					}
 				}
 			}
 			if err := inj.InjectMidTurn(ctx, content, nil); err == nil {
@@ -550,21 +604,59 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 				if h.bridge != nil {
 					h.bridge.CaptureInboundEvent(env.SessionID, env.Seq, events.Input, env.Event.Data)
 				}
+				lease.Commit(supplementInjected)
+				committed = true
+				h.ackSupplement(ctx, env, "injected", false)
 				h.notifySupplement(ctx, env.SessionID, "injected")
 				return nil
 			} else {
 				h.log.Warn("gateway: mid-turn inject failed, falling back to buffer",
 					"session_id", env.SessionID, "err", err)
+				if h.executionStore != nil {
+					if _, aerr := h.executionStore.ActiveBySession(ctx, env.SessionID); errors.Is(aerr, execution.ErrNotFound) {
+						if handled, deliverErr := deliverAsNewTurn(); handled {
+							return deliverErr
+						}
+					}
+				}
 			}
 		}
 	}
-	if h.bridge != nil {
-		h.bridge.BufferPending(env.SessionID, env, content)
-		observability.SupplementBuffered().Add(ctx, 1)
-		h.notifySupplement(ctx, env.SessionID, "buffered")
-		return nil
+	if !h.bridge.BufferPending(env.SessionID, env, content) {
+		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "supplement buffer is full")
 	}
-	return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
+	lease.Commit(supplementBuffered)
+	committed = true
+	observability.SupplementBuffered().Add(ctx, 1)
+	h.ackSupplement(ctx, env, "buffered", false)
+	h.notifySupplement(ctx, env.SessionID, "buffered")
+	return nil
+}
+
+// ackSupplement settles AEP clients for a busy input that was accepted outside
+// the execution ledger. The stable synthetic execution ID mirrors command ACKs;
+// client_message_id remains the authoritative correlation and dedup key.
+func (h *Handler) ackSupplement(ctx context.Context, source *events.Envelope, mode string, duplicate bool) {
+	if h.hub == nil {
+		return
+	}
+	clientID := clientMessageID(source)
+	ack := events.NewEnvelope(aep.NewID(), source.SessionID, h.hub.NextSeq(source.SessionID), events.InputAck, events.InputAckData{
+		ClientMessageID: clientID,
+		ExecutionID:     "supplement-" + clientID,
+		Status:          events.ExecutionStatusDelivered,
+		Duplicate:       duplicate,
+	})
+	ack.Priority = events.PriorityControl
+	ack.OwnerID = source.OwnerID
+	ack.Metadata = map[string]any{"client_message_id": clientID}
+	if mode != "" {
+		ack.Metadata["supplement_mode"] = mode
+	}
+	if err := h.hub.SendToSession(context.WithoutCancel(ctx), ack); err != nil {
+		h.log.Warn("gateway: supplement ack delivery failed", "err", err,
+			"session_id", source.SessionID, "client_message_id", clientID)
+	}
 }
 
 // notifySupplement broadcasts a marker `message` envelope so platform conns
@@ -586,12 +678,19 @@ func (h *Handler) notifySupplement(ctx context.Context, sessionID, mode string) 
 func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error {
 	data, _ := env.Event.Data.(map[string]any)
 	content, _ := data["content"].(string)
-	return h.deliverToWorker(ctx, env, content)
+	// The Bridge already holds the session replay read fence. Returning a raw
+	// busy result lets replayPending requeue without recursively entering the
+	// supplement handler and acquiring the same RWMutex behind a queued writer.
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, false)
 }
 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, true)
+}
+
+func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, handleBusy bool) error {
 	inputReceivedAt := time.Now()
 	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
@@ -611,6 +710,9 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 		if errors.Is(err, execution.ErrSessionBusy) {
 			observability.ExecutionSessionBusy().Add(ctx, 1)
 			h.cancelRetryIfNeeded(env.SessionID)
+			if !handleBusy {
+				return execution.ErrSessionBusy
+			}
 			return h.handleSupplementOnBusy(ctx, env, content)
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
@@ -848,6 +950,34 @@ func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope
 	if h.executionStore == nil {
 		return nil, false, nil
 	}
+	payloadHash, err := inputPayloadHash(env)
+	if err != nil {
+		return nil, false, err
+	}
+	workerRunID := ""
+	if h.bridge != nil {
+		workerRunID, _ = h.bridge.CurrentWorkerRunID(env.SessionID)
+	}
+	if workerRunID == "" {
+		// Duplicate lookup must remain possible even when the session currently has
+		// no Worker. A newly accepted record is rebound to the actual attach run by
+		// MarkRunning after resume/fresh-start readiness.
+		workerRunID = "run_" + uuid.NewString()
+	}
+	record, duplicate, err := h.executionStore.Accept(ctx, execution.AcceptRequest{
+		SessionID:       env.SessionID,
+		ClientMessageID: clientMessageID(env),
+		PayloadHash:     payloadHash,
+		OwnerInstanceID: h.ownerInstanceID,
+		WorkerRunID:     workerRunID,
+	})
+	if err != nil {
+		return nil, duplicate, err
+	}
+	return record, duplicate, nil
+}
+
+func inputPayloadHash(env *events.Envelope) (string, error) {
 	// Hash only the user payload (content + metadata). Transport metadata such
 	// as platform_msg_id is also the idempotency key, so including it would
 	// couple the lookup key to the hashed payload — strip it before hashing.
@@ -866,29 +996,9 @@ func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope
 	}
 	payload, err := json.Marshal(hashData)
 	if err != nil {
-		return nil, false, fmt.Errorf("marshal input for idempotency: %w", err)
+		return "", fmt.Errorf("marshal input for idempotency: %w", err)
 	}
-	workerRunID := ""
-	if h.bridge != nil {
-		workerRunID, _ = h.bridge.CurrentWorkerRunID(env.SessionID)
-	}
-	if workerRunID == "" {
-		// Duplicate lookup must remain possible even when the session currently has
-		// no Worker. A newly accepted record is rebound to the actual attach run by
-		// MarkRunning after resume/fresh-start readiness.
-		workerRunID = "run_" + uuid.NewString()
-	}
-	record, duplicate, err := h.executionStore.Accept(ctx, execution.AcceptRequest{
-		SessionID:       env.SessionID,
-		ClientMessageID: clientMessageID(env),
-		PayloadHash:     sha256Hex(string(payload)),
-		OwnerInstanceID: h.ownerInstanceID,
-		WorkerRunID:     workerRunID,
-	})
-	if err != nil {
-		return nil, duplicate, err
-	}
-	return record, duplicate, nil
+	return sha256Hex(string(payload)), nil
 }
 
 // acceptInputExecutionWithRetry accepts the input, and if the session is fenced

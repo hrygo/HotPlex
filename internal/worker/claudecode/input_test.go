@@ -128,6 +128,9 @@ func TestInjectMidTurn_WritesStdinWithoutSetLastInput(t *testing.T) {
 	baseConn := base.NewConn(slog.Default(), w, "user1", "sess1")
 	ww := New()
 	ww.testConn = baseConn
+	ww.turnMu.Lock()
+	ww.turnActive = true
+	ww.turnMu.Unlock()
 
 	content := "BONUS: tell me 7+8"
 	require.NoError(t, ww.InjectMidTurn(t.Context(), content, nil))
@@ -145,4 +148,34 @@ func TestInjectMidTurn_WritesStdinWithoutSetLastInput(t *testing.T) {
 
 	// Critical correctness invariant: InjectMidTurn must NOT update lastInput.
 	require.Empty(t, baseConn.LastInput(), "InjectMidTurn must not SetLastInput")
+}
+
+func TestInjectMidTurn_RejectsWhenTurnAlreadyFinished(t *testing.T) {
+	t.Parallel()
+
+	r, stdin, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	t.Cleanup(func() { _ = stdin.Close() })
+
+	baseConn := base.NewConn(slog.Default(), stdin, "user1", "sess1")
+	ww := New()
+	ww.testConn = baseConn
+
+	err = ww.InjectMidTurn(t.Context(), "late supplement", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no active turn")
+}
+
+func TestInput_ClosedStdinDoesNotLeaveTurnActive(t *testing.T) {
+	t.Parallel()
+
+	ww := New()
+	ww.testConn = base.NewConn(slog.Default(), nil, "user1", "sess1")
+
+	err := ww.Input(t.Context(), "primary input", nil)
+	require.Error(t, err)
+	ww.turnMu.Lock()
+	require.False(t, ww.turnActive)
+	ww.turnMu.Unlock()
 }

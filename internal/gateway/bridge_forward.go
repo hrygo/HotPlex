@@ -518,6 +518,7 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 		if b.repairer != nil {
 			b.repairer.Enqueue(execution.RepairIntent{
 				ExecutionID: rec.ExecutionID,
+				SessionID:   sessionID,
 				WorkerRunID: fc.workerRunID,
 				Kind:        execution.RepairRuntime,
 				Status:      string(rtStatus),
@@ -535,21 +536,7 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 	// BeginSeqOperation), so the replay MUST run async — DeliverReplay →
 	// deliverToWorker → acceptInputExecution re-enters the seq barrier in its
 	// own context. cloneForReplay sets seq=0 so the hub reassigns it.
-	if b.pending != nil && b.replayer != nil {
-		if merged, repr, ok := b.pending.DrainAndMerge(sessionID); ok {
-			replayEnv := cloneForReplay(repr, merged)
-			go func() {
-				if err := b.replayer.DeliverReplay(context.Background(), replayEnv); err != nil {
-					b.log.Warn("bridge: supplement replay failed",
-						"session_id", sessionID, "err", err)
-					// Replay collided with a fresh input that re-occupied the
-					// gate between Done and the async dispatch. Re-buffer for
-					// the next Done so the supplement is not lost.
-					b.pending.Append(sessionID, merged, replayEnv)
-				}
-			}()
-		}
-	}
+	b.replayPending(sessionID)
 
 	observability.ExecutionRuntimeOutcome().Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("runtime_status", string(rtStatus))))
