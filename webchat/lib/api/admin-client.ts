@@ -133,6 +133,7 @@ async function adminFetchCookie<T>(
   const res = await fetch(`${adminUrl}${path}`, {
     ...options,
     ...authOpts(),
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...((options?.headers as Record<string, string> | undefined) ?? {}),

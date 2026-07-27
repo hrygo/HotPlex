@@ -16,7 +16,12 @@ function browserReachableUrl(rawUrl: string): string {
   if (typeof window === "undefined") return rawUrl;
   try {
     const url = new URL(rawUrl);
-    if (url.hostname === "0.0.0.0" || url.hostname === "::") {
+    if (
+      url.hostname === "0.0.0.0" ||
+      url.hostname === "::" ||
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1"
+    ) {
       url.hostname = window.location.hostname || "localhost";
       return url.toString();
     }
@@ -53,7 +58,11 @@ export const apiKey: string =
 // as the gateway (embedded via go:embed). In this mode, cookie auth is used
 // instead of X-API-Key header, so no build-time secret is needed.
 export function isSameOrigin(): boolean {
-  return typeof window !== "undefined" && !process.env.HOTPLEX_WEBCHAT_WS_URL;
+  return (
+    typeof window !== "undefined" &&
+    !process.env.HOTPLEX_WEBCHAT_WS_URL &&
+    window.location.port !== "3000"
+  );
 }
 
 // -- Per-session init config -------------------------------------------
