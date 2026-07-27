@@ -117,12 +117,18 @@ func (c *SlackConn) handleSkillsList(ctx context.Context, env *events.Envelope) 
 
 func (c *SlackConn) handleStandaloneMessage(ctx context.Context, env *events.Envelope) error {
 	// Supplement path: gateway accepted a mid-turn supplement and signals via
-	// metadata. Render the i18n busy text synchronously and return before the
-	// normal display path, which would silently drop the (empty) Content.
+	// metadata. Only buffered supplements (queued for the next turn) get a
+	// user-facing ack — injected supplements are merged into the running turn
+	// silently (the result appears in the current reply, so a confirmation
+	// would be redundant). slackSupplementText returns "" for silent modes.
 	// Synchronous (not goroutine-launch) so callers see send failures and tests
 	// can observe the reached path; the supplement text is a one-shot short msg.
 	if mode, _ := env.Metadata["supplement_mode"].(string); mode != "" {
-		return c.writeWithPostMessage(ctx, slackSupplementText(mode), false)
+		text := slackSupplementText(mode)
+		if text == "" {
+			return nil // injected: merged into current turn — silent
+		}
+		return c.writeWithPostMessage(ctx, text, false)
 	}
 
 	var text string
@@ -144,14 +150,15 @@ func (c *SlackConn) handleStandaloneMessage(ctx context.Context, env *events.Env
 }
 
 // slackSupplementText returns the English i18n text for a mid-turn supplement
-// accepted by the gateway's busy branch. `injected` means the supplement was
-// merged into the running turn; any other mode (typically `buffered`) means it
-// was queued for the next turn. The fallback is the buffered text — promising
-// future handling — so an unexpected mode never falsely implies the supplement
-// is already being processed.
+// accepted by the gateway's busy branch. A buffered supplement (queued for the
+// next turn) returns a user-facing ack so the user knows their message wasn't
+// lost; any unrecognized mode falls back to this text as a safe default. An
+// injected supplement (merged into the running turn) returns "" to stay silent
+// — the result will appear as part of the current reply, so a confirmation is
+// redundant noise. Callers must treat "" as "do not send".
 func slackSupplementText(mode string) string {
 	if mode == "injected" {
-		return "⏳ Got it — processing within the current task."
+		return "" // merged into current turn — silent
 	}
 	return "⏳ Got it — will process automatically once the current task finishes."
 }

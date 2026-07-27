@@ -10,10 +10,11 @@ import (
 )
 
 // TestFeishuSupplementText verifies the i18n text mapping per supplement mode.
-// injected: supplement was merged into the running turn.
-// buffered: supplement was queued for the next turn.
-// Any other mode falls back to the buffered text (safe default — promises
-// future handling rather than implying immediate processing).
+// injected: merged into the running turn → "" (silent — the result appears as
+// part of the current reply, so a confirmation would be redundant noise).
+// buffered: queued for the next turn → user-facing ack so the user knows their
+// message wasn't lost. Any unrecognized mode falls back to the buffered text
+// as a safe default (promise future handling, never imply immediate processing).
 func TestFeishuSupplementText(t *testing.T) {
 	t.Parallel()
 
@@ -22,8 +23,8 @@ func TestFeishuSupplementText(t *testing.T) {
 		mode string
 		want string
 	}{
-		{"injected merged into current turn", "injected", "⏳ 已收到，正在当前任务中一并处理"},
-		{"buffered for next turn", "buffered", "⏳ 已收到，当前任务完成后会自动处理"},
+		{"injected merged into current turn is silent", "injected", ""},
+		{"buffered for next turn acks", "buffered", "⏳ 已收到，当前任务完成后会自动处理"},
 		{"unknown mode falls back to buffered text", "unknown", "⏳ 已收到，当前任务完成后会自动处理"},
 		{"empty mode falls back to buffered text", "", "⏳ 已收到，当前任务完成后会自动处理"},
 	}
@@ -35,33 +36,50 @@ func TestFeishuSupplementText(t *testing.T) {
 	}
 }
 
-// TestWriteCtx_SupplementMode_RendersI18nText verifies that a `message` envelope
-// carrying supplement_mode metadata triggers the i18n supplement text send
-// instead of the normal display path (which would silently drop empty Content).
+// TestWriteCtx_SupplementMode_BufferedReachesSend verifies that a `message`
+// envelope carrying supplement_mode=buffered triggers the i18n supplement text
+// send instead of the normal display path (which would silently drop empty
+// Content).
 //
 // Detection is verified by the sendTextMessage error ("lark client not
-// initialized" in the test harness). Without the early return, handleMessageEvent
-// would see empty Content and return nil silently.
-func TestWriteCtx_SupplementMode_RendersI18nText(t *testing.T) {
+// initialized" in the test harness). Without the supplement branch, the empty
+// Content would be dropped silently (return nil).
+func TestWriteCtx_SupplementMode_BufferedReachesSend(t *testing.T) {
 	t.Parallel()
 
 	adapter := newTestAdapter(t)
 	conn := newTestConn(adapter, "") // no replyToMsgID → sendTextMessage path
 
-	for _, mode := range []string{"injected", "buffered"} {
-		env := &events.Envelope{
-			SessionID: "s-test",
-			Event:     events.Event{Type: events.Message},
-			Metadata:  map[string]any{"supplement_mode": mode},
-		}
-		err := conn.WriteCtx(context.Background(), env)
-		// The supplement path reaches sendTextMessage, which fails predictably
-		// with "lark client not initialized" in the test harness. Without the
-		// supplement check, WriteCtx would return nil (empty Content dropped).
-		require.Error(t, err, "mode=%s should reach sendTextMessage", mode)
-		require.Contains(t, err.Error(), "lark client not initialized",
-			"mode=%s should trigger sendTextMessage via supplement path", mode)
+	env := &events.Envelope{
+		SessionID: "s-test",
+		Event:     events.Event{Type: events.Message},
+		Metadata:  map[string]any{"supplement_mode": "buffered"},
 	}
+	err := conn.WriteCtx(context.Background(), env)
+	// buffered reaches sendTextMessage, which fails predictably with "lark
+	// client not initialized" in the test harness.
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "lark client not initialized")
+}
+
+// TestWriteCtx_SupplementMode_InjectedIsSilent verifies that an injected
+// supplement (merged into the running turn) does NOT send any ack text — it
+// returns nil before reaching sendTextMessage, since the result will appear as
+// part of the current reply and a confirmation would be redundant noise.
+func TestWriteCtx_SupplementMode_InjectedIsSilent(t *testing.T) {
+	t.Parallel()
+
+	adapter := newTestAdapter(t)
+	conn := newTestConn(adapter, "")
+
+	env := &events.Envelope{
+		SessionID: "s-test",
+		Event:     events.Event{Type: events.Message},
+		Metadata:  map[string]any{"supplement_mode": "injected"},
+	}
+	err := conn.WriteCtx(context.Background(), env)
+	// injected is silent: no sendTextMessage call, no error.
+	require.NoError(t, err)
 }
 
 // TestWriteCtx_SupplementMode_NoMetadataFallsThrough confirms that a Message

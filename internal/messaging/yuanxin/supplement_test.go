@@ -10,8 +10,10 @@ import (
 )
 
 // TestYuanxinSupplementText verifies the Chinese i18n text mapping per supplement
-// mode. injected: merged into the running turn. buffered: queued for next turn.
-// Any other mode falls back to the buffered text (safe default).
+// mode. injected: merged into the running turn → "" (silent — the result
+// appears as part of the current reply). buffered: queued for the next turn →
+// user-facing ack. Any unrecognized mode falls back to the buffered text as a
+// safe default.
 func TestYuanxinSupplementText(t *testing.T) {
 	t.Parallel()
 
@@ -20,8 +22,8 @@ func TestYuanxinSupplementText(t *testing.T) {
 		mode string
 		want string
 	}{
-		{"injected merged into current turn", "injected", "⏳ 已收到，正在当前任务中一并处理"},
-		{"buffered for next turn", "buffered", "⏳ 已收到，当前任务完成后会自动处理"},
+		{"injected merged into current turn is silent", "injected", ""},
+		{"buffered for next turn acks", "buffered", "⏳ 已收到，当前任务完成后会自动处理"},
 		{"unknown mode falls back to buffered text", "unknown", "⏳ 已收到，当前任务完成后会自动处理"},
 		{"empty mode falls back to buffered text", "", "⏳ 已收到，当前任务完成后会自动处理"},
 	}
@@ -33,38 +35,47 @@ func TestYuanxinSupplementText(t *testing.T) {
 	}
 }
 
-// TestWriteCtx_SupplementMode_RendersI18nText verifies that an envelope carrying
-// supplement_mode metadata triggers the i18n supplement text send instead of the
-// normal display path (which would silently drop empty Content).
+// TestWriteCtx_SupplementMode_BufferedReachesSend verifies that an envelope
+// carrying supplement_mode=buffered triggers the i18n supplement text send.
 //
 // Detection is verified by the SendResponse error ("producer not initialized"
-// in the test harness). Without the early return, WriteCtx would return nil
-// silently (empty Content → ExtractResponseText returns ok=false).
-func TestWriteCtx_SupplementMode_RendersI18nText(t *testing.T) {
+// in the test harness).
+func TestWriteCtx_SupplementMode_BufferedReachesSend(t *testing.T) {
 	t.Parallel()
 
 	a := newTestAdapter()
 	conn := NewYuanxinConn(a, "ch-test", "th-test", "/tmp")
 
-	for _, mode := range []string{"injected", "buffered"} {
-		env := &events.Envelope{
-			SessionID: "s-test",
-			Event:     events.Event{Type: events.Message},
-			Metadata:  map[string]any{"supplement_mode": mode},
-		}
-		err := conn.WriteCtx(context.Background(), env)
-		// The supplement path reaches SendResponse, which fails predictably
-		// with "producer not initialized" in the test harness. Without the
-		// supplement check, WriteCtx would return nil (empty Content).
-		require.Error(t, err, "mode=%s should reach SendResponse", mode)
-		require.Contains(t, err.Error(), "producer not initialized",
-			"mode=%s should trigger SendResponse via supplement path", mode)
+	env := &events.Envelope{
+		SessionID: "s-test",
+		Event:     events.Event{Type: events.Message},
+		Metadata:  map[string]any{"supplement_mode": "buffered"},
 	}
+	err := conn.WriteCtx(context.Background(), env)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "producer not initialized")
+}
+
+// TestWriteCtx_SupplementMode_InjectedIsSilent verifies that an injected
+// supplement does NOT send any ack text — returns nil before reaching
+// SendResponse.
+func TestWriteCtx_SupplementMode_InjectedIsSilent(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter()
+	conn := NewYuanxinConn(a, "ch-test", "th-test", "/tmp")
+
+	env := &events.Envelope{
+		SessionID: "s-test",
+		Event:     events.Event{Type: events.Message},
+		Metadata:  map[string]any{"supplement_mode": "injected"},
+	}
+	err := conn.WriteCtx(context.Background(), env)
+	require.NoError(t, err)
 }
 
 // TestWriteCtx_SupplementMode_NoMetadataFallsThrough confirms that an envelope
-// WITHOUT supplement_mode metadata is handled by the normal display path
-// (returns nil for empty Content, does not call SendResponse).
+// WITHOUT supplement_mode metadata is handled by the normal display path.
 func TestWriteCtx_SupplementMode_NoMetadataFallsThrough(t *testing.T) {
 	t.Parallel()
 
