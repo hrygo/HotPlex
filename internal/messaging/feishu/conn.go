@@ -450,6 +450,23 @@ func (c *FeishuConn) handleStatusEvent(ctx context.Context, env *events.Envelope
 }
 
 func (c *FeishuConn) handleMessageEvent(ctx context.Context, env *events.Envelope) error {
+	// Supplement path: gateway accepted a mid-turn supplement and signals via
+	// metadata. Only buffered supplements (queued for the next turn) get a
+	// user-facing ack — injected supplements are merged into the running turn
+	// silently, since an "⏳ 已收到…" confirmation is redundant when the result
+	// will appear as part of the current reply. feishuSupplementText returns ""
+	// for silent modes; we short-circuit before sendTextMessage in that case.
+	if mode, _ := env.Metadata["supplement_mode"].(string); mode != "" {
+		text := feishuSupplementText(mode)
+		if text == "" {
+			return nil // injected: merged into current turn — silent
+		}
+		c.mu.RLock()
+		chatID := c.chatID
+		c.mu.RUnlock()
+		return c.adapter.sendTextMessage(ctx, chatID, text)
+	}
+
 	var content string
 	if msgData, ok := env.Event.Data.(events.MessageData); ok {
 		content = msgData.Content
@@ -460,6 +477,20 @@ func (c *FeishuConn) handleMessageEvent(ctx context.Context, env *events.Envelop
 		return nil
 	}
 	return c.sendOrReply(ctx, OptimizeMarkdownStyle(SanitizeForCard(messaging.SanitizeText(content))))
+}
+
+// feishuSupplementText returns the Chinese i18n text for a mid-turn supplement
+// accepted by the gateway's busy branch. A buffered supplement (queued for the
+// next turn) returns a user-facing ack so the user knows their message wasn't
+// lost; any unrecognized mode falls back to this text as a safe default. An
+// injected supplement (merged into the running turn) returns "" to stay silent
+// — the result will appear as part of the current reply, so an "⏳ 已收到…"
+// confirmation is redundant noise. Callers must treat "" as "do not send".
+func feishuSupplementText(mode string) string {
+	if mode == "injected" {
+		return "" // merged into current turn — silent
+	}
+	return "⏳ 已收到，当前任务完成后会自动处理"
 }
 
 func (c *FeishuConn) Close() error {

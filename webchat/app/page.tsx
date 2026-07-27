@@ -137,7 +137,9 @@ function InnerPage() {
                     }
                 } catch {}
             } catch {
-                router.replace("/login");
+                if (typeof window !== "undefined") {
+                    window.location.replace("/login");
+                }
             }
         };
 

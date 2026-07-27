@@ -340,9 +340,23 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	var cronScheduler *cron.Scheduler
 	var cronDelivery *cron.Delivery
 	var cronAttRouter *cronAttachedRouter
+	// bridge is forward-declared (and assigned later at NewBridge) so this
+	// closure can clear busy-supplement buffers on session end. Mirrors the
+	// existing cronScheduler pattern. Nil before assignment — ClearPending is
+	// nil-safe via b.pending guard, but the bridge pointer itself is checked
+	// here to keep the test path (no gateway_run wiring) honest.
+	var bridge *gateway.Bridge
 
 	sm.OnTerminate = func(sessionID string) {
 		log.Info("gateway: session terminated", "session_id", sessionID)
+		// SESSION_BUSY mid-turn cleanup (Task 11): the session is gone (either
+		// TERMINATED or DELETED — see manager.go:notifyStateChange), so any
+		// buffered supplements are stale. Clearing here funnels every end-of-
+		// life path (client /terminate, /delete, /gc, crash cleanup, GC sweep,
+		// HTTP DELETE) through a single hook instead of patching each call site.
+		if bridge != nil {
+			bridge.ClearPending(sessionID)
+		}
 		if cronScheduler != nil {
 			cronScheduler.CleanupForSession(sessionID)
 		}
@@ -515,7 +529,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Debug("config: agent config resolved", "dir", agentConfigDir)
 	}
 
-	bridge := gateway.NewBridge(gateway.BridgeDeps{
+	bridge = gateway.NewBridge(gateway.BridgeDeps{
 		Log:                    log,
 		Hub:                    hub,
 		SM:                     sm,
@@ -536,6 +550,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		ExecutionStore:         stores.execution,
 		Repairer:               repairer,
 	})
+	repairer.SetSuccessHook(bridge.HandleRepairSuccess)
 
 	// One-time validation sweep: surface stale/invalid agent_config_overrides
 	// written before spec ② write-time validation (#749). Non-blocking.
@@ -557,6 +572,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	handler.SetAuditCollector(auditCollector)
 	hub.SetAuditCollector(auditCollector)
 	bridge.SetAuditCollector(auditCollector) // tool.call audit (issue #833 P2)
+	bridge.SetPendingReplayer(handler)       // SESSION_BUSY mid-turn replay (done-time fallback)
 
 	if cfg.Worker.AutoRetry.Enabled {
 		log.Info("gateway: LLM auto-retry enabled", "max_retries", cfg.Worker.AutoRetry.MaxRetries, "base_delay", cfg.Worker.AutoRetry.BaseDelay)
@@ -1353,6 +1369,15 @@ func shutdownGateway(
 		}
 		shutdownCancel()
 	}()
+
+	// Fence supplement replay before closing Hub/adapters. Repairer.Shutdown
+	// drains its backlog and may otherwise invoke the runtime-success hook while
+	// the gateway is already tearing down, which could start a fresh delivery.
+	if deps.Repairer != nil {
+		deps.Repairer.SetSuccessHook(nil)
+	}
+	deps.Bridge.StopPendingReplays()
+	deps.Bridge.WaitPendingReplays(shutdownCtx)
 
 	if err := deps.Hub.Shutdown(shutdownCtx); err != nil {
 		log.Warn("gateway: hub shutdown", "err", err)

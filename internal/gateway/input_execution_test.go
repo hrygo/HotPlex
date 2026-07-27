@@ -17,21 +17,24 @@ import (
 )
 
 type fakeExecutionStore struct {
-	mu           sync.Mutex
-	record       *execution.Record
-	duplicate    bool
-	acceptErr    error
-	statusErr    error
-	lastAccept   execution.AcceptRequest
-	status       execution.Status
-	errorCode    string
-	statusCalls  int
-	openRecord   *execution.Record
-	markRunID    string
-	markErr      error
-	finishRunID  string
-	finishStatus execution.RuntimeStatus
-	finishErr    error
+	mu            sync.Mutex
+	record        *execution.Record
+	duplicate     bool
+	acceptErr     error
+	statusErr     error
+	lastAccept    execution.AcceptRequest
+	status        execution.Status
+	errorCode     string
+	statusCalls   int
+	openRecord    *execution.Record
+	activeRecord  *execution.Record   // when set, ActiveBySession reports the gate as held
+	activeResults []*execution.Record // optional ordered ActiveBySession results; nil entry means ErrNotFound
+	activeCalls   int
+	markRunID     string
+	markErr       error
+	finishRunID   string
+	finishStatus  execution.RuntimeStatus
+	finishErr     error
 }
 
 func (s *fakeExecutionStore) Accept(_ context.Context, req execution.AcceptRequest) (*execution.Record, bool, error) {
@@ -73,6 +76,19 @@ func (s *fakeExecutionStore) FinishRuntime(_ context.Context, _ string, runID st
 	return s.finishErr
 }
 func (s *fakeExecutionStore) ActiveBySession(context.Context, string) (*execution.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeCalls < len(s.activeResults) {
+		rec := s.activeResults[s.activeCalls]
+		s.activeCalls++
+		if rec == nil {
+			return nil, execution.ErrNotFound
+		}
+		return rec, nil
+	}
+	if s.activeRecord != nil {
+		return s.activeRecord, nil
+	}
 	return nil, execution.ErrNotFound
 }
 func (s *fakeExecutionStore) OpenBySession(context.Context, string) (*execution.Record, error) {

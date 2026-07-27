@@ -27,6 +27,7 @@ func (k RepairKind) String() string {
 
 type RepairIntent struct {
 	ExecutionID string
+	SessionID   string
 	OwnerID     string
 	WorkerRunID string
 	Kind        RepairKind
@@ -81,6 +82,9 @@ type Repairer struct {
 	start  sync.Once
 	stop   sync.Once
 	closed atomic.Bool
+
+	hookMu      sync.RWMutex
+	successHook func(RepairIntent)
 }
 
 func NewRepairer(store Store, cfg RepairConfig, log *slog.Logger) *Repairer {
@@ -105,6 +109,24 @@ func (r *Repairer) Start(ctx context.Context) {
 		r.wg.Add(1)
 		go r.loop(ctx)
 	})
+}
+
+// SetSuccessHook installs a callback invoked after a repair has durably
+// succeeded and been removed from the backlog. The hook runs outside Repairer
+// locks; callers must return promptly and offload longer work themselves.
+func (r *Repairer) SetSuccessHook(hook func(RepairIntent)) {
+	r.hookMu.Lock()
+	r.successHook = hook
+	r.hookMu.Unlock()
+}
+
+func (r *Repairer) notifySuccess(intent RepairIntent) {
+	r.hookMu.RLock()
+	hook := r.successHook
+	r.hookMu.RUnlock()
+	if hook != nil {
+		hook(intent)
+	}
 }
 
 func (r *Repairer) Enqueue(intent RepairIntent) {
@@ -239,6 +261,7 @@ func (r *Repairer) tryProcess(ctx context.Context, intent *RepairIntent) {
 		r.log.Debug("repair intent succeeded",
 			"execution_id", intent.ExecutionID, "attempts", intent.attempts,
 			"backlog", count)
+		r.notifySuccess(*intent)
 		return
 	}
 

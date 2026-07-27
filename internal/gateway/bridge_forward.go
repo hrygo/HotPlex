@@ -518,6 +518,7 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 		if b.repairer != nil {
 			b.repairer.Enqueue(execution.RepairIntent{
 				ExecutionID: rec.ExecutionID,
+				SessionID:   sessionID,
 				WorkerRunID: fc.workerRunID,
 				Kind:        execution.RepairRuntime,
 				Status:      string(rtStatus),
@@ -528,6 +529,14 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 		// is still in a non-terminal state.
 		return
 	}
+
+	// Replay buffered supplements now that the active gate is released. This
+	// method runs UNDER processForwardedEvent's held seq lease (see comment at
+	// the NextSeqHeld call below about self-deadlock if we re-enter
+	// BeginSeqOperation), so the replay MUST run async — DeliverReplay →
+	// deliverToWorker → acceptInputExecution re-enters the seq barrier in its
+	// own context. cloneForReplay sets seq=0 so the hub reassigns it.
+	b.replayPending(sessionID)
 
 	observability.ExecutionRuntimeOutcome().Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("runtime_status", string(rtStatus))))

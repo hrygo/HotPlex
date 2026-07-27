@@ -538,6 +538,20 @@ func (a *Adapter) SendResponse(ctx context.Context, conn *YuanxinConn, content s
 	return err
 }
 
+// yuanxinSupplementText returns the Chinese i18n text for a mid-turn supplement
+// accepted by the gateway's busy branch. A buffered supplement (queued for the
+// next turn) returns a user-facing ack so the user knows their message wasn't
+// lost; any unrecognized mode falls back to this text as a safe default. An
+// injected supplement (merged into the running turn) returns "" to stay silent
+// — the result will appear as part of the current reply, so an "⏳ 已收到…"
+// confirmation is redundant noise. Callers must treat "" as "do not send".
+func yuanxinSupplementText(mode string) string {
+	if mode == "injected" {
+		return "" // merged into current turn — silent
+	}
+	return "⏳ 已收到，当前任务完成后会自动处理"
+}
+
 const maxTextBuilderSize = 1 << 20
 
 type YuanxinConn struct {
@@ -585,6 +599,22 @@ func (c *YuanxinConn) GetMetadata() map[string]any {
 func (c *YuanxinConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 	if env == nil {
 		return fmt.Errorf("yuanxin: nil envelope")
+	}
+
+	// Supplement path: gateway accepted a mid-turn supplement and signals via
+	// metadata. Only buffered supplements (queued for the next turn) get a
+	// user-facing ack — injected supplements are merged into the running turn
+	// silently (the result appears in the current reply, so a confirmation
+	// would be redundant). yuanxinSupplementText returns "" for silent modes.
+	// The gateway only sets supplement_mode on `message` envelopes with empty
+	// Content, so the metadata alone is the signal — no event-type gate needed.
+	// Checked before the switch since Message has no dedicated case.
+	if mode, _ := env.Metadata["supplement_mode"].(string); mode != "" {
+		text := yuanxinSupplementText(mode)
+		if text == "" {
+			return nil // injected: merged into current turn — silent
+		}
+		return c.adapter.SendResponse(ctx, c, text)
 	}
 
 	c.adapter.Log.Debug("yuanxin: WriteCtx called",

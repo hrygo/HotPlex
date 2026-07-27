@@ -81,6 +81,18 @@ type Bridge struct {
 	// fast path; write lock is used for create/delete/reset operations.
 	accumMu sync.RWMutex
 
+	// pending buffers user supplements that arrived while a session was busy,
+	// for workers that lack mid-turn support (acp/ocs fallback). PendingBuffer
+	// has its own internal mu, so no separate guard here. Initialized in
+	// NewBridge; nil-safe proxy methods (BufferPending/ClearPending/...).
+	pending        *PendingBuffer
+	replayer       PendingReplayer // late-injected (Bridge built before Handler)
+	replayMu       sync.Mutex
+	replayWG       sync.WaitGroup
+	replayClosed   bool
+	supplementGate sync.RWMutex
+	replayFences   [64]sync.RWMutex // fixed stripes; serialize replay/supplement with reset/terminate
+
 	crashTracker   map[string]*crashHistory // per-session crash loop detection
 	crashTrackerMu sync.Mutex
 
@@ -140,6 +152,7 @@ func NewBridge(deps BridgeDeps) *Bridge {
 		executionStore:     deps.ExecutionStore,
 		repairer:           deps.Repairer,
 		turnTTFT:           newTurnTTFTTracker(),
+		pending:            NewPendingBuffer(),
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))
@@ -226,6 +239,148 @@ func (b *Bridge) GetWorkspaceByID(ctx context.Context, id string) (*session.Work
 // (issue #833 P2, spec §5.2). Optional: nil leaves tool-call audit disabled.
 func (b *Bridge) SetAuditCollector(ac *audit.Collector) {
 	b.auditCollector = ac
+}
+
+// PendingReplayer replays a buffered supplement as a fresh input turn.
+// Implemented by Handler (which owns deliverToWorker); injected after Bridge
+// construction via SetPendingReplayer because Bridge is built before Handler.
+type PendingReplayer interface {
+	DeliverReplay(ctx context.Context, env *events.Envelope) error
+}
+
+// SetPendingReplayer late-injects the replay target (Handler). Optional: nil
+// leaves done-time replay disabled (supplements buffered but not replayed).
+func (b *Bridge) SetPendingReplayer(r PendingReplayer) { b.replayer = r }
+
+// BufferPending appends a busy-supplement for the fallback path (worker lacks
+// mid-turn support). Called from Handler's SESSION_BUSY branch.
+func (b *Bridge) BufferPending(sessionID string, env *events.Envelope, content string) bool {
+	if b.pending != nil {
+		return b.pending.Append(sessionID, content, env)
+	}
+	return false
+}
+
+func (b *Bridge) BeginSupplement(sessionID, clientMessageID, payloadHash string) (*supplementLease, supplementDisposition) {
+	if b.pending == nil {
+		return nil, supplementNew
+	}
+	return b.pending.BeginSupplement(sessionID, clientMessageID, payloadHash)
+}
+
+func (b *Bridge) replayFence(sessionID string) *sync.RWMutex {
+	// FNV-1a is sufficient for lock striping and avoids retaining session IDs.
+	var hash uint32 = 2166136261
+	for i := 0; i < len(sessionID); i++ {
+		hash ^= uint32(sessionID[i])
+		hash *= 16777619
+	}
+	return &b.replayFences[hash%uint32(len(b.replayFences))]
+}
+
+func (b *Bridge) lockSupplementSession(sessionID string) (func(), bool) {
+	b.supplementGate.RLock()
+	b.replayMu.Lock()
+	closed := b.replayClosed
+	b.replayMu.Unlock()
+	if closed {
+		b.supplementGate.RUnlock()
+		return nil, false
+	}
+	fence := b.replayFence(sessionID)
+	fence.RLock()
+	return func() {
+		fence.RUnlock()
+		b.supplementGate.RUnlock()
+	}, true
+}
+
+// ClearPending drops buffered supplements for one session. Called when the
+// session is reset/deleted.
+func (b *Bridge) ClearPending(sessionID string) {
+	fence := b.replayFence(sessionID)
+	fence.Lock()
+	defer fence.Unlock()
+	if b.pending != nil {
+		b.pending.Clear(sessionID)
+	}
+}
+
+// ClearAllPending drops all buffered supplements. Called on bridge shutdown.
+func (b *Bridge) ClearAllPending() {
+	if b.pending != nil {
+		b.pending.ClearAll()
+	}
+}
+
+// HandleRepairSuccess resumes supplement replay after a runtime terminal write
+// is repaired and the durable active gate is finally released.
+func (b *Bridge) HandleRepairSuccess(intent execution.RepairIntent) {
+	if intent.Kind == execution.RepairRuntime && intent.SessionID != "" {
+		b.replayPending(intent.SessionID)
+	}
+}
+
+func (b *Bridge) replayPending(sessionID string) {
+	if b.pending == nil || b.replayer == nil || b.closed.Load() {
+		return
+	}
+	merged, repr, token, ok := b.pending.DrainForReplay(sessionID)
+	if !ok {
+		return
+	}
+	replayEnv := cloneForReplay(repr, merged)
+
+	b.replayMu.Lock()
+	if b.replayClosed {
+		b.replayMu.Unlock()
+		return
+	}
+	b.replayWG.Add(1)
+	b.replayMu.Unlock()
+
+	go func() {
+		defer b.replayWG.Done()
+		fence := b.replayFence(sessionID)
+		fence.RLock()
+		defer fence.RUnlock()
+		replayCtx, current := b.pending.ReplayContext(sessionID, token)
+		if !current {
+			return
+		}
+		if err := b.replayer.DeliverReplay(replayCtx, replayEnv); err != nil {
+			b.log.Warn("bridge: supplement replay failed", "session_id", sessionID, "err", err)
+			if !b.closed.Load() {
+				b.pending.RequeueIfCurrent(sessionID, token, merged, replayEnv)
+			}
+			return
+		}
+		b.pending.CompleteReplay(sessionID, token)
+	}()
+}
+
+func (b *Bridge) WaitPendingReplays(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		b.replayWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		b.log.Warn("bridge: shutdown timed out, supplement replays still running")
+	}
+}
+
+// StopPendingReplays prevents repair callbacks or Done handlers from starting
+// new replay work and cancels every in-flight per-session replay context.
+func (b *Bridge) StopPendingReplays() {
+	b.supplementGate.Lock()
+	defer b.supplementGate.Unlock()
+	b.replayMu.Lock()
+	b.replayClosed = true
+	b.replayMu.Unlock()
+	b.ClearAllPending()
 }
 
 // StartSession creates a new session and starts a worker.
@@ -466,6 +621,21 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		si.State = events.StateRunning
 	}
 
+	// Hydrate SeqGen from persisted events before createAndLaunchWorker can
+	// allocate the first seq. Platform (messaging) sessions reach resume via
+	// StartPlatformSession → orphan resume, which never traverses the WebSocket
+	// performInit path that hydrates in conn.go. Without this, a session whose
+	// counter was released (RuntimeRelease → ReleaseSeq) restarts from 0 on
+	// resume and collides with durable history, causing recurring UNIQUE
+	// constraint failures on events(session_id, seq_guard_id, seq) (issue #879
+	// regression surviving #900 and 0231fc74, which only hardened the WS path).
+	// A DB error is logged but does not block resume: messaging has no retry
+	// semantics, and a stale counter is no worse than the pre-fix behavior.
+	if err := b.hub.EnsureSeqHydrated(id); err != nil {
+		b.log.Warn("bridge: seq hydration failed before resume; counter may collide with history",
+			"session_id", id, "err", err)
+	}
+
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
 	w, err := b.createAndLaunchWorker(workerLaunchParams{
 		ctx:                ctx,
@@ -672,6 +842,9 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	if w == nil {
 		return fmt.Errorf("bridge: reset: no worker for session %s", sessionID)
 	}
+	fence := b.replayFence(sessionID)
+	fence.Lock()
+	defer fence.Unlock()
 
 	// ResetContext may replace the Worker's connection before returning. Remove
 	// the old run binding first so concurrent input fails closed instead of being
@@ -683,6 +856,12 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 			b.restoreWorkerRun(sessionID, suspendedBinding)
 		}
 		return fmt.Errorf("bridge: reset worker: %w", err)
+	}
+	// A successful reset establishes a new conversation context under the same
+	// session ID. Discard supplements and invalidate in-flight replay tokens from
+	// the old context before the replacement forwarder can emit events.
+	if b.pending != nil {
+		b.pending.Clear(sessionID)
 	}
 	workerRunID := ""
 	if result.ConnReplaced {
@@ -883,11 +1062,19 @@ func isWorkerInUseError(err error) bool {
 func (b *Bridge) Shutdown(ctx context.Context) {
 	b.MarkClosed()
 	b.WaitForwarders(ctx)
+	b.WaitPendingReplays(ctx)
 	// Clear compressCache after all async compression goroutines have finished.
 	b.compressCache.Range(func(key, _ any) bool {
 		b.compressCache.Delete(key)
 		return true
 	})
+	// Drop any buffered mid-turn supplements so stale entries don't survive
+	// shutdown. The buffer is in-memory (not persisted), but clearing here
+	// keeps the Bridge's post-Shutdown state coherent if anything re-enters
+	// the Bridge during the tear-down tail (e.g. a late handler callback).
+	// Task 11 cleanup path; runs after forwarders drain so a racing
+	// DrainAndMerge in replay completes first.
+	b.ClearAllPending()
 }
 
 // MarkClosed sets the closed flag and cancels the shutdown context so that:
@@ -899,6 +1086,7 @@ func (b *Bridge) Shutdown(ctx context.Context) {
 // in-flight message handler creates a worker that is immediately killed.
 func (b *Bridge) MarkClosed() {
 	b.closed.Store(true)
+	b.StopPendingReplays()
 	b.shutdownCancel()
 }
 

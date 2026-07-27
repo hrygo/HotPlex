@@ -20,6 +20,9 @@ func TestReadOutput_ResultSuccess(t *testing.T) {
 	w := NewWithMocks()
 	mc := newMockConn("user1", "session1")
 	w.testConn = mc
+	w.turnMu.Lock()
+	w.turnActive = true
+	w.turnMu.Unlock()
 
 	lines := []string{`{"type":"result","is_error":false,"result":"all good","duration_ms":100}`}
 	var idx atomic.Int64
@@ -57,6 +60,9 @@ func TestReadOutput_ResultSuccess(t *testing.T) {
 	sent := mc.sentEnvelopes()
 	require.Len(t, sent, 1)
 	require.Equal(t, events.Done, sent[0].Event.Type)
+	w.turnMu.Lock()
+	require.False(t, w.turnActive, "result must close the mid-turn injection window before Done")
+	w.turnMu.Unlock()
 }
 
 func TestReadOutput_ResultError(t *testing.T) {

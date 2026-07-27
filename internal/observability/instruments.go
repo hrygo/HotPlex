@@ -1034,6 +1034,12 @@ var (
 	executionSessionBusy     metric.Int64Counter
 	executionSessionBusyInit sync.Once
 
+	midTurnInjected     metric.Int64Counter
+	midTurnInjectedInit sync.Once
+
+	supplementBuffered     metric.Int64Counter
+	supplementBufferedInit sync.Once
+
 	executionDeliveryOutcome     metric.Int64Counter
 	executionDeliveryOutcomeInit sync.Once
 
@@ -1131,6 +1137,38 @@ func ExecutionSessionBusy() metric.Int64Counter {
 		}
 	})
 	return executionSessionBusy
+}
+
+// MidTurnInjected counts user supplements injected into a running turn
+// (worker implements MidTurnInjector; CC headless stream-json / codex turn-steer).
+func MidTurnInjected() metric.Int64Counter {
+	midTurnInjectedInit.Do(func() {
+		var err error
+		midTurnInjected, err = Meter().Int64Counter(
+			"hotplex.execution.mid_turn_injected",
+			metric.WithDescription("User supplements injected into a running turn (mid-turn passthrough)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.mid_turn_injected", err)
+		}
+	})
+	return midTurnInjected
+}
+
+// SupplementBuffered counts user supplements buffered for replay when the
+// worker does not support mid-turn injection (acp/ocs fallback).
+func SupplementBuffered() metric.Int64Counter {
+	supplementBufferedInit.Do(func() {
+		var err error
+		supplementBuffered, err = Meter().Int64Counter(
+			"hotplex.execution.supplement_buffered",
+			metric.WithDescription("User supplements buffered for replay (worker lacks mid-turn support)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.execution.supplement_buffered", err)
+		}
+	})
+	return supplementBuffered
 }
 
 func ExecutionDeliveryOutcome() metric.Int64Counter {

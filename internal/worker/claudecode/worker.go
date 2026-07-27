@@ -30,6 +30,7 @@ import (
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
 var _ worker.PermissionCeilingReporter = (*Worker)(nil)
+var _ worker.MidTurnInjector = (*Worker)(nil)
 var _ base.MetadataHandler = (*Worker)(nil)
 
 // trySender is a named interface for non-blocking envelope send.
@@ -137,6 +138,12 @@ type Worker struct {
 	sessionID   string
 	projectDir  string             // original working directory for the worker process
 	origSession worker.SessionInfo // first Start's session info, reused by ResetContext
+
+	// turnMu serializes the active-turn boundary with mid-turn stdin writes.
+	// readOutput clears turnActive before publishing Done, so InjectMidTurn can
+	// never write after the gateway has observed that turn's completion.
+	turnMu     sync.Mutex
+	turnActive bool
 
 	// permissionCeiling is captured on the first Start/Resume and intentionally
 	// survives ResetContext so runtime commands cannot widen a restarted session.
@@ -532,9 +539,13 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 
 	// Normal input: use Claude Code's stream-json format
 	// instead of AEP envelope format
+	w.turnMu.Lock()
+	w.turnActive = true
+	defer w.turnMu.Unlock()
 	if baseConn, ok := conn.(*base.Conn); ok {
 		stdin, mu := baseConn.StdinUnlocked()
 		if stdin == nil {
+			w.turnActive = false
 			return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
 		}
 		// writeStreamInputLocked issues syscall.Write which blocks indefinitely
@@ -553,6 +564,7 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 			defer mu.Unlock()
 			return writeStreamInputLocked(stdin, content)
 		}); err != nil {
+			w.turnActive = false
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				// A stalled stdin write leaves an orphaned goroutine holding the
 				// conn mutex until the child process exits. Classify as
@@ -582,10 +594,57 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 			},
 		)
 		if err := conn.Send(ctx, msg); err != nil {
+			w.turnActive = false
 			return fmt.Errorf("claudecode: input: %w", err)
 		}
 	}
 
+	w.SetLastIO(time.Now())
+	return nil
+}
+
+// InjectMidTurn delivers a user message into the active turn by writing the
+// same stream-json user frame to stdin. Claude Code (headless --print
+// --input-format stream-json) absorbs it into the running turn rather than
+// queuing a new one (verified by mid-turn injection probe, 2026-07-25).
+//
+// Unlike Input, it MUST NOT call SetLastInput: this is a supplemental inject,
+// not the turn's primary input — crash recovery (bridge_worker.go) replays
+// lastInput and must not replay a mid-turn supplement.
+func (w *Worker) InjectMidTurn(ctx context.Context, content string, metadata map[string]any) error {
+	conn := w.Conn()
+	if conn == nil {
+		return fmt.Errorf("claudecode: not started")
+	}
+	baseConn, ok := conn.(*base.Conn)
+	if !ok {
+		return fmt.Errorf("claudecode: inject requires base conn")
+	}
+	stdin, mu := baseConn.StdinUnlocked()
+	if stdin == nil {
+		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: "claudecode: stdin closed"}
+	}
+	w.turnMu.Lock()
+	defer w.turnMu.Unlock()
+	if !w.turnActive {
+		return fmt.Errorf("claudecode: no active turn for mid-turn inject")
+	}
+	// Mutex acquired inside the closure for the same orphan-write reason as Input
+	// (see Input comment, worker.go:544-554).
+	if err := base.WriteWithCtxBounded(ctx, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return writeStreamInputLocked(stdin, content)
+	}); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return &worker.WorkerError{
+				Kind:    worker.ErrKindUnavailable,
+				Message: "claudecode: stdin write stalled (worker not reading input)",
+				Cause:   err,
+			}
+		}
+		return fmt.Errorf("claudecode: inject mid-turn: %w", err)
+	}
 	w.SetLastIO(time.Now())
 	return nil
 }
@@ -624,6 +683,7 @@ func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action st
 }
 
 func (w *Worker) Terminate(ctx context.Context) error {
+	w.finishTurn()
 	// Cancel goroutines first
 	if w.cancel != nil {
 		w.cancel()
@@ -636,6 +696,7 @@ func (w *Worker) Terminate(ctx context.Context) error {
 // StopCurrentTurn stops the current turn by force-killing the claudecode process.
 func (w *Worker) StopCurrentTurn(ctx context.Context) error {
 	w.Log.Info("claudecode: stopping current turn via ForceKill")
+	w.finishTurn()
 	w.MarkStopped()
 	if w.cancel != nil {
 		w.cancel()
@@ -975,11 +1036,22 @@ func (w *Worker) readOutput(ctx context.Context) {
 					continue // Internal event, skip
 				}
 				for _, env := range envs {
+					if env.Event.Type == events.Done {
+						w.finishTurn()
+					}
 					w.trySend(env)
 				}
 			}
 		}
 	}
+}
+
+// finishTurn closes the worker-local injection window before Done is exposed
+// to the gateway. It is idempotent for termination and duplicate cleanup paths.
+func (w *Worker) finishTurn() {
+	w.turnMu.Lock()
+	w.turnActive = false
+	w.turnMu.Unlock()
 }
 
 // allowInboundPermissionMode validates a Claude-originated mode change before
