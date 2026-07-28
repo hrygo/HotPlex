@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.38.1] - 2026-07-27
+
+### Summary
+
+v1.38.1 是一次 patch 版本更新，核心交付 **SESSION_BUSY mid-turn passthrough** 与 **AEP canonical schema + cross-SDK conformance**。Gateway 现在能智能处理忙碌中的用户补充输入：支持 mid-turn 注入的 Worker（Claude Code、Codex CLI）透明透传至当前 turn，其余 Worker（ACP、OCS）暂存并在当前 turn 结束后重投。同时引入 AEP v1 规范 schema（aep-v1.json）与 38 个 golden envelope 夹具，配合 Go/TS/Python/Java 四端一致性测试，杜绝 SDK 协议漂移。平台 session resume 的 SeqGen 水化和 ACP resume 空 sessionId 问题得到修复。
+
+### Added
+
+- **Gateway Core**: SESSION_BUSY mid-turn passthrough — user supplements injected transparently into running turn for MidTurnInjector workers (Claude Code, Codex CLI), or buffered and replayed after Done for fallback workers (ACP, OCS). (#934)
+- **AEP Schema**: Canonical AEP v1 schema with golden envelope corpus and cross-SDK conformance suite (Go/TypeScript/Python/Java). (#929)
+- **SDK**: Backfill missing AEP types — InputAck, InternalReset, RuntimeExecution* in TypeScript, Python, and Java SDKs.
+- **Observability**: Mid-turn and supplement counters — `mid_turn_injected`, `supplement_buffered`.
+
+### Fixed
+
+- **WebChat UI**: Admin cookie auth — add `credentials:'include'` for cross-port support; gateway URL rewrite for standalone dev server.
+- **Gateway Core**: CC TOCTOU race — re-check active gate before mid-turn inject to prevent ghost turns after Done releases the gate.
+- **Gateway Core**: Harden busy supplement lifecycle — idempotent and bounded, fence replay across reset/shutdown, replay after durable runtime repair.
+- **Gateway Core**: Hydrate SeqGen on platform session resume — fixes recurring UNIQUE constraint failures on Feishu/Slack/Yuanxin resume.
+- **ACP**: Session/load empty sessionId and seq collision on resume — fixes WebChat HISTORY_LOSS and UNIQUE constraint violations (#879).
+
 ## [1.38.0] - 2026-07-23
 
 ### Summary
