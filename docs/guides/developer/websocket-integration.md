@@ -580,7 +580,14 @@ const tabId = `sess_${crypto.randomUUID()}`;
 
 > `session_id` 由 Gateway 覆盖为 init_ack 返回的 Gateway Session ID，`seq` 覆盖为 per-session 单调递增序列号——客户端填空字符串、真实 ID 或省略该字段效果完全相同。`session_id` 仅在 init 握手时有语义（参与 Session ID 派生），后续所有消息中该字段被忽略。
 
-**限制**：Session 必须处于 Active 状态（created / running / idle），非 Active 状态下发送 input 返回 `SESSION_BUSY` 或 `SESSION_TERMINATED` 错误。
+**状态限制**：Session 必须处于 Active 状态（created / running / idle）；处于 TERMINATED/DELETED 时发送 input 返回 `SESSION_TERMINATED`。
+
+**会话繁忙时的输入（SESSION_BUSY 分支）**：若 session 正在执行一个 turn（active gate 被占用），新 input 进入 SESSION_BUSY 分支，但**不会被丢弃或硬拒绝**，而是按 Worker 能力分流：
+
+- 支持 mid-turn 注入的 Worker（`claude_code`、`codex_cli`）：追问被透传并入当前 turn，结果随当前回复一起产出。
+- 其余 Worker（`acp`、`opencode_server`）：追问被暂存，当前 turn 完成后合并重投为一个新 input。
+
+仅当 Bridge 不可用等异常情况才会向客户端返回 `SESSION_BUSY` 错误。客户端可通过 `message` 事件的 `metadata.supplement_mode`（`injected` / `buffered`）感知追问已被接收。
 
 ### 6.2 接收流式响应
 
@@ -768,7 +775,7 @@ Worker 执行过程中还可能产生：
 
 Gateway 对**所有直接连接 `/ws` 的客户端**实行每个 session 单连接限制；这不仅适用于内置 WebChat，也适用于企业自建前端、SDK 和其他 WebSocket Gateway 集成。首个完成 `init` 的连接成为该 session 的 owner；在它关闭前，后续使用同一 session 的 `init` 会收到 `init_ack` 错误，`code` 为 `SESSION_ALREADY_CONNECTED`，随后连接关闭。
 
-这与 `SESSION_BUSY` 不同：`SESSION_BUSY` 表示同一已建立连接上的 session 正在执行，拒绝新的 `input`；`SESSION_ALREADY_CONNECTED` 表示握手阶段已有另一条直接 WebSocket 连接。
+这与 `SESSION_BUSY` 不同：`SESSION_BUSY` 表示同一已建立连接上的 session 正在执行一个 turn，此时新的 `input` 不再被拒绝，而是按 Worker 能力透传并入当前 turn 或暂存待完成后重投（见 §6.1）；`SESSION_ALREADY_CONNECTED` 表示握手阶段已有另一条直接 WebSocket 连接。
 
 企业客户端应按以下方式处理：
 
@@ -1370,7 +1377,7 @@ direction=after&cursor=142    # 向后追赶：id > 142
 | 错误码                | 说明           | 建议           |
 | --------------------- | -------------- | -------------- |
 | `SESSION_NOT_FOUND`   | Session 不存在 | 重新 init      |
-| `SESSION_BUSY`        | Session 非活跃 | 等待或重连     |
+| `SESSION_BUSY`        | 会话繁忙，正常情况自动透传/暂存（仅异常回退返回此码） | 见 §6.1 |
 | `SESSION_EXPIRED`     | 已过期         | 创建新会话     |
 | `SESSION_TERMINATED`  | Session 已终止 | 重连恢复或新建 |
 | `SESSION_INVALIDATED` | Session 已失效 | 重新 init      |

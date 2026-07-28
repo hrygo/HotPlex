@@ -238,6 +238,8 @@ type MessageData struct {
 
 Turn 结束时的完整消息聚合，兼容非流式场景。
 
+> **busy 追问通知 marker**：当 session 繁忙（SESSION_BUSY 分支）时收到用户追问，Gateway 会广播一个空 `content` 的 `message` 事件作为通知 marker，`metadata.supplement_mode` 标记处理方式——`injected`（透传并入当前 turn，结果随当前回复产出）或 `buffered`（暂存待 turn 完成后重投）。客户端应据此感知追问已被接收，而非将其当作空消息展示。
+
 #### `tool_call` — 工具调用通知
 
 ```go
