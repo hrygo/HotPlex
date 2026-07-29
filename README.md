@@ -1,12 +1,12 @@
 <h1 align="center">HotPlex Gateway</h1>
 
 <p align="center">
-  <strong>The Unified Bridge for AI Coding Agents</strong>
+  <strong>Bring every AI coding agent to every place your team works.</strong>
 </p>
 
 <p align="center">
-  A high-performance Go gateway providing a single WebSocket interface<br>
-  to access any AI Coding Agent across Web, Slack, and Feishu.
+  HotPlex is a self-hosted gateway that connects AI coding agents to Web, Slack,<br>
+  Feishu, and enterprise messaging through one consistent, production-ready interface.
 </p>
 
 <p align="center">
@@ -22,42 +22,55 @@
   <a href="https://github.com/hrygo/hotplex/stargazers"><img src="https://img.shields.io/github/stars/hrygo/hotplex?style=flat-square" alt="Stars"></a>
 </p>
 
+<p align="center">
+  <a href="#-quick-start"><strong>Quick Start</strong></a> ·
+  <a href="#-where-hotplex-fits">Use Cases</a> ·
+  <a href="docs/index.md">Documentation</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
 ---
 
-## ✨ Core Capabilities
+## Turn AI coding agents into a shared team capability
 
-### 🏗️ Core Architecture
-- 🌐 **Universal AEP Gateway** — Abstract any AI Coding Agent behind a single WebSocket protocol (AEP v1) with backpressure-aware streaming, per-session monotonic sequencing, and automatic LLM retry with exponential backoff.
-- 🔌 **Pluggable Worker Backends** — **Claude Code**, **OpenCode Server**, **ACP** (JSON-RPC 2.0 over stdio for any ACP-compatible agent), and **Codex CLI** behind a unified interface. Switch agents at any granularity with 5-level config fallback (bot → platform → env → messaging → default).
-- 🔄 **Deterministic Sessions** — UUIDv5 session IDs for seamless reconnect across network drops. 5-state machine with per-user pool quotas, dual **SQLite/PostgreSQL** persistence, and background GC.
+AI coding agents are powerful, but they usually live inside one terminal, one vendor, or one developer's workflow. HotPlex puts a stable gateway in front of them so the same agents can serve a browser, a team chat, an automation, or an internal platform—without rebuilding the agent integration each time.
 
-### 📱 Multi-Platform Delivery
-- 🌍 **Write Once, Deploy Anywhere** — Bridge agents to **Slack** (Socket Mode), **Feishu** (WebSocket), and **Web** with zero agent code changes. Each adapter provides platform-native streaming, slash commands, and interaction management.
-- 🎙️ **Voice Input & Summary** — Seamless integration with platform voice messages (Speech-to-Text supporting both optional cloud-based Feishu STT API and fully localized, offline custom speech recognition commands) and auto-synthesized summaries back to users (Text-to-Speech via Microsoft Edge-TTS or localized CPU-friendly MOSS-TTS sidecar).
-- ⏰ **AI-Native Cron Scheduler** — Agents autonomously create scheduled tasks from natural language ("remind me in 30m"). Supports cron expressions, fixed intervals, and one-shot schedules with lifecycle controls (`max_runs`, `expires_at`), attached session injection, and automatic result delivery.
-- 💬 **Embedded Web Chat & Admin UI** — A single binary serves the AEP gateway, a Next.js SPA web chat, and an admin dashboard for bot management, API keys, and session monitoring — all out of the box.
+| What your team gets | Why it matters |
+| :------------------ | :------------- |
+| **One gateway for every agent** | Connect Claude Code, Codex CLI, OpenCode Server, or any ACP-compatible agent through the same AEP v1 interface. |
+| **Access where work already happens** | Use agents from the embedded Web Chat, Slack, Feishu, or Yuanxin instead of moving every request back to a terminal. |
+| **Conversations that survive real work** | Resume deterministic sessions, stream long-running turns, and accept follow-up input even while an agent is busy. |
+| **Control you can operate yourself** | Self-host authentication, permissions, audit trails, persistence, metrics, tracing, and lifecycle management in one Go binary. |
 
-### 🤖 Agent Intelligence
-- 🎭 **B/C Dual-Channel Personality** — **B-channel** directives (SOUL/AGENTS/SKILLS) unconditionally override **C-channel** context (USER/MEMORY). Three-level per-bot fallback (global → platform → bot). META-COGNITION hardened with **XML Sanitizer** to block prompt injection.
-- 🧠 **Brain LLM Orchestration** — Optional intelligence layer with intent routing (greetings bypass the coding agent), two-stage safety guard, context compression (8K token threshold), and cross-session user preference extraction.
+## 🎯 Where HotPlex fits
 
-### 🛡️ Security & Operations
-- 🔒 **Enterprise-Grade Security** — Timing-safe API key authentication, SSRF protection with DNS rebinding defense, command/tool/model allowlists, environment isolation, and path traversal prevention.
-- 📊 **End-to-End Observability** — 30+ Prometheus metrics, OpenTelemetry distributed tracing with W3C TraceContext propagation, and structured JSON logging.
-- 🛠️ **Self-Contained CLI** — 13 subcommands in one binary: `gateway`, `service` (systemd/launchd/SCM), `onboard` (guided setup), `doctor` (27 diagnostic checks), `cron`, `slack`, `config`, `update` (self-update), `dev`, `status`, `security`, `install`, `version`.
-- 🔄 **Hot-Reload Configuration** — YAML + env var configuration with runtime hot-reload, field-level audit trail, and versioned rollback — no restarts for most changes.
+### Team coding assistant
+
+Give a Slack or Feishu channel access to a real coding agent. Teammates can investigate code, ask follow-up questions, approve tool use, and receive streamed results without sharing a developer workstation.
+
+### Remote development access
+
+Continue an agent session from the embedded Web Chat or a mobile messaging client. Deterministic session identity and persisted history keep the conversation connected across network drops and restarts.
+
+### Agent-powered automation
+
+Turn natural-language requests into one-time reminders, recurring checks, or scheduled engineering jobs. HotPlex runs them through the selected agent and delivers the result back to the target platform.
+
+### Self-hosted enterprise gateway
+
+Place one governed boundary between users and multiple agent runtimes. Centralize API authentication, permission ceilings, bot configuration, session visibility, audit records, and operational telemetry.
 
 ## ⚡ Quick Start
 
-> **AI Agents:** Read https://github.com/hrygo/hotplex/blob/main/INSTALL.md and complete the HotPlex installation and configuration
+### 1. Install HotPlex
 
-### Install
-
-**macOS / Linux (one-click binary):**
+**macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hrygo/hotplex/main/scripts/install.sh | bash -s -- --latest
+curl -fsSL https://raw.githubusercontent.com/hrygo/hotplex/main/scripts/install.sh | sudo bash -s -- --latest
 ```
+
+For a user-local installation without `sudo`, add `--prefix ~/.local` instead. See the [installation reference](INSTALL.md) for Windows, source builds, Docker, and version-pinned installs.
 
 **Windows (PowerShell 5.1+):**
 
@@ -66,171 +79,110 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/hrygo/hotplex/main/scri
 .\install.ps1 -Latest
 ```
 
-**From source (requires Go 1.26+, pnpm, Node.js 22+):**
+### 2. Configure and verify
 
 ```bash
-git clone https://github.com/hrygo/hotplex.git
-cd hotplex
-make quickstart
-```
-
-> **Tip (Claude Code):** After cloning, use `/hotplex-setup` for interactive environment setup and `.env` configuration.
-
-**Docker (Experimental):**
-
-```bash
-cp configs/env.example .env  # edit with your API keys
-docker compose up -d
-```
-
-### Configure
-
-```bash
-# Interactive setup wizard
 hotplex onboard
-
-# Or auto-generate all configs:
-hotplex onboard --non-interactive --enable-slack --enable-feishu
+hotplex doctor
 ```
 
-### Run
+The setup wizard detects installed agents, creates the local configuration, collects required secrets, and optionally enables Slack or Feishu. It is safe to run again when you want to reconfigure an existing installation.
+
+### 3. Start the gateway
 
 ```bash
-# Development mode (foreground)
-make dev
-
-# Production mode (background daemon)
 hotplex gateway start -d
-
-# Stop / restart
-hotplex gateway stop
-hotplex gateway restart -d
+curl http://localhost:8888/health
 ```
 
-### Install as System Service
+Open **[http://localhost:8888](http://localhost:8888)** for the embedded Web Chat. The same gateway can then be connected to Slack, Feishu, or Yuanxin.
 
-```bash
-hotplex service install              # user-level (no root)
-sudo hotplex service install --level system  # system-wide
-hotplex service start
-hotplex service status
-hotplex service logs -f
+> [!TIP]
+> Building from source? Clone the repository, run `make hooks`, then `make quickstart`. The full workflow is in the [contributor setup guide](docs/guides/contributor/development-setup.md).
 
-# Uninstall
-hotplex service uninstall
-```
+## 🏗️ How it works
 
-Supports **systemd** (Linux), **launchd** (macOS), and **Windows SCM**.
+HotPlex separates the place where a user talks from the agent that performs the work:
 
-### Services
-
-| Service             | Address                  | Note                                   |
-| :------------------ | :----------------------- | :------------------------------------- |
-| Gateway (WebSocket) | `ws://localhost:8888/ws` | Main protocol endpoint                 |
-| Admin API           | `http://localhost:9999`  | Management & Statistics                |
-| Web Chat UI         | `http://localhost:8888`  | **Embedded SPA** (served from Gateway) |
-| Dev Web Chat        | `http://localhost:3000`  | Next.js Dev Server (`make dev`)        |
-
-## 🏗️ Architecture
-
-HotPlex sits between frontend clients and backend AI coding agents, featuring a built-in **Meta-Cognition Core** that abstracts protocol differences into a unified **AEP v1** WebSocket layer.
+1. **Clients and messaging platforms** send AEP events through WebSocket or a platform adapter.
+2. **HotPlex Gateway** authenticates the user, resolves the session and agent policy, persists lifecycle state, and streams events with backpressure and ordered sequence numbers.
+3. **Worker adapters** translate the unified session into the native protocol of Claude Code, Codex CLI, OpenCode Server, or an ACP agent.
+4. Results flow back through the same session to the originating browser, chat, or scheduled task.
 
 ![HotPlex Architecture](docs/assets/architecture.svg)
 
+## 🔌 Integrations
 
-## 🔗 SDKs & Libraries
+### Meet users where they work
 
-|    Language    | Path                                                         | Features                                              |
-| :------------: | :----------------------------------------------------------- | :---------------------------------------------------- |
-|     **Go**     | [`client/`](client/)                                         | Full-featured, channel-based events, production-grade |
-| **TypeScript** | [`examples/typescript-client/`](examples/typescript-client/) | Streaming, multi-turn chat, React compatible          |
-|   **Python**   | [`examples/python-client/`](examples/python-client/)         | Asyncio, session resume, CLI ready                    |
-|    **Java**    | [`examples/java-client/`](examples/java-client/)             | Enterprise AEP v1 implementation                      |
+| Channel | Experience |
+| :------ | :--------- |
+| **Embedded Web Chat** | Built-in Next.js interface with streaming conversations, workspace controls, and an admin console. |
+| **Slack** | Socket Mode adapter with streamed replies, slash commands, interactions, and file tooling. |
+| **Feishu** | WebSocket adapter with interactive cards, commands, voice input, and voice summaries. |
+| **Yuanxin** | Pulsar-backed enterprise messaging adapter with session routing and scheduled-result delivery. |
 
-### Connect with Go SDK
+### Choose the right agent for each workload
 
-```go
-package main
+| Worker | Best fit |
+| :----- | :------- |
+| **Claude Code** | Full coding-agent sessions with tool interactions and mid-turn follow-up injection. |
+| **Codex CLI** | Codex app-server sessions with streaming events and mid-turn follow-ups. |
+| **OpenCode Server** | Long-lived OpenCode HTTP/SSE runtime managed behind the gateway. |
+| **ACP** | Any Agent Client Protocol-compatible runtime over JSON-RPC 2.0 stdio. |
 
-import (
-    "context"
-    "fmt"
-    client "github.com/hrygo/hotplex/client"
-)
+Worker choice can be set per bot or platform, with shared defaults for the rest of the deployment.
 
-func main() {
-    c, err := client.New(context.Background(),
-        client.URL("ws://localhost:8888/ws"),
-        client.WorkerType("claude_code"),
-        client.APIKey("<your-api-key>"),
-    )
-    if err != nil {
-        panic(err)
-    }
-    defer c.Close()
+## ✨ Latest release: v1.38.1
 
-    c.SendInput(context.Background(), "Explain HotPlex architecture")
+- **Keep talking while an agent is busy.** Follow-up input is injected into the current Claude Code or Codex CLI turn; ACP and OpenCode Server supplements are buffered and replayed after completion.
+- **One protocol contract across every SDK.** A canonical AEP v1 schema and 38 golden envelopes are checked against Go, TypeScript, Python, and Java clients in CI.
+- **Operate from a complete admin experience.** The v1.38 line includes dashboards for sessions, bots, cron jobs, users, API keys, skills, and activity.
+- **Resume with stronger reliability.** Session sequence hydration and ACP resume fixes prevent history loss and event-sequence collisions across reconnects.
 
-    for env := range c.Events() {
-        if data, ok := env.AsMessageDeltaData(); ok {
-            fmt.Print(data.Content)
-        }
-    }
-}
-```
+See the [changelog](CHANGELOG.md) for the complete release history.
 
-## 🛠️ Configuration
+## 🛡️ Built for teams that run it
 
-| Key                         | Default                      | Description                                    |
-| :-------------------------- | :--------------------------- | :--------------------------------------------- |
-| `agent_config.enabled`      | `true`                       | Enable agent personality/context injection     |
-| `messaging.tts_enabled`     | `true`                       | Enable voice reply (voice-in → voice-out)      |
-| `messaging.tts_provider`    | `edge+moss`                  | TTS provider: `edge` (Edge-TTS), `moss` (MOSS CPU), `edge+moss` |
-| `messaging.stt_provider`    | `local`                      | STT provider: `local` (local command), `feishu` (Feishu API), `feishu+local` |
-| `brain.enabled`             | `false`                      | Enable Brain LLM orchestration (auto-discovers keys from worker configs)  |
-| `webchat.enabled`           | `true`                       | Serve embedded webchat SPA from gateway        |
-| `worker.auto_retry.enabled` | `true`                       | Intelligent LLM retry with exponential backoff |
-| `gateway.addr`              | `localhost:8888`             | WebSocket gateway address                      |
-| `admin.addr`                | `localhost:9999`             | Admin API address                              |
-| `db.path`                   | `~/.hotplex/data/hotplex.db` | SQLite database path                           |
-| `log.level`                 | `info`                       | Log level: debug, info, warn, error            |
+- **Security:** timing-safe API key checks, permission ceilings, SSRF and DNS-rebinding protection, path safety, and isolated worker environments.
+- **Persistence:** deterministic session identity, event history, and lifecycle storage on SQLite by default or PostgreSQL for shared deployments.
+- **Observability:** structured JSON logs, Prometheus metrics, OpenTelemetry traces, and W3C TraceContext propagation.
+- **Operations:** one cross-platform binary with 14 top-level commands, 27 diagnostic checks, hot-reloadable configuration, service management, and self-update support.
+- **Cross-platform:** Linux, macOS, and Windows support with native process and service lifecycle handling.
 
-> [!TIP]
-> See [Configuration Reference](docs/reference/configuration.md) for the full list of environment variables and YAML settings.
+## 🔗 SDKs
 
-## 📖 Documentation
+| Language | Start here |
+| :------- | :--------- |
+| **Go** | [Go client SDK](client/README.md) |
+| **TypeScript** | [TypeScript client](examples/typescript-client/README.md) |
+| **Python** | [Python client](examples/python-client/README.md) |
+| **Java** | [Java client](examples/java-client/README.md) |
 
-HotPlex ships with **self-hosted documentation** — a Chinese-first docs portal built from Markdown sources, compiled into static HTML, and embedded directly into the gateway binary. Access it at `http://localhost:8888/docs` after starting the gateway.
+All four clients consume the same AEP v1 contract and conformance corpus. Protocol details are available in the [AEP reference](docs/reference/aep-protocol.md) and [event catalog](docs/reference/events.md).
 
-| Area                | Guide                                                                                                              |
-| :------------------ | :----------------------------------------------------------------------------------------------------------------- |
-| **Getting Started** | [5-Minute Quick Start](docs/getting-started.md) · [Docs Portal](docs/index.md)                                    |
-| **Tutorials**       | [Slack Integration](docs/tutorials/slack-integration.md) · [Feishu Integration](docs/tutorials/feishu-integration.md) · [AI Personality](docs/tutorials/agent-personality.md) · [Cron Tasks](docs/tutorials/cron-scheduled-tasks.md) |
-| **Guides**          | [Remote Coding Agent](docs/guides/developer/remote-coding-agent.md) · [Enterprise Deployment](docs/guides/enterprise/deployment.md) · [Contributing](docs/guides/contributor/development-setup.md) |
-| **Reference**       | [CLI Reference](docs/reference/cli.md) · [Configuration](docs/reference/configuration.md) · [Admin API](docs/reference/admin-api.md) · [AEP v1 Protocol](docs/reference/aep-protocol.md) |
-| **Architecture**    | [Gateway Design](docs/architecture/Worker-Gateway-Design.md) · [Agent Config Design](docs/architecture/Agent-Config-Design.md) · [Meta-Cognition](internal/agentconfig/META-COGNITION.md) |
-| **Security**        | [Security Policies](docs/reference/security-policies.md) · [Authentication](docs/security/Security-Authentication.md) · [SSRF Protection](docs/security/SSRF-Protection.md) |
+## 📚 Go deeper
 
-> [!TIP]
-> Build docs locally: `make docs-build`. Source files live in `docs/`, output goes to `internal/docs/out/` (embedded via `go:embed`).
+| Goal | Guide |
+| :--- | :---- |
+| Get running in five minutes | [Getting Started](docs/getting-started.md) |
+| Connect a team chat | [Slack Integration](docs/tutorials/slack-integration.md) · [Feishu Integration](docs/tutorials/feishu-integration.md) |
+| Configure workers and platforms | [Configuration Reference](docs/reference/configuration.md) |
+| Deploy and operate HotPlex | [Enterprise Deployment](docs/guides/enterprise/deployment.md) · [Observability](docs/guides/enterprise/observability.md) |
+| Integrate a custom client | [WebSocket Integration](docs/guides/developer/websocket-integration.md) · [AEP v1 Protocol](docs/reference/aep-protocol.md) |
+| Automate recurring work | [Cron Scheduled Tasks](docs/tutorials/cron-scheduled-tasks.md) |
+| Manage the gateway | [CLI Reference](docs/reference/cli.md) · [Admin API](docs/reference/admin-api.md) |
+
+HotPlex also serves its Chinese-first documentation portal directly from the binary at `http://localhost:8888/docs`.
 
 ## 👥 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/AmazingFeature`)
-3. Commit with conventional messages (`git commit -m 'feat: add AmazingFeature'`)
-4. Push to the branch (`git push origin feat/AmazingFeature`)
-5. Open a Pull Request
-
-> [!NOTE]
-> All build/test/lint operations must use `make` targets. See `make help` for the full list.
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [development setup guide](docs/guides/contributor/development-setup.md). Install the repository hooks with `make hooks` before making changes.
 
 ## 🛡️ Security
 
-If you discover a security vulnerability, please do NOT open a public issue. Report it via [SECURITY.md](SECURITY.md) or contact maintainers directly.
+Do not open a public issue for a suspected vulnerability. Follow the private reporting process in [SECURITY.md](SECURITY.md).
 
 ## 📜 License
 
-Distributed under the [Apache License 2.0](LICENSE).
+HotPlex is distributed under the [Apache License 2.0](LICENSE).
