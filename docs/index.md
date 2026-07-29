@@ -120,3 +120,4 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Cron 调度器设计](explanation/cron-design.md)            | AI-native 调度、并发槽、投递机制    |
 | [Phrases 系统设计](explanation/phrases-design.md)        | 加权随机话术池、cascade-append 策略 |
 | [安全模型](explanation/security-model.md)                | 7 层安全体系设计决策和权衡          |
+| [MCP 2026 与 HotPlex 能力演进](explanation/mcp-2026-hotplex-evolution.md) | MCP 规范基线、目标架构、建设序列与 ROI 决策 |
