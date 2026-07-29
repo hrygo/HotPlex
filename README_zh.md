@@ -1,12 +1,12 @@
 <h1 align="center">HotPlex 网关</h1>
 
 <p align="center">
-  <strong>AI Coding Agent 统一接入桥梁</strong>
+  <strong>让每一种 AI Coding Agent，都能出现在团队工作的每一个入口。</strong>
 </p>
 
 <p align="center">
-  高性能 Go 网关，提供统一的 WebSocket 接口，<br>
-  一键接入任意 AI Coding Agent，覆盖 Web、Slack 和飞书全渠道。
+  HotPlex 是一个可自托管的统一网关，通过稳定一致的生产级接口，<br>
+  将 AI Coding Agent 接入 Web、Slack、飞书和企业消息平台。
 </p>
 
 <p align="center">
@@ -22,42 +22,55 @@
   <a href="https://github.com/hrygo/hotplex/stargazers"><img src="https://img.shields.io/github/stars/hrygo/hotplex?style=flat-square" alt="Stars"></a>
 </p>
 
+<p align="center">
+  <a href="#-快速开始"><strong>快速开始</strong></a> ·
+  <a href="#-hotplex-适合哪些场景">使用场景</a> ·
+  <a href="docs/index.md">完整文档</a> ·
+  <a href="CHANGELOG.md">更新记录</a>
+</p>
+
 ---
 
-## ✨ 核心能力
+## 把 AI Coding Agent 变成团队共享能力
 
-### 🏗️ 核心架构
-- 🌐 **统一 AEP 网关** — 将所有 AI Coding Agent 抽象为单一 WebSocket 协议（AEP v1），支持背压感知的流控、会话级严格递增序号和 LLM 指数退避自动重试。
-- 🔌 **可插拔 Worker 后端** — **Claude Code**、**OpenCode Server**、**ACP**（JSON-RPC 2.0 over stdio，兼容任意 ACP Agent）和 **Codex CLI** 四类 Worker 统一接口。通过五级 fallback（Bot → 平台 → 环境变量 → 共享默认 → 编译默认）灵活切换。
-- 🔄 **确定性会话管理** — 基于 UUIDv5 的确定性 Session ID，网络中断后无缝重连。五状态机 + 每用户会话配额 + **SQLite/PostgreSQL** 双数据库持久化 + 后台 GC。
+AI Coding Agent 很强，但它通常被锁在某个终端、某个厂商或某位开发者的工作流里。HotPlex 在 Agent 前提供稳定的统一网关，让同一套能力可以服务浏览器、团队聊天、自动化任务和企业内部平台，而不必为每个入口重新开发一遍 Agent 集成。
 
-### 📱 多平台分发
-- 🌍 **一次接入，全端覆盖** — 无需修改 Agent 代码，即可分发至 **Slack**（Socket Mode）、**飞书**（WebSocket）和 **Web**。每个适配器提供平台原生流式输出、斜杠命令和交互管理。
-- 🎙️ **语音输入与语音摘要** — 支持平台原生语音消息输入（集成可配置的 Speech-to-Text 引擎，支持飞书云端 STT 或完全本地化的离线语音识别命令，无需云端依赖），以及通过智能语音合成（集成微软 Edge-TTS 或本地化部署的 MOSS-TTS 语音合成伴生进程）将 Agent 的文本摘要以语音形式自动播报回传。
-- ⏰ **AI 原生定时任务** — Agent 自主将自然语言（"30 分钟后提醒我"）转换为定时任务，支持 cron 表达式、固定间隔、一次性执行，具备生命周期控制（`max_runs`、`expires_at`）、附加会话注入和自动结果回传。
-- 💬 **开箱即用 Web Chat + 管理后台** — 单二进制同时提供 AEP 网关、Next.js SPA 聊天界面和管理控制台（Bot 配置、API Key 管理、会话监控）。
+| 团队获得的能力 | 带来的价值 |
+| :------------- | :--------- |
+| **一个网关接入所有 Agent** | Claude Code、Codex CLI、OpenCode Server 和任意 ACP 兼容 Agent，共用统一的 AEP v1 接口。 |
+| **在工作的地方直接使用** | 从内置 Web Chat、Slack、飞书或元芯调用 Agent，无需把每个问题搬回开发终端。 |
+| **经得起真实工作的连续会话** | 确定性会话可恢复、长任务可流式返回，Agent 忙碌时也能接收用户继续补充的输入。 |
+| **完全掌握自己的运行边界** | 在一个 Go 二进制内自托管认证、权限、审计、持久化、指标、追踪和生命周期管理。 |
 
-### 🤖 Agent 智能
-- 🎭 **B/C 双通道人格注入** — **B 通道**指令（SOUL/AGENTS/SKILLS）无条件覆盖 **C 通道**上下文（USER/MEMORY）。三级逐文件 fallback（全局 → 平台 → Bot 专属）。META-COGNITION 内置 **XML Sanitizer** 阻断 Prompt 注入。
-- 🧠 **Brain LLM 编排** — 可选智能层，支持意图路由（问候语绕过编码 Agent）、两级安全检测、上下文压缩（8K token 阈值）和跨会话用户偏好提取。
+## 🎯 HotPlex 适合哪些场景
 
-### 🛡️ 安全与运维
-- 🔒 **企业级安全加固** — 时序安全 API Key 认证，DNS 重绑定防御型 SSRF 防护，命令/工具/模型白名单，环境变量隔离，路径穿越防护。
-- 📊 **全链路可观测** — 30+ Prometheus 指标，OpenTelemetry 分布式追踪（W3C TraceContext 传播），结构化 JSON 日志。
-- 🛠️ **一体化 CLI** — 单二进制 13 个子命令：`gateway`、`service`（systemd/launchd/SCM）、`onboard`（引导式配置）、`doctor`（25 项诊断检查）、`cron`、`slack`、`config`、`update`（自更新）、`dev`、`status`、`security`、`install`、`version`。
-- 🔄 **热重载配置** — YAML + 环境变量配置，运行时热重载，字段级变更审计，版本化回滚——大多数变更无需重启。
+### 团队聊天中的编码助手
+
+让 Slack 或飞书群聊接入真正能完成工作的 Coding Agent。团队成员可以分析代码、继续追问、批准工具调用并接收流式结果，不必共享某位开发者的工作站。
+
+### 随时可继续的远程开发
+
+从内置 Web Chat 或移动端消息应用继续 Agent 会话。确定性 Session ID 和持久化历史让对话在网络中断、重连和服务重启之后仍保持连续。
+
+### Agent 驱动的自动化
+
+把自然语言需求变成一次性提醒、周期巡检或定时工程任务。HotPlex 使用指定 Agent 执行任务，并把结果自动投递回目标平台。
+
+### 企业内部自托管网关
+
+在用户和多种 Agent Runtime 之间建立一条可治理的统一边界，集中管理 API 认证、权限上限、Bot 配置、会话视图、审计记录和运行指标。
 
 ## ⚡ 快速开始
 
-> **AI Agent：** 阅读 https://github.com/hrygo/hotplex/blob/main/INSTALL.md 并完成 hotplex 安装和配置
+### 1. 安装 HotPlex
 
-### 安装
-
-**macOS / Linux（一键安装二进制）：**
+**macOS / Linux：**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hrygo/hotplex/main/scripts/install.sh | bash -s -- --latest
+curl -fsSL https://raw.githubusercontent.com/hrygo/hotplex/main/scripts/install.sh | sudo bash -s -- --latest
 ```
+
+如需免 `sudo` 安装到当前用户目录，请改用 `--prefix ~/.local`。Windows、源码构建、Docker 和指定版本安装方式见[安装参考](INSTALL.md)。
 
 **Windows（PowerShell 5.1+）：**
 
@@ -66,171 +79,110 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/hrygo/hotplex/main/scri
 .\install.ps1 -Latest
 ```
 
-**从源码构建（需要 Go 1.26+、pnpm、Node.js 22+）：**
+### 2. 配置并检查环境
 
 ```bash
-git clone https://github.com/hrygo/hotplex.git
-cd hotplex
-make quickstart
-```
-
-> **提示（Claude Code 用户）：** 克隆后可使用 `/hotplex-setup` 交互式配置环境与 `.env`。
-
-**Docker（实验性）：**
-
-```bash
-cp configs/env.example .env  # 填入你的 API 密钥
-docker compose up -d
-```
-
-### 配置
-
-```bash
-# 交互式配置向导
 hotplex onboard
-
-# 或快速自动生成全部配置：
-hotplex onboard --non-interactive --enable-slack --enable-feishu
+hotplex doctor
 ```
 
-### 启动
+配置向导会检测本机已有的 Agent、生成本地配置、收集必要密钥，并按需启用 Slack 或飞书。需要调整已有安装时可以安全地再次运行。
+
+### 3. 启动网关
 
 ```bash
-# 开发模式（前台运行）
-make dev
-
-# 生产模式（后台守护进程）
 hotplex gateway start -d
-
-# 停止 / 重启
-hotplex gateway stop
-hotplex gateway restart -d
+curl http://localhost:8888/health
 ```
 
-### 安装为系统服务
+在浏览器打开 **[http://localhost:8888](http://localhost:8888)**，即可使用内置 Web Chat；之后可以把同一个网关继续接入 Slack、飞书或元芯。
 
-```bash
-hotplex service install              # 用户级（无需 root）
-sudo hotplex service install --level system  # 系统级
-hotplex service start
-hotplex service status
-hotplex service logs -f
+> [!TIP]
+> 从源码构建时，克隆仓库后先运行 `make hooks`，再执行 `make quickstart`。完整流程见[贡献者环境搭建](docs/guides/contributor/development-setup.md)。
 
-# 卸载
-hotplex service uninstall
-```
+## 🏗️ 工作方式
 
-支持 **systemd** (Linux)、**launchd** (macOS) 和 **Windows SCM**。
+HotPlex 把“用户在哪里对话”和“哪个 Agent 执行任务”分离开：
 
-### 服务端口
-
-| 服务             | 地址                     | 说明                             |
-| :--------------- | :----------------------- | :------------------------------- |
-| 网关 (WebSocket) | `ws://localhost:8888/ws` | 主协议端点                       |
-| Admin API        | `http://localhost:9999`  | 管理接口与统计指标               |
-| Web Chat UI      | `http://localhost:8888`  | **内置 SPA**（由网关直接托管）   |
-| 开发版 Web Chat  | `http://localhost:3000`  | Next.js 开发服务器（`make dev`） |
-
-## 🏗️ 架构
-
-HotPlex 位于前端客户端和后端 AI Coding Agent 之间，内置 **元认知控制内核**，将协议差异抽象为统一的 **AEP v1 (Agent Exchange Protocol)** WebSocket 层。
+1. **客户端与消息平台**通过 WebSocket 或平台 Adapter 发送 AEP 事件。
+2. **HotPlex Gateway**完成用户认证、会话与 Agent 策略解析、生命周期持久化，并通过背压控制和严格递增序号流式转发事件。
+3. **Worker Adapter**把统一会话转换为 Claude Code、Codex CLI、OpenCode Server 或 ACP Agent 的原生协议。
+4. 执行结果沿同一会话返回最初发起请求的浏览器、群聊或定时任务。
 
 ![HotPlex 架构](docs/assets/architecture.svg)
 
+## 🔌 集成能力
 
-## 🔗 SDK 与客户端库
+### 在用户工作的入口提供 Agent
 
-|      语言      | 路径                                                         | 特性                             |
-| :------------: | :----------------------------------------------------------- | :------------------------------- |
-|     **Go**     | [`client/`](client/)                                         | 全功能支持，事件驱动，生产级可用 |
-| **TypeScript** | [`examples/typescript-client/`](examples/typescript-client/) | 流式输出、多轮对话、React 兼容   |
-|   **Python**   | [`examples/python-client/`](examples/python-client/)         | Asyncio 支持、会话恢复、CLI 友好 |
-|    **Java**    | [`examples/java-client/`](examples/java-client/)             | 企业级 AEP v1 协议实现           |
+| 渠道 | 使用体验 |
+| :--- | :------- |
+| **内置 Web Chat** | 内置 Next.js 界面，提供流式对话、工作区控制和管理后台。 |
+| **Slack** | Socket Mode 接入，支持流式回复、斜杠命令、交互和文件工具。 |
+| **飞书** | WebSocket 接入，支持交互卡片、命令、语音输入和语音摘要。 |
+| **元芯** | 基于 Pulsar 的企业消息 Adapter，支持会话路由和定时结果投递。 |
 
-### 使用 Go SDK 连接
+### 为不同任务选择合适的 Agent
 
-```go
-package main
+| Worker | 适合场景 |
+| :----- | :------- |
+| **Claude Code** | 完整 Coding Agent 会话、工具交互和执行中的继续追问。 |
+| **Codex CLI** | 基于 Codex app-server 的流式会话和执行中的继续追问。 |
+| **OpenCode Server** | 由网关托管生命周期的 OpenCode HTTP/SSE 长驻 Runtime。 |
+| **ACP** | 通过 JSON-RPC 2.0 stdio 接入任意 Agent Client Protocol 兼容 Runtime。 |
 
-import (
-    "context"
-    "fmt"
-    client "github.com/hrygo/hotplex/client"
-)
+Worker 可以按 Bot 或平台指定，其余场景继承部署级共享默认值。
 
-func main() {
-    c, err := client.New(context.Background(),
-        client.URL("ws://localhost:8888/ws"),
-        client.WorkerType("claude_code"),
-        client.APIKey("<your-api-key>"),
-    )
-    if err != nil {
-        panic(err)
-    }
-    defer c.Close()
+## ✨ 最新版本：v1.38.1
 
-    c.SendInput(context.Background(), "解释一下 HotPlex 架构")
+- **Agent 忙碌时也可以继续说。** Claude Code 和 Codex CLI 会把补充输入注入当前 Turn；ACP 和 OpenCode Server 则暂存输入，并在当前 Turn 完成后自动重投。
+- **所有 SDK 共用一份协议契约。** AEP v1 canonical schema 和 38 个 golden envelope 在 CI 中同时校验 Go、TypeScript、Python 和 Java 客户端。
+- **完整的后台管理体验。** v1.38 系列提供 Session、Bot、Cron、用户、API Key、Skill 和活动记录管理页面。
+- **重连恢复更加可靠。** Session 序号水位恢复与 ACP resume 修复，避免重连后的历史丢失和事件序号冲突。
 
-    for env := range c.Events() {
-        if data, ok := env.AsMessageDeltaData(); ok {
-            fmt.Print(data.Content)
-        }
-    }
-}
-```
+完整版本历史见[更新记录](CHANGELOG.md)。
 
-## 🛠️ 配置说明
+## 🛡️ 为真实运维环境而设计
 
-| 配置项                      | 默认值                       | 说明                                |
-| :-------------------------- | :--------------------------- | :---------------------------------- |
-| `agent_config.enabled`      | `true`                       | 启用 Agent 人格/上下文注入          |
-| `messaging.tts_enabled`     | `true`                       | 开启语音回复 (语音输入 → 语音输出)  |
-| `messaging.tts_provider`    | `edge+moss`                  | TTS 提供商: `edge` (Edge-TTS), `moss` (MOSS CPU), `edge+moss` |
-| `messaging.stt_provider`    | `local`                      | STT 提供商: `local` (本地命令), `feishu` (飞书 API), `feishu+local` |
-| `brain.enabled`             | `false`                      | 启用 Brain LLM 编排层（自动从 Worker 配置文件查找 API Key） |
-| `webchat.enabled`           | `true`                       | 从网关提供嵌入式 Web Chat SPA       |
-| `worker.auto_retry.enabled` | `true`                       | LLM 智能重试，支持指数退避          |
-| `gateway.addr`              | `localhost:8888`             | WebSocket 网关地址                  |
-| `admin.addr`                | `localhost:9999`             | Admin API 地址                      |
-| `db.path`                   | `~/.hotplex/data/hotplex.db` | SQLite 数据库路径                   |
-| `log.level`                 | `info`                       | 日志级别 (debug, info, warn, error) |
+- **安全：** 时序安全 API Key 校验、权限上限、SSRF 与 DNS 重绑定防护、路径安全和 Worker 环境隔离。
+- **持久化：** 确定性 Session ID、事件历史和生命周期数据，默认使用 SQLite，共享部署可切换 PostgreSQL。
+- **可观测性：** 结构化 JSON 日志、Prometheus 指标、OpenTelemetry Trace 和 W3C TraceContext 传播。
+- **运维：** 一个跨平台二进制提供 14 个顶层命令、27 项诊断检查、配置热更新、系统服务管理和自更新。
+- **跨平台：** 支持 Linux、macOS 和 Windows，并提供原生的进程与系统服务生命周期管理。
 
-> [!TIP]
-> 完整的环境变量和 YAML 设置请参考 [配置参考](docs/reference/configuration.md)。
+## 🔗 SDK
 
-## 📖 文档中心
+| 语言 | 开始使用 |
+| :--- | :------- |
+| **Go** | [Go Client SDK](client/README.md) |
+| **TypeScript** | [TypeScript Client](examples/typescript-client/README.md) |
+| **Python** | [Python Client](examples/python-client/README.md) |
+| **Java** | [Java Client](examples/java-client/README.md) |
 
-HotPlex 内置**自托管中文文档门户** — Markdown 源文件编译为静态 HTML，通过 `go:embed` 嵌入网关二进制。启动网关后访问 `http://localhost:8888/docs` 即可浏览。
+四种客户端共用同一份 AEP v1 契约与一致性测试语料。协议细节见 [AEP 参考](docs/reference/aep-protocol.md)和[事件目录](docs/reference/events.md)。
 
-| 领域         | 指南                                                                                                               |
-| :----------- | :----------------------------------------------------------------------------------------------------------------- |
-| **入门指南** | [5 分钟快速上手](docs/getting-started.md) · [文档门户](docs/index.md)                                             |
-| **教程**     | [Slack 集成](docs/tutorials/slack-integration.md) · [飞书集成](docs/tutorials/feishu-integration.md) · [AI 人格定制](docs/tutorials/agent-personality.md) · [定时任务](docs/tutorials/cron-scheduled-tasks.md) |
-| **指南**     | [远程 Coding Agent](docs/guides/developer/remote-coding-agent.md) · [企业部署](docs/guides/enterprise/deployment.md) · [贡献开发](docs/guides/contributor/development-setup.md) |
-| **参考**     | [CLI 参考](docs/reference/cli.md) · [配置参考](docs/reference/configuration.md) · [Admin API](docs/reference/admin-api.md) · [AEP v1 协议](docs/reference/aep-protocol.md) |
-| **架构设计** | [网关架构](docs/architecture/Worker-Gateway-Design.md) · [Agent 配置设计](docs/architecture/Agent-Config-Design.md) · [元认知内核](internal/agentconfig/META-COGNITION.md) |
-| **安全**     | [安全策略](docs/reference/security-policies.md) · [认证机制](docs/security/Security-Authentication.md) · [SSRF 防护](docs/security/SSRF-Protection.md) |
+## 📚 深入了解
 
-> [!TIP]
-> 本地构建文档：`make docs-build`。源文件位于 `docs/`，编译输出到 `internal/docs/out/`（通过 `go:embed` 嵌入二进制）。
+| 目标 | 指南 |
+| :--- | :--- |
+| 五分钟完成首次启动 | [快速上手](docs/getting-started.md) |
+| 接入团队聊天 | [Slack 集成](docs/tutorials/slack-integration.md) · [飞书集成](docs/tutorials/feishu-integration.md) |
+| 配置 Worker 与平台 | [配置参考](docs/reference/configuration.md) |
+| 部署和运维 HotPlex | [企业部署](docs/guides/enterprise/deployment.md) · [可观测性](docs/guides/enterprise/observability.md) |
+| 集成自定义客户端 | [WebSocket 集成](docs/guides/developer/websocket-integration.md) · [AEP v1 协议](docs/reference/aep-protocol.md) |
+| 自动执行周期任务 | [Cron 定时任务](docs/tutorials/cron-scheduled-tasks.md) |
+| 管理网关 | [CLI 参考](docs/reference/cli.md) · [Admin API](docs/reference/admin-api.md) |
+
+HotPlex 还会把中文优先的文档门户直接嵌入二进制；网关启动后可访问 `http://localhost:8888/docs`。
 
 ## 👥 参与贡献
 
-我们欢迎任何形式的贡献！请阅读 [贡献指南](CONTRIBUTING.md) 了解更多。
-
-1. Fork 本项目
-2. 创建特性分支 (`git checkout -b feat/AmazingFeature`)
-3. 使用规范提交格式 (`git commit -m 'feat: add AmazingFeature'`)
-4. 推送到分支 (`git push origin feat/AmazingFeature`)
-5. 开启 Pull Request
-
-> [!NOTE]
-> 所有构建/测试/lint 操作必须使用 `make` 目标。完整列表请运行 `make help`。
+欢迎贡献。请从 [CONTRIBUTING.md](CONTRIBUTING.md) 和[开发环境搭建](docs/guides/contributor/development-setup.md)开始，并在修改前运行 `make hooks` 安装仓库 Git Hooks。
 
 ## 🛡️ 安全
 
-如果您发现安全漏洞，请**不要**公开开启 Issue。请通过 [安全政策](SECURITY.md) 报告漏洞，或直接联系维护者。
+发现疑似安全漏洞时，请勿创建公开 Issue。请按 [SECURITY.md](SECURITY.md) 中的流程私下报告。
 
 ## 📜 开源协议
 
-本项目基于 [Apache License 2.0](LICENSE) 开源。
+HotPlex 基于 [Apache License 2.0](LICENSE) 发布。
