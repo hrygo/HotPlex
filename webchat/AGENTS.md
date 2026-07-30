@@ -114,3 +114,20 @@ pnpm exec playwright test   # E2E tests (requires gateway running)
 ```
 
 No unit test framework — all testing is Playwright E2E or manual verification via `pnpm dev`.
+
+## Internationalization Standards
+
+- **i18n Framework**: The frontend (`webchat/`) uses `react-i18next` + `i18next` for full bilingual (Chinese/English) internationalization. Default locale is `zh-CN`.
+- **No Hardcoded Strings**: Any UI display text, tooltips, form validation messages, placeholders, and error messages are **strictly forbidden** from being hardcoded in Chinese or English. All text must be extracted into JSON resource files under `webchat/locales/`.
+- **Key Synchronization**: When adding or modifying any copy, both `webchat/locales/zh-CN/` and `webchat/locales/en/` JSON files **must** be updated simultaneously. Keys must be identical across locales to prevent fallback or placeholder text when switching languages.
+- **Namespace Categories**: Translations are organized by domain into namespaces:
+  - `common.json` — Global/common items, public buttons, layout labels, etc.
+  - `chat.json` — Chat interface, conversation views, command prompts, workspace management.
+  - `admin.json` — Admin panel (Bot configuration, Cron jobs, session metrics, settings, etc.).
+  - `auth.json` — Login, authentication, logout related pages.
+  - `errors.json` — System-level and common frontend error messages.
+- **Usage Conventions**:
+  - React components/hooks: Use `const { t } = useTranslation('namespace')` and call via `{t('key')}`.
+  - Non-component / global JS context: Import the config instance directly with `import i18n from '@/lib/i18n/config'; i18n.t('namespace:key')`.
+  - Dynamic interpolation: Do not concatenate strings for i18n text. Define `{{param}}` placeholders in JSON translation files and pass values via `t('key', { param: val })`.
+  - Language switching: Use `@/lib/i18n/use-language`; the preference is stored in LocalStorage under key `hotplex.locale`.
