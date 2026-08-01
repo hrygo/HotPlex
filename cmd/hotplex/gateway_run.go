@@ -980,11 +980,13 @@ func initLogging(cfg *config.Config) (*slog.Logger, *config.ConfigStore, *slog.L
 			if len(groups) == 0 && a.Key == slog.TimeKey {
 				return slog.String(slog.TimeKey, a.Value.Time().Format("2006-01-02T15:04:05.0000"))
 			}
-			// Compact source attribution to "file.go:42 function" so Warn/Error
-			// records are locatable without bloating every log line with full paths.
+			// Compact source attribution to "file.go:42 internal/pkg.(Type).Method":
+			// the module prefix is constant per binary (pure noise), while the
+			// package-qualified function name survives line drift across versions.
 			if len(groups) == 0 && a.Key == slog.SourceKey {
 				if s, ok := a.Value.Any().(*slog.Source); ok && s != nil {
-					return slog.String(slog.SourceKey, fmt.Sprintf("%s:%d %s", filepath.Base(s.File), s.Line, s.Function))
+					fn := strings.TrimPrefix(s.Function, "github.com/hrygo/hotplex/")
+					return slog.String(slog.SourceKey, fmt.Sprintf("%s:%d %s", filepath.Base(s.File), s.Line, fn))
 				}
 			}
 			return a

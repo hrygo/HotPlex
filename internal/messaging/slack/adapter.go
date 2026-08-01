@@ -259,6 +259,24 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 	}
 	backoff := messaging.NewReconnectBackoff(baseDelay, maxDelay)
 
+	var (
+		attempt      atomic.Int64 // consecutive failed attempts (reset on clean close)
+		attemptStart atomic.Int64 // unix nano when the current Run() attempt began
+		established  atomic.Int64 // unix nano of the last Connected event
+	)
+	attempt.Store(1)
+	// connUptime reports connection (or in-flight attempt) age so reconnect
+	// flapping is visible without diffing timestamps.
+	connUptime := func() string {
+		if est := established.Load(); est > 0 {
+			return time.Since(time.Unix(0, est)).Round(time.Millisecond).String()
+		}
+		if t := attemptStart.Load(); t > 0 {
+			return time.Since(time.Unix(0, t)).Round(time.Millisecond).String()
+		}
+		return ""
+	}
+
 	// Run() blocks until the WebSocket closes. Wrap it in a loop so that
 	// connection errors trigger automatic reconnect instead of silently exiting.
 	go func() {
@@ -267,7 +285,6 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 				a.Log.Error("slack: panic in socketMode reconnect loop", "panic", r, "stack", string(debug.Stack()))
 			}
 		}()
-		attempt := 1
 		for {
 			select {
 			case <-ctx.Done():
@@ -275,20 +292,25 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 			default:
 			}
 
-			a.Log.Info("slack: starting socket mode", "attempt", attempt)
+			attemptStart.Store(time.Now().UnixNano())
+			a.Log.Info("slack: starting socket mode", "attempt", attempt.Load())
 			if err := a.socketMode.Run(); err != nil {
 				select {
 				case <-ctx.Done():
 					return
 				case <-time.After(backoff.Next()):
-					a.Log.Warn("slack: socket mode error, will retry", "err", err, "attempt", attempt)
-					attempt++
+					a.Log.Warn("slack: socket mode error, will retry",
+						"err", err, "attempt", attempt.Load(), "conn_uptime", connUptime())
+					established.Store(0)
+					attempt.Add(1)
 					continue
 				}
 			}
 			// Run() returned without error (clean close); reset attempt counter.
-			attempt = 1
-			a.Log.Info("slack: socket closed cleanly, reconnecting")
+			a.Log.Info("slack: socket closed cleanly, reconnecting",
+				"attempt", attempt.Load(), "conn_uptime", connUptime())
+			established.Store(0)
+			attempt.Store(1)
 			select {
 			case <-ctx.Done():
 				return
@@ -326,16 +348,20 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 				}()
 
 			case socketmode.EventTypeConnecting:
-				a.Log.Info("slack: websocket handshake in progress")
+				a.Log.Debug("slack: websocket handshake in progress", "attempt", attempt.Load())
 			case socketmode.EventTypeConnected:
-				a.Log.Info("slack: websocket established, ready to receive events")
+				established.Store(time.Now().UnixNano())
+				a.Log.Info("slack: websocket established, ready to receive events", "attempt", attempt.Load())
 				backoff.Reset()
 
 			case socketmode.EventTypeDisconnect:
-				a.Log.Info("slack: disconnected by Slack server, reconnecting...")
+				a.Log.Info("slack: disconnected by Slack server, reconnecting",
+					"attempt", attempt.Load(), "conn_uptime", connUptime())
+				established.Store(0)
 
 			case socketmode.EventTypeConnectionError:
-				a.Log.Warn("slack: websocket connection error, retrying...", "err", evt.Data)
+				a.Log.Warn("slack: websocket connection error, retrying...",
+					"err", evt.Data, "attempt", attempt.Load(), "conn_uptime", connUptime())
 
 			case socketmode.EventTypeInteractive:
 				go func() {
@@ -1162,7 +1188,7 @@ func (a *Adapter) cleanupMedia(ctx context.Context) {
 }
 
 func (a *Adapter) cleanupMediaInDir(dir string) {
-	a.Log.Debug("slack: cleaning up media files", "dir", dir)
+	var deleted, freedBytes int64
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -1170,10 +1196,18 @@ func (a *Adapter) cleanupMediaInDir(dir string) {
 		if !info.IsDir() && time.Since(info.ModTime()) > mediaTTL {
 			if err := os.Remove(path); err != nil {
 				a.Log.Warn("slack: failed to remove old media file", "path", path, "err", err)
+				return nil
 			}
+			deleted++
+			freedBytes += info.Size()
 		}
 		return nil
 	})
+	// Only log when work was done; an empty pass is routine noise.
+	if deleted > 0 {
+		a.Log.Debug("slack: cleaned up old media files",
+			"dir", dir, "deleted", deleted, "freed_bytes", freedBytes)
+	}
 }
 
 func (c *SlackConn) sendTurnSummary(_ context.Context, env *events.Envelope) {

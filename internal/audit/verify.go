@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -38,6 +39,13 @@ type Verifier struct {
 	store Store
 	cfg   VerifierConfig
 	log   *slog.Logger
+
+	// mu guards the recurring-break dedup state below. Only Run writes it,
+	// but VerifyOnce is exported, so keep the access explicit.
+	mu          sync.Mutex
+	lastBroken  int64
+	firstSeen   time.Time
+	occurrences int
 }
 
 // NewVerifier creates a Verifier with the given store, config, and logger.
@@ -64,12 +72,45 @@ func (v *Verifier) Run(ctx context.Context) {
 				v.log.Error("audit verify: pass failed", "err", err)
 				continue
 			}
-			if result.BrokenID != 0 {
-				v.log.Warn("audit verify: chain break detected",
-					"broken_id", result.BrokenID, "reason", result.Reason)
-			}
+			v.recordResult(result)
 		}
 	}
+}
+
+// recordResult logs the outcome of a verify pass. A new chain break is
+// logged at WARN with the row context; a break that persists across passes
+// is downgraded to DEBUG with first_seen/occurrences so a recurring
+// condition does not turn into an hourly alert storm; a break that clears
+// logs an INFO resolution.
+func (v *Verifier) recordResult(result VerifyResult) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if result.BrokenID == 0 {
+		if v.lastBroken != 0 {
+			v.log.Info("audit verify: chain break resolved",
+				"broken_id", v.lastBroken, "occurrences", v.occurrences)
+			v.lastBroken = 0
+			v.firstSeen = time.Time{}
+			v.occurrences = 0
+		}
+		return
+	}
+
+	if result.BrokenID == v.lastBroken {
+		v.occurrences++
+		v.log.Debug("audit verify: chain break persists",
+			"broken_id", result.BrokenID, "reason", result.Reason,
+			"first_seen", v.firstSeen.Format(time.RFC3339), "occurrences", v.occurrences)
+		return
+	}
+
+	v.lastBroken = result.BrokenID
+	v.firstSeen = time.Now()
+	v.occurrences = 1
+	v.log.Warn("audit verify: chain break detected",
+		"broken_id", result.BrokenID, "reason", result.Reason,
+		"rows_checked", result.RowsChecked)
 }
 
 // VerifyOnce runs a single streaming chain verification pass from the

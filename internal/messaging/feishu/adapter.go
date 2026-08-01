@@ -426,7 +426,7 @@ func (a *Adapter) doCleanupMedia() {
 }
 
 func (a *Adapter) cleanupMediaInDir(dir string) {
-	a.Log.Debug("feishu: cleaning up media files", "dir", dir)
+	var deleted, freedBytes int64
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -434,8 +434,16 @@ func (a *Adapter) cleanupMediaInDir(dir string) {
 		if !info.IsDir() && time.Since(info.ModTime()) > feishuMediaTTL {
 			if err := os.Remove(path); err != nil {
 				a.Log.Warn("feishu: failed to remove old media file", "path", path, "err", err)
+				return nil
 			}
+			deleted++
+			freedBytes += info.Size()
 		}
 		return nil
 	})
+	// Only log when work was done; an empty pass is routine noise.
+	if deleted > 0 {
+		a.Log.Debug("feishu: cleaned up old media files",
+			"dir", dir, "deleted", deleted, "freed_bytes", freedBytes)
+	}
 }

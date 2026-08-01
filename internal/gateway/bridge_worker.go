@@ -428,13 +428,19 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 // by a concurrent ResumeSession or attemptResumeFallback.
 func (b *Bridge) cleanupCrashedWorker(sessionID string, crashedWorker worker.Worker) {
 	acc := b.getOrInitAccum(sessionID, "", time.Now())
-	b.log.Debug("bridge: cleaning up crashed worker", "session_id", sessionID, "turn_count", acc.TurnCount.Load())
+	wt := worker.TypeUnknown
+	if crashedWorker != nil {
+		wt = crashedWorker.Type()
+	}
+	b.log.Debug("bridge: cleaning up crashed worker",
+		"session_id", sessionID, "worker_type", wt, "turn_count", acc.TurnCount.Load())
 	if b.sm == nil {
 		return
 	}
 	if crashedWorker != nil {
 		if !b.sm.DetachWorkerIf(sessionID, crashedWorker) {
-			b.log.Debug("bridge: crashed worker already replaced, skipping cleanup", "session_id", sessionID)
+			b.log.Debug("bridge: crashed worker already replaced, skipping cleanup",
+				"session_id", sessionID, "worker_type", wt)
 			return
 		}
 	} else {
