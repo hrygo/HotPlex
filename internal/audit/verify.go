@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,29 @@ type VerifyResult struct {
 	RowsChecked int
 	BrokenID    int64  // 0 if intact
 	Reason      string // "" if intact
+	// Broken carries non-PII diagnostics about the broken row (nil when
+	// intact). PII fields (UserID/SessionID/IP/UserAgent/DetailJSON) are
+	// deliberately excluded so the diagnostic log stays safe to emit.
+	Broken *BrokenRowInfo
+}
+
+// BrokenRowInfo is the non-PII diagnostic snapshot of the broken row,
+// attached to VerifyResult so the first WARN can pinpoint where the chain
+// broke without leaking user data.
+type BrokenRowInfo struct {
+	ID           int64  // broken row id
+	Ts           int64  // row timestamp, Unix ms
+	Platform     string // webchat/feishu/slack/admin/api/cron
+	Action       string // auth.login, session.create, …
+	Outcome      string // success/failure/denied
+	ResourceType string // optional resource category
+	// ExpectedPrevHash is the hash the row's prev_hash should equal (the
+	// chain cursor carried from the previous row or checkpoint anchor).
+	ExpectedPrevHash string
+	// ActualPrevHash is the prev_hash stored in the row. When the two
+	// differ the gap lies before this row: the previous row was deleted,
+	// modified, or never linked correctly.
+	ActualPrevHash string
 }
 
 // Verifier periodically re-verifies the chain from the latest checkpoint.
@@ -108,9 +132,24 @@ func (v *Verifier) recordResult(result VerifyResult) {
 	v.lastBroken = result.BrokenID
 	v.firstSeen = time.Now()
 	v.occurrences = 1
-	v.log.Warn("audit verify: chain break detected",
-		"broken_id", result.BrokenID, "reason", result.Reason,
-		"rows_checked", result.RowsChecked)
+	attrs := []any{
+		"broken_id", result.BrokenID,
+		"reason", result.Reason,
+		"rows_checked", result.RowsChecked,
+		"advice", breakAdvice(result.Reason),
+	}
+	if b := result.Broken; b != nil {
+		attrs = append(attrs,
+			"broken_at", time.UnixMilli(b.Ts).Format(time.RFC3339),
+			"platform", b.Platform,
+			"action", b.Action,
+			"outcome", b.Outcome,
+			"resource_type", b.ResourceType,
+			"expected_prev_hash", b.ExpectedPrevHash,
+			"actual_prev_hash", b.ActualPrevHash,
+		)
+	}
+	v.log.Warn("audit verify: chain break detected", attrs...)
 }
 
 // VerifyOnce runs a single streaming chain verification pass from the
@@ -160,6 +199,7 @@ func (v *Verifier) VerifyOnce(ctx context.Context) (VerifyResult, error) {
 				RowsChecked: rowsChecked,
 				BrokenID:    brokenID,
 				Reason:      reason,
+				Broken:      locateBroken(batch, brokenID, cursor),
 			}, nil
 		}
 		rowsChecked += len(batch)
@@ -177,4 +217,48 @@ func (v *Verifier) VerifyOnce(ctx context.Context) (VerifyResult, error) {
 		BrokenID:    0,
 		Reason:      "",
 	}, nil
+}
+
+// locateBroken finds the broken row inside the batch VerifyChain flagged
+// (the row is guaranteed to be in the batch — VerifyChain only reports ids
+// it iterated) and snapshots its non-PII fields. ExpectedPrevHash is the
+// hash the row failed to link to: the previous row's self_hash inside the
+// batch, or the incoming cursor (checkpoint anchor / genesis) for the
+// batch's first row.
+func locateBroken(batch []UserActivity, brokenID int64, cursor string) *BrokenRowInfo {
+	for i := range batch {
+		if batch[i].ID != brokenID {
+			continue
+		}
+		row := batch[i]
+		expected := cursor
+		if i > 0 {
+			expected = batch[i-1].SelfHash
+		}
+		return &BrokenRowInfo{
+			ID:               row.ID,
+			Ts:               row.Ts,
+			Platform:         row.Platform,
+			Action:           row.Action,
+			Outcome:          row.Outcome,
+			ResourceType:     row.ResourceType,
+			ExpectedPrevHash: expected,
+			ActualPrevHash:   row.PrevHash,
+		}
+	}
+	return &BrokenRowInfo{ID: brokenID, ExpectedPrevHash: cursor}
+}
+
+// breakAdvice maps a verify failure reason to actionable remediation
+// guidance, so the first WARN tells the operator what the break means and
+// what to do instead of only exposing a raw hash mismatch.
+func breakAdvice(reason string) string {
+	switch {
+	case strings.HasPrefix(reason, "prev_hash_mismatch"):
+		return "chain gap before this row: previous row missing/modified, or legacy GC-race false positive; false positives auto-heal after retention GC rebase, real tamper needs user_activity restore from backup"
+	case strings.HasPrefix(reason, "self_hash_mismatch"):
+		return "row content changed after insert (tamper): restore user_activity from backup"
+	default:
+		return "hash recomputation failed: verify canonical serialization compatibility with the version that wrote the row"
+	}
 }

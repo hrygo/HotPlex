@@ -1,7 +1,9 @@
 package audit
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -178,6 +180,121 @@ func TestVerify_LargeTable_TamperedRowDetectedMidChain(t *testing.T) {
 	require.GreaterOrEqual(t, result.RowsChecked, 1000, "verifier must page past the first batch")
 	// The tampered row is the 1501st (1500 good + 1 bad).
 	require.Equal(t, int64(1501), result.BrokenID, "broken row id must be the tampered row")
+}
+
+// TestVerify_BrokenRowDiagnostics verifies that VerifyOnce attaches the
+// non-PII diagnostic snapshot of the broken row (id, timestamp, platform,
+// action, expected vs actual prev_hash) so the first WARN can pinpoint the
+// break without leaking user data.
+func TestVerify_BrokenRowDiagnostics(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	writeChain(t, store, 5)
+
+	ctx := context.Background()
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+	badRow := &UserActivity{
+		Ts:         9999999999999,
+		UserID:     "u1",
+		UserIDType: UserIDTypePlatform,
+		Platform:   PlatformTest,
+		Action:     ActionAuthLogin,
+		Outcome:    OutcomeSuccess,
+		DetailJSON: "{}",
+		PrevHash:   "wrong-prev-hash",
+		SelfHash:   "wrong-self-hash",
+	}
+	require.NoError(t, tx.Append(ctx, badRow))
+	require.NoError(t, tx.Commit())
+
+	rows, err := store.QueryAsc(ctx, 1, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 6)
+	expectedPrev := rows[4].SelfHash // id=5 row's self_hash, which id=6 fails to link
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), result.BrokenID)
+	require.Equal(t, "prev_hash_mismatch", result.Reason)
+
+	require.NotNil(t, result.Broken)
+	b := result.Broken
+	require.Equal(t, int64(6), b.ID)
+	require.Equal(t, "wrong-prev-hash", b.ActualPrevHash)
+	require.Equal(t, expectedPrev, b.ExpectedPrevHash)
+	require.Equal(t, PlatformTest, b.Platform)
+	require.Equal(t, ActionAuthLogin, b.Action)
+	require.Equal(t, OutcomeSuccess, b.Outcome)
+	require.Equal(t, int64(9999999999999), b.Ts)
+}
+
+func TestVerify_IntactChainHasNoBrokenDiagnostics(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	writeChain(t, store, 3)
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(0), result.BrokenID)
+	require.Nil(t, result.Broken)
+}
+
+// TestRecordResult_FirstBreakLogsDiagnostics verifies the first WARN for a
+// chain break includes the broken-row diagnostics (broken_at, platform,
+// action, expected/actual prev_hash) and the remediation advice.
+func TestRecordResult_FirstBreakLogsDiagnostics(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	v := NewVerifier(nil, VerifierConfig{}, log)
+
+	v.recordResult(VerifyResult{
+		RowsChecked: 1252,
+		BrokenID:    1253,
+		Reason:      "prev_hash_mismatch",
+		Broken: &BrokenRowInfo{
+			ID: 1253, Ts: 1700000000000, Platform: "webchat",
+			Action: "auth.login", Outcome: "success",
+			ExpectedPrevHash: "expected-hash", ActualPrevHash: "actual-hash",
+		},
+	})
+
+	out := buf.String()
+	require.Contains(t, out, "chain break detected")
+	require.Contains(t, out, "broken_id=1253")
+	require.Contains(t, out, "broken_at=")
+	require.Contains(t, out, "platform=webchat")
+	require.Contains(t, out, "action=auth.login")
+	require.Contains(t, out, "outcome=success")
+	require.Contains(t, out, "expected_prev_hash=expected-hash")
+	require.Contains(t, out, "actual_prev_hash=actual-hash")
+	require.Contains(t, out, "advice=")
+}
+
+// TestRecordResult_PersistentBreakDowngradesToDebug verifies a recurring
+// break is downgraded to DEBUG without repeating the diagnostics, so an
+// acknowledged condition does not produce an hourly alert storm.
+func TestRecordResult_PersistentBreakDowngradesToDebug(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	v := NewVerifier(nil, VerifierConfig{}, log)
+
+	res := VerifyResult{
+		RowsChecked: 10, BrokenID: 7, Reason: "prev_hash_mismatch",
+		Broken: &BrokenRowInfo{ID: 7, Ts: 1700000000000, Platform: "webchat"},
+	}
+	v.recordResult(res)
+	buf.Reset() // drop the first WARN; only the persisted-break DEBUG remains
+	v.recordResult(res)
+
+	out := buf.String()
+	require.Contains(t, out, "chain break persists")
+	require.Contains(t, out, "occurrences=2")
+	require.NotContains(t, out, "advice=")
 }
 
 // testNow returns the current time (helper for readability).
