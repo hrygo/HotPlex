@@ -35,7 +35,7 @@ The change covers credential-safe audit serialization, tool-input redaction, sin
 
 ### Retention and config audit
 
-- Treat `audit.full_content_retention` as static/restart-required because the event GC captures its TTL at startup. This matches actual runtime behavior and prevents a false “applied” signal.
+- Keep `audit.full_content_retention` static/restart-required as a compatibility field. Its changes remain auditable, but it no longer changes the event GC TTL.
 - Add `audit.full_content_retention` to `auditConfigDiff` so attempted changes are still recorded in the tamper-evident trail.
 
 ## Compatibility
@@ -43,7 +43,7 @@ The change covers credential-safe audit serialization, tool-input redaction, sin
 - Existing `sinks.Sink` implementations remain source-compatible; lifecycle support is optional.
 - Existing YAML fields and defaults do not change.
 - External sink delivery remains best-effort and non-blocking. Database audit persistence remains the source of truth.
-- `full_content_retention` changes now explicitly require restart; startup behavior is unchanged.
+- `full_content_retention` changes remain restart-required for compatibility and are recorded, but no longer affect event/turn retention at startup.
 
 ## Testing
 
