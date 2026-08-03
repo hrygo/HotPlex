@@ -52,18 +52,22 @@ type platformWrite struct {
 }
 
 type pcEntryConfig struct {
-	WriteBuffer   int
-	DropThreshold int
-	CoalesceIntvl time.Duration
-	CoalesceSize  int
+	WriteBuffer     int
+	DropThreshold   int
+	CoalesceIntvl   time.Duration
+	CoalesceSize    int
+	TerminalTimeout time.Duration
 }
+
+const defaultPlatformTerminalTimeout = 5 * time.Second
 
 func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
 	c := pcEntryConfig{
-		WriteBuffer:   cfg.Gateway.PlatformWriteBuffer,
-		DropThreshold: cfg.Gateway.PlatformDropThreshold,
-		CoalesceIntvl: cfg.Gateway.DeltaCoalesceInterval,
-		CoalesceSize:  cfg.Gateway.DeltaCoalesceSize,
+		WriteBuffer:     cfg.Gateway.PlatformWriteBuffer,
+		DropThreshold:   cfg.Gateway.PlatformDropThreshold,
+		CoalesceIntvl:   cfg.Gateway.DeltaCoalesceInterval,
+		CoalesceSize:    cfg.Gateway.DeltaCoalesceSize,
+		TerminalTimeout: defaultPlatformTerminalTimeout,
 	}
 	if c.WriteBuffer <= 0 {
 		c.WriteBuffer = 64
@@ -77,10 +81,16 @@ func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
 	if c.CoalesceSize <= 0 {
 		c.CoalesceSize = 200
 	}
+	if c.TerminalTimeout <= 0 {
+		c.TerminalTimeout = defaultPlatformTerminalTimeout
+	}
 	return c
 }
 
 func newPCEntry(ctx context.Context, pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
+	if cfg.TerminalTimeout <= 0 {
+		cfg.TerminalTimeout = defaultPlatformTerminalTimeout
+	}
 	e := &pcEntry{
 		pc:      pc,
 		ch:      make(chan platformWrite, cfg.WriteBuffer),
@@ -135,6 +145,9 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 	write := platformWrite{env: env, ctx: ctx}
 	var result <-chan error
 	if isTerminalPlatformEvent(env.Event.Type) {
+		terminalCtx, cancel := context.WithTimeout(ctx, e.cfg.TerminalTimeout)
+		defer cancel()
+		write.ctx = terminalCtx
 		ack := make(chan error, 1)
 		write.result = ack
 		result = ack
@@ -153,7 +166,11 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 		}
 	}
 
-	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	writeCtx := write.ctx
+	cancel := func() {}
+	if result == nil {
+		writeCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+	}
 	defer cancel()
 	select {
 	case e.ch <- write:
@@ -284,8 +301,11 @@ func (e *pcEntry) writeOne(write platformWrite) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	if !isTerminalPlatformEvent(write.env.Event.Type) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
 	err := e.pc.WriteCtx(ctx, write.env)
 	if write.result != nil {
 		select {

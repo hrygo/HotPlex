@@ -805,6 +805,54 @@ func TestPCEntry_OrdinaryWriteRemainsAsynchronous(t *testing.T) {
 	require.NoError(t, e.Close())
 }
 
+func TestHub_TerminalWriteBudgetCancelsBackgroundWriteAndUnblocksOtherSessions(t *testing.T) {
+	t.Parallel()
+
+	h := newTestHub(t)
+	slowPC := &blockingPlatformConn{entered: make(chan struct{}, 1)}
+	slowEntry := newPCEntry(context.Background(), slowPC, pcEntryConfig{
+		WriteBuffer:     1,
+		DropThreshold:   1,
+		CoalesceIntvl:   time.Hour,
+		CoalesceSize:    1,
+		TerminalTimeout: 50 * time.Millisecond,
+	}, slog.Default())
+	h.mu.Lock()
+	h.sessions["slow"] = map[SessionWriter]bool{slowEntry: true}
+	h.everHadConn["slow"] = true
+	h.mu.Unlock()
+
+	fastPC := &mockPlatformConn{}
+	h.JoinPlatformSession("fast", fastPC)
+
+	terminalResult := make(chan error, 1)
+	go func() {
+		terminalResult <- h.SendToSession(context.Background(), events.NewEnvelope(aep.NewID(), "slow", 0, events.Done, events.DoneData{Success: true}))
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-slowPC.entered:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, h.SendToSession(context.Background(), events.NewEnvelope(aep.NewID(), "fast", 0, events.State, events.StateData{State: events.StateRunning})))
+	require.NoError(t, h.SendToSession(context.Background(), events.NewEnvelope(aep.NewID(), "fast", 0, events.MessageDelta, events.MessageDeltaData{Content: "still routes"})))
+	require.Eventually(t, func() bool {
+		return len(fastPC.envelopes()) == 2
+	}, time.Second, 10*time.Millisecond, "another session's ordinary and delta events must route after the terminal budget expires")
+
+	select {
+	case err := <-terminalResult:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("terminal write did not finish within its configured budget")
+	}
+}
+
 func TestPCEntry_WriteCtx_DroppableDroppedAtThreshold(t *testing.T) {
 	t.Parallel()
 	cfg := testPCEntryConfig()

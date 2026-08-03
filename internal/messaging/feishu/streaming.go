@@ -61,6 +61,13 @@ func newTerminalDeliveryError(contentPresented bool, errs ...error) error {
 	}
 }
 
+func (c *StreamingCardController) terminalFailureCounter() metric.Int64Counter {
+	if c.terminalFailures != nil {
+		return c.terminalFailures
+	}
+	return observability.StreamingTerminalFailures()
+}
+
 const (
 	PhaseIdle CardPhase = iota
 	PhaseCreating
@@ -130,9 +137,10 @@ type StreamingCardController struct {
 	failedFlushes   int
 
 	// Reliability — metrics and health tracking.
-	streamStartTime time.Time
-	ttlWarnOnce     sync.Once
-	bytesWritten    int64
+	streamStartTime  time.Time
+	ttlWarnOnce      sync.Once
+	bytesWritten     int64
+	terminalFailures metric.Int64Counter // test injection; nil uses observability accessor
 
 	// Tool state — tool call/result display strip.
 	toolEntries       []toolEntry // ring buffer, max 2 entries
@@ -879,7 +887,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 
 	err := newTerminalDeliveryError(bodyPresented, terminalErrs...)
 	if err != nil {
-		observability.StreamingTerminalFailures().Add(ctx, 1,
+		c.terminalFailureCounter().Add(ctx, 1,
 			metric.WithAttributes(attribute.String("fallback_result", "pending")))
 	}
 	return err

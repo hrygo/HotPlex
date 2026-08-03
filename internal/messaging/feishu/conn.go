@@ -40,6 +40,7 @@ type FeishuConn struct {
 	lastSummarySentMs atomic.Int64
 	voiceTriggered    atomic.Bool
 	paraBreaker       textutil.ParagraphBreaker
+	terminalFailures  metric.Int64Counter // test injection; nil uses observability accessor
 
 	// rotateMu serializes proactive TTL rotation between the controller's
 	// timer callback and the lazy check inside writeContent, so concurrent
@@ -48,6 +49,14 @@ type FeishuConn struct {
 }
 
 const terminalDeliveryFallbackText = "⚠️ 回复投递异常，请稍后重试。"
+
+func (c *FeishuConn) recordTerminalFailure(ctx context.Context, result string) {
+	counter := c.terminalFailures
+	if counter == nil {
+		counter = observability.StreamingTerminalFailures()
+	}
+	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("fallback_result", result)))
+}
 
 func NewFeishuConn(adapter *Adapter, chatID, threadKey, workDir string) *FeishuConn {
 	return &FeishuConn{adapter: adapter, chatID: chatID, threadKey: threadKey, workDir: workDir}
@@ -413,8 +422,7 @@ func (c *FeishuConn) handleTerminalDeliveryError(ctx context.Context, closeErr e
 
 	if terminalErr.ContentPresented {
 		c.adapter.Log.Warn("feishu: terminal decoration failed after body was presented", "err", closeErr)
-		observability.StreamingTerminalFailures().Add(ctx, 1,
-			metric.WithAttributes(attribute.String("fallback_result", "skipped_body_presented")))
+		c.recordTerminalFailure(ctx, "skipped_body_presented")
 		return closeErr
 	}
 
@@ -422,14 +430,12 @@ func (c *FeishuConn) handleTerminalDeliveryError(ctx context.Context, closeErr e
 	defer cancel()
 	if err := c.sendOrReply(fallbackCtx, terminalDeliveryFallbackText); err != nil {
 		c.adapter.Log.Warn("feishu: terminal fallback delivery failed", "err", err)
-		observability.StreamingTerminalFailures().Add(ctx, 1,
-			metric.WithAttributes(attribute.String("fallback_result", "failed")))
+		c.recordTerminalFailure(ctx, "failed")
 		return errors.Join(closeErr, fmt.Errorf("feishu: terminal fallback delivery: %w", err))
 	}
 
 	c.adapter.Log.Warn("feishu: terminal fallback delivered after streaming close failure", "err", closeErr)
-	observability.StreamingTerminalFailures().Add(ctx, 1,
-		metric.WithAttributes(attribute.String("fallback_result", "sent")))
+	c.recordTerminalFailure(ctx, "sent")
 	return closeErr
 }
 
