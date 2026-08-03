@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/stretchr/testify/require"
@@ -208,4 +209,135 @@ func TestFeishuConn_HandleDone_SkipsStaticFallbackWhenBodyAlreadyPresented(t *te
 	defer mu.Unlock()
 	require.Empty(t, sentBodies)
 	require.Equal(t, map[string]int64{"pending": 1, "skipped_body_presented": 1}, terminalFailureResults(t, reader))
+}
+
+func TestFeishuConn_TerminalHandlersShareCallerDeadlineAcrossCloseAndFallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		kind events.Kind
+		data any
+	}{
+		{name: "done", kind: events.Done, data: events.DoneData{Success: true}},
+		{name: "error", kind: events.Error, data: events.ErrorData{Code: "MODEL_ERROR", Message: "model failed"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				mu                sync.Mutex
+				closeDeadlines    []time.Time
+				fallbackDeadlines []time.Time
+			)
+			captureDeadline := func(dst *[]time.Time) mediaHTTPClientFunc {
+				return func(req *http.Request) (*http.Response, error) {
+					deadline, ok := req.Context().Deadline()
+					require.True(t, ok, "terminal HTTP request must carry a deadline")
+					mu.Lock()
+					*dst = append(*dst, deadline)
+					mu.Unlock()
+					return nil, errors.New("terminal HTTP unavailable")
+				}
+			}
+
+			limiter := NewFeishuRateLimiter()
+			t.Cleanup(limiter.Stop)
+			ctrlClient := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(captureDeadline(&closeDeadlines)))
+			ctrl := NewStreamingCardController(ctrlClient, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+			ctrl.phase.Store(int32(PhaseStreaming))
+			ctrl.mu.Lock()
+			ctrl.cardID = "card-1"
+			ctrl.msgID = "msg-1"
+			ctrl.buf.WriteString("terminal body")
+			ctrl.mu.Unlock()
+
+			adapter := newTestAdapter(t)
+			adapter.Interactions = messaging.NewInteractionManager(discardLogger)
+			adapter.larkClient = lark.NewClient("test-app", "test-secret", lark.WithHttpClient(captureDeadline(&fallbackDeadlines)))
+			conn := NewFeishuConn(adapter, "chat-1", "", "")
+			conn.EnableStreaming(ctrl)
+
+			callerTimeout := 250 * time.Millisecond
+			if tt.kind == events.Error {
+				callerTimeout = 6 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), callerTimeout)
+			defer cancel()
+			callerDeadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			err := conn.WriteCtx(ctx, &events.Envelope{
+				Version:   events.Version,
+				SessionID: "session-1",
+				Event:     events.Event{Type: tt.kind, Data: tt.data},
+			})
+
+			require.ErrorIs(t, err, ErrTerminalDelivery)
+			mu.Lock()
+			defer mu.Unlock()
+			require.NotEmpty(t, closeDeadlines)
+			require.NotEmpty(t, fallbackDeadlines)
+			for _, deadline := range append(closeDeadlines, fallbackDeadlines...) {
+				require.WithinDuration(t, callerDeadline, deadline, 10*time.Millisecond,
+					"close and fallback must share the caller's terminal budget")
+			}
+		})
+	}
+}
+
+func TestFeishuConn_HandleDone_DefaultTerminalDeadlineIsSharedWithFallback(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu                sync.Mutex
+		closeDeadlines    []time.Time
+		fallbackDeadlines []time.Time
+	)
+	captureDeadline := func(dst *[]time.Time) mediaHTTPClientFunc {
+		return func(req *http.Request) (*http.Response, error) {
+			deadline, ok := req.Context().Deadline()
+			require.True(t, ok, "terminal HTTP request must carry the default deadline")
+			mu.Lock()
+			*dst = append(*dst, deadline)
+			mu.Unlock()
+			return nil, errors.New("terminal HTTP unavailable")
+		}
+	}
+
+	limiter := NewFeishuRateLimiter()
+	t.Cleanup(limiter.Stop)
+	ctrlClient := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(captureDeadline(&closeDeadlines)))
+	ctrl := NewStreamingCardController(ctrlClient, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+	ctrl.phase.Store(int32(PhaseStreaming))
+	ctrl.mu.Lock()
+	ctrl.cardID = "card-1"
+	ctrl.msgID = "msg-1"
+	ctrl.buf.WriteString("terminal body")
+	ctrl.mu.Unlock()
+
+	adapter := newTestAdapter(t)
+	adapter.Interactions = messaging.NewInteractionManager(discardLogger)
+	adapter.larkClient = lark.NewClient("test-app", "test-secret", lark.WithHttpClient(captureDeadline(&fallbackDeadlines)))
+	conn := NewFeishuConn(adapter, "chat-1", "", "")
+	conn.EnableStreaming(ctrl)
+
+	started := time.Now()
+	err := conn.WriteCtx(context.Background(), &events.Envelope{
+		Version:   events.Version,
+		SessionID: "session-1",
+		Event:     events.Event{Type: events.Done, Data: events.DoneData{Success: true}},
+	})
+
+	require.ErrorIs(t, err, ErrTerminalDelivery)
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, closeDeadlines)
+	require.NotEmpty(t, fallbackDeadlines)
+	sharedDeadline := closeDeadlines[0]
+	require.WithinDuration(t, started.Add(defaultTerminalDeliveryTimeout), sharedDeadline, 50*time.Millisecond)
+	for _, deadline := range append(closeDeadlines, fallbackDeadlines...) {
+		require.Equal(t, sharedDeadline, deadline, "close and fallback must use one default end-to-end deadline")
+	}
 }

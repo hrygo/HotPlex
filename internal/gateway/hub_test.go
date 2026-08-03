@@ -718,6 +718,36 @@ func (m *blockingPlatformConn) WriteCtx(ctx context.Context, _ *events.Envelope)
 
 func (m *blockingPlatformConn) Close() error { return nil }
 
+type postCancelBlockingPlatformConn struct {
+	entered       chan struct{}
+	parentExpired chan struct{}
+	release       chan struct{}
+	closed        chan struct{}
+	writes        atomic.Int64
+	closeOnce     sync.Once
+}
+
+func (m *postCancelBlockingPlatformConn) WriteCtx(ctx context.Context, _ *events.Envelope) error {
+	m.writes.Add(1)
+	select {
+	case m.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	select {
+	case <-m.parentExpired:
+	default:
+		close(m.parentExpired)
+	}
+	<-m.release
+	return ctx.Err()
+}
+
+func (m *postCancelBlockingPlatformConn) Close() error {
+	m.closeOnce.Do(func() { close(m.closed) })
+	return nil
+}
+
 func testPCEntryConfig() pcEntryConfig {
 	return pcEntryConfig{
 		WriteBuffer:   8,
@@ -850,6 +880,83 @@ func TestHub_TerminalWriteBudgetCancelsBackgroundWriteAndUnblocksOtherSessions(t
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 	case <-time.After(time.Second):
 		t.Fatal("terminal write did not finish within its configured budget")
+	}
+}
+
+func TestHub_TerminalFailureDoesNotWaitForPostDeadlineCloseBeforeRoutingOtherSessions(t *testing.T) {
+	t.Parallel()
+
+	h := newTestHub(t)
+	slowPC := &postCancelBlockingPlatformConn{
+		entered:       make(chan struct{}, 1),
+		parentExpired: make(chan struct{}),
+		release:       make(chan struct{}),
+		closed:        make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseSlowWrite := func() { releaseOnce.Do(func() { close(slowPC.release) }) }
+	t.Cleanup(releaseSlowWrite)
+	slowEntry := newPCEntry(context.Background(), slowPC, pcEntryConfig{
+		WriteBuffer:     1,
+		DropThreshold:   1,
+		CoalesceIntvl:   time.Hour,
+		CoalesceSize:    1,
+		TerminalTimeout: 50 * time.Millisecond,
+	}, slog.Default())
+	h.mu.Lock()
+	h.sessions["slow-post-cancel"] = map[SessionWriter]bool{slowEntry: true}
+	h.everHadConn["slow-post-cancel"] = true
+	h.mu.Unlock()
+
+	fastPC := &mockPlatformConn{}
+	h.JoinPlatformSession("fast-post-cancel", fastPC)
+
+	terminalResult := make(chan error, 1)
+	go func() {
+		terminalResult <- h.SendToSession(context.Background(), events.NewEnvelope(
+			aep.NewID(), "slow-post-cancel", 0, events.Done, events.DoneData{Success: true},
+		))
+	}()
+
+	select {
+	case <-slowPC.entered:
+	case <-time.After(time.Second):
+		t.Fatal("terminal platform write did not start")
+	}
+	select {
+	case <-slowPC.parentExpired:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("terminal parent context did not expire within its configured budget")
+	}
+
+	require.NoError(t, h.SendToSession(context.Background(), events.NewEnvelope(
+		aep.NewID(), "fast-post-cancel", 0, events.State, events.StateData{State: events.StateRunning},
+	)))
+	require.NoError(t, h.SendToSession(context.Background(), events.NewEnvelope(
+		aep.NewID(), "fast-post-cancel", 0, events.MessageDelta, events.MessageDeltaData{Content: "still routes"},
+	)))
+
+	select {
+	case err := <-terminalResult:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("terminal caller waited for post-deadline connection cleanup")
+	}
+	require.Eventually(t, func() bool {
+		return len(fastPC.envelopes()) == 2
+	}, 200*time.Millisecond, 5*time.Millisecond,
+		"another session's ordinary and delta events must route while cleanup continues")
+
+	require.NoError(t, h.SendToSession(context.Background(), events.NewEnvelope(
+		aep.NewID(), "slow-post-cancel", 0, events.State, events.StateData{State: events.StateRunning},
+	)))
+	require.Equal(t, int64(1), slowPC.writes.Load(), "failed writer must be removed before asynchronous cleanup")
+
+	releaseSlowWrite()
+	select {
+	case <-slowPC.closed:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("asynchronous failed-writer cleanup did not complete")
 	}
 }
 

@@ -48,7 +48,17 @@ type FeishuConn struct {
 	rotateMu sync.Mutex
 }
 
-const terminalDeliveryFallbackText = "⚠️ 回复投递异常，请稍后重试。"
+const (
+	terminalDeliveryFallbackText   = "⚠️ 回复投递异常，请稍后重试。"
+	defaultTerminalDeliveryTimeout = 5 * time.Second
+)
+
+func terminalDeliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, defaultTerminalDeliveryTimeout)
+}
 
 func (c *FeishuConn) recordTerminalFailure(ctx context.Context, result string) {
 	counter := c.terminalFailures
@@ -302,7 +312,10 @@ func (c *FeishuConn) WriteCtx(ctx context.Context, env *events.Envelope) error {
 }
 
 func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error {
-	streamCtrl := c.clearActiveIndicators(ctx)
+	terminalCtx, terminalCancel := terminalDeliveryContext(ctx)
+	defer terminalCancel()
+
+	streamCtrl := c.clearActiveIndicators(terminalCtx)
 	c.adapter.Interactions.CancelAll(env.SessionID)
 
 	d := messaging.ExtractTurnSummary(env)
@@ -338,11 +351,9 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 	var closeErr error
 	if streamCtrl != nil && streamCtrl.IsCreated() {
 		streamCtrl.SetCloseMeta(d)
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		closeErr = streamCtrl.Close(closeCtx)
-		closeCancel()
+		closeErr = streamCtrl.Close(terminalCtx)
 		if closeErr != nil {
-			closeErr = c.handleTerminalDeliveryError(ctx, closeErr)
+			closeErr = c.handleTerminalDeliveryError(terminalCtx, closeErr)
 		}
 	}
 
@@ -376,7 +387,10 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 }
 
 func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) error {
-	streamCtrl := c.clearActiveIndicators(ctx)
+	terminalCtx, terminalCancel := terminalDeliveryContext(ctx)
+	defer terminalCancel()
+
+	streamCtrl := c.clearActiveIndicators(terminalCtx)
 	c.adapter.Interactions.CancelAll(env.SessionID)
 	errMsg := messaging.ExtractErrorMessage(env)
 	// Reset paragraph counter on error.
@@ -389,12 +403,10 @@ func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) erro
 		if errMsg != "" {
 			streamCtrl.SetTerminalContent(errMsg)
 		}
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := streamCtrl.Close(closeCtx)
-		closeCancel()
+		err := streamCtrl.Close(terminalCtx)
 		if err != nil {
 			c.adapter.Log.Warn("feishu: failed to close streaming card on error", "err", err)
-			return c.handleTerminalDeliveryError(ctx, err)
+			return c.handleTerminalDeliveryError(terminalCtx, err)
 		} else if errMsg != "" {
 			return nil
 		}
@@ -404,7 +416,7 @@ func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) erro
 		platformMsgID := c.platformMsgID
 		c.mu.RUnlock()
 		if platformMsgID != "" {
-			_ = c.adapter.replyMessage(ctx, platformMsgID, errMsg, false)
+			_ = c.adapter.replyMessage(terminalCtx, platformMsgID, errMsg, false)
 		}
 	}
 	return nil
@@ -426,9 +438,7 @@ func (c *FeishuConn) handleTerminalDeliveryError(ctx context.Context, closeErr e
 		return closeErr
 	}
 
-	fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := c.sendOrReply(fallbackCtx, terminalDeliveryFallbackText); err != nil {
+	if err := c.sendOrReply(ctx, terminalDeliveryFallbackText); err != nil {
 		c.adapter.Log.Warn("feishu: terminal fallback delivery failed", "err", err)
 		c.recordTerminalFailure(ctx, "failed")
 		return errors.Join(closeErr, fmt.Errorf("feishu: terminal fallback delivery: %w", err))

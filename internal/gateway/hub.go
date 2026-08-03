@@ -709,12 +709,31 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 		}
 		routeErrs = append(routeErrs, err)
 		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
-		_ = conn.Close()
-		h.mu.Lock()
-		h.removeSession(msg.Env.SessionID, conn)
-		h.mu.Unlock()
+		h.detachAndCloseSessionWriter(msg.Env.SessionID, conn)
 	}
 	return errors.Join(routeErrs...)
+}
+
+// detachAndCloseSessionWriter removes a failed writer from routing before
+// starting cleanup. Close may wait on a platform write that outlives its
+// caller's terminal deadline, so it must never block the Hub's single router.
+func (h *Hub) detachAndCloseSessionWriter(sessionID string, conn SessionWriter) {
+	h.mu.Lock()
+	h.removeSession(sessionID, conn)
+	h.mu.Unlock()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				h.log.Error("gateway: panic closing failed session writer",
+					"session_id", sessionID, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+		if err := conn.Close(); err != nil {
+			h.log.Warn("gateway: failed session writer cleanup",
+				"session_id", sessionID, "err", err)
+		}
+	}()
 }
 
 // drainBroadcast processes remaining messages in the broadcast channel.
