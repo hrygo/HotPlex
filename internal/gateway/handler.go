@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -311,7 +313,14 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) 
 		}
 	}()
 	if env.Event.Type != events.Ping {
-		h.log.Info("gateway: Handle received event", "type", env.Event.Type, "session_id", env.SessionID, "seq", env.Seq, "data", env.Event.Data)
+		dataSize, dataSHA256 := eventDataLogSummary(env.Event.Data)
+		h.log.Info("gateway: Handle received event",
+			"type", env.Event.Type,
+			"session_id", env.SessionID,
+			"seq", env.Seq,
+			"data_size", dataSize,
+			"data_sha256", dataSHA256,
+		)
 	}
 	switch env.Event.Type {
 	case events.Input:
@@ -333,6 +342,18 @@ func (h *Handler) Handle(ctx context.Context, env *events.Envelope) (err error) 
 	default:
 		return h.sendErrorf(ctx, env, events.ErrCodeProtocolViolation, "unknown event type: %s", env.Event.Type)
 	}
+}
+
+// eventDataLogSummary returns an operationally useful, non-plaintext summary
+// of event data. JSON encoding gives maps a stable key order; unsupported
+// values use their type name, which is likewise stable and reveals no body.
+func eventDataLogSummary(data any) (int, string) {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		encoded = []byte(fmt.Sprintf("unsupported:%T", data))
+	}
+	sum := sha256.Sum256(encoded)
+	return len(encoded), hex.EncodeToString(sum[:])[:16]
 }
 
 func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {

@@ -194,7 +194,7 @@ func Default() *Config {
 		Audit: AuditConfig{
 			Enabled:              true,
 			Retention:            26280 * time.Hour, // 3 years
-			FullContentRetention: 2160 * time.Hour,  // 90 days (spec §5.3)
+			FullContentRetention: 2160 * time.Hour,  // 90 days; compatibility field, not used by events/turns GC
 			Collector: AuditCollectorConfig{
 				ChannelCap:    4096,
 				BatchInterval: 1 * time.Second,

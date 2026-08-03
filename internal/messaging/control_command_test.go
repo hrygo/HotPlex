@@ -62,6 +62,20 @@ func TestParseControlCommand_NaturalLanguage(t *testing.T) {
 	}
 }
 
+func TestDetectCommand_AbortTriggersRouteToControlStop(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{"stop", "停止", "/stop"} {
+		t.Run(input, func(t *testing.T) {
+			result := DetectCommand(input)
+			require.Equal(t, CmdControl, result.Action)
+			require.NotNil(t, result.Control)
+			require.Equal(t, events.ControlActionStop, result.Control.Action)
+			require.Equal(t, "stop", result.Control.Label)
+		})
+	}
+}
+
 func TestParseWorkerCommand_SlashCommands(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

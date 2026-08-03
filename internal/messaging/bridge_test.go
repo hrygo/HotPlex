@@ -143,6 +143,15 @@ type mockHandler struct{}
 
 func (m *mockHandler) Handle(_ context.Context, _ *events.Envelope) error { return nil }
 
+type recordingHandler struct {
+	envelope *events.Envelope
+}
+
+func (h *recordingHandler) Handle(_ context.Context, env *events.Envelope) error {
+	h.envelope = env
+	return nil
+}
+
 // mockStarter captures botID passed to StartPlatformSession.
 type mockStarter struct {
 	startFn func(params worker.SessionStartParams) error
@@ -153,6 +162,75 @@ func (s *mockStarter) StartPlatformSession(_ context.Context, params worker.Sess
 		return s.startFn(params)
 	}
 	return nil
+}
+
+func TestBridge_Handle_ControlStopDoesNotStartSession(t *testing.T) {
+	t.Parallel()
+
+	b := newTestBridge()
+	handler := &recordingHandler{}
+	b.handler = handler
+	var startCalls atomic.Int32
+	b.starter = &mockStarter{
+		startFn: func(worker.SessionStartParams) error {
+			startCalls.Add(1)
+			return nil
+		},
+	}
+	env := &events.Envelope{
+		SessionID: "existing-session",
+		OwnerID:   "owner1",
+		Event: events.Event{
+			Type: events.Control,
+			Data: events.ControlData{Action: events.ControlActionStop},
+		},
+	}
+
+	require.NoError(t, b.Handle(context.Background(), env, nil))
+	require.Zero(t, startCalls.Load(), "stop must not create or start a platform session")
+	require.Same(t, env, handler.envelope, "stop must still reach Gateway's control handler")
+}
+
+func TestBridge_Handle_NonStopEventsStillStartSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		event events.Event
+	}{
+		{
+			name:  "input",
+			event: events.Event{Type: events.Input, Data: map[string]any{"content": "hello"}},
+		},
+		{
+			name:  "gc control",
+			event: events.Event{Type: events.Control, Data: events.ControlData{Action: events.ControlActionGC}},
+		},
+		{
+			name:  "reset control",
+			event: events.Event{Type: events.Control, Data: events.ControlData{Action: events.ControlActionReset}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newTestBridge()
+			handler := &recordingHandler{}
+			b.handler = handler
+			var startCalls atomic.Int32
+			b.starter = &mockStarter{
+				startFn: func(worker.SessionStartParams) error {
+					startCalls.Add(1)
+					return nil
+				},
+			}
+			env := &events.Envelope{SessionID: "sid1", OwnerID: "owner1", Event: tt.event}
+
+			require.NoError(t, b.Handle(context.Background(), env, nil))
+			require.Equal(t, int32(1), startCalls.Load())
+			require.Same(t, env, handler.envelope)
+		})
+	}
 }
 
 // I5: nil adapter passes empty botID to StartPlatformSession.

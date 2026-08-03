@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -15,6 +16,8 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcardkit "github.com/larksuite/oapi-sdk-go/v3/service/cardkit/v1"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/phrases"
@@ -22,6 +25,48 @@ import (
 )
 
 type CardPhase int32
+
+// ErrTerminalDelivery identifies a streaming-card finalization that could not
+// complete cleanly. Callers can use TerminalDeliveryError to decide whether a
+// static fallback is still necessary.
+var ErrTerminalDelivery = errors.New("feishu: terminal delivery failed")
+
+// TerminalDeliveryError reports a finalization failure while preserving whether
+// the terminal body is already visible. A decoration failure (for example, the
+// header update) must remain observable without causing the connection to send
+// the response body a second time.
+type TerminalDeliveryError struct {
+	ContentPresented bool
+	err              error
+}
+
+func (e *TerminalDeliveryError) Error() string {
+	if e.ContentPresented {
+		return fmt.Sprintf("feishu: terminal delivery failed after body was presented: %v", e.err)
+	}
+	return fmt.Sprintf("feishu: terminal delivery failed before body was presented: %v", e.err)
+}
+
+func (e *TerminalDeliveryError) Unwrap() error {
+	return e.err
+}
+
+func newTerminalDeliveryError(contentPresented bool, errs ...error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	return &TerminalDeliveryError{
+		ContentPresented: contentPresented,
+		err:              errors.Join(append([]error{ErrTerminalDelivery}, errs...)...),
+	}
+}
+
+func (c *StreamingCardController) terminalFailureCounter() metric.Int64Counter {
+	if c.terminalFailures != nil {
+		return c.terminalFailures
+	}
+	return observability.StreamingTerminalFailures()
+}
 
 const (
 	PhaseIdle CardPhase = iota
@@ -92,9 +137,10 @@ type StreamingCardController struct {
 	failedFlushes   int
 
 	// Reliability — metrics and health tracking.
-	streamStartTime time.Time
-	ttlWarnOnce     sync.Once
-	bytesWritten    int64
+	streamStartTime  time.Time
+	ttlWarnOnce      sync.Once
+	bytesWritten     int64
+	terminalFailures metric.Int64Counter // test injection; nil uses observability accessor
 
 	// Tool state — tool call/result display strip.
 	toolEntries       []toolEntry // ring buffer, max 2 entries
@@ -756,6 +802,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		"last_flushed_len", len(c.lastFlushed))
 
 	finalFlushOK := false
+	var terminalErrs []error
 	// Skip final flush when content is empty — CardKit rejects empty content
 	// with code 99992402. If lastFlushed has content, the streaming card already
 	// displays it from the periodic flush loop.
@@ -768,9 +815,13 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		if err := c.flushCardKitElement(ctx, c.elementID, content, seq); err != nil {
 			c.log.Warn("feishu: final cardkit flush failed, attempting IM patch fallback",
 				"err", err)
+			terminalErrs = append(terminalErrs, err)
 			if c.msgID != "" {
 				if err := c.flushIMPatchWithConfig(ctx, content); err == nil {
 					finalFlushOK = true
+					terminalErrs = nil
+				} else {
+					terminalErrs = append(terminalErrs, err)
 				}
 			}
 		} else {
@@ -780,6 +831,8 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		c.log.Debug("feishu: cardkit degraded, using IM patch with final config")
 		if err := c.flushIMPatchWithConfig(ctx, content); err == nil {
 			finalFlushOK = true
+		} else {
+			terminalErrs = append(terminalErrs, err)
 		}
 	}
 
@@ -787,6 +840,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 	if finalFlushOK {
 		c.lastFlushed = content
 	}
+	bodyPresented := finalFlushOK || c.lastFlushed == content
 	integrityFailed := !finalFlushOK || len(c.lastFlushed) < len(content)*9/10
 	if integrityFailed && c.bytesWritten > 0 {
 		c.log.Warn("feishu: streaming integrity check failed",
@@ -808,6 +862,7 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		if cardID != "" {
 			if err := c.disableStreaming(ctx); err != nil {
 				c.log.Warn("feishu: disable streaming failed", "err", err)
+				terminalErrs = append(terminalErrs, err)
 			} else {
 				c.log.Info("feishu: streaming stopped",
 					"card_id", cardID,
@@ -822,13 +877,20 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 		c.mu.Unlock()
 	}
 
-	c.updateHeader(ctx, cardID, cardHeader{
+	if err := c.updateHeader(ctx, cardID, cardHeader{
 		Title:    c.agentName,
 		Template: headerBlue,
 		Tags:     c.closeTags(),
-	}, content, true)
+	}, content, true); err != nil {
+		terminalErrs = append(terminalErrs, err)
+	}
 
-	return nil
+	err := newTerminalDeliveryError(bodyPresented, terminalErrs...)
+	if err != nil {
+		c.terminalFailureCounter().Add(ctx, 1,
+			metric.WithAttributes(attribute.String("fallback_result", "pending")))
+	}
+	return err
 }
 
 func (c *StreamingCardController) Abort(ctx context.Context) error {
@@ -854,11 +916,13 @@ func (c *StreamingCardController) Abort(ctx context.Context) error {
 		c.sendAbortMessage(ctx, msgID)
 	}
 
-	c.updateHeader(ctx, cardID, cardHeader{
+	if err := c.updateHeader(ctx, cardID, cardHeader{
 		Title:    c.agentName,
 		Template: headerGrey,
 		Tags:     turnTags(c.turnNum, c.model, c.branch, c.workDir),
-	}, "", false)
+	}, "", false); err != nil {
+		c.log.Warn("feishu: abort header update failed", "err", err)
+	}
 
 	return nil
 }
@@ -881,9 +945,9 @@ func (c *StreamingCardController) buildFinalElements(body string, showClosing bo
 	return elements
 }
 
-func (c *StreamingCardController) updateHeader(ctx context.Context, cardID string, header cardHeader, body string, showClosing bool) {
+func (c *StreamingCardController) updateHeader(ctx context.Context, cardID string, header cardHeader, body string, showClosing bool) error {
 	if cardID == "" {
-		return
+		return nil
 	}
 
 	cardJSON := buildCard(header,
@@ -910,7 +974,12 @@ func (c *StreamingCardController) updateHeader(ctx context.Context, cardID strin
 	resp, err := c.client.Cardkit.V1.Card.Update(ctx, req)
 	if err != nil || !resp.Success() {
 		c.log.Warn("feishu: header update failed (non-fatal)", "err", err)
+		if err != nil {
+			return fmt.Errorf("cardkit header update: %w", err)
+		}
+		return fmt.Errorf("cardkit header update failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
+	return nil
 }
 
 func (c *StreamingCardController) idConvert(ctx context.Context, messageID string) (string, error) {

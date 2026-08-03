@@ -31,6 +31,7 @@ description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配�
    - [webchat — Web Chat UI](#313-webchat--web-chat-ui)
    - [oauth — WebChat 企业 SSO（OIDC）](#314-oauth--webchat--ssooidc)
    - [inherits — 配置继承](#315-inherits--)
+   - [events 和 audit — 事件与审计留存](#316-events-和-audit--事件与审计留存)
 4. [热重载](#4-热重载)
 5. [环境变量速查](#5-环境变量速查)
 
@@ -288,6 +289,21 @@ LLM Provider 返回临时错误（429、529、400 等）时的自动重试配置
 | `permission_prompt` | bool | `true` | — | 启用 `--permission-prompt-tool` stdio 模式。开启后权限请求会转发到 Slack/飞书交互 UI。config.yaml 默认开启（#920），使 headless Worker 的权限请求默认走交互 UI 而非静默拒绝；字段缺省时 Go 零值为 `false`（行为回退为静默拒绝） |
 | `permission_auto_approve` | []string | `["ExitPlanMode"]` | — | 自动批准的工具名称列表（无需转发用户交互 UI） |
 | `mcp_servers` | map | `{}` | — | 用户配置的 MCP Server。空值 = 使用默认发现机制 |
+
+##### Claude Code 权限边界与 Doctor
+
+`bypass` 会让 Claude Code 使用跳过常规权限提示的执行路径；它只应出现在受控、短期、已隔离的运维场景，不能作为飞书生产机器人的常规默认值。`messaging.*.allow_from`、`allow_dm_from` 和 `allow_group_from` 仅限制**谁能向机器人发消息**，不能限制获准请求在 Worker 内可调用的工具，也不能替代 Worker 权限模式。
+
+对启用的飞书 `claude_code` Worker，`hotplex doctor` 的 `worker.claude_bypass_mode` 会按运行时同一规则检查两类有效模式：平台会话的空 `sessionMode` 使用 `worker.claude_code.permission_mode`（空值仍是兼容性的 `bypass`）；workspace 会话使用 `worker.default_permission_mode`，再被前者作为 permissiveness ceiling 收紧。发现任一路径为 `bypass` 时只输出 Warn 和收紧建议，**不会修改配置，也没有自动修复**。
+
+`HOTPLEX_WORKER_CLAUDE_CODE_PERMISSION_MODE` 可覆盖 Claude Code operator 模式。相对地，`HOTPLEX_WORKER_DEFAULT_PERMISSION_MODE` 当前**没有**运行时环境变量绑定；该变量不会覆盖 YAML 的 `worker.default_permission_mode`，请在配置文件中设置该字段。收紧到 workspace 的生产基线示例：
+
+```yaml
+worker:
+  default_permission_mode: workspace
+  claude_code:
+    permission_mode: workspace
+```
 
 #### 3.7.4 opencode_server — OpenCode Server Worker
 
@@ -681,6 +697,20 @@ log:
 2. 递归加载父配置文件（含环检测）
 3. 子配置文件值覆盖父配置值
 4. 环境变量覆盖所有文件配置
+
+---
+
+### 3.16 events 和 audit — 事件与审计留存
+
+运行期 event store 与合规 audit store 是职责不同的两类数据副本：前者支持会话恢复和协议重放，后者保存可追溯的用户活动原文。两者按各自配置独立清理；延长审计原文留存**不会**延长 event store 或 turn 的留存。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `events.retention` | duration | `720h` (30天) | `HOTPLEX_EVENTS_RETENTION` | Event store 和 turns 的运行期留存窗口。到期后由事件 GC 清理 |
+| `audit.retention` | duration | `26280h` (3年) | `HOTPLEX_AUDIT_RETENTION` | 审计记录的基础留存窗口，由 audit GC 独立执行 |
+| `audit.full_content_retention` | duration | `2160h` (90天) | `HOTPLEX_AUDIT_FULL_CONTENT_RETENTION` | 审计原文的兼容配置字段；不再影响 event store 或 turns 留存 |
+
+> 网关 INFO 日志不会记录消息正文、prompt 或 `Envelope.Event.Data`。为支持关联排障，日志仅包含事件类型、session、seq、`data_size` 与 `data_sha256`（SHA-256 的短指纹）。
 
 ---
 

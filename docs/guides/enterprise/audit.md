@@ -96,7 +96,7 @@ grep "audit" ~/.hotplex/logs/gateway.log | head -5
 audit:
   enabled: true
   retention: 26280h       # 3 年（默认值）
-  full_content_retention: 2160h  # 90 天（默认值）
+  full_content_retention: 2160h  # 90 天兼容字段；不影响 events/turns GC
   collector:
     channel_cap: 4096     # 内存缓冲区
     batch_interval: 1s     # 刷写间隔
@@ -118,9 +118,9 @@ audit:
 |--------|------|--------|----------|------|
 | `audit.enabled` | bool | `true` | `AUDIT_ENABLED` | 是否启用审计系统 |
 | `audit.retention` | duration | `26280h`（3 年） | `AUDIT_RETENTION` | 审计记录保留时长 |
-| `audit.full_content_retention` | duration | `2160h`（90 天） | `AUDIT_FULL_CONTENT_RETENTION` | 事件 drill-down 引用有效窗口 |
+| `audit.full_content_retention` | duration | `2160h`（90 天） | `AUDIT_FULL_CONTENT_RETENTION` | 兼容配置字段；不影响 event store 或 turns 的留存 |
 
-**有效事件保留期**：当审计启用时，实际的事件保留期为 `max(events.retention, audit.full_content_retention)`，确保审计引用在 90 天内可回溯。
+**事件与审计留存相互独立**：event store 与 turns 只按 `events.retention` 清理；入站消息原文由 audit 记录保留并按 `audit.retention` 独立清理。`audit.full_content_retention` 为兼容字段，不会延长 event/turn 副本或 `event_ref` 的可用时间。
 
 ### 3.2 Collector 调优
 
@@ -172,7 +172,7 @@ audit:
 | `audit.collector.batch_size` | **热重载** | 立即应用 |
 | `audit.collector.batch_interval` | **热重载**（⚠️ 实际需重启） | 变更会被记录，但刷写器需重启才能生效 |
 | `audit.enabled` | **需重启** | 禁止热关闭，防止管理员在审计盲区操作 |
-| `audit.full_content_retention` | **需重启** | 事件 TTL 变更需重启 |
+| `audit.full_content_retention` | **需重启** | 兼容字段变更会被审计记录，但不会改变 event/turn GC 留存 |
 | `audit.collector.channel_cap` | **需重启** | Channel 容量在创建时确定 |
 | `audit.collector.spill_dir` | **需重启** | Spill 路径在启动时确定 |
 
@@ -389,7 +389,8 @@ Tool Call 的敏感工具输入在写入审计表前，自动进行凭证遮罩�
 
 | 事件类型 | detail_json 内容 | drill-down |
 |----------|-----------------|------------|
-| 标准事件 | 摘要 + SHA-256 | 通过 `event_ref` 回溯 events/turns（90 天有效） |
+| `message.inbound` | `content` 保留消息原文，按 `audit.retention` 独立留存 | `event_ref` 若存在仅关联 events/turns，并只在 `events.retention` 窗口内可用 |
+| 其他标准事件 | 摘要 + SHA-256 | `event_ref` 若存在仅作短期运行事实关联 |
 | 敏感行为 | 完整上下文直接存储 | 无需 drill-down |
 
 **敏感行为**（直接存储完整上下文）包括：认证失败、敏感工具调用、权限拒绝、Worker 崩溃/超时。
@@ -838,7 +839,7 @@ groups:
 - [ ] **审计系统**：确认 `audit.enabled: true`（默认开启），生产环境**禁止关闭**
 - [ ] **Hash Chain 告警**：配置 `AuditChainBroken` 告警规则，确保链断裂在 5 分钟内通知
 - [ ] **Spill 监控**：配置 `AuditSpillRateHigh` 告警，高并发场景适当调大 `channel_cap`
-- [ ] **保留期**：根据合规要求调整 `audit.retention`（默认 3 年）和 `audit.full_content_retention`（默认 90 天）
+- [ ] **保留期**：根据合规要求分别调整 `audit.retention`（默认 3 年）与 `events.retention`（默认 30 天）；`audit.full_content_retention`（默认 90 天）仅为兼容字段
 - [ ] **身份链接**：为跨平台用户创建 Identity Link，确保跨渠道审计查询完整
 - [ ] **Sink 投递**：生产环境配置 Webhook Sink 接入 SIEM，不要使用 noop 默认值
 - [ ] **导出归档**：定期导出审计数据（JSON/CSV）并归档，满足合规审查要求

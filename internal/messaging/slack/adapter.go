@@ -508,9 +508,6 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 
 	cmd := messaging.DetectCommand(text)
 	switch cmd.Action {
-	case messaging.CmdAbort:
-		a.Log.Info("slack: abort command received", "channel", channelID)
-		return
 	case messaging.CmdHelp:
 		_ = a.SetStatus(ctx, channelID, threadTS, StatusThinking, "Loading help...")
 		opts := []slack.MsgOption{
@@ -736,6 +733,11 @@ func (a *Adapter) handleAudioMessage(ctx context.Context, m *MediaInfo) (string,
 // handleTextControlCommand sends a control event derived from a text message
 // through the bridge, then sends ephemeral feedback to the user.
 func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelID, threadTS, userID string, result *messaging.ControlCommandResult) {
+	if a.Bridge() == nil {
+		a.Log.Warn("slack: text control command dropped without bridge", "action", result.Label)
+		return
+	}
+
 	conn := a.GetOrCreateConn(channelID, threadTS)
 	if conn == nil {
 		a.Log.Warn("slack: adapter closed, dropping control command", "action", result.Label)
@@ -790,8 +792,10 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		}
 	}
 
-	// Completion feedback for non-CD actions (CD feedback was sent before execution).
-	if result.Action != events.ControlActionCD {
+	// Stop is confirmed by Gateway's done.reason=stopped_by_user event. Avoid a
+	// duplicate local completion message while its terminal delivery settles.
+	// CD feedback was sent before execution; other controls complete locally.
+	if result.Action != events.ControlActionCD && result.Action != events.ControlActionStop {
 		a.sendEphemeralOrPost(ctx, channelID, threadTS, userID, controlFeedbackMessage(result.Action))
 	}
 }

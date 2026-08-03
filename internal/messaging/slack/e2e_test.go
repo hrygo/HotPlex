@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -81,6 +83,37 @@ func (h *captureHandler) Handle(_ context.Context, env *events.Envelope) error {
 		})
 	}
 	return nil
+}
+
+type controlCaptureHandler struct {
+	envelopes chan *events.Envelope
+}
+
+func (h *controlCaptureHandler) Handle(_ context.Context, env *events.Envelope) error {
+	h.envelopes <- env
+	return nil
+}
+
+type controlSessionStarter struct {
+	calls atomic.Int32
+}
+
+func (s *controlSessionStarter) StartPlatformSession(_ context.Context, _ worker.SessionStartParams) error {
+	s.calls.Add(1)
+	return nil
+}
+
+func newAdapterWithControlCapture(t *testing.T) (*Adapter, <-chan *events.Envelope, *controlSessionStarter) {
+	t.Helper()
+	a := newTestAdapter(t)
+	handler := &controlCaptureHandler{envelopes: make(chan *events.Envelope, 1)}
+	starter := &controlSessionStarter{}
+	bridge := messaging.NewBridge(
+		slog.Default(), messaging.PlatformSlack, nil, handler, starter,
+		"test_worker", "", "/tmp", "",
+	)
+	require.NoError(t, a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge}))
+	return a, handler.envelopes, starter
 }
 
 // newAdapterWithCapture creates an adapter whose bridge captures Handle calls.
@@ -293,16 +326,27 @@ func TestE2E_SelfMentionBlocked(t *testing.T) {
 	require.Len(t, *calls, 1)
 }
 
-func TestE2E_AbortCommandBlocked(t *testing.T) {
+func TestE2E_AbortCommandRoutesControlStop(t *testing.T) {
 	t.Parallel()
-	a, calls := newAdapterWithCapture(t)
 
-	// Abort commands pass dedup but are caught by IsAbortCommand before HandleTextMessage
-	a.handleEventsAPI(context.Background(), makeDMEvent("U_ALICE", "stop"))
-	require.Empty(t, *calls, "'stop' should not reach HandleTextMessage")
+	for _, text := range []string{"stop", "停止", "/stop"} {
+		t.Run(text, func(t *testing.T) {
+			a, envelopes, starter := newAdapterWithControlCapture(t)
+			a.handleEventsAPI(context.Background(), makeDMEvent("U_ALICE", text))
 
-	a.handleEventsAPI(context.Background(), makeDMEvent("U_ALICE", "停止"))
-	require.Empty(t, *calls, "'停止' should not reach HandleTextMessage")
+			select {
+			case envelope := <-envelopes:
+				require.NotEmpty(t, envelope.SessionID)
+				require.Equal(t, events.Control, envelope.Event.Type)
+				control, ok := envelope.Event.Data.(events.ControlData)
+				require.True(t, ok)
+				require.Equal(t, events.ControlActionStop, control.Action)
+			case <-time.After(time.Second):
+				t.Fatal("abort text did not reach the control handler")
+			}
+			require.Zero(t, starter.calls.Load(), "stop must not create a platform session")
+		})
+	}
 }
 
 func TestE2E_RichTextPasses(t *testing.T) {

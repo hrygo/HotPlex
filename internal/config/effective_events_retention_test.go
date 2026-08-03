@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestEffectiveEventsRetention_Defaults verifies the default config yields the
-// audit full-content retention (90d > 30d events default).
+// TestEffectiveEventsRetention_Defaults verifies that event and audit retention
+// are independent, even when the audit full-content window is longer.
 func TestEffectiveEventsRetention_Defaults(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
@@ -16,14 +16,13 @@ func TestEffectiveEventsRetention_Defaults(t *testing.T) {
 	require.Equal(t, 720*time.Hour, cfg.Events.Retention)
 	require.True(t, cfg.Audit.Enabled)
 	require.Equal(t, 2160*time.Hour, cfg.Audit.FullContentRetention)
-	// Effective = max(720h, 2160h) = 2160h.
-	require.Equal(t, 2160*time.Hour, EffectiveEventsRetention(cfg))
+	// Event storage retains its own 30-day window; audit retains plaintext
+	// independently for its configured 90-day window.
+	require.Equal(t, 720*time.Hour, EffectiveEventsRetention(cfg))
 }
 
-// TestEffectiveEventsRetention_AuditDisabledNoOverride verifies that when audit
-// is disabled, the events retention is returned UNCHANGED even if
-// full_content_retention is longer (audit must not silently lengthen TTL when
-// the operator turned audit off).
+// TestEffectiveEventsRetention_AuditDisabledNoOverride verifies that disabling
+// audit leaves the independent event retention unchanged.
 func TestEffectiveEventsRetention_AuditDisabledNoOverride(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
@@ -34,19 +33,19 @@ func TestEffectiveEventsRetention_AuditDisabledNoOverride(t *testing.T) {
 	require.Equal(t, 720*time.Hour, EffectiveEventsRetention(cfg))
 }
 
-// TestEffectiveEventsRetention_EventsLongerThanFull verifies the max picks
-// events.retention when it exceeds full_content_retention.
+// TestEffectiveEventsRetention_EventsLongerThanFull verifies that audit
+// full-content retention never changes events.retention.
 func TestEffectiveEventsRetention_EventsLongerThanFull(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
 	cfg.Audit.Enabled = true
 	cfg.Events.Retention = 5000 * time.Hour
 	cfg.Audit.FullContentRetention = 2160 * time.Hour
-	// max(5000h, 2160h) = 5000h.
+	// Event retention remains operator-configured at 5000h.
 	require.Equal(t, 5000*time.Hour, EffectiveEventsRetention(cfg))
 }
 
-// TestEffectiveEventsRetention_EqualValues is the boundary case.
+// TestEffectiveEventsRetention_EqualValues is the equal-window boundary case.
 func TestEffectiveEventsRetention_EqualValues(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
@@ -57,14 +56,14 @@ func TestEffectiveEventsRetention_EqualValues(t *testing.T) {
 }
 
 // TestEffectiveEventsRetention_ZeroEventsFallback verifies a zero/empty events
-// retention falls back to the 720h default before the max is taken.
+// retention falls back to the independent 720h default.
 func TestEffectiveEventsRetention_ZeroEventsFallback(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
 	cfg.Audit.Enabled = true
 	cfg.Events.Retention = 0 // unset
 	cfg.Audit.FullContentRetention = 100 * time.Hour
-	// max(720h fallback, 100h) = 720h.
+	// The 720h event fallback is not affected by audit retention.
 	require.Equal(t, 720*time.Hour, EffectiveEventsRetention(cfg))
 }
 
@@ -75,14 +74,14 @@ func TestEffectiveEventsRetention_NilConfig(t *testing.T) {
 }
 
 // TestEffectiveEventsRetention_ZeroFullContent verifies a zero
-// full_content_retention does not shrink events retention (only extends).
+// full_content_retention does not affect events retention.
 func TestEffectiveEventsRetention_ZeroFullContent(t *testing.T) {
 	t.Parallel()
 	cfg := Default()
 	cfg.Audit.Enabled = true
 	cfg.Events.Retention = 720 * time.Hour
 	cfg.Audit.FullContentRetention = 0 // unset
-	// max(720h, 0h) = 720h — no change.
+	// Event retention remains 720h.
 	require.Equal(t, 720*time.Hour, EffectiveEventsRetention(cfg))
 }
 

@@ -32,7 +32,7 @@ hotplex 需要审计每个用户的行为,支撑**内部调查**与**合规/取�
 |---|---|
 | 驱动 | 内部调查 + 合规/取证 |
 | 归因维度 | 平台原生 ID(`ou_…`/`U…`/UUID 各自独立审计) |
-| 消息内容 | 独立审计表存摘要+sha256;全量靠 `event_ref` 引用 events/turns;敏感行为全量直存 |
+| 消息内容 | `message.inbound` 在独立审计表保留原文；`event_ref` 仅为 events/turns 的可选关联，不承担审计正文留存 |
 | 保留期 | 3 年 |
 | 不可变性 | append-only + hash chain(不需 WORM/外部存储) |
 | 实时告警 | 需要(本 spec 只定义可扩展 `AlertSink` 接口,不实现具体规则/通道) |
@@ -118,16 +118,16 @@ CREATE INDEX idx_ua_action_ts ON user_activity(action, ts);
 
 > **注**:每请求的 cookie 重新校验(`AuthenticateRequest` cookie 成功分支、WS 升级成功分支)**不发审计行**——归因交给领域动作。`auth.token_validated` 常量保留未用(预留)。
 
-### 5.3 内容策略(摘要 + 引用复用全量)
+### 5.3 内容策略（审计原文与运行副本分离）
 
-呼应决策 3(独立表则摘要+hash):
+呼应消息内容决策：审计是长期治理记录，events/turns 是短期运行副本。
 
-- 审计表 `detail_json` 存**摘要 + sha256**(永久可查,3 年)
-- `event_ref` → `events.id` / `turns.id`,session 存活时下钻**复用** events/turns 完整内容(不在审计表重存全量)
+- `message.inbound` 的 `detail_json.content` 保存消息原文，并按 `audit.retention`（默认 3 年）独立留存
+- 其他审计记录仍按其数据最小化策略保存摘要、SHA-256 或必要上下文
+- `event_ref` → `events.id` / `turns.id` 仅用于关联运行事实；审计正文读取不依赖它
 - **敏感行为**(失败认证、敏感工具调用、denied、crash/timeout)在 `detail_json` 内**直接存全量上下文**(量小且重要,不依赖 events)
-- 权衡:events/turns 现 retention 30 天,到期后普通消息只剩摘要。新增 `audit.full_content_retention` 把 events/turns 延长(默认 90 天)供下钻;敏感行为已全量入审计表,不受影响
-- **wiring**:`effective events retention = max(events.retention, audit.full_content_retention)`(audit 启用时);注意此延长会同时影响**非审计用途**的 events(副作用已接受,换取下钻完整性)
-- `event_ref` 预期会随 events/turns TTL(90 天)后**悬空**——届时审计行只剩摘要 + sha256(仍满足"是否做过某行为"的审计);需长期全量回溯的敏感行为已全量直存 `detail_json`,不依赖 `event_ref`。悬空是设计预期,非异常
+- `events.retention`（默认 30 天）独立控制 events/turns GC；`audit.full_content_retention` 保留为兼容字段，绝不延长运行副本
+- `event_ref` 可以在 events/turns 到期后悬空；这不影响已存入 audit 的消息原文或敏感行为上下文。悬空是设计预期，非异常
 
 ### 5.4 归因
 
@@ -223,7 +223,7 @@ type AlertSink interface {
 - `detail_json` 字段白名单(结构化)
 - **禁录**:凭证、password、API key 明文、session token、完整 PII(身份证/手机号)
 - API key 记前缀 + 掩码(`hpk_a4c1…`)
-- 消息正文:摘要(前 N 字 + PII 脱敏)+ sha256;全量靠 `event_ref` 或敏感行为路径
+- 消息正文：`message.inbound` 的 `detail_json.content` 直接保留原文，并按 `audit.retention` 独立留存；`event_ref` 若存在只关联 events/turns，且仅在 `events.retention` 窗口内可用
 - 符合 OWASP Logging Cheat Sheet "What Not to Log"
 
 ### 5.10 性能与背压(补 events 静默丢弃缺口)
@@ -261,7 +261,7 @@ type AlertSink interface {
 audit:
   enabled: true
   retention: 26280h              # 3 年
-  full_content_retention: 2160h  # events/turns 延长(90 天)供下钻
+  full_content_retention: 2160h  # 兼容字段；不延长 events/turns
   chain_verify_interval: 1h
   collector:
     channel_cap: 4096
@@ -342,7 +342,7 @@ audit:
 - `tool.call` 工具调用审计(spec §5.2)
 - 现有 `internal/admin/audit.go` AdminAudit slog 路径迁移为双写 `user_activity`
 - 外部 `RegisterSink` 机制 + `WebhookSink`
-- `full_content_retention` 延长 events/turns TTL(默认 90 天)
+- `full_content_retention` 保留为兼容字段，不影响 events/turns TTL
 - `system.audit_config_changed` meta-audit
 - sinks↔audit 单向导入清理
 
@@ -434,7 +434,7 @@ audit:
 |---|---|
 | 双写性能开销 | 异步批量 + spill;审计点轻量(摘要) |
 | hash chain 写入序列化瓶颈 | SQLite 单进程 mutex + 批量足够;**PG 多 pod 共享 advisory lock 是全局串行化点**——高吞吐场景按 `user_id` hash 分片多链(见 §14 分区) |
-| events 到期后普通消息只剩摘要 | `full_content_retention` 延长;敏感行为全量入审计表 |
+| events 到期后 `event_ref` 悬空 | 入站消息原文与敏感行为上下文已独立保存在审计表；按需要调整 `events.retention` |
 | 平台原生 ID 不归一 → 同人跨通道分散 | v1 接受;v2 建映射(§13) |
 | 审计表 3 年膨胀 | TTL GC + 索引 + 可选冷归档 |
 | spill 磁盘故障丢审计 | WAL + fsync;失败告警 |

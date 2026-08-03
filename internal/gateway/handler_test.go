@@ -1,12 +1,17 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +19,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/eventstore"
@@ -25,6 +31,154 @@ import (
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
+
+type captureAuditStore struct {
+	mu         sync.Mutex
+	activities []audit.UserActivity
+}
+
+func (s *captureAuditStore) BeginTx(context.Context) (audit.Tx, error) {
+	return &captureAuditTx{store: s}, nil
+}
+
+func (s *captureAuditStore) Query(_ context.Context, _ audit.Query) ([]audit.UserActivity, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	activities := make([]audit.UserActivity, len(s.activities))
+	copy(activities, s.activities)
+	return activities, nil
+}
+
+func (s *captureAuditStore) Stats(context.Context, audit.Query) (audit.ActivityStats, error) {
+	return audit.ActivityStats{}, nil
+}
+
+func (s *captureAuditStore) QueryAsc(context.Context, int64, int) ([]audit.UserActivity, error) {
+	return nil, nil
+}
+
+func (s *captureAuditStore) DeleteBefore(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (s *captureAuditStore) SaveCheckpoint(context.Context, audit.Checkpoint) error {
+	return nil
+}
+
+func (s *captureAuditStore) LatestCheckpoint(context.Context) (*audit.Checkpoint, error) {
+	return nil, nil
+}
+
+func (s *captureAuditStore) ListIdentityLinks(context.Context, string) ([]audit.IdentityLink, error) {
+	return nil, nil
+}
+
+func (s *captureAuditStore) UpsertIdentityLink(context.Context, audit.IdentityLink) error {
+	return nil
+}
+
+func (s *captureAuditStore) DeleteIdentityLink(context.Context, string) error {
+	return nil
+}
+
+func (s *captureAuditStore) Close() error {
+	return nil
+}
+
+func (s *captureAuditStore) Dialect() dbutil.Dialect {
+	return dbutil.DialectSQLite
+}
+
+type captureAuditTx struct {
+	store *captureAuditStore
+}
+
+func (tx *captureAuditTx) Append(ctx context.Context, activity *audit.UserActivity) error {
+	return tx.AppendBatch(ctx, []*audit.UserActivity{activity})
+}
+
+func (tx *captureAuditTx) AppendBatch(_ context.Context, activities []*audit.UserActivity) error {
+	tx.store.mu.Lock()
+	defer tx.store.mu.Unlock()
+	for _, activity := range activities {
+		tx.store.activities = append(tx.store.activities, *activity)
+	}
+	return nil
+}
+
+func (tx *captureAuditTx) SaveCheckpoint(context.Context, audit.Checkpoint) error {
+	return nil
+}
+
+func (tx *captureAuditTx) TailHash(context.Context) (string, error) {
+	return "", nil
+}
+
+func (tx *captureAuditTx) LastRowBefore(context.Context, time.Time) (int64, string, error) {
+	return 0, "", nil
+}
+
+func (tx *captureAuditTx) DeleteByIDLEQ(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+
+func (tx *captureAuditTx) RowCount(context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (tx *captureAuditTx) Commit() error {
+	return nil
+}
+
+func (tx *captureAuditTx) Rollback() error {
+	return nil
+}
+
+// TestHandler_ReceivedEventLogExcludesBodyAndAuditRetainsContent catches a
+// regression that creates an unmanaged plaintext log copy while preserving
+// the governed audit copy.
+func TestHandler_ReceivedEventLogExcludesBodyAndAuditRetainsContent(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	store := &captureAuditStore{}
+	collector := audit.NewCollector(store, nil, nil, logger, audit.CollectorConfig{
+		ChannelCap:    1,
+		BatchSize:     1,
+		BatchInterval: time.Hour,
+	})
+	collector.Start(context.Background())
+	t.Cleanup(func() { require.NoError(t, collector.Close(context.Background())) })
+
+	handler := NewHandler(HandlerDeps{Log: logger, Hub: newTestHub(t)})
+	handler.SetAuditCollector(collector)
+	secret := "customer-secret-message"
+	data := map[string]any{"content": secret}
+	env := events.NewEnvelope(aep.NewID(), "session-1", 7, events.Kind("unknown"), data)
+
+	require.Error(t, handler.Handle(context.Background(), env))
+
+	encoded, err := json.Marshal(data)
+	require.NoError(t, err)
+	sum := sha256.Sum256(encoded)
+	logOutput := logs.String()
+	require.NotContains(t, logOutput, secret)
+	require.Contains(t, logOutput, `"data_size":`+strconv.Itoa(len(encoded)))
+	require.Contains(t, logOutput, `"data_sha256":"`+hex.EncodeToString(sum[:])[:16]+`"`)
+
+	handler.emitAudit(audit.OutcomeSuccess, "user-1", "feishu", "session-1", secret)
+	require.Eventually(t, func() bool {
+		activities, queryErr := store.Query(context.Background(), audit.Query{})
+		return queryErr == nil && len(activities) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	activities, err := store.Query(context.Background(), audit.Query{})
+	require.NoError(t, err)
+	var detail map[string]string
+	require.NoError(t, json.Unmarshal([]byte(activities[0].DetailJSON), &detail))
+	require.Equal(t, secret, detail["content"])
+}
 
 // mockHandlerSM is a mock session manager for handler tests.
 type mockHandlerSM struct {

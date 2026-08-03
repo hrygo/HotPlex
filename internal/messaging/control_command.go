@@ -53,6 +53,7 @@ var controlCommands = NewCommandMap(
 		"/park":  {Action: events.ControlActionGC, Label: "gc"},
 		"/reset": {Action: events.ControlActionReset, Label: "reset"},
 		"/new":   {Action: events.ControlActionReset, Label: "reset"},
+		"/stop":  {Action: events.ControlActionStop, Label: "stop"},
 		"/cd":    {Action: events.ControlActionCD, Label: "cd"},
 	},
 	map[string]ControlCommandResult{

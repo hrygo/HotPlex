@@ -808,16 +808,10 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		log.Warn("Brain initialization failed (fail-open)", "err", err)
 	}
 
-	// Effective events/turns retention: when audit is enabled, extend the TTL
-	// to max(events.retention, audit.full_content_retention) so audit event_ref
-	// drill-down stays valid for the full-content window (spec §5.3). Hot-reload
-	// of this effective value requires a gateway restart (the GC goroutine
-	// captures the value at startup), consistent with audit.collector.batch_interval.
+	// Events and turns retain only their configured events.retention window.
+	// Audit plaintext has an independent retention policy. The GC captures this
+	// value at startup, so changing events.retention requires a gateway restart.
 	eventsRetention := config.EffectiveEventsRetention(cfg)
-	if eventsRetention != cfg.Events.Retention {
-		log.Info("audit: extending events/turns retention for full-content drill-down",
-			"original", cfg.Events.Retention, "effective", eventsRetention)
-	}
 	go runEventsGC(ctx, stores, log, eventsRetention)
 
 	leaseMgr.Start(ctx)
