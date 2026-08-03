@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hrygo/hotplex/internal/cli"
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 // claudeAutoModeChecker verifies the installed Claude Code CLI advertises the
@@ -62,6 +63,120 @@ func (c claudeAutoModeChecker) Check(ctx context.Context) cli.Diagnostic {
 	}
 }
 
+// claudeBypassModeChecker reports the risk of a configured Feishu Claude Code
+// worker running with bypass permissions. It is intentionally read-only: a
+// permission change needs an operator decision and a restart.
+type claudeBypassModeChecker struct{}
+
+func (c claudeBypassModeChecker) Name() string     { return "worker.claude_bypass_mode" }
+func (c claudeBypassModeChecker) Category() string { return "worker" }
+
+func (c claudeBypassModeChecker) Check(ctx context.Context) cli.Diagnostic {
+	cfg, err := loadConfig()
+	if cfg == nil && err == nil {
+		return cli.Diagnostic{
+			Name:     c.Name(),
+			Category: c.Category(),
+			Status:   cli.StatusPass,
+			Message:  "Config path not set; skipping Claude Code bypass permission check",
+		}
+	}
+	if err != nil {
+		return cli.Diagnostic{
+			Name:     c.Name(),
+			Category: c.Category(),
+			Status:   cli.StatusWarn,
+			Message:  "Cannot load config for Claude Code bypass permission check",
+			Detail:   err.Error(),
+			FixHint:  "Fix the configuration file, then run hotplex doctor again",
+		}
+	}
+
+	if !hasFeishuClaudeCodeWorker(cfg) {
+		return cli.Diagnostic{
+			Name:     c.Name(),
+			Category: c.Category(),
+			Status:   cli.StatusPass,
+			Message:  "No Claude Code Feishu worker configured",
+		}
+	}
+
+	workspaceMode := resolveClaudePermissionMode(cfg.Worker.DefaultPermissionMode, cfg.Worker.ClaudeCode.PermissionMode)
+	platformMode := resolveClaudePermissionMode("", cfg.Worker.ClaudeCode.PermissionMode)
+	if workspaceMode == permissionModeBypass || platformMode == permissionModeBypass {
+		return cli.Diagnostic{
+			Name:     c.Name(),
+			Category: c.Category(),
+			Status:   cli.StatusWarn,
+			Message:  "Claude Code bypass permission mode is active for Feishu",
+			Detail:   "Bypass skips normal Claude Code permission prompts for at least one effective Feishu session mode.",
+			FixHint:  "Set worker.claude_code.permission_mode and worker.default_permission_mode to workspace or read-only, then restart HotPlex.",
+		}
+	}
+
+	return cli.Diagnostic{
+		Name:     c.Name(),
+		Category: c.Category(),
+		Status:   cli.StatusPass,
+		Message:  "Configured Feishu Claude Code workers use restricted permission modes",
+	}
+}
+
+const (
+	permissionModeReadOnly  = "read-only"
+	permissionModeWorkspace = "workspace"
+	permissionModeAutoEdit  = "auto-edit"
+	permissionModeBypass    = "bypass"
+)
+
+// resolveClaudePermissionMode mirrors Claude Code's runtime resolution: a
+// platform session has no session mode and therefore uses the operator mode;
+// an explicit workspace default is clamped to that operator ceiling. Empty
+// operator mode preserves the legacy Claude Code bypass default.
+func resolveClaudePermissionMode(sessionMode, operatorMode string) string {
+	effectiveMode := sessionMode
+	if effectiveMode == "" {
+		effectiveMode = operatorMode
+	}
+	if operatorMode != "" && permissionModeRank(effectiveMode) > permissionModeRank(operatorMode) {
+		effectiveMode = operatorMode
+	}
+	if effectiveMode == "" {
+		return permissionModeBypass
+	}
+	return effectiveMode
+}
+
+func permissionModeRank(mode string) int {
+	switch mode {
+	case permissionModeReadOnly:
+		return 0
+	case permissionModeWorkspace:
+		return 1
+	case permissionModeAutoEdit:
+		return 2
+	case permissionModeBypass:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func hasFeishuClaudeCodeWorker(cfg *config.Config) bool {
+	if !cfg.Messaging.Feishu.Enabled {
+		return false
+	}
+	if len(cfg.Messaging.Feishu.Bots) == 0 {
+		return cfg.ResolveWorkerType("feishu", "") == config.DefaultWorkerType
+	}
+	for _, bot := range cfg.Messaging.Feishu.Bots {
+		if cfg.ResolveWorkerType("feishu", bot.Name) == config.DefaultWorkerType {
+			return true
+		}
+	}
+	return false
+}
+
 // probeClaudeHelp runs `claude --help` with a bounded timeout and returns its
 // combined stdout/stderr. The help text lists supported --permission-mode values.
 func probeClaudeHelp(ctx context.Context, claude string) (string, error) {
@@ -86,4 +201,5 @@ func claudeHelpSupportsAuto(helpText string) bool {
 
 func init() {
 	cli.DefaultRegistry.Register(claudeAutoModeChecker{})
+	cli.DefaultRegistry.Register(claudeBypassModeChecker{})
 }

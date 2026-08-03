@@ -290,6 +290,21 @@ LLM Provider 返回临时错误（429、529、400 等）时的自动重试配置
 | `permission_auto_approve` | []string | `["ExitPlanMode"]` | — | 自动批准的工具名称列表（无需转发用户交互 UI） |
 | `mcp_servers` | map | `{}` | — | 用户配置的 MCP Server。空值 = 使用默认发现机制 |
 
+##### Claude Code 权限边界与 Doctor
+
+`bypass` 会让 Claude Code 使用跳过常规权限提示的执行路径；它只应出现在受控、短期、已隔离的运维场景，不能作为飞书生产机器人的常规默认值。`messaging.*.allow_from`、`allow_dm_from` 和 `allow_group_from` 仅限制**谁能向机器人发消息**，不能限制获准请求在 Worker 内可调用的工具，也不能替代 Worker 权限模式。
+
+对启用的飞书 `claude_code` Worker，`hotplex doctor` 的 `worker.claude_bypass_mode` 会按运行时同一规则检查两类有效模式：平台会话的空 `sessionMode` 使用 `worker.claude_code.permission_mode`（空值仍是兼容性的 `bypass`）；workspace 会话使用 `worker.default_permission_mode`，再被前者作为 permissiveness ceiling 收紧。发现任一路径为 `bypass` 时只输出 Warn 和收紧建议，**不会修改配置，也没有自动修复**。
+
+`HOTPLEX_WORKER_CLAUDE_CODE_PERMISSION_MODE` 可覆盖 Claude Code operator 模式。相对地，`HOTPLEX_WORKER_DEFAULT_PERMISSION_MODE` 当前**没有**运行时环境变量绑定；该变量不会覆盖 YAML 的 `worker.default_permission_mode`，请在配置文件中设置该字段。收紧到 workspace 的生产基线示例：
+
+```yaml
+worker:
+  default_permission_mode: workspace
+  claude_code:
+    permission_mode: workspace
+```
+
 #### 3.7.4 opencode_server — OpenCode Server Worker
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |

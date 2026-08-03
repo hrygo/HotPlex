@@ -121,6 +121,19 @@ Docker/K8s 环境建议用 NetworkPolicy 替代，避免 NAT 后 IP 失真。
 | XML Sanitizer | 强制开启，防注入 |
 | 路径安全 | `work_dir` 限制在允许目录树内 |
 
+### 2.6 Claude Code Worker 权限
+
+飞书机器人使用 Claude Code 时，生产基线应同时把 workspace 默认和 Claude Code operator ceiling 收紧为 `workspace`（或按业务需要收紧为 `read-only`）：
+
+```yaml
+worker:
+  default_permission_mode: workspace
+  claude_code:
+    permission_mode: workspace
+```
+
+`bypass` 会跳过常规 Claude Code 权限提示；仅应在隔离、短期且由运维人员明确批准的场景使用。飞书的 `allow_from`、`allow_dm_from` 和 `allow_group_from` 是入口身份限制，不是 Worker 工具权限边界：白名单用户的消息仍可能驱动 Worker 执行高权限工具。部署变更后运行 `hotplex doctor`，确认 `worker.claude_bypass_mode` 没有 Warn，再使用 `hotplex service restart` 原子重启服务。
+
 ---
 
 ## 3. 网络配置
