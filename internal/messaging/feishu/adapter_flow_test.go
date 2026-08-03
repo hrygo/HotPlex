@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/messaging"
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -19,6 +21,15 @@ type controlEnvelopeHandler struct {
 
 func (h *controlEnvelopeHandler) Handle(_ context.Context, env *events.Envelope) error {
 	h.envelopes <- env
+	return nil
+}
+
+type controlSessionStarter struct {
+	calls atomic.Int32
+}
+
+func (s *controlSessionStarter) StartPlatformSession(_ context.Context, _ worker.SessionStartParams) error {
+	s.calls.Add(1)
 	return nil
 }
 
@@ -32,8 +43,9 @@ func TestAdapterFlow_AbortTextRoutesControlStop(t *testing.T) {
 			t.Cleanup(a.chatQueue.Close)
 
 			handler := &controlEnvelopeHandler{envelopes: make(chan *events.Envelope, 1)}
+			starter := &controlSessionStarter{}
 			bridge := messaging.NewBridge(
-				slog.Default(), messaging.PlatformFeishu, nil, handler, nil,
+				slog.Default(), messaging.PlatformFeishu, nil, handler, starter,
 				"test_worker", "", "/tmp", "",
 			)
 			require.NoError(t, a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge}))
@@ -64,6 +76,7 @@ func TestAdapterFlow_AbortTextRoutesControlStop(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("abort text did not reach the control handler")
 			}
+			require.Zero(t, starter.calls.Load(), "stop must not create a platform session")
 		})
 	}
 }

@@ -84,8 +84,10 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 		b.hub.JoinPlatformSession(env.SessionID, pc)
 	}
 
-	// Auto-create session if starter is available.
-	if b.starter != nil {
+	// Auto-create sessions for input and existing control flows. A stop must
+	// target an already-derived session: starting one here could spawn a worker
+	// solely to stop it.
+	if b.starter != nil && shouldStartPlatformSession(env) {
 		// Extract platform key from envelope metadata for persistence.
 		platform, platformKey := b.extractPlatformKey(env)
 		if b.acpCommand != "" {
@@ -131,6 +133,14 @@ func (b *Bridge) Handle(ctx context.Context, env *events.Envelope, pc PlatformCo
 	}
 
 	return b.handler.Handle(ctx, env)
+}
+
+func shouldStartPlatformSession(env *events.Envelope) bool {
+	if env.Event.Type != events.Control {
+		return true
+	}
+	data, ok := env.Event.Data.(events.ControlData)
+	return !ok || data.Action != events.ControlActionStop
 }
 
 // JoinSession subscribes a PlatformConn to a gateway session.
