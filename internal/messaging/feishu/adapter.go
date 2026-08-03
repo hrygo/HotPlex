@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -132,6 +133,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	a.larkClient = lark.NewClient(a.appID, a.appSecret,
 		lark.WithLogger(SlogLogger{Logger: a.Log}),
+		lark.WithHttpClient(newMediaBoundedHTTPClient(http.DefaultClient)),
 	)
 
 	if err := a.fetchBotInfo(ctx); err != nil {

@@ -2,11 +2,17 @@ package feishu
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,6 +46,47 @@ func TestReadMediaBytes_StopsAtLimitForInfiniteReader(t *testing.T) {
 	require.Equal(t, mediaMaxSize+1, reader.bytesRead)
 }
 
+func TestFetchMediaBytes_BoundsSDKResponseBeforeSDKBuffering(t *testing.T) {
+	t.Parallel()
+
+	resourceBody := &infiniteMediaReadCloser{}
+	client := lark.NewClient("media-test-app", "media-test-secret",
+		lark.WithHttpClient(newMediaBoundedHTTPClient(mediaHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/open-apis/auth/v3/tenant_access_token/internal":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"code":0,"tenant_access_token":"test-token","expire":7200}`)),
+					Request:    req,
+				}, nil
+			case "/open-apis/im/v1/messages/message-id/resources/resource-key":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/octet-stream"}},
+					Body:       resourceBody,
+					Request:    req,
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected SDK request path %q", req.URL.Path)
+			}
+		}))),
+	)
+	adapter := newTestAdapter(t)
+	adapter.larkClient = client
+
+	data, _, err := adapter.fetchMediaBytes(context.Background(), &MediaInfo{
+		Type:      "file",
+		Key:       "resource-key",
+		MessageID: "message-id",
+	})
+
+	require.ErrorIs(t, err, ErrMediaTooLarge)
+	require.Nil(t, data)
+	require.Equal(t, mediaMaxSize+1, resourceBody.bytesRead)
+	require.True(t, resourceBody.closed)
+}
+
 func TestSaveMediaFile_UsesPrivatePermissions(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -71,6 +118,22 @@ func TestSaveMediaFile_RejectsUnsafeFilename(t *testing.T) {
 
 type infiniteMediaReader struct {
 	bytesRead int
+}
+
+type infiniteMediaReadCloser struct {
+	infiniteMediaReader
+	closed bool
+}
+
+func (r *infiniteMediaReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
+type mediaHTTPClientFunc func(*http.Request) (*http.Response, error)
+
+func (f mediaHTTPClientFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func (r *infiniteMediaReader) Read(p []byte) (int, error) {

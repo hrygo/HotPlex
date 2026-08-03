@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
@@ -64,6 +66,48 @@ const mediaMaxSize = 10 * 1024 * 1024 // 10 MB
 var ErrMediaTooLarge = errors.New("feishu: file too large")
 
 const silenceTimeout = 30 * time.Second
+
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+type mediaBoundedHTTPClient struct {
+	client httpDoer
+}
+
+func newMediaBoundedHTTPClient(client httpDoer) *mediaBoundedHTTPClient {
+	return &mediaBoundedHTTPClient{client: client}
+}
+
+func (c *mediaBoundedHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	resp, err := c.client.Do(req)
+	if err != nil || resp == nil || resp.Body == nil || !isMessageResourceDownload(req) {
+		return resp, err
+	}
+	resp.Body = &mediaLimitReadCloser{
+		Reader: io.LimitReader(resp.Body, mediaMaxSize+1),
+		Closer: resp.Body,
+	}
+	return resp, nil
+}
+
+func isMessageResourceDownload(req *http.Request) bool {
+	if req == nil || req.Method != http.MethodGet {
+		return false
+	}
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	return len(parts) == 7 &&
+		parts[0] == "open-apis" &&
+		parts[1] == "im" &&
+		parts[2] == "v1" &&
+		parts[3] == "messages" &&
+		parts[5] == "resources"
+}
+
+type mediaLimitReadCloser struct {
+	io.Reader
+	io.Closer
+}
 
 // mediaTypeToResourceType maps our internal media types to Feishu resource types.
 var mediaTypeToResourceType = map[string]string{
