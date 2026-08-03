@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 func TestIsAbortCommand(t *testing.T) {
@@ -59,7 +61,7 @@ func TestDetectCommand(t *testing.T) {
 		input  string
 		action CommandAction
 	}{
-		{"abort", "stop", CmdAbort},
+		{"abort becomes control stop", "stop", CmdControl},
 		{"help", "/help", CmdHelp},
 		{"control /gc", "/gc", CmdControl},
 		{"control /reset", "/reset", CmdControl},
@@ -83,6 +85,15 @@ func TestDetectCommand_ControlResult(t *testing.T) {
 	result := DetectCommand("/gc")
 	require.NotNil(t, result.Control)
 	require.Equal(t, "gc", result.Control.Label)
+}
+
+func TestDetectCommand_AbortControlResult(t *testing.T) {
+	t.Parallel()
+
+	result := DetectCommand("stop")
+	require.Equal(t, CmdControl, result.Action)
+	require.NotNil(t, result.Control)
+	require.Equal(t, events.ControlActionStop, result.Control.Action)
 }
 
 func TestDetectCommand_WorkerResult(t *testing.T) {

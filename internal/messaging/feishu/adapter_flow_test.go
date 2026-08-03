@@ -2,14 +2,71 @@ package feishu
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/pkg/events"
 )
+
+type controlEnvelopeHandler struct {
+	envelopes chan *events.Envelope
+}
+
+func (h *controlEnvelopeHandler) Handle(_ context.Context, env *events.Envelope) error {
+	h.envelopes <- env
+	return nil
+}
+
+func TestAdapterFlow_AbortTextRoutesControlStop(t *testing.T) {
+	t.Parallel()
+
+	for _, text := range []string{"stop", "停止", "/stop"} {
+		t.Run(text, func(t *testing.T) {
+			a := newTestAdapter(t)
+			a.chatQueue = NewChatQueue(discardLogger)
+			t.Cleanup(a.chatQueue.Close)
+
+			handler := &controlEnvelopeHandler{envelopes: make(chan *events.Envelope, 1)}
+			bridge := messaging.NewBridge(
+				slog.Default(), messaging.PlatformFeishu, nil, handler, nil,
+				"test_worker", "", "/tmp", "",
+			)
+			require.NoError(t, a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge}))
+
+			sender := larkim.NewEventSenderBuilder().
+				SenderId(larkim.NewUserIdBuilder().OpenId("user-stop").Build()).
+				SenderType("user").
+				Build()
+			message := larkim.NewEventMessageBuilder().
+				MessageId("message-stop-" + text).
+				MessageType("text").
+				Content(`{"text":"` + text + `"}`).
+				ChatId("chat-stop").
+				ChatType("p2p").
+				Build()
+
+			require.NoError(t, a.handleMessage(context.Background(), &larkim.P2MessageReceiveV1{
+				Event: &larkim.P2MessageReceiveV1Data{Sender: sender, Message: message},
+			}))
+
+			select {
+			case envelope := <-handler.envelopes:
+				require.NotEmpty(t, envelope.SessionID)
+				require.Equal(t, events.Control, envelope.Event.Type)
+				control, ok := envelope.Event.Data.(events.ControlData)
+				require.True(t, ok)
+				require.Equal(t, events.ControlActionStop, control.Action)
+			case <-time.After(time.Second):
+				t.Fatal("abort text did not reach the control handler")
+			}
+		})
+	}
+}
 
 func TestAdapterFlow_HandleTextMessage_NilBridge(t *testing.T) {
 	t.Parallel()

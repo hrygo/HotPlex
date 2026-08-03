@@ -3,6 +3,8 @@ package messaging
 import (
 	"strings"
 	"sync"
+
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // Source: OpenClaw abort-detect.ts (core triggers, covering English/Chinese/Japanese/Russian).
@@ -38,7 +40,6 @@ type CommandAction int
 
 const (
 	CmdNone CommandAction = iota
-	CmdAbort
 	CmdHelp
 	CmdControl
 	CmdWorker
@@ -53,7 +54,13 @@ type CommandResult struct {
 
 func DetectCommand(text string) CommandResult {
 	if IsAbortCommand(text) {
-		return CommandResult{Action: CmdAbort}
+		return CommandResult{
+			Action: CmdControl,
+			Control: &ControlCommandResult{
+				Action: events.ControlActionStop,
+				Label:  "stop",
+			},
+		}
 	}
 	if IsHelpCommand(text) {
 		return CommandResult{Action: CmdHelp}

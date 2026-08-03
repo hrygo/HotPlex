@@ -108,13 +108,7 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 		}
 	}
 
-	// Step 8: Abort fast-path.
-	if messaging.IsAbortCommand(text) {
-		a.chatQueue.Abort(chatID)
-		return nil
-	}
-
-	// Step 9: All message processing (including control commands) goes through
+	// Step 8: All message processing (including stop and other control commands) goes through
 	// chatQueue to serialize execution per chatID, preventing races between
 	// reset's Terminate→Start and the next message's Input() call.
 	replyToMsgID := parentID
@@ -257,6 +251,11 @@ func (a *Adapter) GetOrCreateConn(chatID, threadKey string) *FeishuConn {
 }
 
 func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, threadKey, platformMsgID string, result *messaging.ControlCommandResult) {
+	if a.Bridge() == nil {
+		a.Log.Warn("feishu: text control command dropped without bridge", "action", result.Label)
+		return
+	}
+
 	conn := a.GetOrCreateConn(chatID, threadKey)
 	envelope := a.makeEnvelope(chatID, threadKey, userID, "", conn.WorkDir())
 	if envelope == nil {
@@ -313,8 +312,10 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, chatID, userID, 
 		conn.mu.Unlock()
 	}
 
-	// Completion feedback for non-CD actions (CD feedback was sent before execution).
-	if result.Action != events.ControlActionCD {
+	// Stop is confirmed by Gateway's done.reason=stopped_by_user event. Avoid a
+	// duplicate local completion message while its terminal delivery settles.
+	// CD feedback was sent before execution; other controls complete locally.
+	if result.Action != events.ControlActionCD && result.Action != events.ControlActionStop {
 		_ = a.replyOrSend(ctx, platformMsgID, chatID, controlFeedbackMessageCN(result.Action))
 	}
 }
