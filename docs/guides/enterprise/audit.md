@@ -330,7 +330,7 @@ Verifier 每小时自动运行一次，以**流式方式**逐批验证 Hash Chai
 
 检测到链断裂时：
 - 记录 `hotplex_audit_chain_breaks_total` Prometheus 指标（含 `reason` 属性）
-- 输出 WARN 级别日志
+- 日志按**状态机降噪**输出：新断裂（首次出现）输出 WARN，附带 `rows_checked`、按 `reason` 映射的处置建议（`advice`）与断裂行诊断（`broken_at` / `platform` / `action` / `outcome` / `resource_type` / `expected_prev_hash` / `actual_prev_hash`，均为无 PII 字段，可安全外发）；同一断裂持续存在时降为 DEBUG 并累计 `first_seen` / `occurrences`，避免每小时告警风暴；断裂修复后输出 INFO `chain break resolved`
 
 ```yaml
 # 告警规则示例
