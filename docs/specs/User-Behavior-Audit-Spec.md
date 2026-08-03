@@ -223,7 +223,7 @@ type AlertSink interface {
 - `detail_json` 字段白名单(结构化)
 - **禁录**:凭证、password、API key 明文、session token、完整 PII(身份证/手机号)
 - API key 记前缀 + 掩码(`hpk_a4c1…`)
-- 消息正文:摘要(前 N 字 + PII 脱敏)+ sha256;全量靠 `event_ref` 或敏感行为路径
+- 消息正文：`message.inbound` 的 `detail_json.content` 直接保留原文，并按 `audit.retention` 独立留存；`event_ref` 若存在只关联 events/turns，且仅在 `events.retention` 窗口内可用
 - 符合 OWASP Logging Cheat Sheet "What Not to Log"
 
 ### 5.10 性能与背压(补 events 静默丢弃缺口)

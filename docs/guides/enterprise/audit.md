@@ -389,7 +389,8 @@ Tool Call 的敏感工具输入在写入审计表前，自动进行凭证遮罩�
 
 | 事件类型 | detail_json 内容 | drill-down |
 |----------|-----------------|------------|
-| 标准事件 | 摘要 + SHA-256 | 通过 `event_ref` 回溯 events/turns（90 天有效） |
+| `message.inbound` | `content` 保留消息原文，按 `audit.retention` 独立留存 | `event_ref` 若存在仅关联 events/turns，并只在 `events.retention` 窗口内可用 |
+| 其他标准事件 | 摘要 + SHA-256 | `event_ref` 若存在仅作短期运行事实关联 |
 | 敏感行为 | 完整上下文直接存储 | 无需 drill-down |
 
 **敏感行为**（直接存储完整上下文）包括：认证失败、敏感工具调用、权限拒绝、Worker 崩溃/超时。
