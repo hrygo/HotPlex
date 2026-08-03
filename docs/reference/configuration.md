@@ -31,6 +31,7 @@ description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配�
    - [webchat — Web Chat UI](#313-webchat--web-chat-ui)
    - [oauth — WebChat 企业 SSO（OIDC）](#314-oauth--webchat--ssooidc)
    - [inherits — 配置继承](#315-inherits--)
+   - [events 和 audit — 事件与审计留存](#316-events-和-audit--事件与审计留存)
 4. [热重载](#4-热重载)
 5. [环境变量速查](#5-环境变量速查)
 
@@ -681,6 +682,20 @@ log:
 2. 递归加载父配置文件（含环检测）
 3. 子配置文件值覆盖父配置值
 4. 环境变量覆盖所有文件配置
+
+---
+
+### 3.16 events 和 audit — 事件与审计留存
+
+运行期 event store 与合规 audit store 是职责不同的两类数据副本：前者支持会话恢复和协议重放，后者保存可追溯的用户活动原文。两者按各自配置独立清理；延长审计原文留存**不会**延长 event store 或 turn 的留存。
+
+| 字段 | 类型 | 默认值 | 环境变量 | 说明 |
+|------|------|--------|----------|------|
+| `events.retention` | duration | `720h` (30天) | `HOTPLEX_EVENTS_RETENTION` | Event store 和 turns 的运行期留存窗口。到期后由事件 GC 清理 |
+| `audit.retention` | duration | `26280h` (3年) | `HOTPLEX_AUDIT_RETENTION` | 审计记录的基础留存窗口，由 audit GC 独立执行 |
+| `audit.full_content_retention` | duration | `2160h` (90天) | `HOTPLEX_AUDIT_FULL_CONTENT_RETENTION` | 审计原文的兼容配置字段；不再影响 event store 或 turns 留存 |
+
+> 网关 INFO 日志不会记录消息正文、prompt 或 `Envelope.Event.Data`。为支持关联排障，日志仅包含事件类型、session、seq、`data_size` 与 `data_sha256`（SHA-256 的短指纹）。
 
 ---
 
