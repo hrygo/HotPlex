@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,6 +119,92 @@ func TestStreamingCardController_ConcurrentTransitions(t *testing.T) {
 	// Exactly one should succeed; the rest fail because phase already changed
 	require.Equal(t, 1, successCount)
 	require.Equal(t, PhaseCreating, c.getPhase())
+}
+
+func TestStreamingCardController_Close_ReturnsTerminalDeliveryErrorWhenCardKitAndIMPatchFail(t *testing.T) {
+	t.Parallel()
+
+	apiErr := errors.New("terminal API unavailable")
+	limiter := NewFeishuRateLimiter()
+	t.Cleanup(limiter.Stop)
+	client := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(mediaHTTPClientFunc(func(*http.Request) (*http.Response, error) {
+		return nil, apiErr
+	})))
+	c := NewStreamingCardController(client, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+	c.phase.Store(int32(PhaseStreaming))
+	c.mu.Lock()
+	c.cardID = "card-1"
+	c.msgID = "msg-1"
+	c.buf.WriteString("final response")
+	c.mu.Unlock()
+
+	err := c.Close(context.Background())
+	require.ErrorIs(t, err, ErrTerminalDelivery)
+	require.ErrorIs(t, err, apiErr)
+
+	var terminalErr *TerminalDeliveryError
+	require.ErrorAs(t, err, &terminalErr)
+	require.False(t, terminalErr.ContentPresented)
+}
+
+func TestStreamingCardController_Close_MarksBodyPresentedWhenPriorStreamingFlushSucceeded(t *testing.T) {
+	t.Parallel()
+
+	apiErr := errors.New("terminal API unavailable")
+	limiter := NewFeishuRateLimiter()
+	t.Cleanup(limiter.Stop)
+	client := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(mediaHTTPClientFunc(func(*http.Request) (*http.Response, error) {
+		return nil, apiErr
+	})))
+	c := NewStreamingCardController(client, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+	c.phase.Store(int32(PhaseStreaming))
+	c.mu.Lock()
+	c.cardID = "card-1"
+	c.msgID = "msg-1"
+	c.buf.WriteString("final response")
+	c.lastFlushed = "final response"
+	c.mu.Unlock()
+
+	err := c.Close(context.Background())
+	require.ErrorIs(t, err, ErrTerminalDelivery)
+
+	var terminalErr *TerminalDeliveryError
+	require.ErrorAs(t, err, &terminalErr)
+	require.True(t, terminalErr.ContentPresented)
+}
+
+func TestStreamingCardController_Close_ReturnsVisibleHeaderErrorAfterBodyPresented(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewFeishuRateLimiter()
+	t.Cleanup(limiter.Stop)
+	client := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(mediaHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"code":0,"msg":"ok"}`
+		if req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/cards/card-1") {
+			body = `{"code":999,"msg":"header update failed"}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})))
+	c := NewStreamingCardController(client, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+	c.phase.Store(int32(PhaseStreaming))
+	c.mu.Lock()
+	c.cardID = "card-1"
+	c.msgID = "msg-1"
+	c.buf.WriteString("final response")
+	c.mu.Unlock()
+
+	err := c.Close(context.Background())
+	require.ErrorIs(t, err, ErrTerminalDelivery)
+
+	var terminalErr *TerminalDeliveryError
+	require.ErrorAs(t, err, &terminalErr)
+	require.True(t, terminalErr.ContentPresented)
+	require.Contains(t, err.Error(), "header")
 }
 
 // ─── truncateForSummary ──────────────────────────────────────────────────────

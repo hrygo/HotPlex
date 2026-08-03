@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -45,6 +46,8 @@ type FeishuConn struct {
 	// triggers never double-rotate. See #839.
 	rotateMu sync.Mutex
 }
+
+const terminalDeliveryFallbackText = "⚠️ 回复投递异常，请稍后重试。"
 
 func NewFeishuConn(adapter *Adapter, chatID, threadKey, workDir string) *FeishuConn {
 	return &FeishuConn{adapter: adapter, chatID: chatID, threadKey: threadKey, workDir: workDir}
@@ -329,6 +332,9 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		closeErr = streamCtrl.Close(closeCtx)
 		closeCancel()
+		if closeErr != nil {
+			closeErr = c.handleTerminalDeliveryError(ctx, closeErr)
+		}
 	}
 
 	ttsOK := c.adapter.ttsPipeline != nil
@@ -379,6 +385,7 @@ func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) erro
 		closeCancel()
 		if err != nil {
 			c.adapter.Log.Warn("feishu: failed to close streaming card on error", "err", err)
+			return c.handleTerminalDeliveryError(ctx, err)
 		} else if errMsg != "" {
 			return nil
 		}
@@ -392,6 +399,38 @@ func (c *FeishuConn) handleError(ctx context.Context, env *events.Envelope) erro
 		}
 	}
 	return nil
+}
+
+// handleTerminalDeliveryError preserves the finalization error for upstream
+// visibility. It sends one short, independent terminal message only when the
+// streaming card did not present the body; decoration-only failures must never
+// duplicate the full response.
+func (c *FeishuConn) handleTerminalDeliveryError(ctx context.Context, closeErr error) error {
+	var terminalErr *TerminalDeliveryError
+	if !errors.As(closeErr, &terminalErr) {
+		return closeErr
+	}
+
+	if terminalErr.ContentPresented {
+		c.adapter.Log.Warn("feishu: terminal decoration failed after body was presented", "err", closeErr)
+		observability.StreamingTerminalFailures().Add(ctx, 1,
+			metric.WithAttributes(attribute.String("fallback_result", "skipped_body_presented")))
+		return closeErr
+	}
+
+	fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := c.sendOrReply(fallbackCtx, terminalDeliveryFallbackText); err != nil {
+		c.adapter.Log.Warn("feishu: terminal fallback delivery failed", "err", err)
+		observability.StreamingTerminalFailures().Add(ctx, 1,
+			metric.WithAttributes(attribute.String("fallback_result", "failed")))
+		return errors.Join(closeErr, fmt.Errorf("feishu: terminal fallback delivery: %w", err))
+	}
+
+	c.adapter.Log.Warn("feishu: terminal fallback delivered after streaming close failure", "err", closeErr)
+	observability.StreamingTerminalFailures().Add(ctx, 1,
+		metric.WithAttributes(attribute.String("fallback_result", "sent")))
+	return closeErr
 }
 
 func (c *FeishuConn) handleToolCall(_ context.Context, env *events.Envelope) error {

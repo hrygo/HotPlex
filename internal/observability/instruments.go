@@ -740,6 +740,9 @@ var (
 
 	streamingCardFlushFallbacks     metric.Int64Counter
 	streamingCardFlushFallbacksInit sync.Once
+
+	streamingTerminalFailures     metric.Int64Counter
+	streamingTerminalFailuresInit sync.Once
 )
 
 func StreamingCardRotations() metric.Int64Counter {
@@ -782,6 +785,24 @@ func StreamingCardFlushFallbacks() metric.Int64Counter {
 		}
 	})
 	return streamingCardFlushFallbacks
+}
+
+// StreamingTerminalFailures counts terminal-card finalization failures. The
+// fallback_result attribute records whether the connection later sent the short
+// static terminal fallback, could not send it, or skipped it because the body
+// was already visible.
+func StreamingTerminalFailures() metric.Int64Counter {
+	streamingTerminalFailuresInit.Do(func() {
+		var err error
+		streamingTerminalFailures, err = Meter().Int64Counter(
+			"hotplex.streaming.terminal_failures",
+			metric.WithDescription("Streaming card terminal delivery failures by fallback result"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.streaming.terminal_failures", err)
+		}
+	})
+	return streamingTerminalFailures
 }
 
 // ─── ACP Instruments ────────────────────────────────────────────────
