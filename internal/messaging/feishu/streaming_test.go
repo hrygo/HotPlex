@@ -207,6 +207,69 @@ func TestStreamingCardController_Close_ReturnsVisibleHeaderErrorAfterBodyPresent
 	require.Contains(t, err.Error(), "header")
 }
 
+func TestStreamingCardController_Close_CardKitFailureWithIMPatchSuccessDegradesSuccessfully(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewFeishuRateLimiter()
+	t.Cleanup(limiter.Stop)
+	client := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(mediaHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"code":0,"msg":"ok"}`
+		if strings.HasSuffix(req.URL.Path, "/elements/streaming_content/content") {
+			body = `{"code":999,"msg":"cardkit final flush failed"}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})))
+	c := NewStreamingCardController(client, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+	c.phase.Store(int32(PhaseStreaming))
+	c.mu.Lock()
+	c.cardID = "card-1"
+	c.msgID = "msg-1"
+	c.buf.WriteString("final response")
+	c.mu.Unlock()
+
+	require.NoError(t, c.Close(context.Background()))
+}
+
+func TestStreamingCardController_Close_AggregatesDisableStreamingFailureAfterBodyPresented(t *testing.T) {
+	t.Parallel()
+
+	limiter := NewFeishuRateLimiter()
+	t.Cleanup(limiter.Stop)
+	client := lark.NewClient("test-app", "test-secret", lark.WithHttpClient(mediaHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"code":0,"msg":"ok"}`
+		if strings.HasSuffix(req.URL.Path, "/settings") {
+			body = `{"code":999,"msg":"disable streaming failed"}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})))
+	c := NewStreamingCardController(client, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
+	c.phase.Store(int32(PhaseStreaming))
+	c.mu.Lock()
+	c.cardID = "card-1"
+	c.msgID = "msg-1"
+	c.streamingActive = true
+	c.buf.WriteString("final response")
+	c.mu.Unlock()
+
+	err := c.Close(context.Background())
+	require.ErrorIs(t, err, ErrTerminalDelivery)
+	require.Contains(t, err.Error(), "disable streaming")
+
+	var terminalErr *TerminalDeliveryError
+	require.ErrorAs(t, err, &terminalErr)
+	require.True(t, terminalErr.ContentPresented)
+}
+
 // ─── truncateForSummary ──────────────────────────────────────────────────────
 
 func TestTruncateForSummary(t *testing.T) {

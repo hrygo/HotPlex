@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -702,6 +703,21 @@ func (m *mockPlatformConn) envelopes() []*events.Envelope {
 	return out
 }
 
+type blockingPlatformConn struct {
+	entered chan struct{}
+}
+
+func (m *blockingPlatformConn) WriteCtx(ctx context.Context, _ *events.Envelope) error {
+	select {
+	case m.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (m *blockingPlatformConn) Close() error { return nil }
+
 func testPCEntryConfig() pcEntryConfig {
 	return pcEntryConfig{
 		WriteBuffer:   8,
@@ -711,13 +727,13 @@ func testPCEntryConfig() pcEntryConfig {
 	}
 }
 
-func TestPCEntry_WriteCtx_Async(t *testing.T) {
+func TestPCEntry_WriteCtx_OrdinaryEventAsync(t *testing.T) {
 	t.Parallel()
 	pc := &mockPlatformConn{}
 	e := newPCEntry(context.Background(), pc, testPCEntryConfig(), slog.Default())
 	defer e.Close()
 
-	env := events.NewEnvelope(aep.NewID(), "s1", 1, events.Done, events.DoneData{Success: true})
+	env := events.NewEnvelope(aep.NewID(), "s1", 1, events.State, events.StateData{State: events.StateRunning})
 	err := e.WriteCtx(context.Background(), env)
 	require.NoError(t, err)
 
@@ -727,7 +743,66 @@ func TestPCEntry_WriteCtx_Async(t *testing.T) {
 
 	got := pc.envelopes()
 	require.Len(t, got, 1)
-	require.Equal(t, events.Done, got[0].Event.Type)
+	require.Equal(t, events.State, got[0].Event.Type)
+}
+
+func TestHub_SendToSession_TerminalPlatformWriteErrorPropagates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		kind events.Kind
+		data any
+	}{
+		{name: "done", kind: events.Done, data: events.DoneData{Success: true}},
+		{name: "error", kind: events.Error, data: events.ErrorData{Code: events.ErrCodeInternalError, Message: "failed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHub(t)
+			terminalErr := errors.New("terminal delivery failed")
+			pc := &mockPlatformConn{err: terminalErr}
+			h.JoinPlatformSession("s-terminal", pc)
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			err := h.SendToSession(ctx, events.NewEnvelope(aep.NewID(), "s-terminal", 0, tt.kind, tt.data))
+			require.ErrorIs(t, err, terminalErr)
+		})
+	}
+}
+
+func TestPCEntry_TerminalWriteHonorsContextAndCloseDoesNotWaitForAck(t *testing.T) {
+	t.Parallel()
+
+	pc := &blockingPlatformConn{entered: make(chan struct{}, 1)}
+	e := newPCEntry(context.Background(), pc, testPCEntryConfig(), slog.Default())
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := e.WriteCtx(ctx, events.NewEnvelope(aep.NewID(), "s1", 1, events.Done, events.DoneData{Success: true}))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, e.Close())
+}
+
+func TestPCEntry_OrdinaryWriteRemainsAsynchronous(t *testing.T) {
+	t.Parallel()
+
+	pc := &blockingPlatformConn{entered: make(chan struct{}, 1)}
+	e := newPCEntry(context.Background(), pc, testPCEntryConfig(), slog.Default())
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	require.NoError(t, e.WriteCtx(ctx, events.NewEnvelope(aep.NewID(), "s1", 1, events.State, events.StateData{State: events.StateRunning})))
+	require.Eventually(t, func() bool {
+		select {
+		case <-pc.entered:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, e.Close())
 }
 
 func TestPCEntry_WriteCtx_DroppableDroppedAtThreshold(t *testing.T) {
@@ -743,7 +818,7 @@ func TestPCEntry_WriteCtx_DroppableDroppedAtThreshold(t *testing.T) {
 
 	// Fill channel directly (bypassing WriteCtx to avoid writeLoop drain race).
 	for i := 0; i < cfg.WriteBuffer; i++ {
-		e.ch <- events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})
+		e.ch <- platformWrite{env: events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})}
 	}
 
 	// Channel is now full (len=4 >= DropThreshold=2). Droppable should be silently dropped.
@@ -778,7 +853,7 @@ func TestPCEntry_WriteCtx_DroppableDroppedDefault(t *testing.T) {
 
 	// Fill channel to capacity.
 	for i := 0; i < cfg.WriteBuffer; i++ {
-		e.ch <- events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})
+		e.ch <- platformWrite{env: events.NewEnvelope(aep.NewID(), "s1", int64(i+1), events.MessageDelta, map[string]any{"content": "x"})}
 	}
 
 	// Now len(ch) >= DropThreshold, so the fast-path check should drop.

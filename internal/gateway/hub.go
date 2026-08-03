@@ -148,9 +148,23 @@ type Hub struct {
 type EnvelopeWithConn struct {
 	Env  *events.Envelope
 	Conn *Conn
+	// routeCtx is retained only for terminal platform writes, which need to
+	// surface their actual delivery result to the original caller.
+	routeCtx context.Context
+	result   chan<- error
 	// afterDrain is called (blocking) by Run after routeMessage finishes processing this item.
 	// Tests use it to synchronize against the drain goroutine.
 	afterDrain func()
+}
+
+func (m *EnvelopeWithConn) complete(err error) {
+	if m.result == nil {
+		return
+	}
+	select {
+	case m.result <- err:
+	default:
+	}
 }
 
 // NewHub creates a new Hub.
@@ -464,12 +478,30 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 	// No Clone needed here: Bridge.forwardEvents already clones the envelope
 	// before calling SendToSession, so this is a bridge-owned copy. The Hub.Run
 	// goroutine reads it from the channel for routing without mutation.
+	msg := &EnvelopeWithConn{Env: env, afterDrain: afterDrainCallback}
+	if isTerminalPlatformEvent(env.Event.Type) {
+		result := make(chan error, 1)
+		msg.routeCtx = ctx
+		msg.result = result
+		if !h.sendBroadcast(msg) {
+			return errors.New("gateway: broadcast channel closed")
+		}
+		select {
+		case err := <-result:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-h.ctx.Done():
+			return errors.New("gateway: broadcast channel closed")
+		}
+	}
+
 	if isDroppable(env.Event.Type) {
 		// Non-blocking send — droppable events must never stall Hub.Run.
 		// A full broadcast channel means a slow consumer is already being
 		// protected at the per-conn writeCh layer; dropping here is the
 		// intended backpressure semantics. The UI self-heals on done.
-		if h.trySendBroadcast(&EnvelopeWithConn{Env: env, afterDrain: afterDrainCallback}) {
+		if h.trySendBroadcast(msg) {
 			return nil
 		}
 		observability.GatewayDeltasDropped().Add(context.Background(), 1)
@@ -477,7 +509,7 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 	}
 
 	// Guaranteed delivery path.
-	if h.sendBroadcast(&EnvelopeWithConn{Env: env, afterDrain: afterDrainCallback}) {
+	if h.sendBroadcast(msg) {
 		return nil
 	}
 	return errors.New("gateway: broadcast channel closed")
@@ -608,8 +640,9 @@ func (h *Hub) Run() {
 					attribute.String("event_type", string(msg.Env.Event.Type)),
 					attribute.String("seq", fmt.Sprintf("%d", msg.Env.Seq)),
 				)
-				h.routeMessage(msg)
+				err := h.routeMessage(msg)
 				span.End()
+				msg.complete(err)
 				if msg.afterDrain != nil {
 					msg.afterDrain()
 				}
@@ -618,7 +651,7 @@ func (h *Hub) Run() {
 	}
 }
 
-func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
+func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 	conns := h.snapshotConns(msg.Env.SessionID)
 
 	if len(conns) == 0 {
@@ -633,7 +666,7 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 			h.log.Debug("gateway: event dropped, no connections",
 				"session_id", msg.Env.SessionID, "event_type", msg.Env.Event.Type)
 		}
-		return
+		return nil
 	}
 
 	if h.LogHandler != nil {
@@ -652,9 +685,10 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 	data, err := aep.EncodeJSON(msg.Env)
 	if err != nil {
 		h.log.Error("gateway: encode message failed", "session_id", msg.Env.SessionID, "err", err)
-		return
+		return err
 	}
 
+	var routeErrs []error
 	for _, conn := range conns {
 		var err error
 		if conn.PreferEnvelope() {
@@ -662,19 +696,25 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) {
 			// json:"-" fields (e.g. OwnerID) that EncodeJSON omits.
 			// Use WithoutCancel so cancelled h.ctx doesn't block during
 			// shutdown drain, while preserving tracing propagation.
-			err = conn.RouteWrite(context.WithoutCancel(h.ctx), msg.Env)
+			routeCtx := context.WithoutCancel(h.ctx)
+			if msg.routeCtx != nil {
+				routeCtx = msg.routeCtx
+			}
+			err = conn.RouteWrite(routeCtx, msg.Env)
 		} else {
 			err = conn.RouteWriteData(data, msg.Env.Event.Type)
 		}
 		if err == nil {
 			continue
 		}
+		routeErrs = append(routeErrs, err)
 		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
 		_ = conn.Close()
 		h.mu.Lock()
 		h.removeSession(msg.Env.SessionID, conn)
 		h.mu.Unlock()
 	}
+	return errors.Join(routeErrs...)
 }
 
 // drainBroadcast processes remaining messages in the broadcast channel.
@@ -685,7 +725,8 @@ func (h *Hub) drainBroadcast() {
 		select {
 		case msg := <-h.broadcast:
 			if msg != nil && msg.Env != nil {
-				h.routeMessage(msg)
+				err := h.routeMessage(msg)
+				msg.complete(err)
 				if msg.afterDrain != nil {
 					msg.afterDrain()
 				}

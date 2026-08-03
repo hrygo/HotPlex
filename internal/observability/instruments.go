@@ -794,15 +794,19 @@ func StreamingCardFlushFallbacks() metric.Int64Counter {
 func StreamingTerminalFailures() metric.Int64Counter {
 	streamingTerminalFailuresInit.Do(func() {
 		var err error
-		streamingTerminalFailures, err = Meter().Int64Counter(
-			"hotplex.streaming.terminal_failures",
-			metric.WithDescription("Streaming card terminal delivery failures by fallback result"),
-		)
+		streamingTerminalFailures, err = newStreamingTerminalFailures(Meter())
 		if err != nil {
 			warnInstrument("hotplex.streaming.terminal_failures", err)
 		}
 	})
 	return streamingTerminalFailures
+}
+
+func newStreamingTerminalFailures(meter metric.Meter) (metric.Int64Counter, error) {
+	return meter.Int64Counter(
+		"hotplex.streaming.terminal_failures",
+		metric.WithDescription("Streaming card terminal delivery failures by fallback result"),
+	)
 }
 
 // ─── ACP Instruments ────────────────────────────────────────────────

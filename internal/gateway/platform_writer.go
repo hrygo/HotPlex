@@ -33,13 +33,22 @@ import (
 type pcEntry struct {
 	pc      messaging.PlatformConn
 	cfg     pcEntryConfig
-	ch      chan *events.Envelope
+	ch      chan platformWrite
 	closeCh chan struct{} // signals Close() was called
 	done    chan struct{}
 	closed  atomic.Bool // fast-path check to avoid send-on-closed-channel
 	closeMu sync.Once
 	log     *slog.Logger
 	ctx     context.Context
+}
+
+// platformWrite carries a queued platform envelope and, for terminal events,
+// a one-shot completion channel. The channel is buffered so a caller that
+// times out cannot strand the write loop while it reports its eventual result.
+type platformWrite struct {
+	env    *events.Envelope
+	ctx    context.Context
+	result chan<- error
 }
 
 type pcEntryConfig struct {
@@ -74,7 +83,7 @@ func defaultPCEntryConfig(cfg *config.Config) pcEntryConfig {
 func newPCEntry(ctx context.Context, pc messaging.PlatformConn, cfg pcEntryConfig, log *slog.Logger) *pcEntry {
 	e := &pcEntry{
 		pc:      pc,
-		ch:      make(chan *events.Envelope, cfg.WriteBuffer),
+		ch:      make(chan platformWrite, cfg.WriteBuffer),
 		closeCh: make(chan struct{}),
 		done:    make(chan struct{}),
 		cfg:     cfg,
@@ -123,13 +132,20 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 		return errors.New("platform conn closed")
 	}
 
+	write := platformWrite{env: env, ctx: ctx}
+	var result <-chan error
+	if isTerminalPlatformEvent(env.Event.Type) {
+		ack := make(chan error, 1)
+		write.result = ack
+		result = ack
+	}
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
 			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
 			return nil
 		}
 		select {
-		case e.ch <- env:
+		case e.ch <- write:
 			return nil
 		default:
 			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
@@ -137,13 +153,27 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	select {
-	case e.ch <- env:
-		return nil
-	case <-ctx.Done():
+	case e.ch <- write:
+	case <-writeCtx.Done():
 		return fmt.Errorf("platform conn write timeout: buffer full")
+	case <-e.closeCh:
+		return errors.New("platform conn closed")
+	case <-e.done:
+		return errors.New("platform conn closed")
+	}
+
+	if result == nil {
+		return nil
+	}
+
+	select {
+	case err := <-result:
+		return err
+	case <-writeCtx.Done():
+		return fmt.Errorf("platform conn terminal write timeout: %w", writeCtx.Err())
 	case <-e.closeCh:
 		return errors.New("platform conn closed")
 	case <-e.done:
@@ -203,16 +233,17 @@ func (e *pcEntry) writeLoop() {
 			timer.Stop()
 			timerCh = nil
 		}
-		e.writeOne(merged)
+		e.writeOne(platformWrite{env: merged, ctx: e.ctx})
 	}
 
 	for {
 		select {
-		case env, ok := <-e.ch:
+		case write, ok := <-e.ch:
 			if !ok {
 				flush(pendingSID)
 				return
 			}
+			env := write.env
 
 			if isDroppable(env.Event.Type) {
 				content := extractDeltaContent(env)
@@ -239,7 +270,7 @@ func (e *pcEntry) writeLoop() {
 				}
 			} else {
 				flush(pendingSID)
-				e.writeOne(env)
+				e.writeOne(write)
 			}
 
 		case <-timerCh:
@@ -248,15 +279,30 @@ func (e *pcEntry) writeLoop() {
 	}
 }
 
-func (e *pcEntry) writeOne(env *events.Envelope) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (e *pcEntry) writeOne(write platformWrite) {
+	ctx := write.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := e.pc.WriteCtx(ctx, env); err != nil {
+	err := e.pc.WriteCtx(ctx, write.env)
+	if write.result != nil {
+		select {
+		case write.result <- err:
+		default:
+		}
+	}
+	if err != nil {
 		e.log.Warn("platform async write failed",
-			"event_type", env.Event.Type,
-			"session_id", env.SessionID,
+			"event_type", write.env.Event.Type,
+			"session_id", write.env.SessionID,
 			"err", err)
 	}
+}
+
+func isTerminalPlatformEvent(kind events.Kind) bool {
+	return kind == events.Done || kind == events.Error
 }
 
 func extractDeltaContent(env *events.Envelope) string {
