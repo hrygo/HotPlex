@@ -62,7 +62,8 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 	if dedup == nil {
 		return nil // adapter is closing
 	}
-	if !dedup.TryRecord(messageID) {
+	dedupHandle, recorded := dedup.TryRecordWithHandle(messageID)
+	if !recorded {
 		return nil
 	}
 
@@ -70,6 +71,7 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 	msgType := ptrStr(msg.MessageType)
 	text, ok, medias := ConvertMessage(msgType, ptrStr(msg.Content), msg.Mentions, a.botOpenID, messageID)
 	if !ok || text == "" {
+		dedup.Rollback(dedupHandle)
 		return nil
 	}
 	text = messaging.SanitizeText(text)
@@ -104,6 +106,7 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 	if a.Gate != nil {
 		if allowed, reason := a.Gate.Check(chatType == "p2p", userID, botMentioned); !allowed {
 			a.Log.Debug("feishu: gate rejected", "reason", reason, "chat", chatID, "user", userID)
+			dedup.Rollback(dedupHandle)
 			return nil
 		}
 	}
@@ -116,7 +119,7 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 		replyToMsgID = rootID
 	}
 
-	return a.chatQueue.Enqueue(chatID, func(qtx context.Context) error {
+	err := a.chatQueue.Enqueue(chatID, func(qtx context.Context) error {
 		cmd := messaging.DetectCommand(text)
 		switch cmd.Action {
 		case messaging.CmdHelp:
@@ -140,6 +143,10 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 
 		return a.handleTextMessage(qtx, messageID, chatID, chatType, userID, text, threadKey, replyToMsgID, hasVoice)
 	})
+	if err != nil {
+		dedup.Rollback(dedupHandle)
+	}
+	return err
 }
 
 func isBotMentioned(mentions []*larkim.MentionEvent, botOpenID string) bool {

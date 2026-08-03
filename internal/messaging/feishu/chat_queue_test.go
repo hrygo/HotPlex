@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -183,4 +184,103 @@ func TestChatQueue_TaskTimeout(t *testing.T) {
 	t.Parallel()
 	// Verify that the timeout constant is set to 10 minutes.
 	require.Equal(t, 10*time.Minute, chatTaskTimeout)
+}
+
+func TestChatQueue_CloseRejectsNewTasks(t *testing.T) {
+	t.Parallel()
+
+	q := NewChatQueue(nil)
+	q.Close()
+
+	err := q.Enqueue("closed-chat", func(context.Context) error { return nil })
+	require.ErrorIs(t, err, ErrChatQueueClosed)
+}
+
+func TestChatQueue_CloseAndEnqueueConcurrent(t *testing.T) {
+	t.Parallel()
+
+	q := NewChatQueue(nil)
+	start := make(chan struct{})
+	errs := make(chan error, 32)
+	var completed atomic.Int32
+	for range 32 {
+		go func() {
+			defer completed.Add(1)
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					errs <- errors.New("enqueue panicked while close raced")
+				}
+			}()
+			<-start
+			errs <- q.Enqueue("shared-chat", func(context.Context) error { return nil })
+		}()
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		<-start
+		q.Close()
+		close(closeDone)
+	}()
+	close(start)
+
+	require.Eventually(t, func() bool {
+		return completed.Load() == 32
+	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-closeDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	close(errs)
+	for err := range errs {
+		require.True(t, err == nil || errors.Is(err, ErrChatQueueClosed), "unexpected enqueue result: %v", err)
+	}
+}
+
+func TestChatQueue_IdleCleanupDoesNotOrphanAcceptedTask(t *testing.T) {
+	t.Parallel()
+
+	q := NewChatQueue(nil)
+	w := &chatWorker{tasks: make(chan func(context.Context) error, 1)}
+	taskRan := make(chan struct{})
+	w.tasks <- func(context.Context) error {
+		close(taskRan)
+		return nil
+	}
+	q.mu.Lock()
+	q.workers["idle-boundary"] = w
+	q.wg.Add(1)
+	q.mu.Unlock()
+
+	require.False(t, q.tryRemoveIdleWorker("idle-boundary", w))
+
+	go q.runWorker("idle-boundary", w)
+	select {
+	case <-taskRan:
+	case <-time.After(time.Second):
+		t.Fatal("accepted task was orphaned at idle cleanup boundary")
+	}
+	q.Close()
+}
+
+func TestChatQueue_WorkerExitDoesNotRemoveReplacement(t *testing.T) {
+	t.Parallel()
+
+	q := NewChatQueue(nil)
+	exiting := &chatWorker{tasks: make(chan func(context.Context) error)}
+	replacement := &chatWorker{tasks: make(chan func(context.Context) error)}
+	q.mu.Lock()
+	q.workers["replacement"] = replacement
+	q.mu.Unlock()
+
+	q.removeWorkerIfCurrent("replacement", exiting)
+
+	q.mu.Lock()
+	current := q.workers["replacement"]
+	q.mu.Unlock()
+	require.Same(t, replacement, current)
 }

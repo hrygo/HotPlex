@@ -10,12 +10,30 @@ import (
 // Supports both self-cleanup (via StartCleanup/Close) and manual Sweep.
 type Dedup struct {
 	mu         sync.Mutex
-	entries    map[string]time.Time
-	order      []string // FIFO eviction order
+	entries    map[string]dedupEntry
+	order      []dedupOrderEntry // FIFO eviction order
+	nextHandle uint64
 	maxEntries int
 	ttl        time.Duration
 	done       chan struct{}
 	closeOnce  sync.Once
+}
+
+type dedupEntry struct {
+	recordedAt time.Time
+	handle     uint64
+}
+
+type dedupOrderEntry struct {
+	id     string
+	handle uint64
+}
+
+// DedupHandle identifies one successful TryRecordWithHandle call. It can be
+// used to roll back an admission failure without removing a later retry.
+type DedupHandle struct {
+	id     string
+	handle uint64
 }
 
 // NewDedup creates a new bounded dedup map.
@@ -28,8 +46,8 @@ func NewDedup(maxEntries int, ttl time.Duration) *Dedup {
 		ttl = 12 * time.Hour
 	}
 	return &Dedup{
-		entries:    make(map[string]time.Time),
-		order:      make([]string, 0, maxEntries),
+		entries:    make(map[string]dedupEntry),
+		order:      make([]dedupOrderEntry, 0, maxEntries),
 		maxEntries: maxEntries,
 		ttl:        ttl,
 	}
@@ -45,32 +63,63 @@ func (d *Dedup) StartCleanup() {
 // TryRecord records an id and returns true if it was not previously seen.
 // Returns false if the id is a duplicate.
 func (d *Dedup) TryRecord(id string) bool {
+	_, accepted := d.TryRecordWithHandle(id)
+	return accepted
+}
+
+// TryRecordWithHandle records an id and returns a handle for conditionally
+// rolling back that exact registration if downstream admission fails.
+func (d *Dedup) TryRecordWithHandle(id string) (*DedupHandle, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if _, seen := d.entries[id]; seen {
-		return false
+		return nil, false
 	}
 
 	for len(d.entries) >= d.maxEntries && len(d.order) > 0 {
-		// Use writeIdx compaction to release backing array references.
-		writeIdx := 0
-		target := len(d.entries) - d.maxEntries + 1
-		for _, id := range d.order {
-			if target > 0 {
-				delete(d.entries, id)
-				target--
-			} else {
-				d.order[writeIdx] = id
-				writeIdx++
-			}
+		oldest := d.order[0]
+		d.order = d.order[1:]
+		if entry, ok := d.entries[oldest.id]; ok && entry.handle == oldest.handle {
+			delete(d.entries, oldest.id)
 		}
-		d.order = d.order[:writeIdx]
 	}
 
-	d.entries[id] = time.Now()
-	d.order = append(d.order, id)
-	return true
+	d.nextHandle++
+	handle := d.nextHandle
+	d.entries[id] = dedupEntry{recordedAt: time.Now(), handle: handle}
+	d.order = append(d.order, dedupOrderEntry{id: id, handle: handle})
+	return &DedupHandle{id: id, handle: handle}, true
+}
+
+// Rollback removes an entry only when it still matches the supplied handle.
+// A delayed failure therefore cannot erase a later platform retry record.
+func (d *Dedup) Rollback(handle *DedupHandle) {
+	if handle == nil {
+		return
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	entry, ok := d.entries[handle.id]
+	if !ok || entry.handle != handle.handle {
+		return
+	}
+	delete(d.entries, handle.id)
+	d.removeOrderEntryLocked(handle.id, handle.handle)
+}
+
+func (d *Dedup) removeOrderEntryLocked(id string, handle uint64) {
+	writeIdx := 0
+	for _, entry := range d.order {
+		if entry.id == id && entry.handle == handle {
+			continue
+		}
+		d.order[writeIdx] = entry
+		writeIdx++
+	}
+	d.order = d.order[:writeIdx]
 }
 
 // Sweep removes expired entries. Can be called manually or from a background goroutine.
@@ -80,12 +129,13 @@ func (d *Dedup) Sweep() {
 
 	cutoff := time.Now().Add(-d.ttl)
 	writeIdx := 0
-	for _, id := range d.order {
-		if t, ok := d.entries[id]; ok && t.After(cutoff) {
-			d.order[writeIdx] = id
+	for _, ordered := range d.order {
+		entry, ok := d.entries[ordered.id]
+		if ok && entry.handle == ordered.handle && entry.recordedAt.After(cutoff) {
+			d.order[writeIdx] = ordered
 			writeIdx++
-		} else {
-			delete(d.entries, id)
+		} else if ok && entry.handle == ordered.handle {
+			delete(d.entries, ordered.id)
 		}
 	}
 	d.order = d.order[:writeIdx]

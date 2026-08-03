@@ -81,3 +81,20 @@ func TestDedup_TryRecord_FIFOEvict(t *testing.T) {
 	require.False(t, d.TryRecord("a"))
 	require.Equal(t, 3, len(d.order))
 }
+
+func TestDedup_RollbackDoesNotRemoveRetryRecord(t *testing.T) {
+	t.Parallel()
+
+	d := NewDedup(10, time.Hour)
+	first, accepted := d.TryRecordWithHandle("message-1")
+	require.True(t, accepted)
+	d.Rollback(first)
+
+	retry, accepted := d.TryRecordWithHandle("message-1")
+	require.True(t, accepted)
+	d.Rollback(first)
+
+	require.False(t, d.TryRecord("message-1"), "the later retry record must remain deduplicated")
+	d.Rollback(retry)
+	require.True(t, d.TryRecord("message-1"), "rolling back the matching record permits another retry")
+}

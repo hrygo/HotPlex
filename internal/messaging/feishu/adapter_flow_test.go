@@ -81,6 +81,105 @@ func TestAdapterFlow_AbortTextRoutesControlStop(t *testing.T) {
 	}
 }
 
+func TestAdapterFlow_ConversionFailureRollsBackDedup(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter(t)
+	message := larkim.NewEventMessageBuilder().
+		MessageId("conversion-retry").
+		MessageType("unsupported").
+		Content(`{"text":"hello"}`).
+		ChatId("chat-conversion").
+		ChatType("p2p").
+		Build()
+
+	require.NoError(t, a.handleMessage(context.Background(), &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{Message: message},
+	}))
+	require.True(t, a.Dedup.TryRecord("conversion-retry"), "a rejected conversion must be retriable")
+}
+
+func TestAdapterFlow_GateRejectionRollsBackDedup(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter(t)
+	a.Gate = messaging.NewGate("allowlist", "open", false, []string{"allowed-user"}, nil, nil)
+	sender := larkim.NewEventSenderBuilder().
+		SenderId(larkim.NewUserIdBuilder().OpenId("blocked-user").Build()).
+		SenderType("user").
+		Build()
+	message := larkim.NewEventMessageBuilder().
+		MessageId("gate-retry").
+		MessageType("text").
+		Content(`{"text":"hello"}`).
+		ChatId("chat-gate").
+		ChatType("p2p").
+		Build()
+
+	require.NoError(t, a.handleMessage(context.Background(), &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{Sender: sender, Message: message},
+	}))
+	require.True(t, a.Dedup.TryRecord("gate-retry"), "a gate rejection must be retriable")
+}
+
+func TestAdapterFlow_QueueFullRollsBackDedup(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter(t)
+	q := NewChatQueue(discardLogger)
+	w := &chatWorker{tasks: make(chan func(context.Context) error, 1)}
+	w.tasks <- func(context.Context) error { return nil }
+	q.mu.Lock()
+	q.workers["chat-full"] = w
+	q.mu.Unlock()
+	a.chatQueue = q
+	t.Cleanup(q.Close)
+
+	message := larkim.NewEventMessageBuilder().
+		MessageId("queue-full-retry").
+		MessageType("text").
+		Content(`{"text":"hello"}`).
+		ChatId("chat-full").
+		ChatType("p2p").
+		Build()
+
+	err := a.handleMessage(context.Background(), &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{Message: message},
+	})
+	require.Error(t, err)
+	<-w.tasks
+	require.NoError(t, a.handleMessage(context.Background(), &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{Message: message},
+	}))
+	require.Len(t, w.tasks, 1, "a full queue must allow the platform retry to enter")
+}
+
+func TestAdapterFlow_SuccessfulQueueAdmissionKeepsDedup(t *testing.T) {
+	t.Parallel()
+
+	a := newTestAdapter(t)
+	q := NewChatQueue(discardLogger)
+	w := &chatWorker{tasks: make(chan func(context.Context) error, 2)}
+	q.mu.Lock()
+	q.workers["chat-admitted"] = w
+	q.mu.Unlock()
+	a.chatQueue = q
+	t.Cleanup(q.Close)
+
+	message := larkim.NewEventMessageBuilder().
+		MessageId("queue-admitted").
+		MessageType("text").
+		Content(`{"text":"hello"}`).
+		ChatId("chat-admitted").
+		ChatType("p2p").
+		Build()
+	event := &larkim.P2MessageReceiveV1{Event: &larkim.P2MessageReceiveV1Data{Message: message}}
+
+	require.NoError(t, a.handleMessage(context.Background(), event))
+	require.NoError(t, a.handleMessage(context.Background(), event))
+	require.Len(t, w.tasks, 1, "a successfully admitted message must remain deduplicated")
+}
+
 func TestAdapterFlow_HandleTextMessage_NilBridge(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
