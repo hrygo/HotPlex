@@ -189,7 +189,7 @@ hotplex version --format json
 
 ### `hotplex doctor`
 
-运行环境诊断检查，验证 HotPlex 配置是否正确。检查按类别组织：environment、config、dependencies、security、runtime、messaging、stt。
+运行环境诊断检查，验证 HotPlex 配置是否正确。检查按类别组织：environment、config、dependencies、security、runtime、messaging、stt、tts、agent_config、worker。
 
 **示例**：
 
@@ -207,7 +207,7 @@ hotplex doctor --json              # JSON 输出（用于脚本集成）
 | `--fix` | | `bool` | `false` | 自动修复可修复的问题 |
 | `--verbose` | `-v` | `bool` | `false` | 显示详细信息 |
 | `--json` | | `bool` | `false` | JSON 格式输出 |
-| `--category` | `-C` | `string` | | 仅检查指定类别：`environment`、`config`、`dependencies`、`security`、`runtime`、`messaging`、`stt` |
+| `--category` | `-C` | `string` | | 仅检查指定类别：`environment`、`config`、`dependencies`、`security`、`runtime`、`messaging`、`stt`、`tts`、`agent_config`、`worker` |
 
 **退出码**：
 
