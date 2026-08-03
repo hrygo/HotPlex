@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,6 +61,8 @@ func (a *Adapter) processMediaAttachments(ctx context.Context, medias []*MediaIn
 
 const mediaMaxSize = 10 * 1024 * 1024 // 10 MB
 
+var ErrMediaTooLarge = errors.New("feishu: file too large")
+
 const silenceTimeout = 30 * time.Second
 
 // mediaTypeToResourceType maps our internal media types to Feishu resource types.
@@ -111,24 +114,31 @@ func (a *Adapter) fetchMediaBytes(ctx context.Context, media *MediaInfo) ([]byte
 		ext = mimeExt(ct)
 	}
 
-	data, err := io.ReadAll(resp.File)
+	data, err := readMediaBytes(resp.File)
 	if err != nil {
-		return nil, "", fmt.Errorf("feishu: read file content: %w", err)
-	}
-	if len(data) > mediaMaxSize {
-		return nil, "", fmt.Errorf("feishu: file too large: %d > %d bytes", len(data), mediaMaxSize)
+		return nil, "", err
 	}
 
 	a.Log.Debug("feishu: media fetched", "type", media.Type, "key", media.Key, "size", len(data))
 	return data, ext, nil
 }
 
+// readMediaBytes reads one extra byte so oversized media is rejected without
+// allowing an untrusted reader to consume unbounded memory or input.
+func readMediaBytes(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, mediaMaxSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("feishu: read file content: %w", err)
+	}
+	if len(data) > mediaMaxSize {
+		return nil, fmt.Errorf("%w: %d > %d bytes", ErrMediaTooLarge, len(data), mediaMaxSize)
+	}
+	return data, nil
+}
+
 // saveMediaBytes writes media data to disk and returns the file path.
 func (a *Adapter) saveMediaBytes(data []byte, media *MediaInfo, ext string) (string, error) {
 	mediaDir := filepath.Join(config.TempBaseDir(), "media", media.Type+"s")
-	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
-		return "", fmt.Errorf("feishu: create media dir: %w", err)
-	}
 
 	filename := media.Key + ext
 	if media.Name != "" {
@@ -136,13 +146,54 @@ func (a *Adapter) saveMediaBytes(data []byte, media *MediaInfo, ext string) (str
 			filename = media.Key + "_" + base
 		}
 	}
-	filePath := filepath.Join(mediaDir, filename)
-
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
-		return "", fmt.Errorf("feishu: write file: %w", err)
+	filePath, err := saveMediaFile(mediaDir, data, filename)
+	if err != nil {
+		return "", err
 	}
 
 	a.Log.Debug("feishu: media saved", "type", media.Type, "key", media.Key, "path", filePath)
+	return filePath, nil
+}
+
+// saveMediaFile writes a media file atomically with owner-only permissions.
+func saveMediaFile(mediaDir string, data []byte, filename string) (string, error) {
+	if filepath.Base(filename) != filename || filename == "." || filename == ".." {
+		return "", fmt.Errorf("feishu: unsafe media filename %q", filename)
+	}
+	if err := os.MkdirAll(mediaDir, 0o700); err != nil {
+		return "", fmt.Errorf("feishu: create media dir: %w", err)
+	}
+	if err := os.Chmod(mediaDir, 0o700); err != nil {
+		return "", fmt.Errorf("feishu: restrict media dir: %w", err)
+	}
+
+	tempFile, err := os.CreateTemp(mediaDir, ".media-*")
+	if err != nil {
+		return "", fmt.Errorf("feishu: create media file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = tempFile.Close()
+		}
+		_ = os.Remove(tempPath)
+	}()
+	if err := tempFile.Chmod(0o600); err != nil {
+		return "", fmt.Errorf("feishu: restrict media file: %w", err)
+	}
+	if _, err := tempFile.Write(data); err != nil {
+		return "", fmt.Errorf("feishu: write file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", fmt.Errorf("feishu: close media file: %w", err)
+	}
+	closed = true
+
+	filePath := filepath.Join(mediaDir, filename)
+	if err := os.Rename(tempPath, filePath); err != nil {
+		return "", fmt.Errorf("feishu: finalize media file: %w", err)
+	}
 	return filePath, nil
 }
 
