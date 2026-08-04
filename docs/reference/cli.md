@@ -31,6 +31,8 @@ hotplex
 ├── version          # 版本信息
 ├── doctor           # 环境诊断检查
 ├── security         # 安全审计
+├── audit            # 审计链操作
+│   └── verify       # 校验审计 Hash Chain 完整性（只读）
 ├── config           # 配置管理
 │   └── validate     # 验证配置文件
 ├── onboard          # 交互式配置向导
@@ -240,6 +242,36 @@ hotplex security --json            # JSON 输出
 | `--fix` | | `bool` | `false` | 自动修复安全问题 |
 | `--verbose` | `-v` | `bool` | `false` | 显示详细信息 |
 | `--json` | | `bool` | `false` | JSON 格式输出 |
+
+---
+
+## 审计链操作
+
+### `hotplex audit verify`
+
+只读校验 `user_activity` Hash Chain 完整性（从最新 Checkpoint 或创世行起逐行校验）。一次输出**全部**断裂点（非短路），每条含 `id` / 时间戳 / `platform` / `action` / `expected_prev_hash` / `actual_prev_hash` 与处置建议。
+
+自 migration 030 起未锚定 DELETE 已被数据库拒绝，因此新出现的 `prev_hash_mismatch` 通常意味着篡改或备份损坏。
+
+**示例**：
+
+```bash
+hotplex audit verify               # 校验审计链（默认 ~/.hotplex/config.yaml）
+hotplex audit verify -c configs/config-dev.yaml   # 指定配置
+```
+
+**输出**：
+
+```
+audit chain OK: 1503 rows checked, no breaks
+audit chain BROKEN: 2 break(s) found across 1499 rows checked
+  id=1253 ts=2026-07-21T13:48:21+08:00 platform=webchat action=skill.install outcome=failure reason=prev_hash_mismatch ...
+advice: chain gap before this row: previous row missing/modified, ...
+```
+
+| 标志 | 短标志 | 类型 | 默认值 | 说明 |
+|------|--------|------|--------|------|
+| `--config` | | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
 
 ---
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/audit"
@@ -51,16 +52,29 @@ const (
 	AuditResultDenied = "denied"
 )
 
-// auditLogger is slog.Default() so admin_audit records flow through the same
-// JSON handler as the rest of the gateway. Swap via SetAuditLogger (tests).
-var auditLogger = slog.Default()
+// auditLoggerOverride, when non-nil, redirects admin_audit records to a
+// specific logger (tests). Production never sets it, so AdminAudit follows
+// slog.Default() at call time — the handler configured by initLogging
+// (JSON + optional lumberjack file), NOT the logger captured at package
+// init. Historically the package captured slog.Default() into a plain var,
+// so production admin_audit lines bypassed the configured pipeline.
+var auditLogger atomic.Pointer[slog.Logger]
 
 // SetAuditLogger redirects admin_audit records. Tests use it to capture audits
 // without spinning the real slog pipeline; production never calls it.
 func SetAuditLogger(l *slog.Logger) {
 	if l != nil {
-		auditLogger = l
+		auditLogger.Store(l)
 	}
+}
+
+// currentAuditLogger returns the explicit override if one is installed,
+// otherwise the current process-wide default logger.
+func currentAuditLogger() *slog.Logger {
+	if l := auditLogger.Load(); l != nil {
+		return l
+	}
+	return slog.Default()
 }
 
 // AdminAudit records a structured admin action for compliance and incident
@@ -68,7 +82,7 @@ func SetAuditLogger(l *slog.Logger) {
 // actor is a uid (cookie channel) or "admin-token"/"anonymous" (Bearer/failed);
 // target is the request path (with ids); result is one of the AuditResult*.
 func AdminAudit(actor, action, target, result string) {
-	auditLogger.Info("admin_audit",
+	currentAuditLogger().Info("admin_audit",
 		"actor_user_id", actor,
 		"action", action,
 		"target", target,

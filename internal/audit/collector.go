@@ -394,7 +394,13 @@ func (c *Collector) flushLocked(ctx context.Context, batch []*UserActivity) {
 		return
 	}
 	if err := c.flushBatch(ctx, batch); err != nil {
-		c.log.Error("audit: flush batch failed", "err", err, "size", len(batch))
+		// DB flush failed — re-spill the in-flight batch so no event is
+		// lost (same zero-loss contract as the spill-drain path); the next
+		// drain attempt replays them. Without this the regular flush path
+		// silently dropped up to BatchSize events on a transient outage.
+		c.reSpillUAsLocked(batch)
+		c.log.Error("audit: flush batch failed, records re-spilled",
+			"err", err, "size", len(batch))
 	}
 }
 
@@ -435,19 +441,42 @@ func (c *Collector) drainSpillLocked(ctx context.Context) {
 // be called with c.mu held (the caller — drainSpillLocked — already holds it).
 // The spill file's own mutex serializes the writes against concurrent Enqueue.
 func (c *Collector) reSpillLocked(records []SpillRecord) {
-	if c.spill == nil {
-		return
-	}
 	for _, r := range records {
 		if r.UA == nil {
 			continue
 		}
-		if err := c.spill.Write(SpillRecord{TsMs: r.TsMs, UA: r.UA}); err != nil {
-			// Last-resort: spill write failed (disk full?). We cannot do
-			// anything more — log and count so it's visible to monitoring.
-			c.dropped.Add(1)
-			c.log.Error("audit: re-spill write failed (record lost)", "err", err)
+		c.reSpillRecordLocked(r)
+	}
+}
+
+// reSpillUAsLocked writes the given events back to the spill file so a
+// failed DB flush cannot lose them. Called with c.mu held (all flushLocked
+// call sites hold it). With no spill file configured the events cannot be
+// preserved — they are counted as dropped so the loss stays visible.
+func (c *Collector) reSpillUAsLocked(uas []*UserActivity) {
+	if c.spill == nil {
+		c.dropped.Add(int64(len(uas)))
+		return
+	}
+	for _, ua := range uas {
+		if ua == nil {
+			continue
 		}
+		c.reSpillRecordLocked(SpillRecord{TsMs: time.Now().UnixMilli(), UA: ua})
+	}
+}
+
+// reSpillRecordLocked writes one record to the spill file; a write failure
+// (disk full etc.) is the last resort and is counted as dropped so the
+// loss stays visible to monitoring.
+func (c *Collector) reSpillRecordLocked(r SpillRecord) {
+	if c.spill == nil {
+		c.dropped.Add(1)
+		return
+	}
+	if err := c.spill.Write(r); err != nil {
+		c.dropped.Add(1)
+		c.log.Error("audit: re-spill write failed (record lost)", "err", err)
 	}
 }
 
