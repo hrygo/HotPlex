@@ -1,155 +1,206 @@
 # HOTPLEX 2.0 Architecture
 
-## 架构目标
+## 文档定位
 
-HotPlex 2.0 的目标架构是一个渐进式 Runtime Platform：
-
-```text
-Client / Bot / WebChat / Cron
-        |
-        v
-Gateway API + AEP Router
-        |
-        v
-Session Runtime Kernel
-        |
-        +--> AgentSpec Resolver
-        +--> Agent Identity Binder
-        +--> Execution Queue
-        +--> Policy Hook
-        +--> Runtime Context
-        |
-        v
-Worker Adapter Registry
-        |
-        +--> claude_code
-        +--> opencode_server
-        +--> codex_cli
-        +--> acp
-        |
-        v
-Process / App Server / JSON-RPC / Provider Runtime
-```
-
-这不是新建一套 control plane 取代 Gateway，而是在 Gateway + Session + Worker 之间补齐 2.0 所需的标准契约。
+本文定义 HotPlex 2.0 的稳定组件、事实所有权、状态语义、数据流、兼容边界和反模式。产品阶段与优先级以 [ROADMAP](./ROADMAP.md) 为准，交付切片与闸门以 [Implementation Roadmap](./IMPLEMENTATION-ROADMAP.md) 为准。
 
 ## 架构定位
 
-2.0 的控制面是 **single-node runtime control plane**，不是分布式集群控制面。
+HotPlex 是 single-Gateway、self-hosted Agent Runtime Gateway。它在现有 Gateway、Session、Worker、AEP、Event Store、Execution、Audit、Observability 和 Cron 内核上形成受控运行时，不建立平行 control plane。
 
-它负责：
+```text
+Client / WebChat / Slack / Feishu / HTTP / Cron
+                         │
+                         v
+              Gateway API + AEP Router
+                         │
+          ┌──────────────┼──────────────┐
+          v              v              v
+   Authority/Scope  Desired Plan   Session Manager
+          │              │              │
+          └──────────────┼──────────────┘
+                         v
+               Durable Input Execution
+                         │
+                         v
+               Worker Adapter Registry
+        ┌────────────┬────────────┬────────────┐
+        v            v            v            v
+   Claude Code  OpenCode Server  Codex CLI     ACP
+        │            │            │            │
+        └────────────┴────────────┴────────────┘
+                         │
+              Worker Events / Gateway Effects
+                         │
+          ┌──────────────┼──────────────┐
+          v              v              v
+     Event Store    Observed State   Effect Ledger
+          │              │              │
+          └──────────────┼──────────────┘
+                         v
+              Reconciliation / Fence
+                         │
+          ┌──────────────┼──────────────┐
+          v              v              v
+        Audit        Trace/Metrics   Admin/Cockpit
+```
 
-- 解析 AgentSpec。
-- 绑定 AgentIdentity。
-- 标准化 runtime metadata。
-- 控制同 session 的 input dispatch。
-- 暴露 runtime context 和诊断事实。
+## 组件状态
 
-它暂不负责：
-
-- 跨机器调度。
-- Agent registry/marketplace。
-- Workflow DAG 编排。
-- 外部 memory backend。
-- 自定义策略语言。
-
-这个边界参考成熟平台的演进经验：先用稳定 API 和状态模型约束本地运行时，再在真实调度压力出现后引入分布式 controller。
-
-## 当前架构事实
-
-| 模块 | 现状 | 约束 |
+| 组件 | 状态 | 说明 |
 | --- | --- | --- |
-| `internal/gateway` | AEP 分发、WebSocket 连接、worker bridge、history recovery、LLM retry、audit emission | 2.0 API 必须复用 Handler/Bridge 生命周期 |
-| `internal/session` | 状态机、store、pool、workspace quota、user ownership | Agent identity 只能扩展 Session metadata，不能旁路状态机 |
-| `internal/worker` | 注册式 Worker 接口和 SessionInfo，适配 Claude Code/OpenCode/Codex/ACP | AgentSpec 应映射到 SessionInfo 和 worker config |
-| `pkg/events` | AEP v1 事件、Envelope.Metadata、内部 OwnerID | Runtime event 必须仍是 AEP Kind/Data 扩展 |
-| `internal/eventstore` | 事件捕获、turns 聚合、synthetic turn | RuntimeContext 先从这里读取事实，不新建 memory DB |
-| `internal/observability` | OTel 初始化、Prometheus handler、39 类指标工具函数 | Agent tracing 复用现有 meter/tracer lifecycle |
-| `internal/audit` | user activity 与 tool call audit | Policy/security events 复用 audit collector |
-| `internal/cron` | 本地 scheduler、timeout、retry、delivery | ExecutionQueue 可借鉴 cron 的 timeout/retry 模型 |
+| Gateway / Session / Worker / AEP | 已交付 | 当前运行时核心 |
+| AgentSpec / AgentIdentity / RuntimeContext | 已交付 | 配置、身份和上下文契约 |
+| Durable Input Execution | 已交付 | input ledger、owner lease、single-active gate、fence、repair |
+| Runtime Observability | 已交付基线 | trace/metrics 可用，完整 AEP runtime event contract 仍在扩展 |
+| EffectiveRuntimePlan / Observed Bootstrap | 已冻结 | 统一期望状态与运行时证据 |
+| Gateway-owned EffectLedger | 已冻结 | 外部副作用事实与调和 |
+| Bounded ExecutionQueue / Cockpit | 已冻结 | 排序元数据和只读运营投影 |
+| Capability Inventory / Recipes | 已冻结 | 条件式平台能力 |
 
-## 目标组件
+“已冻结”代表实现契约已批准，不代表当前代码已经提供该能力。
 
-### AgentSpec Resolver
+## Canonical Fact Ownership
 
-职责：
+| 事实 | Canonical owner | 写入边界 | 只读消费者 |
+| --- | --- | --- | --- |
+| Principal / workspace / bot ownership | identity、config、session owner chain | 认证、配置和 session 生命周期 | Gateway、adapter、audit、admin |
+| Desired runtime state | `EffectiveRuntimePlan` resolver | WS/REST/doctor/worker/admin/recipe 共同解析路径 | worker start、diagnostics、Cockpit、audit |
+| Input execution | `internal/execution` | accept、delivery、owner lease、runtime status、fence | Gateway、forwarder、repairer、runtime events |
+| Session lifecycle | `internal/session` | session state machine 和 store | Gateway、Worker、RuntimeContext、admin |
+| Runtime events | AEP + `internal/eventstore` | Gateway/Bridge 事件捕获 | client、RuntimeContext、Cockpit、observability |
+| Gateway-owned external effect | `EffectLedger` | delivery、Webhook、Cron、control、recipe、connector | retry、reconcile、Cockpit、audit |
+| Worker/provider/delivery observed state | worker/connector adapter evidence | actual worker/backend/artifact、provider receipt/query | plan status、reconciler、Cockpit、audit |
+| Audit integrity | `internal/audit` | user/tool/admin/security action | CLI verify、admin、export |
+| Trace/metrics | `internal/observability` | OTel/Prometheus lifecycle | operator、Cockpit summary、alerts |
 
-- 将 YAML/config/env/init metadata 解析为统一 `AgentSpec`。
-- 保持现有 `worker_type`、allowed tools、permission mode、sandbox、budget 配置兼容。
-- 输出可审计的 normalized spec，供 Session 和 Worker 使用。
+Adapter、UI、admin handler、recipe 和 diagnostic checker 不拥有第二份 session、identity、execution 或 effect 真相。缓存必须携带 source version 或 plan hash，并定义失效和降级。
 
-边界：
+## 核心组件
 
-- 不替代 `internal/config`。
-- 不直接启动 worker。
-- 不读取业务消息内容。
-- 第一版是只读 normalized view，不新增持久化字段。
-
-### Agent Identity Binder
-
-职责：
-
-- 将 user、workspace、bot、platform、agent name、runtime provider 绑定到 session。
-- 为 AEP metadata、audit、eventstore、trace 提供一致 identity。
-- 支持匿名用户和历史 session 的兼容迁移。
-
-边界：
-
-- 不新建独立 identity service。
-- 不绕过现有 workspace owner 校验。
-
-### Execution Queue
+### Gateway API 与 AEP Router
 
 职责：
 
-- 在 Session 与 Worker Input 之间提供 ordered task dispatch。
-- 记录 task id、attempt、timeout、retry reason、worker execution metadata。
-- 暴露队列状态给 observability 和 admin diagnostics。
+- WebSocket/HTTP 认证、workspace ownership、session init 和 AEP 分发；
+- durable input accept、ACK、Worker delivery 和 runtime event emission；
+- bridge lifecycle、history recovery、LLM retry、audit/trace correlation；
+- admin/runtime API 的授权和 redacted response。
 
 边界：
 
-- 第一版只做单 session / 单 worker 顺序队列。
-- 第一刀先实现 per-session input gate。
-- 不做跨节点调度。
-- 不改变现有输入事件和 worker stream 输出语义。
+- 不保存 prompt、metadata value、credential 或 raw provider request；
+- 不理解 Claude/OpenCode/Codex/ACP 的私有 tool protocol；
+- 不以 connection success 或 Worker `done` 证明外部 effect 成功。
 
-### Policy Hook
+### Session Manager
 
 职责：
 
-- 对工具、文件系统、网络、预算、permission mode 做统一检查入口。
-- 将 allow/deny/escalate 结果写入 audit 和 runtime events。
+- 管理 `CREATED/RUNNING/IDLE/TERMINATED/DELETED` 状态机；
+- 绑定 user、workspace、AgentIdentity 和 worker session reference；
+- 提供 SQLite/PostgreSQL 持久化、quota 和 lifecycle transaction。
 
 边界：
 
-- 第一版复用现有 permission mode、allowed/disallowed tools、workspace path validation。
-- 不引入复杂策略语言。
+- session 状态不承载 external effect outcome；
+- adapter 不绕过 session owner 校验或直接维护独立 session 生命周期。
 
-### Runtime Context
+### Worker Adapter Registry
 
 职责：
 
-- 将 session history、turns、worker internal session id、workspace context 抽象为上下文接口。
-- 为 resume、fork、summary recovery、future memory backend 提供统一读取路径。
+- 通过 `worker.Register()` 管理 `claude_code`、`opencode_server`、`codex_cli`、`acp`；
+- 将 AgentSpec/EffectiveRuntimePlan 映射为现有 Worker start/input contract；
+- 提供 worker/backend/artifact 和 isolation capability evidence。
 
 边界：
 
-- 第一版不建设独立 Memory Service。
-- 第一刀只提供 `Load` facade。
-- eventstore 和 worker provider history 仍是事实源。
+- Worker interface 变化同步四 adapter、mocks、`internal/worker/noop` 和 registry tests；
+- CLI、singleton 和 RPC Worker 的新能力语义必须明确；
+- host env inheritance、filesystem 和 network restriction 只按真实 enforcement 报告。
 
-### Runtime Observability
+### AgentSpec 与 EffectiveRuntimePlan
 
-职责：
+AgentSpec 是当前已交付的 normalized runtime view。EffectiveRuntimePlan 是冻结契约，它将 config、init metadata、workspace、worker registry、policy、sandbox、env profile、capability 和 source refs 解析为一份 canonical redacted desired state。
 
-- 将 init、session create、worker start、input dispatch、tool call、done/error 串成 trace。
-- 为 runtime events 增加 trace id/span id metadata。
-- 暴露 agent/runtime 维度 metrics。
+```text
+compiled defaults
+  -> base config
+  -> platform/bot config
+  -> workspace override
+  -> session init metadata
+  -> validated runtime capability
+  -> canonical redacted plan
+```
 
-边界：
+plan 输出包含 plan hash、resolver version、worker、permission、budget/timeout、env key names、sandbox desired state、capability/skill/config hash、source refs、warnings 和 blocked reasons。它不包含值级 secret、prompt、完整命令或 raw error。
 
-- 复用 `internal/observability.Init` 的 shutdown 和 noop fallback。
-- 不从应用层直接 import Prometheus。
+### Durable Input Execution
+
+`internal/execution` 是 input lifecycle 的事实源：
+
+- 只保存 payload SHA-256 指纹；
+- 区分 accepted/delivered 与 pending/running/completed/failed/unknown；
+- 使用 owner instance、lease、worker run ID 和 conditional update；
+- single-active gate 返回 `SESSION_BUSY`；
+- ambiguity fence 阻止不安全重投；
+- late completion 可收敛同一 worker run；
+- repairer 处理 durable write failure 和 expired lease。
+
+该 ledger 不承担 Gateway-owned external effect 的 provider evidence。
+
+### Gateway-owned EffectLedger
+
+EffectLedger 是冻结契约，覆盖 delivery、Webhook、Cron、admin/control、recipe 和 connector operation。
+
+```text
+planned -> started -> succeeded
+                  -> failed
+                  -> unknown -> reconciled_succeeded
+                             -> reconciled_failed
+                             -> fenced
+```
+
+每个 effect 具有 execution/effect identity、business idempotency key、claim owner/lease、attempt、provider reference、evidence/confidence、redacted reason 和 timestamps。worker-private tool/model-provider 内部调用不进入该 ledger。
+
+### Observed State 与 Reconciliation
+
+Observed State 记录实际 worker type、backend、artifact/layer digest、env/isolation evidence、provider receipt、delivery acknowledgement、external query result 和 observed timestamp。
+
+Reconciliation 比较 desired 与 observed：
+
+- 外部状态可查询：query 后写入 reconciled result；
+- 可安全重试：在 lease、attempt cap、backoff 和 idempotency contract 下重试；
+- 结果不可证明：保持 `unknown` 并 fence 冲突操作；
+- 需要人工接管：通过授权 operator action 写入 audit 和 final evidence。
+
+### RuntimeContext
+
+RuntimeContext 从 session、eventstore、turns、worker internal session ID 和 workspace metadata 读取恢复事实，为 resume/fork/history reconstruction 提供统一接口。它不创建独立 memory database，也不把 prompt/context 扩展为通用 workflow history。
+
+### Audit 与 Observability
+
+Audit 记录 actor、action、target、decision 和 redacted references；Observability 使用一致的 agent/session/execution/effect correlation keys。
+
+- `execution_id`、`effect_type`、`worker_type`、`outcome` 等有限枚举可用于 metrics；
+- plan hash、workspace、provider/evidence ref 只用于脱敏 trace/log/audit correlation；
+- tracing disabled 保持 noop，不阻止 Gateway 启动；
+- Cockpit 只消费现有 canonical facts，并具备分页、时间窗、payload 和数据库连接预算。
+
+## 状态语义
+
+| 状态 | 证明的事实 | 不证明的事实 |
+| --- | --- | --- |
+| planned | Gateway 计算出期望计划 | worker/backend/sandbox 已应用 |
+| accepted | input 已持久化接收 | Worker 已处理 |
+| delivered | input 已投递到指定 Worker run | Worker turn 已成功 |
+| running | Worker run 已进入运行态 | 外部 provider/effect 已成立 |
+| completed | Worker turn 返回完成终态 | 消息、Webhook 或 connector effect 已成功 |
+| effect succeeded | provider/connector contract 确认 effect 成功 | 所有下游最终用户状态均已验证 |
+| unknown | 现有 evidence 无法证明成功或失败 | 动作未发生 |
+| reconciled | query/callback/operator evidence 已收敛 unknown | 未来不会出现新的外部变化 |
+| fenced | 冲突动作被阻止 | unknown 已解决 |
 
 ## 数据流
 
@@ -157,64 +208,110 @@ Process / App Server / JSON-RPC / Provider Runtime
 
 ```text
 client init
-  -> gateway validates auth/workspace
-  -> AgentSpec Resolver normalizes config
-  -> Agent Identity Binder attaches identity
-  -> session.Manager creates or resumes session
-  -> worker.Registry validates worker type
-  -> bridge starts worker
-  -> AEP init_ack + runtime events
+  -> authenticate principal and workspace ownership
+  -> AgentSpec / EffectiveRuntimePlan resolution
+  -> validate Worker registry and capabilities
+  -> bind AgentIdentity
+  -> create or resume Session
+  -> start Worker with plan reference
+  -> capture observed worker/backend evidence
+  -> AEP init_ack + runtime metadata/events
 ```
 
-### Turn 执行
+plan resolution 失败发生在 Worker 或外部副作用启动之前。等价 WS/REST 输入必须得到相同 canonical plan hash。
+
+### Input 执行
 
 ```text
-input event
-  -> AEP validation
-  -> Policy Hook
-  -> Execution Queue enqueue
+AEP input
+  -> validate owner/session/payload fingerprint
+  -> durable accept + ACK
+  -> single-active gate / execution lease
   -> Worker.Input
   -> bridge.forwardEvents
-  -> eventstore capture
-  -> observability spans/metrics
-  -> audit for user/tool/security decisions
+  -> eventstore + trace + audit
+  -> durable runtime terminal or unknown/fence
 ```
+
+旧 forwarder 绑定 immutable worker run；`/reset` 或跨平台重连不能使旧连接事件写入新 run。
+
+### Gateway-owned External Effect
+
+```text
+execution intent
+  -> effect planned + business idempotency key
+  -> claim lease
+  -> provider attempt
+  -> accepted/receipt/query evidence?
+       -> yes: succeeded
+       -> no: unknown
+  -> reconcile query / bounded retry / fence / operator action
+  -> audit + eventstore + diagnostics reference
+```
+
+provider response 丢失不自动触发第二次外部动作；只有 provider contract 和当前 evidence 证明安全时才允许重试。
 
 ### Context 恢复
 
 ```text
 resume request
-  -> session lookup
-  -> RuntimeContext reads eventstore/turns/provider session id
-  -> worker-specific adapter reconstructs history
-  -> session transitions to RUNNING or IDLE
+  -> session owner/state lookup
+  -> RuntimeContext reads eventstore/turns/worker session ref
+  -> execution fence/open-state check
+  -> worker-specific history reconstruction
+  -> observed state refresh
+  -> session RUNNING or IDLE
 ```
 
-## 兼容策略
+## 兼容边界
 
-| 兼容面 | 策略 |
+| 兼容面 | 契约 |
 | --- | --- |
-| AEP v1 | 新事件只增不改，旧客户端可忽略未知 event kind |
-| Config | `worker_type` 和现有 worker config 保留，AgentSpec 是 normalized view |
-| Session store | 新字段使用可空字段或 JSON metadata，迁移必须兼容旧记录 |
-| Worker | 通过 SessionInfo 扩展，不修改 Worker 接口的核心输入输出语义 |
-| Observability | tracing disabled 时保持 noop，不影响 gateway 启动 |
+| AEP v1 | 新 Kind/Data/Metadata 增量兼容；旧客户端可忽略未知事件和字段 |
+| SDK | AEP 变化同步 Go SDK 和 TypeScript/Python/Java 示例 SDK |
+| Config | 现有 `worker_type` 和 worker config 保留；AgentSpec/plan 是 normalized view |
+| Session | 新数据使用兼容字段或 versioned JSON；旧记录可读 |
+| Worker | 保持核心 start/input/event contract；扩展同步四 adapter 和 mocks |
+| Database | SQLite/PostgreSQL migration、conditional update 和跨实例测试成对 |
+| Cross-platform | process、env、path、signal 和 injection 在 Linux/macOS/Windows 分离验证 |
+| Observability | disabled 模式 noop；新增 metrics 使用低基数属性 |
+
+## 安全与隐私边界
+
+- authentication、authorization、capability declaration、filesystem/network enforcement、credential injection 和 audit 分开建模；
+- workspace/path/origin 使用类型化解析、canonicalization、allowlist 和负向测试；
+- strict profile fail closed；compat profile 明确 host env inheritance 和迁移告警；
+- durable facts 不保存 prompt、metadata value、secret、credential、raw provider request、完整 tool args 或 raw worker error；
+- audit 证明操作被记录，不证明模型无法越权；
+- capability token 或 plan hash 不证明 OS isolation；
+- XML sanitizer 和 Windows 临时文件注入保持强制安全边界。
+
+## 关闭与恢复
+
+Gateway 关闭顺序保持：
+
+```text
+signal -> cancel ctx -> tracing -> hub -> bridge -> sessionMgr -> HTTP
+```
+
+Repairer、reaper 和 reconciler 必须有 stop condition；关闭时未确认的 effect 保持 durable pending/unknown，不记录为已成功，也不因进程退出盲目重投。
 
 ## 反模式
 
-- 在 `internal/runtime` 新建一套独立 session/worker 生命周期。
-- 为 runtime events 引入 Kafka/NATS 等外部 event bus。
-- 将 AgentSpec 做成只有 WebChat 使用的前端模型。
-- 在 ExecutionQueue 内直接理解 Claude/OpenCode/Codex 的私有协议。
-- 为 Memory Service 新建数据事实源，导致 eventstore 和 turns 失去权威性。
+- 新建独立 runtime/session/worker 生命周期；
+- 为 runtime events 引入第二 event bus；
+- 让 WebChat、Slack、Feishu、doctor 或 recipe 各自解析 runtime plan；
+- 把 Worker `done`、HTTP 2xx、timeout 或 audit 记录映射为 external effect success；
+- 把单进程 mutex/Set 当成跨重启幂等；
+- 在 ExecutionQueue 中理解 Worker 私有协议；
+- 建立独立 identity、memory 或 capability authorization 事实源；
+- 以 high-cardinality metrics、N+1 查询或无界 snapshot 实现 Cockpit；
+- 只实现 SQLite 或 PostgreSQL 一种方言；
+- 在没有 evidence、rollback 和 operator action 时报告 `enforced` 或 `completed`。
 
-## 分阶段落地
+## 关联文档
 
-| 阶段 | Issue | 架构增量 |
-| --- | --- | --- |
-| Runtime Contract | #847 | AgentSpec Resolver |
-| Runtime Contract | #848 | Agent Identity Binder |
-| Runtime Contract | #849 | Runtime AEP events |
-| Runtime Contract | #850 | Runtime tracing/metrics |
-| Control Plane | #851 | Execution Queue |
-| Control Plane | #852 | Runtime Context |
+- [HotPlex 2.0 Roadmap](./ROADMAP.md)
+- [HotPlex 2.0 Implementation Roadmap](./IMPLEMENTATION-ROADMAP.md)
+- [Runtime Operations Contract](../superpowers/specs/2026-08-04-runtime-operations-contract.md)
+- [Scope-aware Capability Inventory Contract](../specs/Scope-Aware-Capability-Inventory-Spec.md)
