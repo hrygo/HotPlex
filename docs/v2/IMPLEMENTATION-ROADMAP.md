@@ -60,7 +60,7 @@ Agent Platform / Agent OS
 5. #851：引入 queue，但保持输入输出语义不变。
 6. #852：抽象 context 读取/保存，复用 eventstore 和 worker history。
 
-## 高 ROI 演进切片
+## 高 ROI 交付切片
 
 2.0 的第一阶段应优先做“小而可验证”的运行时契约切片，而不是直接实现 Agent OS 大组件。
 
@@ -73,13 +73,42 @@ Agent Platform / Agent OS
 | 5 | RuntimeContext 只读 facade | #852 | 7/10 | 从 eventstore/turns/worker_session_id 读取事实，不建设独立 memory service |
 | 6 | Per-session input gate | #851 | 7/10 | 先约束同 session 输入串行，验证后再扩展完整 ExecutionQueue |
 
-暂缓方向：
+### qm 终态校准切片
+
+| 优先级 | 切片 | 对应 issue/spec | ROI | 说明 |
+| --- | --- | --- | --- | --- |
+| 0 | EffectiveRuntimePlan + fail-closed preflight | 新 issue + `2026-08-04-qm-inspired-runtime-operations-design.md` | 10/10 | 复用 #847/#867/doctor；统一 WS/REST/worker/admin/recipe 的 resolved state |
+| 1 | Explicit env allowlist + isolation report | #867 | 9/10 | 先建立 compat/allowlist profile 与可证明能力报告，不声称 OS isolation |
+| 2 | Worker observed bootstrap | #946/#867 | 9/10 | plan 必须区分 desired/observed/enforced，不能用配置 hash 冒充 sandbox/backend 已应用 |
+| 3 | Cron delivery durable effect vertical slice | #947 + Cron | 10/10 | 先解决重启、多实例、超时和晚到 ack，再提取通用 EffectLedger |
+| 4 | Gateway-owned EffectLedger | #947，协同 #851/#870 | 8/10 | 只覆盖 Gateway-owned delivery/webhook/cron/control/recipe；unknown 必须 reconcile/fence |
+| 5 | Capability inventory/hash/precedence | `QM-Scope-Capability-Model-Spec.md` | 7/10 | 只读优先；先解释配置/skills 投影，再讨论 promotion |
+
+明确暂缓方向：
 
 - 分布式 scheduler。
 - 独立 memory service。
 - Agent registry/marketplace。
 - 复杂策略语言。
 - 多 Agent workflow 编排。
+
+qm 研究确认的明确暂缓项：
+
+- 复制 qm 的 Web app publishing、Slack-first company surface 或 private-fork 运营模型；
+- worker 私有 tool protocol 搬运到 Gateway；
+- skill marketplace、remote registry、独立 memory service；
+- 在 EffectiveRuntimePlan 和 EffectLedger 未稳定前建设跨 session 分布式 scheduler。
+
+### 终版正交架构闸门
+
+上述优先级同时受以下架构闸门约束：
+
+1. **唯一事实源**：先在设计和测试中标明 authority/scope、desired plan、execution、Gateway effect、observed state 和 reconciliation 的 canonical owner；不得由 handler、adapter、doctor 各自维护状态机。
+2. **故障语义先行**：在写 retry/queue 代码前，先定义 provider 已接收但响应丢失、进程在提交前后崩溃、lease 过期、旧 owner 迟到完成和人工接管的行为；没有 `unknown`/fence/stop condition 的实现不进入生产路径。
+3. **安全证据分层**：认证、授权、capability declaration、filesystem/network enforcement、credential injection 和 audit 必须分开报告；没有运行时证据的能力只能标为 `partial`/`unavailable`。
+4. **兼容与可逆**：AEP 增量兼容；SQLite/PostgreSQL 迁移和条件更新成对；新事实层先 read-only/shadow，具备旧版本读写、暂停 repair、回退和 operator escape hatch。
+5. **容量预算**：为 plan/effect/audit/Cockpit 写清保留期、查询分页、payload 上限、重试队列和连接池预算；`plan_hash`/workspace/provider ref 不直接进入无界 metrics label。
+6. **通用化门槛**：至少一个真实垂直切片完成 `desired → effect → observed → reconcile` 闭环，并由两个消费者复用后，才提取通用 EffectLedger 或扩大到 scheduler/recipe。
 
 ## 产品迭代波次
 
@@ -91,11 +120,16 @@ Agent Platform / Agent OS
 
 - 2.0 文档明确产品定位、非定位、first cuts、暂缓清单。
 - #847-#852 每个 issue 都具备 first cut 和验收标准。
+- 增加 EffectiveRuntimePlan、preflight、EffectLedger 的边界、非目标和数据保密规则。
+- 增加 desired/execution/observed/reconciliation 四层事实闭环和 Cron 第一条垂直切片。
+- 冻结产品非目标、canonical owner、状态词汇、能力诚实、隐私边界、容量预算和回滚闸门。
+- 所有新增 plan/effect projection 默认只读或 shadow，不得先改变现有 dispatch 语义。
 
 完成标准：
 
 - 文档构建通过。
 - GitHub issue 与文档可双向追踪。
+- 每个待开发切片都能回答 owner、故障时序、evidence、迁移、容量和回滚六个问题。
 
 ### Wave 1: Runtime Correlation
 
@@ -139,6 +173,10 @@ Agent Platform / Agent OS
 - RuntimeContext 从 eventstore、turns、worker_session_id、workspace metadata 读取事实。
 - 不引入分布式 scheduler 或外部 memory backend。
 
+补充顺序：#877 fence escape hatch 与 #867 isolation/preflight 先于完整 #851 queue；queue 的事实必须能被 EffectLedger/Execution Cockpit 消费。
+
+二阶校准：先完成 `desired → effect → observed → reconcile`，再扩展 queue ordering/attempt/timeout/retry reason；否则 queue 会把 Worker 终态误当成外部副作用终态。
+
 ### Wave 3: Runtime Operations
 
 目标：把 2.0 能力转成可运营界面和诊断 API。
@@ -148,10 +186,14 @@ Agent Platform / Agent OS
 - Admin runtime diagnostics：按 session/execution 查询状态、事件、trace、audit ref。
 - Runtime health summary：worker readiness、queue/input gate state、context source。
 - Policy decision visibility：先展示现有 permission/workspace/tool decisions，不发明策略语言。
+- Effective runtime plan：展示脱敏 plan hash、来源、capability/enforcement 状态和 warnings。
+- Effect reconciliation：展示 Gateway-owned effect 的 attempt、unknown、fence 和 reconcile ref。
+- Observed state/drift：展示实际 worker/backend/artifact/provider evidence，与 desired plan 分栏显示。
 
 启动条件：
 
 - Wave 1/2 的 metadata 和 context 边界稳定。
+- 至少一条 Cron/Webhook delivery 在重启、多实例、provider timeout 和晚到确认下可收敛。
 
 ### Wave 4: Agent Platform
 

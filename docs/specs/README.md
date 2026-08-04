@@ -92,6 +92,12 @@
 
 ## 状态统计
 
+### 2026-08-04 新增提案
+
+| 文档 | 描述 | 状态 |
+|------|------|------|
+| [QM-Scope-Capability-Model-Spec.md](./QM-Scope-Capability-Model-Spec.md) | 基于 qm 校准的 scope-aware capability inventory、安全 materialization 与 precedence | proposed |
+
 ### 按状态分类
 
 - **implemented**: 8 个 — Per-Bot-Agent-Config, Turn-Summary-WorkDir-Fix, Worker-User-Interaction, Slack-Stream-Rotation, Gateway-Self-Restart, Multi-Bot-Support, Agent-Config-Injection-Control, Slack-Block-Kit-Upgrade

@@ -34,7 +34,7 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 - 不做独立 memory 产品：先复用 eventstore、turns、worker history。
 - 不做 Agent marketplace：先沉淀 capability contract，再谈 registry/marketplace。
 
-## 调研输入
+## 外部架构依据
 
 外部成熟系统给 HotPlex 2.0 的启发：
 
@@ -70,6 +70,24 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 3. **不引入平行系统**：不要新建独立 event bus、identity service、memory service 或 scheduler。
 4. **兼容 v1.x 客户端**：AEP v1 wire format 和现有 worker config 必须继续工作。
 5. **小 PR 可回滚**：每个 issue 独立验收，最终通过文档和 traceability matrix 串联。
+
+## qm 研究终态校准（2026-08-04）
+
+对 [yc-software/qm](https://github.com/yc-software/qm) 的源码、测试、部署文档和公开 issue 交叉确认后，2.0 路线确定三条运行时约束：
+
+- **EffectiveRuntimePlan**：把 config、init metadata、workspace、worker、policy、sandbox 和 env profile 解析成同一份 redacted、可 hash、可审计的期望状态；WS init、REST create-session、doctor、worker start 和 recipe dry-run 不得各算一份。
+- **Gateway-owned EffectLedger**：对 delivery、webhook、cron、admin/control 和 recipe 等 Gateway 自己发起的副作用记录 attempt/idempotency/outcome；`unknown` 进入 reconcile/fence，不把网络断开误当成 failed 后盲目重试。worker 私有 tool protocol 不搬进 Gateway。
+- **Capability/Isolation honesty**：能力清单、skills/config hash 和 filesystem/network enforcement 以 `enforced/partial/unavailable` 报告，不能把 token、审计或 screening 误写成形式化隔离或 prompt-injection 解决方案。
+
+这三条是对已有 AgentSpec、AgentIdentity、AEP runtime events、execution ledger、Audit 和 Cron 的收敛，不是新增平行 runtime 层。qm issue [#165](https://github.com/yc-software/qm/issues/165) 证明“renderer 派生环境”和“secret/doctor 读取原始配置”分裂会造成部署 crash-loop；HotPlex 将其转化为 #867 的 effective-plan/preflight 依赖。
+
+上述三项统一为一条事实闭环：
+
+```text
+Authority/Scope → Desired Plan → Durable Execution/Effect → Observed State → Reconciliation/Fence
+```
+
+因此，`plan_hash` 只能证明 HotPlex 计算出了期望状态，Worker `done` 只能证明 Worker 返回了终态；两者都不能单独证明 sandbox layer 已应用、外部消息已送达或 provider effect 已成立。#946/#947 的验收必须增加 observed evidence、drift、unknown 和 reconcile 语义。
 
 ## Phase 1: Runtime Contract 2.0
 
@@ -158,6 +176,55 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 - Runtime metadata 能稳定关联 AEP、eventstore、audit、trace。
 - 至少一个真实工作流证明需要多 Agent 编排，而不是单 Agent + tool/context 即可解决。
 
+## 实施优先级
+
+在完整 ExecutionQueue、Execution Cockpit 和 Coding Ops Recipes 之前，先完成以下共同事实层：
+
+1. #877 fenced execution escape hatch：消除异常三重失败导致的无界 session lockout；
+2. #867 explicit worker env allowlist + isolation capability report：由 EffectiveRuntimePlan 驱动，兼容模式必须可诊断；
+3. 新增 effective runtime plan / fail-closed preflight：让 doctor、worker start、admin diagnostics 和 recipe dry-run 使用同一 resolver；
+4. 新增 Gateway-owned EffectLedger：再将 #851 的 queue state、#868 Cockpit、#870 recipes 接入该事实层。
+
+#851 的剩余范围不再包含 #878 已交付的 single-active gate、owner lease、ambiguity fence 和最小 runtime events；#868 只能消费已持久化且脱敏的 plan/effect facts；#870 不能在没有 dry-run plan 和 idempotency contract 时扩展为 workflow engine。
+
+5. 先选 Cron/Webhook/消息 delivery 完成一条 `desired → effect → observed → reconcile` 垂直闭环，再提取通用 EffectLedger；旧进程内 retry queue 不能作为重启/多实例后的最终事实源。
+
+## 终版正交架构闸门（2026-08-04）
+
+为避免把 qm 的局部机制误读为 HotPlex 的整体方向，路线受以下跨维度闸门约束。详细审查见 [qm × HotPlex 正交架构审查](../research/2026-08-04-qm-hotplex-orthogonal-architecture-review.md)。
+
+### 必须同时满足的架构不变量
+
+- HotPlex 仍是 self-hosted Agent Runtime Gateway；workflow engine、marketplace、独立 memory service、跨 session scheduler 和 SaaS control plane 不进入当前主线。
+- authority/scope、desired plan、durable execution、Gateway-owned effect、worker/provider observed state 和 reconciliation 各自只有一个 canonical owner，其他模块只能投影。
+- `plan_hash` 只能证明期望计划，`worker done` 只能证明 worker turn 终态，provider response 只有在业务 receipt 或可查询状态支持时才能提升为外部成功。
+- 认证、授权、能力声明、sandbox/OS enforcement、审计和 workload identity 分开建模；无法证明的能力必须标记 `partial`/`unavailable`。
+- 新 AEP 字段必须增量兼容；SQLite/PostgreSQL 迁移、条件更新、旧版本读写和 fault-injection 必须成对验证。
+- effect/reconcile/repair 必须具备 lease/fence、attempt cap、backoff、stop condition 和 operator escape hatch；禁止以 exactly-once 掩盖 provider 事实不明。
+- `execution_id`/`effect_id`/`plan_hash` 可做 trace/log/audit correlation，但不可直接成为无界高基数 metrics label；Cockpit 查询必须有分页、时间和 payload 预算。
+
+### 实施前的否决条件
+
+若一个提案无法同时说明 canonical owner、故障时序、外部 evidence、敏感数据边界、双数据库迁移、容量预算和回滚路径，则只能保持 `proposed`/`shadow`，不能进入 `enforced`/`completed`。任何通用抽象必须由至少两个已验证消费者驱动，不能先建平台再寻找场景。
+
+### 重新校准的波次
+
+```text
+Wave 0  边界/事实所有权/状态词汇/隐私/容量冻结
+   ↓
+Wave 1  EffectiveRuntimePlan + observed worker bootstrap
+   ↓
+Wave 2  Cron/Webhook/消息 delivery 一条 durable effect 闭环
+   ↓
+Wave 3  Repair + redacted Cockpit + SLO/容量治理
+   ↓
+Wave 4  在真实需求证明后评估 scheduler/workflow/registry/workload identity
+```
+
+Wave 4 不再由“平台化愿景”自动触发，而必须由 Wave 1–3 的运行时 SLO、容量和迁移证据触发。
+
+#946 不能只输出配置 hash，必须区分 declared、observed、enforced、partial、unavailable；#947 不能只增加唯一键，必须区分 claim、attempt、effect fact、external evidence 和 unknown/fence。
+
 ## Phase 4: Agent OS
 
 目标：形成跨环境的 Agent execution kernel。
@@ -194,6 +261,7 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 
 - 4 类 worker 共享 AgentSpec 映射。
 - 关键 runtime 操作均能通过 AEP event + trace + audit 关联。
+- 关键副作用能区分 desired、attempted、observed、unknown 和 reconciled；不能以 Worker done 冒充外部成功。
 - Agent identity 能贯穿 session、worker、eventstore、audit。
 - 2.0 文档与 GitHub issues 可双向追踪。
 
@@ -202,6 +270,7 @@ HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
 - ExecutionQueue 支持 ordered dispatch、timeout、retry 观测。
 - RuntimeContext 支持 session recovery 与 provider-specific adapter。
 - 单机资源限制和 workspace 隔离可验证。
+- 至少一条 Cron/Webhook delivery 路径在重启、多实例、超时和晚到确认下可收敛，且不会盲目重复外部副作用。
 
 2027 Agent Platform：
 
