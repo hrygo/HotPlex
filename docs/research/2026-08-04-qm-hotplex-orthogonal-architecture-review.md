@@ -1,16 +1,18 @@
 ---
 title: "qm × HotPlex 正交架构审查与实施闸门"
 type: research-review
-status: final
+status: final-evidence
 date: 2026-08-04
 references:
   - docs/research/2026-08-04-qm-hotplex-deep-research-report.md
   - docs/research/2026-08-04-qm-hotplex-second-order-calibration.md
-  - docs/superpowers/specs/2026-08-04-qm-inspired-runtime-operations-design.md
+  - docs/superpowers/specs/2026-08-04-runtime-operations-contract.md
   - https://github.com/yc-software/qm
 ---
 
 # qm × HotPlex 正交架构审查与实施闸门
+
+> 本文是架构反例、风险、ROI 和决策闸门的证据附件，不是产品路线或实现契约。最终决策以 `docs/v2/ROADMAP.md`、`docs/v2/ARCHITECTURE.md` 和 approved specs 为准。
 
 ## 1. 终版审查结论
 
@@ -255,7 +257,7 @@ ROI 不按“可复用抽象数量”计分，而按四个可验证收益计算�
 
 - qm 源码与 issues：https://github.com/yc-software/qm
 - HotPlex 当前运行时与路线图：`docs/v2/ROADMAP.md`、`docs/v2/IMPLEMENTATION-ROADMAP.md`
-- HotPlex 事实闭环 spec：`docs/superpowers/specs/2026-08-04-qm-inspired-runtime-operations-design.md`
+- HotPlex 事实闭环 spec：`docs/superpowers/specs/2026-08-04-runtime-operations-contract.md`
 - Kubernetes controller：https://kubernetes.io/docs/concepts/architecture/controller/
 - Temporal durable execution：https://docs.temporal.io/
 - OpenTelemetry semantic conventions：https://opentelemetry.io/docs/specs/semconv/

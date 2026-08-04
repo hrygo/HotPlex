@@ -1,10 +1,12 @@
 ---
 title: "qm 对 HotPlex 的深度调研、校准与 ROI 评估"
 date: 2026-08-04
-status: final
+status: final-evidence
 ---
 
 # qm 对 HotPlex 的深度调研、校准与 ROI 评估
+
+> 本文是源码、测试、Issue、外部规范和 ROI 的证据附件，不是产品路线或实现契约。最终决策以 `docs/v2/ROADMAP.md`、`docs/v2/ARCHITECTURE.md` 和 approved specs 为准。
 
 ## 结论先行
 
@@ -80,9 +82,9 @@ HotPlex 的安全文档、Admin、worker isolation 和 audit 也应采用同样�
 
 | qm 机制 | HotPlex 现状 | 校准结论 | 处理 |
 |---|---|---|---|
-| Scope-owned runtime resolution | workspace/session/worker/AgentSpec 已存在 | 直接收敛为 EffectiveRuntimePlan | 更新 #847 余项与新 spec |
+| Scope-owned runtime resolution | workspace/session/worker/AgentSpec 已存在 | 直接收敛为 EffectiveRuntimePlan | Runtime Operations Contract |
 | Agent identity object | #848 已完成，identity 在 context_json | 继续作为跨 AEP/audit/trace 的共享键 | 保留现状，补验证与文档 |
-| Run lease/reaper | #878 已完成 owner lease/repair/fence | 不复制 qm run store；补 Gateway-owned effect ledger | 新 spec，更新 #851/#870 |
+| Run lease/reaper | #878 已完成 owner lease/repair/fence | 不复制 qm run store；补 Gateway-owned effect ledger | Runtime Operations Contract、#851/#870 |
 | Tool ledger | HotPlex 有 execution ledger，但没有 effect-level exactly-once 边界 | 只覆盖 Gateway-owned side effects；worker-private tools 不搬运 | 新 issue，非 #851 全量队列的一部分 |
 | Skills review/publish/materialize | HotPlex 有 agent config/skills 注入，能力治理较分散 | 先 capability inventory/hash/precedence，后做 promotion | 新 issue，低于 isolation/preflight |
 | Deployment check/doctor | HotPlex 有 CLI doctor/checkers | 用同一个 resolved plan 做 preflight、render、diagnose | 新 issue，优先级高 |
@@ -116,9 +118,9 @@ HotPlex 的安全文档、Admin、worker isolation 和 audit 也应采用同样�
 
 Execution Cockpit、完整 queue 和 capability promotion 都依赖这三条线的事实，顺序不能倒置。
 
-## 对现有 roadmap/spec 的终态校准
+## 决策映射
 
-### Roadmap 调整
+### ROADMAP 映射
 
 - Phase 1 的交付物包含 `EffectiveRuntimePlan`、preflight、redacted resolved config 和 plan hash，并与 AgentSpec/Identity/Event/Trace 共享关联键。
 - Phase 2 的依赖顺序为 #877 fence escape hatch、#867 isolation profile/preflight、完整 #851 queue、#870 recipes。
@@ -126,13 +128,13 @@ Execution Cockpit、完整 queue 和 capability promotion 都依赖这三条线�
 - #868 Cockpit 消费 execution/effect facts，默认展示 redacted plan、policy decision、attempt、unknown/fence 和 trace/audit refs。
 - Skills/capabilities 以 Phase 3 只读 inventory 形式纳入，不包含 registry/marketplace。
 
-### 新 spec
+### Approved contract 映射
 
-`docs/superpowers/specs/2026-08-04-qm-inspired-runtime-operations-design.md` 定义 EffectiveRuntimePlan、preflight、Gateway-owned EffectLedger、isolation capability report、unknown/fence 和验收边界。
+`docs/superpowers/specs/2026-08-04-runtime-operations-contract.md` 定义 EffectiveRuntimePlan、preflight、Gateway-owned EffectLedger、isolation capability report、unknown/fence 和验收边界。
 
-`docs/specs/QM-Scope-Capability-Model-Spec.md` 限定 HotPlex 的 scope-aware capability inventory 与安全 materialization，不引入独立 memory service 或 marketplace。
+`docs/specs/Scope-Aware-Capability-Inventory-Spec.md` 限定 HotPlex 的 scope-aware capability inventory 与安全 materialization，不引入独立 memory service 或 marketplace。
 
-## Issue 终态对齐
+## Issue 映射
 
 ### 既有 Issue 的冻结范围
 

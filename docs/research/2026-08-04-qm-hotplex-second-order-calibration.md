@@ -1,15 +1,17 @@
 ---
 title: "qm 对 HotPlex 的二阶校准：从 Runtime Plan 到事实闭环"
 date: 2026-08-04
-status: final
+status: final-evidence
 references:
   - docs/research/2026-08-04-qm-hotplex-deep-research-report.md
-  - docs/superpowers/specs/2026-08-04-qm-inspired-runtime-operations-design.md
+  - docs/superpowers/specs/2026-08-04-runtime-operations-contract.md
   - docs/v2/ROADMAP.md
   - https://github.com/yc-software/qm
 ---
 
 # qm 对 HotPlex 的二阶校准：从 Runtime Plan 到事实闭环
+
+> 本文是运行时反例、源码路径、动态测试和外部架构的证据附件，不是产品路线或实现契约。最终决策以 `docs/v2/ROADMAP.md`、`docs/v2/ARCHITECTURE.md` 和 approved specs 为准。
 
 ## 结论先行
 
