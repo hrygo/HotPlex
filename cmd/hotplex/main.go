@@ -54,6 +54,7 @@ Quick start:
 		newSlackCmd(),
 		newCronCmd(),
 		newAdminCmd(),
+		newAuditCmd(),
 	)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)

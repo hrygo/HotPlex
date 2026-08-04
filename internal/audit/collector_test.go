@@ -95,8 +95,8 @@ func TestCollector_OrderingPreserved(t *testing.T) {
 	require.Len(t, rows, 10)
 
 	// Verify hash chain integrity
-	brokenID, reason := VerifyChain(reverseRows(rows), "")
-	require.Equal(t, int64(0), brokenID, "chain broken: %s", reason)
+	breaks := VerifyChain(reverseRows(rows), "")
+	require.Empty(t, breaks, "chain must be intact")
 }
 
 func TestCollector_SpillOnFull(t *testing.T) {
@@ -138,8 +138,8 @@ func TestCollector_SpillOnFull(t *testing.T) {
 	require.Len(t, rows, n, "all %d events should be in DB", n)
 
 	// Verify hash chain
-	brokenID, reason := VerifyChain(reverseRows(rows), "")
-	require.Equal(t, int64(0), brokenID, "chain broken: %s", reason)
+	breaks := VerifyChain(reverseRows(rows), "")
+	require.Empty(t, breaks, "chain must be intact")
 }
 
 func TestCollector_SinkFanout(t *testing.T) {
@@ -207,8 +207,8 @@ func TestCollector_CloseDrainsSpill(t *testing.T) {
 	require.Len(t, rows, n, "all %d events should be persisted after close", n)
 
 	// Hash chain intact
-	brokenID, reason := VerifyChain(reverseRows(rows), "")
-	require.Equal(t, int64(0), brokenID, "chain broken: %s", reason)
+	breaks := VerifyChain(reverseRows(rows), "")
+	require.Empty(t, breaks, "chain must be intact")
 }
 
 func TestCollector_DroppedIsZero(t *testing.T) {
@@ -275,8 +275,8 @@ func TestCollector_HashChainIntegrity(t *testing.T) {
 	require.Len(t, rows, n)
 
 	// Full chain verification (reverse DESC rows for VerifyChain ASC expectation)
-	brokenID, reason := VerifyChain(reverseRows(rows), "")
-	require.Equal(t, int64(0), brokenID, "hash chain broken: %s", reason)
+	breaks := VerifyChain(reverseRows(rows), "")
+	require.Empty(t, breaks, "hash chain must be intact")
 
 	// Verify exactly one genesis row and all self_hash values are non-empty.
 	genesisCount := 0
@@ -542,6 +542,55 @@ func TestCollector_SpillFlushFailure_ReSpills(t *testing.T) {
 		records, rErr := spill.ReadAll()
 		return rErr == nil && len(records) > 0
 	}, 5*time.Second, 50*time.Millisecond, "expected re-spilled records to survive flush failure")
+
+	require.Equal(t, int64(0), c.Dropped(), "zero-loss: re-spill must not count as drop")
+}
+
+// TestCollector_BatchFlushFailure_RespillsBatch covers the zero-loss gap in
+// the regular (non-spill-drain) flush path: runWriter discarded the batch
+// on flush failure, permanently losing up to BatchSize in-flight events.
+// On failure the batch must be re-spilled so it survives for the next
+// drain attempt — the same contract the spill-drain path already honors.
+func TestCollector_BatchFlushFailure_RespillsBatch(t *testing.T) {
+	t.Parallel()
+
+	store := &failingCommitStore{Store: newTestSQLiteStore(t)}
+	spillPath := filepath.Join(t.TempDir(), "spill_batch.wal")
+	spill, err := OpenSpill(spillPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = spill.Close() })
+
+	c := NewCollector(store, spill, nil, slog.Default(), CollectorConfig{
+		ChannelCap:    64, // n < cap: nothing spills via Enqueue; all events sit in the batch
+		BatchSize:     100,
+		BatchInterval: 5 * time.Second,
+	})
+	t.Cleanup(func() { _ = c.Close(context.Background()) })
+	c.Start(context.Background())
+
+	ctx := context.Background()
+	const n = 6
+	for i := 0; i < n; i++ {
+		ua := &UserActivity{
+			Ts:         int64(1700000000000 + i),
+			UserID:     "u1",
+			UserIDType: UserIDTypePlatform,
+			Platform:   PlatformTest,
+			Action:     ActionAuthLogin,
+			Outcome:    OutcomeSuccess,
+			DetailJSON: `{}`,
+		}
+		require.NoError(t, c.Enqueue(ctx, ua))
+	}
+	// The sentinel forces a regular batch flush, which fails
+	// (failingCommitStore). Every in-flight event must survive in the
+	// spill file for the next drain, with zero counted drops.
+	require.NoError(t, c.Enqueue(ctx, spillSentinel))
+
+	require.Eventually(t, func() bool {
+		records, rErr := spill.ReadAll()
+		return rErr == nil && len(records) == n
+	}, 5*time.Second, 50*time.Millisecond, "failed batch must be re-spilled, not dropped")
 
 	require.Equal(t, int64(0), c.Dropped(), "zero-loss: re-spill must not count as drop")
 }

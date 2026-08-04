@@ -61,9 +61,8 @@ func TestVerifyChain_Valid(t *testing.T) {
 		rows = append(rows, ua)
 		prev = h
 	}
-	brokenID, reason := VerifyChain(rows, "")
-	require.Equal(t, int64(0), brokenID, "valid chain should not break")
-	require.Empty(t, reason)
+	breaks := VerifyChain(rows, "")
+	require.Empty(t, breaks, "valid chain should not break")
 }
 
 func TestVerifyChain_TamperedRowDetected(t *testing.T) {
@@ -83,9 +82,10 @@ func TestVerifyChain_TamperedRowDetected(t *testing.T) {
 	}
 	// Tamper: change UserID on row 2
 	rows[1].UserID = "attacker"
-	brokenID, reason := VerifyChain(rows, "")
-	require.Equal(t, int64(2), brokenID)
-	require.Contains(t, reason, "self_hash_mismatch")
+	breaks := VerifyChain(rows, "")
+	require.Len(t, breaks, 1, "one tampered row yields one break")
+	require.Equal(t, int64(2), breaks[0].ID)
+	require.Contains(t, breaks[0].Reason, "self_hash_mismatch")
 }
 
 func TestVerifyChain_GenesisPrevMustBeEmpty(t *testing.T) {
@@ -94,12 +94,15 @@ func TestVerifyChain_GenesisPrevMustBeEmpty(t *testing.T) {
 		ID: 1, Ts: 1700000000000, UserID: "u1", Action: ActionAuthLogin, Outcome: OutcomeSuccess,
 		DetailJSON: `{}`, PrevHash: "should_be_empty",
 	}
-	h, _ := ComputeSelfHash("", &ua)
+	// A real row's self_hash is computed from its own prev_hash; only the
+	// chain linkage is broken here, so exactly one break is reported.
+	h, _ := ComputeSelfHash("should_be_empty", &ua)
 	ua.SelfHash = h
 	rows := []UserActivity{ua}
-	brokenID, reason := VerifyChain(rows, "")
-	require.Equal(t, int64(1), brokenID)
-	require.Contains(t, reason, "prev_hash_mismatch")
+	breaks := VerifyChain(rows, "")
+	require.Len(t, breaks, 1)
+	require.Equal(t, int64(1), breaks[0].ID)
+	require.Contains(t, breaks[0].Reason, "prev_hash_mismatch")
 }
 
 func TestVerifyChain_AcceptsCheckpointOverride(t *testing.T) {
@@ -111,7 +114,34 @@ func TestVerifyChain_AcceptsCheckpointOverride(t *testing.T) {
 	h, _ := ComputeSelfHash("abc123checkpoint", &ua)
 	ua.SelfHash = h
 	rows := []UserActivity{ua}
-	brokenID, reason := VerifyChain(rows, "abc123checkpoint")
-	require.Equal(t, int64(0), brokenID)
-	require.Empty(t, reason)
+	breaks := VerifyChain(rows, "abc123checkpoint")
+	require.Empty(t, breaks, "checkpoint override must anchor the chain")
+}
+
+func TestVerifyChain_ReportsEveryBreak(t *testing.T) {
+	t.Parallel()
+	var rows []UserActivity
+	prev := ""
+	for i := 0; i < 6; i++ {
+		ua := UserActivity{
+			ID: int64(i + 1), Ts: int64(1700000000000 + i*1000),
+			UserID: "u1", Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`,
+			PrevHash: prev,
+		}
+		h, _ := ComputeSelfHash(prev, &ua)
+		ua.SelfHash = h
+		rows = append(rows, ua)
+		prev = h
+	}
+	// Physically remove rows 3 and 5, mimicking two independent interior
+	// deletions: rows 4 and 6 now reference self_hashes that no longer exist.
+	rows = append(rows[:2], rows[3:]...)
+	rows = append(rows[:3], rows[4:]...)
+
+	breaks := VerifyChain(rows, "")
+	require.Len(t, breaks, 2, "both orphaned rows must be reported")
+	require.Equal(t, int64(4), breaks[0].ID)
+	require.Equal(t, int64(6), breaks[1].ID)
+	require.NotEqual(t, breaks[0].Expected, breaks[0].Actual)
+	require.NotEqual(t, breaks[1].Expected, breaks[1].Actual)
 }
