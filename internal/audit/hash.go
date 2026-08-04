@@ -55,26 +55,49 @@ func ComputeSelfHash(prevHash string, ua *UserActivity) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// VerifyChain validates a sequence of UserActivity rows in id order.
-// Returns the first broken row's id (0 if no break) and a reason.
-// The genesis row's prev_hash must be "".
-// Each row's self_hash must equal ComputeSelfHash(previous self_hash, row).
-// checkpointHash, if non-empty, overrides the genesis requirement (used after GC rebase).
-func VerifyChain(rows []UserActivity, checkpointHash string) (brokenID int64, reason string) {
+// ChainBreak is one hash-chain violation found during verification.
+// Expected is the prev_hash the row should carry (previous row's
+// self_hash or the checkpoint anchor); Actual is what the row stores.
+type ChainBreak struct {
+	ID       int64
+	Reason   string
+	Expected string
+	Actual   string
+}
+
+// VerifyChain validates a sequence of UserActivity rows in id order and
+// returns EVERY break found, not just the first. The cursor always
+// advances to the row's stored self_hash so later breaks are still
+// detected after an earlier one (the historical single-break
+// short-circuit hid later gaps — e.g. id=1269 was masked by 1253).
+// The genesis row's prev_hash must equal checkpointHash ("" for a fresh
+// chain, or the rebase anchor after GC).
+func VerifyChain(rows []UserActivity, checkpointHash string) []ChainBreak {
 	expectedPrev := checkpointHash
+	var breaks []ChainBreak
 	for i := range rows {
 		row := rows[i]
 		if row.PrevHash != expectedPrev {
-			return row.ID, "prev_hash_mismatch"
+			breaks = append(breaks, ChainBreak{
+				ID: row.ID, Reason: "prev_hash_mismatch",
+				Expected: expectedPrev, Actual: row.PrevHash,
+			})
 		}
-		computed, err := ComputeSelfHash(expectedPrev, &row)
+		// self_hash is computed from the row's OWN prev_hash (that is how
+		// it was written), so a prev mismatch never double-reports the row.
+		computed, err := ComputeSelfHash(row.PrevHash, &row)
 		if err != nil {
-			return row.ID, "compute_error:" + err.Error()
-		}
-		if computed != row.SelfHash {
-			return row.ID, "self_hash_mismatch"
+			breaks = append(breaks, ChainBreak{
+				ID: row.ID, Reason: "compute_error:" + err.Error(),
+				Expected: row.PrevHash, Actual: row.SelfHash,
+			})
+		} else if computed != row.SelfHash {
+			breaks = append(breaks, ChainBreak{
+				ID: row.ID, Reason: "self_hash_mismatch",
+				Expected: computed, Actual: row.SelfHash,
+			})
 		}
 		expectedPrev = row.SelfHash
 	}
-	return 0, ""
+	return breaks
 }

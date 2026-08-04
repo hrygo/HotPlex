@@ -246,7 +246,7 @@ Worker 每次执行工具调用时触发 `tool.call`。根据工具敏感性采�
 
 所有 Admin API 写操作**双写**到两个审计通道：
 
-1. **slog admin_audit**（传统日志管道）
+1. **slog admin_audit**（传统日志管道——在调用时解析 `slog.Default()`，因此与 Gateway 的 JSON / lumberjack 日志管道一致；不会被包初始化时捕获的旧 logger 绕过）
 2. **user_activity 表**（不可变审计存储，action 前缀 `admin.*`）
 
 | Admin 操作 | user_activity Action |
@@ -305,12 +305,18 @@ Row 3:
 
 ### 5.2 不可变性保障
 
-数据库层面通过 `BEFORE UPDATE` 触发器**禁止所有 UPDATE 操作**：
+数据库层面通过触发器**禁止所有 UPDATE 与未授权的 DELETE**（migration 023 + 030）：
 
-- **SQLite**：`RAISE(ABORT)` 阻止更新
-- **PostgreSQL**：通过 PL/pgSQL 函数 `RAISE EXCEPTION` 阻止更新
+- **SQLite**：`RAISE(ABORT)` 阻止更新；`trg_ua_no_delete` 阻止未被 Checkpoint 锚定的删除
+- **PostgreSQL**：通过 PL/pgSQL 函数 `RAISE EXCEPTION` 阻止更新与未锚定删除
 
 任何试图修改审计记录的操作都会被数据库拒绝并返回错误。
+
+**DELETE 保护原理**（根因修复：历史上手工/脚本删除可在不写 Checkpoint 的情况下静默断链——即 `broken_id=1253` 事件的成因）：
+
+- 只有**被 Checkpoint 锚定覆盖**的删除被允许（即 GC prune 与 `DeleteBefore` 两条路径；两者在**同一事务内先写 Checkpoint 再删除**——这是应用层保证，SQL 触发器无法观测事务身份，放行条件为 `checkpoint.next_id > 被删行 id`）
+- 不变量：每次 GC 前缀删除后，所有幸存行 `id >= 最新 checkpoint.next_id`，因此**任何现存行都无法被未锚定删除**
+- 违反者返回 `audit: rows are immutable except via checkpoint-anchored GC`
 
 ### 5.3 保留与 GC
 
@@ -318,19 +324,21 @@ Row 3:
 
 1. 计算 cutoff 时间点（`now - retention`）
 2. 在写事务中找到 cutoff 前最后一条记录的 ID
-3. 删除该 ID 及之前的所有记录
-4. 保存 Checkpoint（rebase 锚点）
-5. 提交事务
+3. **先在事务内写入 Checkpoint（锚定待删前缀），再删除**——顺序即 `trg_ua_no_delete` 触发器契约；若表被清空则追加一条 `LastSelfHash=""` 的修正 Checkpoint，使下一条记录成为新创世
+4. 提交事务
 
-> **SQLite** 通过 `writeMu` 串行化，**PostgreSQL** 通过 `pg_advisory_xact_lock(819207)` 串行化，确保 GC 与写入不会产生竞态。
+> **SQLite** 通过 `writeMu` 串行化，**PostgreSQL** 通过 `pg_advisory_xact_lock(819207)` 串行化，确保 GC 与写入不会产生竞态（C1/C2 race 已由单事务收口）。
 
 ### 5.4 后台 Verifier
 
 Verifier 每小时自动运行一次，以**流式方式**逐批验证 Hash Chain 完整性（每批 1000 条，O(batchSize) 内存，不 OOM）。
 
+**一次校验报告全部断裂点**（非短路）：游标在断裂后照常推进，同一轮即可列出所有断裂行（上限 50 条），避免"修复第一处后才暴露下一处"的掩盖问题。
+
 检测到链断裂时：
-- 记录 `hotplex_audit_chain_breaks_total` Prometheus 指标（含 `reason` 属性）
-- 日志按**状态机降噪**输出：新断裂（首次出现）输出 WARN，附带 `rows_checked`、按 `reason` 映射的处置建议（`advice`）与断裂行诊断（`broken_at` / `platform` / `action` / `outcome` / `resource_type` / `expected_prev_hash` / `actual_prev_hash`，均为无 PII 字段，可安全外发）；同一断裂持续存在时降为 DEBUG 并累计 `first_seen` / `occurrences`，避免每小时告警风暴；断裂修复后输出 INFO `chain break resolved`
+- 记录 `hotplex_audit_chain_breaks_total` Prometheus 指标
+- 日志按**状态机降噪**输出：新断裂（首次出现）输出 WARN，附带 `rows_checked`、`broken_count` / `broken_ids`（多断点时）、按 `reason` 映射的处置建议（`advice`）与首个断裂行诊断（`broken_at` / `platform` / `action` / `outcome` / `resource_type` / `expected_prev_hash` / `actual_prev_hash`，均为无 PII 字段，可安全外发）；同一断裂持续存在时降为 DEBUG 并累计 `first_seen` / `occurrences`，避免每小时告警风暴；断裂修复后输出 INFO `chain break resolved`
+- 也可手动触发：`hotplex audit verify`（只读，输出全部断裂点与 `advice`）
 
 ```yaml
 # 告警规则示例
@@ -344,6 +352,8 @@ Verifier 每小时自动运行一次，以**流式方式**逐批验证 Hash Chai
 ```
 
 ### 5.5 Zero-loss 保证
+
+Collector 提供三级降级（channel → O_SYNC WAL spill → 有界阻塞），**常规 batch flush 失败时同样不丢事件**：`runWriter` 会把未落库的 batch 重新写入 spill 文件，等待下一次 drain 重放（与 spill-drain 路径的 re-spill 契约一致）。无 spill 配置时失败事件计入 `hotplex_audit_*_dropped_total`，保证丢失可见。
 
 Collector 采用 3 级 Enqueue 策略确保事件不丢失：
 

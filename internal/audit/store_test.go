@@ -344,7 +344,12 @@ func TestSQLiteStore_Stats(t *testing.T) {
 	require.NotNil(t, stats.ByPlatform)
 }
 
-func TestSQLiteStore_DeleteBefore(t *testing.T) {
+// TestSQLiteStore_DeleteBefore_CheckpointAnchored covers the root-cause
+// fix: the legacy DeleteBefore path deleted rows with no checkpoint
+// anchor, orphaning the hash chain (the broken_id=1253 era). After the
+// fix it must behave like the GC prune — delete the prefix, write a
+// checkpoint, and leave the chain verifiable.
+func TestSQLiteStore_DeleteBefore_CheckpointAnchored(t *testing.T) {
 	t.Parallel()
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()
@@ -352,8 +357,13 @@ func TestSQLiteStore_DeleteBefore(t *testing.T) {
 	rows := []*UserActivity{
 		{Ts: 1000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "", SelfHash: "h1"},
 		{Ts: 2000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "h1", SelfHash: "h2"},
-		{Ts: 3000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "h2", SelfHash: "h3"},
+		{Ts: 3000, UserID: "u1", UserIDType: UserIDTypePlatform, Platform: PlatformFeishu, Action: ActionAuthLogin, Outcome: OutcomeSuccess, DetailJSON: `{}`, PrevHash: "h2"},
 	}
+	// The surviving row's self_hash must be the real chain hash so the
+	// post-prune verification pass stays clean.
+	h3, err := ComputeSelfHash("h2", rows[2])
+	require.NoError(t, err)
+	rows[2].SelfHash = h3
 	tx, err := store.BeginTx(ctx)
 	require.NoError(t, err)
 	require.NoError(t, tx.AppendBatch(ctx, rows))
@@ -367,6 +377,20 @@ func TestSQLiteStore_DeleteBefore(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	require.Equal(t, int64(3000), remaining[0].Ts)
+
+	// The delete must have written a checkpoint anchoring the pruned prefix
+	// (next_id = first surviving id), and the chain must verify clean.
+	cp, err := store.LatestCheckpoint(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, cp, "DeleteBefore must leave a checkpoint anchor")
+	require.Equal(t, int64(3), cp.NextID, "checkpoint must anchor at the first surviving row")
+	require.Equal(t, "h2", cp.LastSelfHash, "checkpoint must carry the last pruned row's self_hash")
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), result.BrokenID, "chain must verify clean after checkpoint-anchored delete")
+	require.Empty(t, result.Reason)
 }
 
 func TestSQLiteStore_Checkpoint(t *testing.T) {

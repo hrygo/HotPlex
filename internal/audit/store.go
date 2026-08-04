@@ -74,13 +74,16 @@ type Store interface {
 // Tx is a single audit-write transaction. All hash-chain rows in one batch
 // must use the same Tx; the previous row's self_hash feeds the next row's prev_hash.
 //
-// GC also runs its whole prune inside one Tx (LastRowBefore → DeleteByIDLEQ →
-// SaveCheckpoint → Commit). Doing the prune under the Tx guarantees the same
-// single-writer serialization that protects the append path: on SQLite the
-// process-wide writeMu is held for the entire Tx; on PostgreSQL the
-// pg_advisory_xact_lock acquired in BeginTx is held until Commit. This closes
-// the C1/C2 race where GC previously ran each step as a separate store call
-// and could interleave with a concurrent flushBatch, breaking the hash chain.
+// GC also runs its whole prune inside one Tx (LastRowBefore → SaveCheckpoint →
+// DeleteByIDLEQ → [corrected checkpoint] → Commit). The checkpoint is written
+// BEFORE the delete because trg_ua_no_delete (migration 030) only lets a row
+// through when a checkpoint in the same transaction already anchors it. Doing
+// the prune under the Tx guarantees the same single-writer serialization that
+// protects the append path: on SQLite the process-wide writeMu is held for the
+// entire Tx; on PostgreSQL the pg_advisory_xact_lock acquired in BeginTx is
+// held until Commit. This closes the C1/C2 race where GC previously ran each
+// step as a separate store call and could interleave with a concurrent
+// flushBatch, breaking the hash chain.
 type Tx interface {
 	Append(ctx context.Context, ua *UserActivity) error
 	AppendBatch(ctx context.Context, uas []*UserActivity) error
@@ -402,18 +405,68 @@ func (s *sqliteStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]
 	return queryAsc(s.db, s.d, ctx, fromID, limit)
 }
 
+// DeleteBefore prunes rows with ts < cutoff, anchored by a checkpoint
+// written in the same transaction (mirror of the GC prune path). The
+// checkpoint is the trigger contract for trg_ua_no_delete (migration 030):
+// a DELETE that is not checkpoint-anchored is rejected at the DB layer,
+// and a delete without a checkpoint would orphan the hash chain.
 func (s *sqliteStore) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	var deleted int64
-	err := s.writeMu.WithLock(func() error {
-		res, err := s.db.ExecContext(ctx, "DELETE FROM user_activity WHERE ts < ?", cutoff.UnixMilli())
-		if err != nil {
-			return fmt.Errorf("audit: delete: %w", err)
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("audit: delete-before begin: %w", err)
+	}
+	deleted, _, err := deleteBeforeTx(ctx, tx, cutoff)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("audit: delete-before commit: %w", err)
+	}
+	return deleted, nil
+}
+
+// deleteBeforeTx runs the shared prefix-prune sequence: find the
+// highest-id row before the cutoff, anchor it with a checkpoint, then
+// delete the prefix — all inside one Tx so the DELETE trigger sees the
+// anchor and no concurrent writer can interleave. When the prune empties
+// the table a second (corrected) checkpoint with LastSelfHash="" is
+// written so the next append is treated as genesis.
+func deleteBeforeTx(ctx context.Context, tx Tx, cutoff time.Time) (int64, Checkpoint, error) {
+	lastID, lastHash, err := tx.LastRowBefore(ctx, cutoff)
+	if err != nil {
+		return 0, Checkpoint{}, fmt.Errorf("audit: delete-before last row: %w", err)
+	}
+	if lastID == 0 {
+		return 0, Checkpoint{}, nil
+	}
+	cp := Checkpoint{
+		PrunedAt:     time.Now(),
+		LastSelfHash: lastHash,
+		NextID:       lastID + 1,
+	}
+	// Anchor FIRST: trg_ua_no_delete only lets rows through when a
+	// checkpoint in the same transaction already covers them.
+	if err := tx.SaveCheckpoint(ctx, cp); err != nil {
+		return 0, Checkpoint{}, fmt.Errorf("audit: delete-before save checkpoint: %w", err)
+	}
+	deleted, err := tx.DeleteByIDLEQ(ctx, lastID)
+	if err != nil {
+		return 0, Checkpoint{}, fmt.Errorf("audit: delete-before delete: %w", err)
+	}
+	// Empty-table detection must run AFTER the delete; a corrected
+	// checkpoint clears the anchor so the next row is genesis.
+	remaining, err := tx.RowCount(ctx)
+	if err != nil {
+		return 0, Checkpoint{}, fmt.Errorf("audit: delete-before row count: %w", err)
+	}
+	if remaining == 0 {
+		cp.LastSelfHash = ""
+		if err := tx.SaveCheckpoint(ctx, cp); err != nil {
+			return 0, Checkpoint{}, fmt.Errorf("audit: delete-before corrected checkpoint: %w", err)
 		}
-		d, _ := res.RowsAffected()
-		deleted = d
-		return nil
-	})
-	return deleted, err
+	}
+	return deleted, cp, nil
 }
 
 func (s *sqliteStore) SaveCheckpoint(ctx context.Context, c Checkpoint) error {
@@ -745,12 +798,19 @@ func (s *pgStore) QueryAsc(ctx context.Context, fromID int64, limit int) ([]User
 }
 
 func (s *pgStore) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM user_activity WHERE ts < $1", cutoff.UnixMilli())
+	tx, err := s.BeginTx(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("audit: pg delete: %w", err)
+		return 0, fmt.Errorf("audit: pg delete-before begin: %w", err)
 	}
-	d, _ := res.RowsAffected()
-	return d, nil
+	deleted, _, err := deleteBeforeTx(ctx, tx, cutoff)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("audit: pg delete-before commit: %w", err)
+	}
+	return deleted, nil
 }
 
 func (s *pgStore) SaveCheckpoint(ctx context.Context, c Checkpoint) error {

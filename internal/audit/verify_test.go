@@ -3,11 +3,16 @@ package audit
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/dbutil"
+	"github.com/hrygo/hotplex/internal/sqlutil"
 )
 
 func TestVerify_ValidChain(t *testing.T) {
@@ -295,6 +300,114 @@ func TestRecordResult_PersistentBreakDowngradesToDebug(t *testing.T) {
 	require.Contains(t, out, "chain break persists")
 	require.Contains(t, out, "occurrences=2")
 	require.NotContains(t, out, "advice=")
+}
+
+// TestVerify_MultipleBreaksReported covers the root-cause fix for the
+// audit-chain breakage (broken_id=1253 era): the verifier used to
+// short-circuit on the FIRST break, hiding later ones (e.g. the second
+// gap at id=1269 was masked by the first at 1253). VerifyOnce must now
+// report EVERY broken row so operators see the full extent of a chain
+// break in one pass.
+func TestVerify_MultipleBreaksReported(t *testing.T) {
+	t.Parallel()
+	store, db := newTestStoreAndDB(t)
+	writeChain(t, store, 10)
+
+	// Interior deletes mirror the historical manual-DELETE breakage:
+	// rows 5 and 9 vanish, orphaning rows 6 and 10 (their prev_hash
+	// references the deleted rows' self_hash).
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `DELETE FROM user_activity WHERE id = 5`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `DELETE FROM user_activity WHERE id = 9`)
+	require.NoError(t, err)
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, int64(6), result.BrokenID, "first break must remain the canonical broken_id")
+	require.Equal(t, "prev_hash_mismatch", result.Reason)
+	require.Len(t, result.BrokenRows, 2, "verifier must report every break, not short-circuit")
+
+	ids := []int64{result.BrokenRows[0].ID, result.BrokenRows[1].ID}
+	require.ElementsMatch(t, []int64{6, 10}, ids, "broken rows must be 6 (gap at 5) and 10 (gap at 9)")
+
+	for _, br := range result.BrokenRows {
+		require.NotEqual(t, "", br.ExpectedPrevHash, "expected_prev_hash must be populated")
+		require.NotEqual(t, "", br.ActualPrevHash, "actual_prev_hash must be populated")
+		require.NotEqual(t, br.ExpectedPrevHash, br.ActualPrevHash, "a real break has divergent hashes")
+		require.Equal(t, "prev_hash_mismatch", br.Reason)
+	}
+}
+
+// TestVerify_AllBreaksAcrossBatchBoundary ensures multi-break collection
+// still works when breaks span the verifier's internal 1000-row batch
+// boundary (the cursor must keep advancing past a break).
+func TestVerify_AllBreaksAcrossBatchBoundary(t *testing.T) {
+	t.Parallel()
+	store, db := newTestStoreAndDB(t)
+	writeChain(t, store, 1500)
+
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `DELETE FROM user_activity WHERE id IN (500, 1200)`)
+	require.NoError(t, err)
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(ctx)
+	require.NoError(t, err)
+	require.Len(t, result.BrokenRows, 2, "breaks in different batches must both be reported")
+	ids := []int64{result.BrokenRows[0].ID, result.BrokenRows[1].ID}
+	require.ElementsMatch(t, []int64{501, 1201}, ids)
+}
+
+// TestVerify_SelfHashBreakCarriesSelfHashDiagnostics pins the diagnostic
+// contract for tamper breaks: for self_hash_mismatch the Expected/Actual
+// values are SELF hashes, so they must be exposed in dedicated fields —
+// stuffing them into ExpectedPrevHash/ActualPrevHash would mislabel them
+// as previous-hash linkage data and mislead operators.
+func TestVerify_SelfHashBreakCarriesSelfHashDiagnostics(t *testing.T) {
+	t.Parallel()
+	store, db := newTestStoreAndDB(t)
+	writeChain(t, store, 3)
+
+	// Tamper row 2's content directly (test schema has no UPDATE trigger).
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `UPDATE user_activity SET user_id='attacker' WHERE id = 2`)
+	require.NoError(t, err)
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(ctx)
+	require.NoError(t, err)
+	require.Len(t, result.BrokenRows, 1, "one tampered row yields one break")
+	br := result.BrokenRows[0]
+	require.Equal(t, int64(2), br.ID)
+	require.Equal(t, "self_hash_mismatch", br.Reason)
+
+	require.NotEmpty(t, br.ExpectedSelfHash, "expected self hash must be populated")
+	require.NotEmpty(t, br.ActualSelfHash, "actual self hash must be populated")
+	require.NotEqual(t, br.ExpectedSelfHash, br.ActualSelfHash, "tamper diverges expected vs actual")
+	require.Empty(t, br.ExpectedPrevHash, "prev-hash fields must stay empty for self-hash breaks")
+	require.Empty(t, br.ActualPrevHash)
+}
+
+// newTestStoreAndDB returns an audit Store plus the raw *sql.DB backing it,
+// so tests can poke rows directly (e.g. simulate manual DELETE breakage).
+func newTestStoreAndDB(t *testing.T) (Store, *sql.DB) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "audit_test.db")
+	db, err := sql.Open(sqlutil.DriverName, dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	require.NoError(t, err)
+	_, err = db.Exec(testSchemaSQL)
+	require.NoError(t, err)
+	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
+	store, err := NewStore(db, dbutil.DialectSQLite, writeMu, slog.Default())
+	require.NoError(t, err)
+	return store, db
 }
 
 // testNow returns the current time (helper for readability).

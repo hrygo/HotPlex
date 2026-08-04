@@ -99,8 +99,8 @@ func captureSlogAudit(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	auditMu.Lock()
 	t.Cleanup(func() { auditMu.Unlock() })
-	prev := auditLogger
-	t.Cleanup(func() { auditLogger = prev })
+	prev := currentAuditLogger()
+	t.Cleanup(func() { auditLogger.Store(prev) })
 	var buf bytes.Buffer
 	SetAuditLogger(slog.New(slog.NewTextHandler(&buf, nil)))
 	return &buf

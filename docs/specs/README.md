@@ -26,6 +26,7 @@
 | [Turns-Materialized-Table-Spec.md](./Turns-Materialized-Table-Spec.md) | Turns 物化表 — eventstore 物化为独立表提升查询性能 | proposed | 2026-05-19 | 0% |
 | [API-Documentation-Hybrid-Generation-Spec.md](./API-Documentation-Hybrid-Generation-Spec.md) | API 文档混合生成 — 手写 + 自动生成方案降低维护风险 | proposed | 2026-06-03 | 0% |
 | [Observability-Spec.md](./Observability-Spec.md) | 统一可观测性体系 — OTel Native 架构，70 指标，Tracing，告警，SLO | proposed | 2026-06-04 | 0% |
+| [Scope-Aware-Capability-Inventory-Spec.md](./Scope-Aware-Capability-Inventory-Spec.md) | Scope-aware capability inventory、precedence、safe materialization 与 enforcement contract | approved | 2026-08-04 | 设计已冻结 |
 | [WebChat-Multitenancy-Foundation-Design-Spec.md](./WebChat-Multitenancy-Foundation-Design-Spec.md) | WebChat 多租户地基（spec ①） — 身份/workspace/隔离/配额后端地基设计 | draft | 2026-06-15 | 0% |
 | [WebChat-Multitenancy-Roadmap-Spec.md](./WebChat-Multitenancy-Roadmap-Spec.md) | WebChat 多租户路线图 — 后续 spec ②-⑥ 阶段规划与依赖编排 | proposed | 2026-06-15 | 0% |
 
@@ -90,25 +91,14 @@
 
 ---
 
-## 状态统计
+## HotPlex 2.0 Approved Contracts
 
-### 按状态分类
-
-- **implemented**: 8 个 — Per-Bot-Agent-Config, Turn-Summary-WorkDir-Fix, Worker-User-Interaction, Slack-Stream-Rotation, Gateway-Self-Restart, Multi-Bot-Support, Agent-Config-Injection-Control, Slack-Block-Kit-Upgrade
-- **approved**: 1 个 — OCS-Production-Readiness
-- **verified**: 1 个 — ACP-Worker-Enhancement
-- **draft**: 13 个 — Gateway-Async-Init, Feishu-Adapter, Hot-Reload, Session-History, Turn-Summary, CLI-Self-Service, Onboard-UX, TTS-Engine, Codex-Reset-Zombie-Fix, Cron-Delivery-Retry, Feishu-Card-Header, Feishu-Interactive-Card-Buttons, Codex-CLI-Full-Upgrade, WebChat-Multitenancy-Foundation
-- **proposed**: 11 个 — GroupChat-Collaboration, Dual-Database-Support, Consolidate-Events-Store, Delta-Optimization, Interaction-Response-Chain-Fix, Inbound-Event-Storage-Fix, Onboard-Go-Embed-AST, WebChat-v2-Revamp, Windows-Support, Turns-Materialized-Table, API-Documentation-Hybrid-Generation, WebChat-Multitenancy-Roadmap
-
-### 按领域分类
-
-- **架构/Gateway**: 18 个
-- **Worker/Session**: 10 个
-- **平台适配**: 5 个
-- **定时任务**: 3 个
-- **CLI/Onboard**: 3 个
-- **前端/平台**: 3 个
-- **跟踪矩阵**: 4 个
+| 文档 | 权威职责 | 状态 |
+| --- | --- | --- |
+| [Scope-Aware-Capability-Inventory-Spec.md](./Scope-Aware-Capability-Inventory-Spec.md) | Capability inventory、precedence、materialization 和 enforcement | approved |
+| [Runtime Operations Contract](../superpowers/specs/2026-08-04-runtime-operations-contract.md) | EffectiveRuntimePlan、EffectLedger、observed state 和 reconciliation | approved |
+| [HotPlex 2.0 Roadmap](../v2/ROADMAP.md) | 产品定位、当前事实、阶段、优先级和完成定义 | final |
+| [HotPlex 2.0 Architecture](../v2/ARCHITECTURE.md) | 组件、事实所有权、数据流和兼容边界 | final |
 
 ---
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Summary
+
+审计 Hash Chain 根因修复：**DELETE 保护 + 全断点报告**。历史上手工/脚本删除可在不写 Checkpoint 的情况下静默断链（`broken_id=1253` 事件成因），本次通过 `trg_ua_no_delete` 触发器将删除限定为 checkpoint 锚定路径（GC prune / `DeleteBefore`），Verifier 从"只报第一处断裂"改为一次报告全部断裂点（上限 50），并新增 `hotplex audit verify` 只读命令用于主动校验。
+
+### Added
+
+- **Audit**: `hotplex audit verify` — read-only on-demand chain verification CLI (no migrations applied, safe against read-only copies), reports every break (up to 50) with per-reason non-PII diagnostics and remediation advice, exits non-zero on a broken chain for CI/cron gating.
+- **Audit**: Verifier collects ALL breaks in one pass (`BrokenRows`), surfaces `broken_count` / `broken_ids` on the first WARN; cursor advances past breaks so later gaps (e.g. id=1269) are no longer masked by the first one (id=1253). Per-reason hash diagnostics are no longer conflated: `prev_hash_mismatch` exposes expected/actual prev_hash, `self_hash_mismatch` exposes expected/actual self_hash.
+- **Audit**: `trg_ua_no_delete` (migration 030, SQLite + PostgreSQL) — DELETE rejected unless covered by a checkpoint anchor; the anchor is written in the same transaction as the delete by the GC prune / `DeleteBefore` paths; `DeleteBefore` rewritten as checkpoint-anchored prefix prune.
+
+### Changed
+
+- **Audit GC**: prune sequence reordered to anchor-first (checkpoint before DELETE) to satisfy the new trigger contract; empty-table correction checkpoint preserves genesis semantics.
+- **Audit metric**: `hotplex_audit_chain_breaks_total` keeps the `reason` attribute on each increment.
+- **Admin audit logging**: `admin_audit` now resolves the logger at call time (`slog.Default()`), so records flow through the configured JSON/lumberjack pipeline instead of the logger captured at package init (which bypassed the pipeline entirely); `SetAuditLogger(nil)` clears a test override so the default is followed again.
+- **Audit zero-loss**: a failed regular batch flush now re-spills the in-flight batch (previously discarded), matching the spill-drain path's zero-loss contract.
+
 ## [1.38.1] - 2026-07-27
 
 ### Summary

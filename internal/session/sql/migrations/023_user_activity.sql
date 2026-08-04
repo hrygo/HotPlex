@@ -1,8 +1,9 @@
 -- +goose Up
 -- Issue #833 (User Behavior Audit System, Phase 1) — Spec §5.1 / §5.5 / §11.2.
 -- Append-only audit log with per-row sha256 hash chain. UPDATE is blocked at the DB
--- layer via BEFORE UPDATE trigger (DELETE is intentionally NOT blocked: §5.5 lets the
--- audit GC loop rebase the chain via the audit_chain_checkpoints table). v_turns* are
+-- layer via BEFORE UPDATE trigger (migration 030 later added trg_ua_no_delete,
+-- which blocks every DELETE that is not anchored by a checkpoint written in the
+-- same transaction — the audit GC loop's prune path). v_turns* are
 -- dead views from before migration 009 (Turns-Materialized-Table) — DROP IF EXISTS is
 -- a harmless no-op for fresh DBs and cleans up dev/test DBs that still carry them.
 

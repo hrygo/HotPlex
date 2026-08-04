@@ -141,8 +141,8 @@ func TestCSRFMiddleware_AuditsCSRFRejects(t *testing.T) {
 	auditMu.Lock()
 	t.Cleanup(func() { auditMu.Unlock() })
 
-	prev := auditLogger
-	t.Cleanup(func() { auditLogger = prev })
+	prev := currentAuditLogger()
+	t.Cleanup(func() { auditLogger.Store(prev) })
 
 	var buf bytes.Buffer
 	SetAuditLogger(slog.New(slog.NewTextHandler(&buf, nil)))
