@@ -232,6 +232,38 @@ Expected: 用户既有 audit 文件保持原状；本计划只产生文档变更
 
 Run: `rtk git add docs && rtk git commit -m 'docs(v2): 发布终版路线图文档体系'`
 
+### Task 7: 同步相关 GitHub Issues
+
+**Files:**
+- Read: `docs/v2/ROADMAP.md`
+- Read: `docs/v2/IMPLEMENTATION-ROADMAP.md`
+- Read: `docs/superpowers/specs/2026-08-04-runtime-operations-contract.md`
+- Read: `docs/specs/Scope-Aware-Capability-Inventory-Spec.md`
+
+**Interfaces:**
+- Consumes: 终版路径、四阶段路线、冻结契约、完成标准和 Issue 追踪矩阵。
+- Produces: 与终版文档一致的 GitHub Issue 正文和终态评论。
+
+- [ ] **Step 1: 读取相关 Issue 当前状态**
+
+通过 GitHub connector 读取 #851、#867、#868、#870、#946、#947、#948 的 title、state、body、labels 和最新评论；已关闭的 #847–#850、#852、#877、#878 只核对状态，不覆盖已交付记录。
+
+- [ ] **Step 2: 更新冻结契约 Issue**
+
+更新 #946、#947、#948 的权威文档路径、四阶段归属、范围、完成标准和非目标；保持 `open`，明确“设计已冻结、实现尚未完成”。
+
+- [ ] **Step 3: 更新承接 Issue**
+
+更新 #851、#867、#868、#870 的依赖和终态评论，使其分别承接 EffectLedger、EffectiveRuntimePlan/isolation、canonical facts/Cockpit、Recipes/effect contract，不保留 qm 调研时间线。
+
+- [ ] **Step 4: 远端复核**
+
+重新读取 7 个 Issue 和 4 条终态评论，确认路径、状态、依赖、非目标和本地 ROADMAP 一致；不关闭任何实现未完成的 Issue。
+
+- [ ] **Step 5: 记录同步结果**
+
+在最终交付中列出 7 个 Issue 链接、state 和设计状态；外部写入完成以重新读取结果为准，不以 connector 调用返回成功替代远端事实。
+
 - [ ] **Step 6: 推送分支**
 
 Run: `rtk git push origin fix/949-audit-chain-delete-protection`
