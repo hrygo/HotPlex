@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -80,4 +81,50 @@ func TestMigrations_PG_023UserActivity_TriggerBlocksUpdate(t *testing.T) {
 	// BEFORE UPDATE with no WHEN clause, so it fires unconditionally.
 	_, err = db.ExecContext(ctx, `UPDATE user_activity SET ts = ts`)
 	require.Error(t, err, "self-assign UPDATE must also be blocked")
+}
+
+// TestMigrations_PG_030AuditNoDelete_BlocksUnauthorizedRowDeletes is the
+// PostgreSQL counterpart to TestMigrations_030AuditNoDelete_BlocksUnauthorizedRowDeletes:
+// migration 030's fn_ua_no_delete trigger must reject every DELETE that is
+// not covered by a checkpoint anchor, while the GC prune path (checkpoint
+// written in the same transaction before the delete) must still pass.
+func TestMigrations_PG_030AuditNoDelete_BlocksUnauthorizedRowDeletes(t *testing.T) {
+	ctx := context.Background()
+	db := openTestPGDB(t)
+	defer func() { _ = db.Close() }()
+
+	insertRow := func(id int, selfHash string) {
+		t.Helper()
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO user_activity (ts, user_id, user_id_type, platform, action, outcome, detail_json, prev_hash, self_hash)
+			 VALUES ($1, 'u', 'registered', 'webchat', 'x', 'success', '{}', 'prev', $2)`,
+			int64(id), selfHash)
+		require.NoError(t, err, "INSERT row %d", id)
+	}
+	insertRow(1, "h1")
+	insertRow(2, "h2")
+
+	// Unauthorized DELETE (no checkpoint anchor) must abort with the spec message.
+	_, err := db.ExecContext(ctx, `DELETE FROM user_activity WHERE id = 1`)
+	require.Error(t, err, "unauthorized DELETE must be rejected by trg_ua_no_delete")
+	require.True(t,
+		strings.Contains(err.Error(), "audit: rows are immutable") || strings.Contains(err.Error(), "immutable"),
+		"trigger error should mention immutability, got: %v", err)
+
+	// The GC prune path (checkpoint written in the SAME transaction before
+	// the DELETE) must still pass.
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO audit_chain_checkpoints (pruned_at, last_self_hash, next_id) VALUES ($1, $2, $3)`,
+		time.Now().UnixMilli(), "h1", int64(2))
+	require.NoError(t, err, "checkpoint insert inside GC tx")
+	_, err = tx.ExecContext(ctx, `DELETE FROM user_activity WHERE id <= 1`)
+	require.NoError(t, err, "checkpoint-anchored DELETE (GC prune) must pass")
+	require.NoError(t, tx.Commit())
+
+	// A row beyond the checkpoint's next_id (id=2 survives, next_id=2)
+	// must NOT be deletable.
+	_, err = db.ExecContext(ctx, `DELETE FROM user_activity WHERE id = 2`)
+	require.Error(t, err, "row past the checkpoint anchor must stay immutable")
 }

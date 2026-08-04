@@ -2,12 +2,14 @@
 -- Root-cause fix for audit-chain breakage (broken_id=1253 era): rows were
 -- DELETEable with no trace, orphaning the hash chain (manual/scripted
 -- deletes never wrote a checkpoint anchor). DELETE is now only permitted
--- for rows anchored by a checkpoint written in the same transaction —
--- i.e. the GC prune path (gc.go Tick) and the checkpoint-anchored
--- DeleteBefore. The anchor check uses the invariant that every surviving
--- row has id >= the latest checkpoint's next_id (each GC prune deletes
--- the whole prefix up to next_id-1), so any live row fails the
--- NOT EXISTS test and is rejected; GC's own pruned rows pass it.
+-- for rows covered by an existing checkpoint anchor — the GC prune path
+-- (gc.go Tick) and the checkpoint-anchored DeleteBefore write the anchor
+-- in the SAME transaction as the delete (an application-level guarantee;
+-- a SQL trigger cannot observe transaction identity). The anchor check
+-- uses the invariant that every surviving row has id >= the latest
+-- checkpoint's next_id (each GC prune deletes the whole prefix up to
+-- next_id-1), so any live row fails the NOT EXISTS test and is rejected;
+-- GC's own pruned rows pass it.
 -- See SQLite companion for the trigger rationale.
 
 -- +goose StatementBegin

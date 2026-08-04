@@ -48,3 +48,21 @@ func TestAdminAudit_ExplicitOverrideStillWins(t *testing.T) {
 	require.Contains(t, out, "admin_audit", "explicit override logger must receive the record")
 	require.Contains(t, out, "actor-2")
 }
+
+// TestSetAuditLogger_NilClearsOverride pins the restore contract: tests
+// previously "restored" with SetAuditLogger(slog.Default()), which with the
+// atomic override pointer installs the default AS a permanent override and
+// stops AdminAudit from following later slog.SetDefault changes. nil must
+// clear the override so the default is followed again at call time.
+func TestSetAuditLogger_NilClearsOverride(t *testing.T) {
+	prev := currentAuditLogger()
+	t.Cleanup(func() { auditLogger.Store(prev) })
+
+	var buf bytes.Buffer
+	SetAuditLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+	require.NotEqual(t, slog.Default(), currentAuditLogger(), "override must be active")
+
+	SetAuditLogger(nil)
+	require.Equal(t, slog.Default(), currentAuditLogger(),
+		"nil must clear the override so AdminAudit follows the current default")
+}

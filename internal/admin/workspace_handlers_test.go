@@ -161,7 +161,7 @@ func TestHandleUpdateAdminWorkspacePermissionMode_Forbidden(t *testing.T) {
 func TestAdminWorkspaceUpdate_AuditTrail(t *testing.T) {
 	var buf bytes.Buffer
 	SetAuditLogger(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { SetAuditLogger(slog.Default()) })
+	t.Cleanup(func() { SetAuditLogger(nil) })
 
 	api := setupWorkspaceAPI(t)
 	mux := http.NewServeMux()

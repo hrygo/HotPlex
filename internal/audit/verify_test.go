@@ -361,6 +361,36 @@ func TestVerify_AllBreaksAcrossBatchBoundary(t *testing.T) {
 	require.ElementsMatch(t, []int64{501, 1201}, ids)
 }
 
+// TestVerify_SelfHashBreakCarriesSelfHashDiagnostics pins the diagnostic
+// contract for tamper breaks: for self_hash_mismatch the Expected/Actual
+// values are SELF hashes, so they must be exposed in dedicated fields —
+// stuffing them into ExpectedPrevHash/ActualPrevHash would mislabel them
+// as previous-hash linkage data and mislead operators.
+func TestVerify_SelfHashBreakCarriesSelfHashDiagnostics(t *testing.T) {
+	t.Parallel()
+	store, db := newTestStoreAndDB(t)
+	writeChain(t, store, 3)
+
+	// Tamper row 2's content directly (test schema has no UPDATE trigger).
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `UPDATE user_activity SET user_id='attacker' WHERE id = 2`)
+	require.NoError(t, err)
+
+	v := NewVerifier(store, VerifierConfig{}, nil)
+	result, err := v.VerifyOnce(ctx)
+	require.NoError(t, err)
+	require.Len(t, result.BrokenRows, 1, "one tampered row yields one break")
+	br := result.BrokenRows[0]
+	require.Equal(t, int64(2), br.ID)
+	require.Equal(t, "self_hash_mismatch", br.Reason)
+
+	require.NotEmpty(t, br.ExpectedSelfHash, "expected self hash must be populated")
+	require.NotEmpty(t, br.ActualSelfHash, "actual self hash must be populated")
+	require.NotEqual(t, br.ExpectedSelfHash, br.ActualSelfHash, "tamper diverges expected vs actual")
+	require.Empty(t, br.ExpectedPrevHash, "prev-hash fields must stay empty for self-hash breaks")
+	require.Empty(t, br.ActualPrevHash)
+}
+
 // newTestStoreAndDB returns an audit Store plus the raw *sql.DB backing it,
 // so tests can poke rows directly (e.g. simulate manual DELETE breakage).
 func newTestStoreAndDB(t *testing.T) (Store, *sql.DB) {

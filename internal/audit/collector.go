@@ -49,6 +49,11 @@ func (c *CollectorConfig) defaults() {
 // Collector is the zero-loss audit event writer. It batches events into
 // a single transaction (so the hash chain is consistent within a batch),
 // fans out to AlertSinks after commit, and spills to disk on backpressure.
+// "Zero-loss" is bounded: events survive channel overflow, DB flush
+// failures (regular and spill-drain), and graceful shutdown — but a
+// spill write failure or the no-spill bounded-block fallback counts the
+// event as dropped (visible via Dropped()/metrics) instead of losing it
+// silently.
 type Collector struct {
 	store Store
 	spill *SpillFile

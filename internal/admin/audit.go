@@ -60,12 +60,12 @@ const (
 // so production admin_audit lines bypassed the configured pipeline.
 var auditLogger atomic.Pointer[slog.Logger]
 
-// SetAuditLogger redirects admin_audit records. Tests use it to capture audits
-// without spinning the real slog pipeline; production never calls it.
+// SetAuditLogger redirects admin_audit records. Tests use it to capture
+// audits without spinning the real slog pipeline; production never calls it.
+// Passing nil clears the override so AdminAudit follows slog.Default() again
+// (the restore contract for tests that swap the logger).
 func SetAuditLogger(l *slog.Logger) {
-	if l != nil {
-		auditLogger.Store(l)
-	}
+	auditLogger.Store(l)
 }
 
 // currentAuditLogger returns the explicit override if one is installed,

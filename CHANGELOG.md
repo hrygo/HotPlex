@@ -8,14 +8,15 @@
 
 ### Added
 
-- **Audit**: `hotplex audit verify` — read-only on-demand chain verification CLI, reports every break with non-PII diagnostics and remediation advice.
-- **Audit**: Verifier collects ALL breaks in one pass (`BrokenRows`), surfaces `broken_count` / `broken_ids` on the first WARN; cursor advances past breaks so later gaps (e.g. id=1269) are no longer masked by the first one (id=1253).
-- **Audit**: `trg_ua_no_delete` (migration 030, SQLite + PostgreSQL) — DELETE rejected unless anchored by a checkpoint written in the same transaction; `DeleteBefore` rewritten as checkpoint-anchored prefix prune.
+- **Audit**: `hotplex audit verify` — read-only on-demand chain verification CLI (no migrations applied, safe against read-only copies), reports every break (up to 50) with per-reason non-PII diagnostics and remediation advice, exits non-zero on a broken chain for CI/cron gating.
+- **Audit**: Verifier collects ALL breaks in one pass (`BrokenRows`), surfaces `broken_count` / `broken_ids` on the first WARN; cursor advances past breaks so later gaps (e.g. id=1269) are no longer masked by the first one (id=1253). Per-reason hash diagnostics are no longer conflated: `prev_hash_mismatch` exposes expected/actual prev_hash, `self_hash_mismatch` exposes expected/actual self_hash.
+- **Audit**: `trg_ua_no_delete` (migration 030, SQLite + PostgreSQL) — DELETE rejected unless covered by a checkpoint anchor; the anchor is written in the same transaction as the delete by the GC prune / `DeleteBefore` paths; `DeleteBefore` rewritten as checkpoint-anchored prefix prune.
 
 ### Changed
 
 - **Audit GC**: prune sequence reordered to anchor-first (checkpoint before DELETE) to satisfy the new trigger contract; empty-table correction checkpoint preserves genesis semantics.
-- **Admin audit logging**: `admin_audit` now resolves the logger at call time (`slog.Default()`), so records flow through the configured JSON/lumberjack pipeline instead of the logger captured at package init (which bypassed the pipeline entirely).
+- **Audit metric**: `hotplex_audit_chain_breaks_total` keeps the `reason` attribute on each increment.
+- **Admin audit logging**: `admin_audit` now resolves the logger at call time (`slog.Default()`), so records flow through the configured JSON/lumberjack pipeline instead of the logger captured at package init (which bypassed the pipeline entirely); `SetAuditLogger(nil)` clears a test override so the default is followed again.
 - **Audit zero-loss**: a failed regular batch flush now re-spills the in-flight batch (previously discarded), matching the spill-drain path's zero-loss contract.
 
 ## [1.38.1] - 2026-07-27

@@ -314,7 +314,7 @@ Row 3:
 
 **DELETE 保护原理**（根因修复：历史上手工/脚本删除可在不写 Checkpoint 的情况下静默断链——即 `broken_id=1253` 事件的成因）：
 
-- 只有**同一事务内先写 Checkpoint 再删除**的操作被允许（即 GC prune 与 `DeleteBefore` 两条路径，均以 `checkpoint.next_id > 被删行 id` 为放行条件）
+- 只有**被 Checkpoint 锚定覆盖**的删除被允许（即 GC prune 与 `DeleteBefore` 两条路径；两者在**同一事务内先写 Checkpoint 再删除**——这是应用层保证，SQL 触发器无法观测事务身份，放行条件为 `checkpoint.next_id > 被删行 id`）
 - 不变量：每次 GC 前缀删除后，所有幸存行 `id >= 最新 checkpoint.next_id`，因此**任何现存行都无法被未锚定删除**
 - 违反者返回 `audit: rows are immutable except via checkpoint-anchored GC`
 

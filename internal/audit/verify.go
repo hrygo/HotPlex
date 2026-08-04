@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/hrygo/hotplex/internal/observability"
 )
 
@@ -56,11 +59,20 @@ type BrokenRowInfo struct {
 	Reason string
 	// ExpectedPrevHash is the hash the row's prev_hash should equal (the
 	// chain cursor carried from the previous row or checkpoint anchor).
+	// Populated for prev_hash_mismatch breaks only.
 	ExpectedPrevHash string
 	// ActualPrevHash is the prev_hash stored in the row. When the two
 	// differ the gap lies before this row: the previous row was deleted,
 	// modified, or never linked correctly.
 	ActualPrevHash string
+	// ExpectedSelfHash is the self_hash the row SHOULD carry, recomputed
+	// from the row's own stored prev_hash. Populated for self_hash_mismatch
+	// breaks only (tampering) — it is a self hash, not a prev hash, so it
+	// must not be conflated with the ExpectedPrevHash fields above.
+	ExpectedSelfHash string
+	// ActualSelfHash is the self_hash stored in the row. When it differs
+	// from ExpectedSelfHash the row content changed after insert.
+	ActualSelfHash string
 }
 
 // Verifier periodically re-verifies the chain from the latest checkpoint.
@@ -160,9 +172,20 @@ func (v *Verifier) recordResult(result VerifyResult) {
 			"action", b.Action,
 			"outcome", b.Outcome,
 			"resource_type", b.ResourceType,
-			"expected_prev_hash", b.ExpectedPrevHash,
-			"actual_prev_hash", b.ActualPrevHash,
 		)
+		// Per-reason hash diagnostics: prev-hash linkage for gap breaks,
+		// self hashes for tamper breaks (never conflated).
+		if strings.HasPrefix(result.Reason, "prev_hash_mismatch") {
+			attrs = append(attrs,
+				"expected_prev_hash", b.ExpectedPrevHash,
+				"actual_prev_hash", b.ActualPrevHash,
+			)
+		} else {
+			attrs = append(attrs,
+				"expected_self_hash", b.ExpectedSelfHash,
+				"actual_self_hash", b.ActualSelfHash,
+			)
+		}
 	}
 	v.log.Warn("audit verify: chain break detected", attrs...)
 }
@@ -212,10 +235,15 @@ func (v *Verifier) VerifyOnce(ctx context.Context) (VerifyResult, error) {
 				break
 			}
 			info := BrokenRowInfo{
-				ID:               b.ID,
-				Reason:           b.Reason,
-				ExpectedPrevHash: b.Expected,
-				ActualPrevHash:   b.Actual,
+				ID:     b.ID,
+				Reason: b.Reason,
+			}
+			if strings.HasPrefix(b.Reason, "prev_hash_mismatch") {
+				info.ExpectedPrevHash = b.Expected
+				info.ActualPrevHash = b.Actual
+			} else {
+				info.ExpectedSelfHash = b.Expected
+				info.ActualSelfHash = b.Actual
 			}
 			for i := range batch {
 				if batch[i].ID != b.ID {
@@ -241,8 +269,9 @@ func (v *Verifier) VerifyOnce(ctx context.Context) (VerifyResult, error) {
 	}
 
 	if len(brokenRows) > 0 {
-		observability.AuditChainBreaks().Add(ctx, 1)
 		first := brokenRows[0]
+		observability.AuditChainBreaks().Add(ctx, 1,
+			metric.WithAttributes(attribute.String("reason", first.Reason)))
 		return VerifyResult{
 			Checkpoint:  cp,
 			RowsChecked: rowsChecked,

@@ -74,13 +74,16 @@ type Store interface {
 // Tx is a single audit-write transaction. All hash-chain rows in one batch
 // must use the same Tx; the previous row's self_hash feeds the next row's prev_hash.
 //
-// GC also runs its whole prune inside one Tx (LastRowBefore → DeleteByIDLEQ →
-// SaveCheckpoint → Commit). Doing the prune under the Tx guarantees the same
-// single-writer serialization that protects the append path: on SQLite the
-// process-wide writeMu is held for the entire Tx; on PostgreSQL the
-// pg_advisory_xact_lock acquired in BeginTx is held until Commit. This closes
-// the C1/C2 race where GC previously ran each step as a separate store call
-// and could interleave with a concurrent flushBatch, breaking the hash chain.
+// GC also runs its whole prune inside one Tx (LastRowBefore → SaveCheckpoint →
+// DeleteByIDLEQ → [corrected checkpoint] → Commit). The checkpoint is written
+// BEFORE the delete because trg_ua_no_delete (migration 030) only lets a row
+// through when a checkpoint in the same transaction already anchors it. Doing
+// the prune under the Tx guarantees the same single-writer serialization that
+// protects the append path: on SQLite the process-wide writeMu is held for the
+// entire Tx; on PostgreSQL the pg_advisory_xact_lock acquired in BeginTx is
+// held until Commit. This closes the C1/C2 race where GC previously ran each
+// step as a separate store call and could interleave with a concurrent
+// flushBatch, breaking the hash chain.
 type Tx interface {
 	Append(ctx context.Context, ua *UserActivity) error
 	AppendBatch(ctx context.Context, uas []*UserActivity) error

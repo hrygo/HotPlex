@@ -249,7 +249,7 @@ hotplex security --json            # JSON 输出
 
 ### `hotplex audit verify`
 
-只读校验 `user_activity` Hash Chain 完整性（从最新 Checkpoint 或创世行起逐行校验）。一次输出**全部**断裂点（非短路），每条含 `id` / 时间戳 / `platform` / `action` / `expected_prev_hash` / `actual_prev_hash` 与处置建议。
+只读校验 `user_activity` Hash Chain 完整性（从最新 Checkpoint 或创世行起逐行校验；不应用任何 migration，可安全指向只读副本）。一次输出**全部**断裂点（非短路，上限 50 处），每条含 `id` / 时间戳 / `platform` / `action` / 按断裂类型的哈希诊断（链断裂为 `expected_prev_hash` / `actual_prev_hash`，篡改为 `expected_self_hash` / `actual_self_hash`）与处置建议。**链断裂时命令以非零退出码结束**（可用于 CI/cron 完整性门禁）。
 
 自 migration 030 起未锚定 DELETE 已被数据库拒绝，因此新出现的 `prev_hash_mismatch` 通常意味着篡改或备份损坏。
 
@@ -257,7 +257,7 @@ hotplex security --json            # JSON 输出
 
 ```bash
 hotplex audit verify               # 校验审计链（默认 ~/.hotplex/config.yaml）
-hotplex audit verify -c configs/config-dev.yaml   # 指定配置
+hotplex audit verify --config configs/config-dev.yaml   # 指定配置
 ```
 
 **输出**：
