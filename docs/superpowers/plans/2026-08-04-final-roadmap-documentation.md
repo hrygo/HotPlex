@@ -246,7 +246,7 @@ Run: `rtk git add docs && rtk git commit -m 'docs(v2): 发布终版路线图文�
 
 - [ ] **Step 1: 读取相关 Issue 当前状态**
 
-通过 GitHub connector 读取 #851、#867、#868、#870、#946、#947、#948 的 title、state、body、labels 和最新评论；已关闭的 #847–#850、#852、#877、#878 只核对状态，不覆盖已交付记录。
+通过 GitHub connector 读取 #849、#851、#867、#868、#870、#877、#946、#947、#948 的 title、state、body、labels 和最新评论；已关闭的 #847、#848、#850、#852、#878 只核对状态，不覆盖已交付记录。
 
 - [ ] **Step 2: 更新冻结契约 Issue**
 
@@ -254,15 +254,15 @@ Run: `rtk git add docs && rtk git commit -m 'docs(v2): 发布终版路线图文�
 
 - [ ] **Step 3: 更新承接 Issue**
 
-更新 #851、#867、#868、#870 的依赖和终态评论，使其分别承接 EffectLedger、EffectiveRuntimePlan/isolation、canonical facts/Cockpit、Recipes/effect contract，不保留 qm 调研时间线。
+更新 #849、#851、#867、#868、#870、#877 的依赖和终态评论，使其分别承接完整 runtime events、EffectLedger、EffectiveRuntimePlan/isolation、canonical facts/Cockpit、Recipes/effect contract 与 operator reconcile，不保留 qm 调研时间线。
 
 - [ ] **Step 4: 远端复核**
 
-重新读取 7 个 Issue 和 4 条终态评论，确认路径、状态、依赖、非目标和本地 ROADMAP 一致；不关闭任何实现未完成的 Issue。
+重新读取 9 个 Issue 和终态评论，确认路径、状态、依赖、非目标和本地 ROADMAP 一致；不关闭任何实现未完成的 Issue。
 
 - [ ] **Step 5: 记录同步结果**
 
-在最终交付中列出 7 个 Issue 链接、state 和设计状态；外部写入完成以重新读取结果为准，不以 connector 调用返回成功替代远端事实。
+在最终交付中列出 9 个 Issue 链接、state 和设计状态；外部写入完成以重新读取结果为准，不以 connector 调用返回成功替代远端事实。
 
 - [ ] **Step 6: 推送分支**
 
