@@ -1,279 +1,280 @@
 # HOTPLEX 2.0 Roadmap
 
-> 从 AI CLI Agent Runtime 演进为 Agent Runtime Platform，再进入 Agent Operating System。
+> HotPlex 2.0 将现有 Gateway、Session、Worker、AEP、Execution、Audit、Observability 和 Cron 收敛为稳定的 Agent Runtime Gateway 契约。
 
-## 目标定位
+## 文档定位
 
-HotPlex 2.0 的核心不是重写一个新的 Agent OS，而是把 v1.x 已经存在的 Gateway、Session、Worker、AEP、Audit、Observability、Cron 能力收敛成稳定的运行时契约。
+本文是 HotPlex 2.0 产品定位、当前事实、目标状态、阶段边界、实施优先级和完成定义的唯一主线。
 
-一句话目标：
+- [Implementation Roadmap](./IMPLEMENTATION-ROADMAP.md) 展开交付切片、依赖和阶段闸门。
+- [Architecture](./ARCHITECTURE.md) 定义组件职责、事实所有权、数据流和兼容边界。
+- Approved specs 定义尚未交付能力的冻结实现契约。
+- `docs/research/` 保存源码、测试、Issue、外部规范和 ROI 证据，不覆盖本文决策。
 
-> 让自主 Agent 可以被声明、启动、审计、观测、限制资源、恢复上下文，并在未来被调度和编排。
+状态口径：
+
+| 状态 | 含义 |
+| --- | --- |
+| 已交付 | 当前代码、测试和发布记录均存在 |
+| 已冻结 | 契约已批准，实现尚未全部完成 |
+| 当前实施 | 已进入明确 Issue 和交付切片 |
+| 暂缓 | 不进入当前阶段，具备显式启动条件 |
+| 非目标 | 不属于 HotPlex 2.0 产品职责 |
 
 ## 产品定位
 
-HotPlex 2.0 的产品定位是 **self-hosted Agent Runtime Gateway**：
+HotPlex 2.0 是 **self-hosted Agent Runtime Gateway**：
 
-- 面向需要把 Claude Code、OpenCode、Codex CLI、ACP agent 等运行在受控环境中的工程团队。
-- 提供远程会话、工作区绑定、权限边界、事件流、审计、可观测性和恢复能力。
-- 作为 Agent runtime 基座，而不是通用低代码 workflow 平台、模型网关、向量知识库或 Agent marketplace。
+- 在受控 workspace 中运行 Claude Code、OpenCode Server、Codex CLI 和 ACP agent；
+- 提供远程会话、工作区绑定、身份与权限边界、AEP 事件流、执行可靠性、审计、可观测性和恢复能力；
+- 为 WebChat、Slack、Feishu、HTTP/WebSocket 集成提供统一 runtime；
+- 以单 Gateway 的稳定运行时契约为核心，平台化能力受运行时事实和 SLO 约束。
 
-核心用户：
+核心用户与价值：
 
-| 用户 | 主要诉求 | 2.0 应交付的价值 |
+| 用户 | 主要诉求 | HotPlex 2.0 价值 |
 | --- | --- | --- |
-| 开发团队 | 远程、安全、可恢复地运行 coding agents | workspace-bound session、worker provider neutral runtime、resume/context recovery |
-| 平台/运维 | 管理并审计 agent 行为 | identity、policy hook、audit trail、runtime observability |
-| 集成开发者 | 通过 WebChat、消息平台、API 接入 agent runtime | stable AEP events、runtime metadata、admin/runtime diagnostics |
-| 企业安全 | 知道谁在何处用什么工具做了什么 | agent identity、tool audit、trace/event/audit correlation |
+| 开发团队 | 远程、安全、可恢复地运行 coding agents | workspace-bound session、provider-neutral worker、resume/context recovery |
+| 平台与运维 | 管理、诊断和审计 agent 行为 | execution facts、runtime diagnostics、audit/trace correlation |
+| 集成开发者 | 通过 WebChat、消息平台和 API 接入 runtime | stable AEP、runtime metadata、adapter-neutral contract |
+| 企业安全 | 解释谁在何处以什么权限执行了什么 | identity、policy evidence、isolation report、redacted audit |
 
-明确不定位：
+## 非目标
 
-- 不做模型聚合网关：模型路由不是 HotPlex 2.0 的核心差异。
-- 不做通用 workflow SaaS：多 Agent workflow 需要建立在 runtime contract 稳定之后。
-- 不做独立 memory 产品：先复用 eventstore、turns、worker history。
-- 不做 Agent marketplace：先沉淀 capability contract，再谈 registry/marketplace。
-
-## 外部架构依据
-
-外部成熟系统给 HotPlex 2.0 的启发：
-
-| 参考方向 | 可迁移原则 | HotPlex 2.0 取舍 |
-| --- | --- | --- |
-| OpenAI Agents SDK | Runtime 应管理 turns、tool execution、guardrails、handoffs、sessions，并内建 tracing | HotPlex 先拥有 session/turn/tool 生命周期和 trace，不急于做 handoffs |
-| MCP | 生命周期、capability negotiation、tools/resources/prompts 应有清晰协议边界 | AEP runtime metadata 和 AgentSpec 应先成为稳定契约 |
-| OpenTelemetry | traces、metrics、logs/events 需要统一语义属性，避免事后拼接 | 先定义低基数 semantic keys，再补指标和 span |
-| Temporal / LangGraph | Durable execution 依赖事件历史、checkpoint、resume 和 human-in-the-loop | eventstore/turns/worker_session_id 是 RuntimeContext 的事实源 |
-| Kubernetes control plane | API 描述期望状态，controller 逐步调和实际状态 | #851 先做单机 input gate，再考虑 scheduler/reconcile loop |
-
-## 当前基线
-
-截至 v1.37.x，HotPlex 已经具备 2.0 的运行时内核（含 #878 durable ingress reliability epic 交付的 execution 账本/owner lease/repairer/单活跃门与 `runtime.execution.*` 事件）：
-
-| 能力 | 当前实现 | 2.0 演进方向 |
-| --- | --- | --- |
-| Gateway | WebSocket + HTTP session 入口，负责 AEP 分发、init 握手、用户/workspace 校验 | 暴露稳定 Runtime API，统一 session 与 agent 语义 |
-| Session | `CREATED/RUNNING/IDLE/TERMINATED/DELETED` 状态机，SQLite/PostgreSQL 持久化，用户和 workspace 绑定 | 增加 Agent identity、task context、execution metadata |
-| Worker | `claude_code`、`opencode_server`、`codex_cli`、`acp` 注册式适配器 | 通过 AgentSpec 统一声明 provider、权限、sandbox、预算 |
-| AEP | `pkg/events` 作为唯一 wire contract，Envelope 支持 Metadata，OwnerID 内部校验 | 增加 runtime/security/audit 事件类型，不引入第二套事件总线 |
-| Event Store | outbound/inbound 事件持久化、turns 聚合、崩溃/超时 synthetic turn | 为 runtime trace、context recovery 和审计查询提供事实源 |
-| Execution / Durable Ingress | `internal/execution` 输入账本：owner instance + lease、有界 repairer、delivery/runtime 状态分离、单活跃门（`SESSION_BUSY`）、ambiguity fence、`runtime.execution.*` 事件（#878 epic） | 作为 #851 ExecutionQueue 与 #868 Cockpit 的持久化事实源；real-PG 多实例验证待接入 CI |
-| Observability | OpenTelemetry bootstrap、Prometheus metrics、worker/session/gateway 指标 | 增加 Agent lifecycle、tool execution、policy decision spans |
-| Security/Audit | API key、cookie admin fallback、workspace owner 校验、tool call/user activity audit | 收敛成策略检查接口，保持现有认证链路 |
-| Cron | 定时任务、执行超时、重试、平台投递 | 作为 scheduler 的已实现经验，避免过早引入分布式调度 |
-| Multitenancy | 用户、workspace、OAuth/SSO、多 bot、多 workspace 配置 | 作为 2.0 identity/ownership 的基础，不另起身份系统 |
-
-## 设计原则
-
-1. **演进现有内核**：扩展 Session、Worker、AEP 和 config，不绕开它们。
-2. **先定义契约再扩展能力**：AgentSpec、AgentIdentity、RuntimeEvent 是 2.0 的第一批契约。
-3. **不引入平行系统**：不要新建独立 event bus、identity service、memory service 或 scheduler。
-4. **兼容 v1.x 客户端**：AEP v1 wire format 和现有 worker config 必须继续工作。
-5. **小 PR 可回滚**：每个 issue 独立验收，最终通过文档和 traceability matrix 串联。
-
-## qm 研究终态校准（2026-08-04）
-
-对 [yc-software/qm](https://github.com/yc-software/qm) 的源码、测试、部署文档和公开 issue 交叉确认后，2.0 路线确定三条运行时约束：
-
-- **EffectiveRuntimePlan**：把 config、init metadata、workspace、worker、policy、sandbox 和 env profile 解析成同一份 redacted、可 hash、可审计的期望状态；WS init、REST create-session、doctor、worker start 和 recipe dry-run 不得各算一份。
-- **Gateway-owned EffectLedger**：对 delivery、webhook、cron、admin/control 和 recipe 等 Gateway 自己发起的副作用记录 attempt/idempotency/outcome；`unknown` 进入 reconcile/fence，不把网络断开误当成 failed 后盲目重试。worker 私有 tool protocol 不搬进 Gateway。
-- **Capability/Isolation honesty**：能力清单、skills/config hash 和 filesystem/network enforcement 以 `enforced/partial/unavailable` 报告，不能把 token、审计或 screening 误写成形式化隔离或 prompt-injection 解决方案。
-
-这三条是对已有 AgentSpec、AgentIdentity、AEP runtime events、execution ledger、Audit 和 Cron 的收敛，不是新增平行 runtime 层。qm issue [#165](https://github.com/yc-software/qm/issues/165) 证明“renderer 派生环境”和“secret/doctor 读取原始配置”分裂会造成部署 crash-loop；HotPlex 将其转化为 #867 的 effective-plan/preflight 依赖。
-
-上述三项统一为一条事实闭环：
-
-```text
-Authority/Scope → Desired Plan → Durable Execution/Effect → Observed State → Reconciliation/Fence
-```
-
-因此，`plan_hash` 只能证明 HotPlex 计算出了期望状态，Worker `done` 只能证明 Worker 返回了终态；两者都不能单独证明 sandbox layer 已应用、外部消息已送达或 provider effect 已成立。#946/#947 的验收必须增加 observed evidence、drift、unknown 和 reconcile 语义。
-
-## Phase 1: Runtime Contract 2.0
-
-目标：把现有运行时能力提升为明确的数据模型和事件契约。
-
-跟踪 issue：
-
-- [#847](https://github.com/hrygo/hotplex/issues/847) `feat(config): introduce AgentSpec runtime model`
-- [#848](https://github.com/hrygo/hotplex/issues/848) `feat(session): bind agent identity to runtime sessions`
-- [#849](https://github.com/hrygo/hotplex/issues/849) `feat(aep): extend event protocol for runtime observability`
-- [#850](https://github.com/hrygo/hotplex/issues/850) `feat(obs): enhance existing tracing with agent runtime spans`
-
-交付物：
-
-- AgentSpec 作为现有 config/session init 的标准化视图。
-- SessionInfo/Session record 增加 agent identity 与 execution metadata。
-- AEP 增加 agent/runtime/security/audit 事件类型。
-- OpenTelemetry trace 串联 init、worker start、turn execution、tool call、done/error。
-
-完成标准：
-
-- `make check` 通过。
-- `make docs-build` 通过。
-- 新增或更新 `docs/reference/aep-protocol.md`、`docs/reference/configuration.md`、`docs/explanation/session-lifecycle.md` 中受影响内容。
-- 旧客户端无需变更即可继续连接和收发 AEP v1 事件。
-
-优先 first cuts：
-
-- `AgentSpec` 先作为只读 normalized view，统一 WS/REST session 创建路径，不改变持久化和 Worker 接口。
-- `AgentIdentity` 先通过 session `context_json`、AEP metadata、audit detail 和 trace attributes 贯穿，不急于 schema 化。
-- Runtime events 先围绕单次 input 的 `execution_id` 建立 started/completed/failed 三个最小事件。
-- Observability 先补低基数 execution metrics 和 trace correlation，不引入高基数 label。
-
-产品验收：
-
-- 用户能回答：这个 session 由谁发起、绑定哪个 workspace、使用哪个 worker、执行了哪次 input、触发了哪些工具。
-- 运维能回答：一次失败来自 init、worker start、input dispatch、tool call、done/error 的哪一段。
-- 旧客户端不需要理解新 runtime events 也能继续工作。
-
-## Phase 2: Runtime Control Plane
-
-目标：在单机 Gateway 内形成可调度、可恢复、可限流的执行控制层。
-
-跟踪 issue：
-
-- [#851](https://github.com/hrygo/hotplex/issues/851) `refactor(runtime): introduce execution queue abstraction`
-- [#852](https://github.com/hrygo/hotplex/issues/852) `feat(context): introduce runtime context persistence interface`
-
-交付物：
-
-- ExecutionQueue：位于 Session 与 Worker 之间，负责 ordered dispatch、timeout、retry 和执行元数据。
-- RuntimeContext：从当前 session/eventstore/worker history 中抽象上下文接口，先支持 session-scoped context。
-- Policy hook：复用现有 permission mode、allowed tools、workspace sandbox、audit collector，为后续 PolicyEngine 留接口。
-
-完成标准：
-
-- 不改变现有用户输入到 worker 的语义。
-- turn timeout、auto retry、crash synthetic turn、event capture 仍由现有测试覆盖。
-- 队列和上下文接口具备 race 测试，单模块 `-race -count=1` 通过。
-
-优先 first cuts：
-
-- ExecutionQueue 先做 per-session input gate，证明同 session 输入不会并发 interleave。
-- RuntimeContext 先做只读 facade，复用 eventstore、turns、worker_session_id、workspace metadata。
-
-产品验收：
-
-- 用户连续发送多条 input 时，同一 session 内执行顺序可解释、可审计、可恢复。
-- Gateway 重启或 worker 崩溃后，可以基于 RuntimeContext 解释恢复路径和丢失边界。
-- Control Plane 仍然是单机内核，不承诺分布式调度。
-
-## Phase 3: Agent Platform
-
-目标：在 Runtime Contract 和 Control Plane 稳定后，开放平台能力。
-
-候选方向：
-
-- 多 Agent workflow：manager/tester/reviewer 等角色编排。
-- 外部 memory backend：project memory、skill memory、knowledge memory。
-- 企业策略：RBAC、审计查询、合规导出。
-- 分布式调度：仅在单机 ExecutionQueue 的边界清晰后启动。
-
-启动门槛：
-
-- #847-#852 的 first cuts 已在生产或长期测试环境中验证。
-- Runtime metadata 能稳定关联 AEP、eventstore、audit、trace。
-- 至少一个真实工作流证明需要多 Agent 编排，而不是单 Agent + tool/context 即可解决。
-
-## 实施优先级
-
-在完整 ExecutionQueue、Execution Cockpit 和 Coding Ops Recipes 之前，先完成以下共同事实层：
-
-1. #877 fenced execution escape hatch：消除异常三重失败导致的无界 session lockout；
-2. #867 explicit worker env allowlist + isolation capability report：由 EffectiveRuntimePlan 驱动，兼容模式必须可诊断；
-3. 新增 effective runtime plan / fail-closed preflight：让 doctor、worker start、admin diagnostics 和 recipe dry-run 使用同一 resolver；
-4. 新增 Gateway-owned EffectLedger：再将 #851 的 queue state、#868 Cockpit、#870 recipes 接入该事实层。
-
-#851 的剩余范围不再包含 #878 已交付的 single-active gate、owner lease、ambiguity fence 和最小 runtime events；#868 只能消费已持久化且脱敏的 plan/effect facts；#870 不能在没有 dry-run plan 和 idempotency contract 时扩展为 workflow engine。
-
-5. 先选 Cron/Webhook/消息 delivery 完成一条 `desired → effect → observed → reconcile` 垂直闭环，再提取通用 EffectLedger；旧进程内 retry queue 不能作为重启/多实例后的最终事实源。
-
-## 终版正交架构闸门（2026-08-04）
-
-为避免把 qm 的局部机制误读为 HotPlex 的整体方向，路线受以下跨维度闸门约束。详细审查见 [qm × HotPlex 正交架构审查](../research/2026-08-04-qm-hotplex-orthogonal-architecture-review.md)。
-
-### 必须同时满足的架构不变量
-
-- HotPlex 仍是 self-hosted Agent Runtime Gateway；workflow engine、marketplace、独立 memory service、跨 session scheduler 和 SaaS control plane 不进入当前主线。
-- authority/scope、desired plan、durable execution、Gateway-owned effect、worker/provider observed state 和 reconciliation 各自只有一个 canonical owner，其他模块只能投影。
-- `plan_hash` 只能证明期望计划，`worker done` 只能证明 worker turn 终态，provider response 只有在业务 receipt 或可查询状态支持时才能提升为外部成功。
-- 认证、授权、能力声明、sandbox/OS enforcement、审计和 workload identity 分开建模；无法证明的能力必须标记 `partial`/`unavailable`。
-- 新 AEP 字段必须增量兼容；SQLite/PostgreSQL 迁移、条件更新、旧版本读写和 fault-injection 必须成对验证。
-- effect/reconcile/repair 必须具备 lease/fence、attempt cap、backoff、stop condition 和 operator escape hatch；禁止以 exactly-once 掩盖 provider 事实不明。
-- `execution_id`/`effect_id`/`plan_hash` 可做 trace/log/audit correlation，但不可直接成为无界高基数 metrics label；Cockpit 查询必须有分页、时间和 payload 预算。
-
-### 实施前的否决条件
-
-若一个提案无法同时说明 canonical owner、故障时序、外部 evidence、敏感数据边界、双数据库迁移、容量预算和回滚路径，则只能保持 `proposed`/`shadow`，不能进入 `enforced`/`completed`。任何通用抽象必须由至少两个已验证消费者驱动，不能先建平台再寻找场景。
-
-### 重新校准的波次
-
-```text
-Wave 0  边界/事实所有权/状态词汇/隐私/容量冻结
-   ↓
-Wave 1  EffectiveRuntimePlan + observed worker bootstrap
-   ↓
-Wave 2  Cron/Webhook/消息 delivery 一条 durable effect 闭环
-   ↓
-Wave 3  Repair + redacted Cockpit + SLO/容量治理
-   ↓
-Wave 4  在真实需求证明后评估 scheduler/workflow/registry/workload identity
-```
-
-Wave 4 不再由“平台化愿景”自动触发，而必须由 Wave 1–3 的运行时 SLO、容量和迁移证据触发。
-
-#946 不能只输出配置 hash，必须区分 declared、observed、enforced、partial、unavailable；#947 不能只增加唯一键，必须区分 claim、attempt、effect fact、external evidence 和 unknown/fence。
-
-## Phase 4: Agent OS
-
-目标：形成跨环境的 Agent execution kernel。
-
-长期能力：
-
-- Agent registry 和版本化发布。
-- 多租户企业控制面。
-- Kubernetes/operator 或私有云部署。
-- Agent marketplace 或 capability catalog。
-
-## 路线图边界
-
-| 不做 | 原因 |
+| 非目标 | 产品边界 |
 | --- | --- |
-| 立刻重写 Agent runtime | 当前 Worker/Gateway/Session 已经是可演进内核 |
-| 立刻建设分布式 scheduler | Cron 和 session pool 先沉淀单机调度边界 |
-| 立刻建设独立 memory service | eventstore、turns、worker session history 已能支撑第一版 RuntimeContext |
-| 另起 event bus | AEP 和 eventstore 已是运行时事实源 |
-| 新建身份系统 | user/workspace/OAuth/session owner 已提供身份基础 |
+| 模型聚合网关 | 模型路由不是 HotPlex 的核心差异 |
+| 通用 workflow/DAG SaaS | 编排能力只能建立在稳定 runtime contract 之上 |
+| 独立 memory 产品或向量知识库 | RuntimeContext 复用 eventstore、turns 和 worker history |
+| Agent/skill marketplace | Capability contract 和安全 materialization 先于 registry |
+| 平行 event bus、identity service 或 scheduler | AEP、eventstore、现有身份链和单机 runtime 是事实基础 |
+| 形式化隔离承诺 | 只报告可观察、可验证的 enforcement 能力 |
 
-## 参考资料
+## 当前已交付能力
 
-- OpenAI Agents SDK: https://openai.github.io/openai-agents-python/
-- Model Context Protocol specification: https://modelcontextprotocol.io/specification/2025-11-25
-- OpenTelemetry semantic conventions: https://opentelemetry.io/docs/concepts/semantic-conventions/
-- Temporal durable execution: https://temporal.io/blog/what-is-durable-execution
-- LangGraph overview: https://docs.langchain.com/oss/python/langgraph/overview
-- Kubernetes controllers: https://kubernetes.io/docs/concepts/architecture/controller/
+当前代码已经形成 HotPlex 2.0 的运行时内核：
+
+| 能力 | 当前事实 | 状态与来源 |
+| --- | --- | --- |
+| Gateway | WebSocket + HTTP session 入口，执行 AEP 分发、init 握手、用户/workspace 校验 | 已交付 |
+| Session | `CREATED/RUNNING/IDLE/TERMINATED/DELETED` 状态机，SQLite/PostgreSQL 持久化，用户与 workspace 绑定 | 已交付 |
+| Worker | `claude_code`、`opencode_server`、`codex_cli`、`acp` 注册式适配器 | 已交付 |
+| AgentSpec | config、init metadata、workspace 和 worker 选项的只读归一化模型 | 已交付，[#847](https://github.com/hrygo/hotplex/issues/847) |
+| AgentIdentity | identity 贯穿 session context、runtime metadata、audit 和 trace | 已交付，[#848](https://github.com/hrygo/hotplex/issues/848) |
+| AEP | `pkg/events` 是唯一 wire contract；Envelope、Metadata、OwnerID 和最小 `runtime.execution.*` 事件可用 | 已交付基线；完整 runtime observability 仍由 [#849](https://github.com/hrygo/hotplex/issues/849) 跟踪 |
+| Event Store | inbound/outbound 事件持久化、turn 聚合、崩溃/超时 synthetic turn | 已交付 |
+| Durable Ingress / Execution | input payload 指纹、owner instance、lease、delivery/runtime 状态分离、single-active gate、`SESSION_BUSY`、ambiguity fence、late convergence、有界 repairer | 已交付，[#878](https://github.com/hrygo/hotplex/issues/878) |
+| RuntimeContext | 从 eventstore、turns、worker session 和 workspace metadata 读取上下文的持久化接口 | 已交付，[#852](https://github.com/hrygo/hotplex/issues/852) |
+| Observability | OpenTelemetry bootstrap、runtime spans、Prometheus worker/session/gateway 指标 | 已交付，[#850](https://github.com/hrygo/hotplex/issues/850) |
+| Security / Audit | API key、cookie admin fallback、workspace owner 校验、tool/user/admin audit、链式完整性校验 | 已交付 |
+| Cron | 定时任务、执行超时、重试、平台投递和指标 | 已交付；durable external effect 仍未形成统一契约 |
+| Multitenancy | 用户、workspace、OAuth/SSO、多 bot、多 workspace 配置 | 已交付 |
+
+## 目标运行时模型
+
+HotPlex 2.0 使用五层事实闭环：
+
+```text
+Authority / Scope / Capability
+              ↓
+Desired Runtime Plan
+              ↓
+Durable Execution / Gateway-owned Effect
+              ↓
+Observed Worker / Provider / Delivery State
+              ↓
+Reconciliation / Repair / Fence / Operator Action
+```
+
+| 事实层 | 作用 | Canonical owner |
+| --- | --- | --- |
+| Authority / Scope | 确定 principal、workspace、bot、session 和 capability ownership | 现有 identity/config/session 边界 |
+| Desired Runtime Plan | 表达 redacted、可 hash、可解释的期望 worker、policy、sandbox、env 和 capability | `EffectiveRuntimePlan` resolver |
+| Durable Execution | 表达 input 是否 accepted、owned、delivered、running 或 terminal | `internal/execution` |
+| Gateway-owned Effect | 表达 delivery、Webhook、Cron、control、recipe 等外部副作用的 claim、attempt、idempotency 和 outcome | `EffectLedger` |
+| Observed State | 表达实际 worker/backend/artifact、provider receipt、delivery acknowledgement 和 evidence | worker/connector adapter |
+| Reconciliation | 依据 desired 与 observed 差异执行 query、repair、fence 或 operator action | 有界 reconciler/repairer |
+
+`plan_hash` 只证明期望计划；Worker `done` 只证明 worker turn 终态；HTTP 成功、audit 记录和 timeout 均不能单独证明外部 effect 已成立。证据不足的结果保持 `unknown`，并进入 reconcile 或 fence。
+
+## 设计不变量
+
+1. **演进现有内核**：扩展 Gateway、Session、Worker、AEP、Execution 和 config，不绕开它们。
+2. **唯一事实源**：authority、plan、execution、effect、observed state 和 reconciliation 各有唯一写入者；UI、adapter 和 admin 只读投影。
+3. **AEP 唯一 wire contract**：新字段增量兼容，并同步 Go SDK、三种示例 SDK、协议文档和双向测试。
+4. **敏感数据最小化**：execution、effect、audit、event 和 Cockpit 不保存 prompt、metadata value、secret、credential、raw provider request、完整 tool args 或 raw worker error。
+5. **双数据库一致**：SQLite/PostgreSQL migration、条件更新、跨实例和故障测试成对实现。
+6. **安全能力诚实**：authentication、authorization、capability declaration、filesystem/network enforcement、credential injection 和 audit 分开建模；无法证明的能力是 `partial` 或 `unavailable`。
+7. **未知结果优先安全**：timeout、连接中断和响应丢失不自动等于 failed；repair/reconcile 具备 lease、attempt cap、backoff、stop condition 和 operator escape hatch。
+8. **低基数可观测性**：metrics 只使用有限枚举；plan hash、workspace 和 provider/evidence ref 进入脱敏 trace/log/audit correlation。
+9. **有界运营成本**：plan、effect、audit、snapshot 和 Cockpit 具备 retention、分页、payload、并发和数据库连接预算。
+10. **小切片可回滚**：新事实层先 read-only 或 shadow，保持旧版本读取和现有 dispatch 语义，具备暂停与回退路径。
+
+## Stage 1: Runtime Contract
+
+### 当前事实
+
+- AgentSpec、AgentIdentity、RuntimeContext 和 runtime spans 已交付；
+- AEP 已具备最小 execution metadata/events，完整 runtime observability 契约仍未完成；
+- 四类 Worker 继续使用现有 `worker.Register()` 和 adapter contract。
+
+### 冻结契约
+
+- [#849](https://github.com/hrygo/hotplex/issues/849)：补齐 agent/runtime/security/audit 事件和协议兼容；
+- [#946](https://github.com/hrygo/hotplex/issues/946)：`EffectiveRuntimePlan` 统一 WS、REST、doctor、worker start、admin diagnostics 和 recipe dry-run；
+- [#867](https://github.com/hrygo/hotplex/issues/867)：显式 worker environment allowlist、compat/strict profile 和 isolation capability report；
+- [Runtime Operations Contract](../superpowers/specs/2026-08-04-runtime-operations-contract.md)：定义 plan、preflight、observed bootstrap 和 redaction。
+
+### 完成定义
+
+- 等价 WS/REST 输入产生相同 canonical plan hash；
+- doctor、worker start、admin diagnostics 和 recipe dry-run 使用同一 resolver；
+- 四类 Worker 均报告 declared/observed/enforced/partial/unavailable；
+- 旧 AEP v1 客户端可忽略新事件并继续工作；
+- prompt、secret、raw worker error 和完整 tool args 不进入 durable facts。
+
+## Stage 2: Runtime Reliability
+
+### 当前事实
+
+- #878 已交付 single-active gate、owner lease、delivery/runtime 分离、ambiguity fence、late convergence 和有界 repairer；
+- Cron/platform delivery 仍依赖进程内 retry 路径，不能作为重启和多实例后的最终事实源。
+
+### 冻结契约
+
+- [#877](https://github.com/hrygo/hotplex/issues/877)：为 fenced execution 提供有审计的 operator escape hatch；
+- [#947](https://github.com/hrygo/hotplex/issues/947)：Gateway-owned `EffectLedger`；
+- 第一条垂直切片覆盖 Cron、Webhook 和消息 delivery 的 `desired → effect → observed → reconcile`；
+- worker-private tool/model-provider 内部调用不进入 Gateway EffectLedger。
+
+### 完成定义
+
+- claim、attempt、effect fact、idempotency key 和 external evidence 明确分离；
+- 重启、多实例竞争、DB 短暂失败、lease expiry、provider timeout/5xx、成功但响应丢失和晚到确认均有 fault-injection 测试；
+- external ack 只在 effect 已确认成功后写入，无法确认时保持 `unknown`；
+- SQLite/PostgreSQL migration 和条件状态迁移成对通过；
+- repair/reconcile 可停止、可限流、可 fence、可由 operator 接管。
+
+## Stage 3: Runtime Operations
+
+### 当前事实
+
+- RuntimeContext、eventstore、execution、audit、trace 和 metrics 已提供运营事实基础；
+- 当前 admin/runtime UI 尚未形成统一 execution timeline。
+
+### 冻结契约
+
+- [#851](https://github.com/hrygo/hotplex/issues/851)：bounded `ExecutionQueue`，负责 FIFO ordering metadata、attempt、timeout/retry reason 和 queue state，不重复 #878；
+- [#868](https://github.com/hrygo/hotplex/issues/868)：只读 Execution Cockpit，消费 canonical plan/execution/effect/observed/audit/trace facts；
+- diagnostics、reconciliation 和 operator action 使用统一 authorization、redaction 和 audit。
+
+### 完成定义
+
+- 同一 session 的输入顺序可解释、可审计、可恢复；
+- Cockpit 能区分 input acceptance、worker completion、external effect、unknown、fence 和 reconciled；
+- 查询具备 snapshot、分页、时间窗、payload 上限、workspace/session authorization 和数据库预算；
+- queue 与 Cockpit 不创建第二套 execution、effect、event bus 或 idempotency state；
+- API、WebChat、authorization、中文与英文文案测试通过。
+
+## Stage 4: Conditional Platform Expansion
+
+### 冻结契约
+
+- [#948](https://github.com/hrygo/hotplex/issues/948)：scope-aware capability inventory、precedence、hash、safe materialization 和 admin-gated promotion；
+- [#870](https://github.com/hrygo/hotplex/issues/870)：基于 Cron、Webhook、Session、Worker、EffectiveRuntimePlan 和 EffectLedger 的 versioned Coding Ops Recipes；
+- [Scope-aware Capability Inventory Contract](../specs/Scope-Aware-Capability-Inventory-Spec.md) 定义 capability 的解释与安全投影边界。
+
+### 启动条件
+
+- Stage 1–3 的 plan divergence、unknown age、reconcile、delivery loss/duplicate、数据库容量和定位能力具有持续运行证据；
+- 至少一个真实业务场景证明单 Agent runtime + tools/context 无法满足；
+- 新能力复用现有 Gateway、Session、Execution、AEP、eventstore、audit 和 observability，不建立平行控制面。
+
+### 暂缓能力
+
+- 跨 session 分布式 scheduler；
+- multi-agent workflow/DAG；
+- 外部 memory product；
+- Agent/skill marketplace 和 public registry；
+- Kubernetes operator 或独立多租户 SaaS control plane；
+- SPIFFE/SPIRE 等跨主机 workload identity，直至跨节点信任成为硬需求。
+
+## 当前实施优先级
+
+| 顺序 | 交付切片 | Issue | 状态 | 依赖关系 |
+| ---: | --- | --- | --- | --- |
+| 1 | Fenced execution operator escape hatch | [#877](https://github.com/hrygo/hotplex/issues/877) | 当前实施 | 消除无界 session lockout |
+| 2 | EffectiveRuntimePlan + observed bootstrap | [#946](https://github.com/hrygo/hotplex/issues/946) | 已冻结 | 复用 #847，约束 #867/#868/#870 |
+| 3 | Explicit env allowlist + isolation report | [#867](https://github.com/hrygo/hotplex/issues/867) | 已冻结 | 由 #946 的统一 plan 驱动 |
+| 4 | Cron/Webhook/message durable effect | [#947](https://github.com/hrygo/hotplex/issues/947) | 已冻结 | 复用 #878 identity/lease/fence |
+| 5 | Bounded ExecutionQueue | [#851](https://github.com/hrygo/hotplex/issues/851) | 已冻结 | 消费 #947 effect facts，不重复 #878 |
+| 6 | Execution Cockpit | [#868](https://github.com/hrygo/hotplex/issues/868) | 已冻结 | 消费 #946/#947/#851 canonical facts |
+| 7 | Coding Ops Recipes | [#870](https://github.com/hrygo/hotplex/issues/870) | 已冻结 | 依赖 #946 dry-run 与 #947 effect contract |
+| 8 | Capability inventory/materialization | [#948](https://github.com/hrygo/hotplex/issues/948) | 已冻结 | 依赖稳定 plan、scope 和 isolation vocabulary |
+
+通用抽象只由已验证的垂直切片提取。第一条 durable effect 闭环完成前，不扩展分布式 queue、workflow 或 marketplace。
 
 ## 成功指标
 
-2026 Runtime Contract：
+### Runtime Contract
 
-- 4 类 worker 共享 AgentSpec 映射。
-- 关键 runtime 操作均能通过 AEP event + trace + audit 关联。
-- 关键副作用能区分 desired、attempted、observed、unknown 和 reconciled；不能以 Worker done 冒充外部成功。
-- Agent identity 能贯穿 session、worker、eventstore、audit。
-- 2.0 文档与 GitHub issues 可双向追踪。
+- 四类 Worker 共享 AgentSpec、EffectiveRuntimePlan 和 capability vocabulary；
+- AEP event、trace、audit 和 eventstore 使用一致的 agent/session/execution correlation keys；
+- declared、observed、enforced、partial、unavailable 不混用；
+- 旧客户端和现有 worker config 保持兼容。
 
-2026 Runtime Control Plane：
+### Runtime Reliability
 
-- ExecutionQueue 支持 ordered dispatch、timeout、retry 观测。
-- RuntimeContext 支持 session recovery 与 provider-specific adapter。
-- 单机资源限制和 workspace 隔离可验证。
-- 至少一条 Cron/Webhook delivery 路径在重启、多实例、超时和晚到确认下可收敛，且不会盲目重复外部副作用。
+- 关键副作用能区分 desired、claimed、attempted、observed、unknown、fenced 和 reconciled；
+- Worker `done` 不被记录为外部 delivery 成功；
+- 至少一条 Cron/Webhook/message delivery 在重启、多实例、timeout 和晚到确认下收敛；
+- SQLite/PostgreSQL 和四 Worker 的 fault/race 测试覆盖一致。
 
-2027 Agent Platform：
+### Runtime Operations
 
-- 多 Agent workflow 可在单 Gateway 内运行。
-- 可插拔 memory backend 不破坏 v1.x session 语义。
-- 企业部署可基于现有 observability/security/admin API 扩展。
+- 操作者能从 session/execution 定位 init、dispatch、worker、effect、provider 和 delivery 的故障段；
+- unknown age、reconcile result、delivery loss/duplicate、queue state 和 DB pool saturation 可观测；
+- Cockpit 和 diagnostics 的查询、权限、redaction 和容量边界可验证。
+
+### 文档与发布
+
+- ROADMAP、Implementation Roadmap、Architecture、approved specs 和 GitHub Issues 可双向追踪；
+- AEP/Worker/数据库变更同步代码、测试、SDK 和文档；
+- `make check`、`make docs-build` 和受影响模块 `-race -count=1` 通过；
+- 发布、迁移和 repair 均具备暂停、回退和 operator action 路径。
+
+## Issue 与 Spec 追踪矩阵
+
+| Issue / Spec | 状态 | 路线归属 | 终态职责 |
+| --- | --- | --- | --- |
+| [#847](https://github.com/hrygo/hotplex/issues/847) AgentSpec | closed | Stage 1 | runtime config normalized view |
+| [#848](https://github.com/hrygo/hotplex/issues/848) AgentIdentity | closed | Stage 1 | identity correlation |
+| [#849](https://github.com/hrygo/hotplex/issues/849) Runtime AEP Events | open | Stage 1 | 完整 runtime event contract |
+| [#850](https://github.com/hrygo/hotplex/issues/850) Runtime Observability | closed | Stage 1 | runtime spans/metrics |
+| [#852](https://github.com/hrygo/hotplex/issues/852) RuntimeContext | closed | Stage 3 基线 | context persistence/read facade |
+| [#878](https://github.com/hrygo/hotplex/issues/878) Durable Ingress | closed | Stage 2 基线 | input ledger、lease、fence、repair |
+| [#877](https://github.com/hrygo/hotplex/issues/877) Fence Escape Hatch | open | Stage 2 | operator recovery |
+| [#946](https://github.com/hrygo/hotplex/issues/946) EffectiveRuntimePlan | open | Stage 1 | plan/preflight/observed bootstrap |
+| [#867](https://github.com/hrygo/hotplex/issues/867) Isolation Profiles | open | Stage 1 | env allowlist/isolation report |
+| [#947](https://github.com/hrygo/hotplex/issues/947) EffectLedger | open | Stage 2 | Gateway-owned external effects |
+| [#851](https://github.com/hrygo/hotplex/issues/851) ExecutionQueue | open | Stage 3 | bounded ordering/attempt/queue state |
+| [#868](https://github.com/hrygo/hotplex/issues/868) Execution Cockpit | open | Stage 3 | canonical runtime facts view |
+| [#870](https://github.com/hrygo/hotplex/issues/870) Coding Ops Recipes | open | Stage 4 | versioned runtime recipes |
+| [#948](https://github.com/hrygo/hotplex/issues/948) Capability Inventory | open | Stage 4 | scope-aware inventory/materialization |
+| [Runtime Operations Contract](../superpowers/specs/2026-08-04-runtime-operations-contract.md) | approved | Stage 1–3 | plan/effect/observed/reconcile contract |
+| [Scope-aware Capability Inventory Contract](../specs/Scope-Aware-Capability-Inventory-Spec.md) | approved | Stage 4 | capability projection contract |
+
+## 设计依据
+
+- [HotPlex 2.0 Architecture](./ARCHITECTURE.md)
+- [HotPlex 2.0 Implementation Roadmap](./IMPLEMENTATION-ROADMAP.md)
+- [HotPlex 2.0 终版路线图文档架构](../superpowers/specs/2026-08-04-final-roadmap-documentation-architecture-design.md)
+- [qm 深度研究证据](../research/2026-08-04-qm-hotplex-deep-research-report.md)
+- [qm 事实闭环证据](../research/2026-08-04-qm-hotplex-second-order-calibration.md)
+- [qm 正交架构审查证据](../research/2026-08-04-qm-hotplex-orthogonal-architecture-review.md)
+- OpenAI Agents SDK: https://openai.github.io/openai-agents-python/
+- Model Context Protocol: https://modelcontextprotocol.io/specification/2025-11-25
+- OpenTelemetry semantic conventions: https://opentelemetry.io/docs/specs/semconv/
+- Temporal durable execution: https://docs.temporal.io/
+- Kubernetes controllers: https://kubernetes.io/docs/concepts/architecture/controller/
+- NIST Zero Trust Architecture: https://csrc.nist.gov/pubs/sp/800/207/a/final
