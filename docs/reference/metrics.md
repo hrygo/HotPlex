@@ -367,6 +367,36 @@ rate(hotplex_worker_starts_total[5m])
 rate(hotplex_gateway_stale_forwarder_event_total_total[5m])
 ```
 
+## Audit 指标
+
+审计子系统（`internal/audit/`）暴露 5 个专属指标（前缀 `hotplex.audit.*`，Prometheus 导出名 `hotplex_audit_*_total`）。
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.audit.events` | Counter | 审计事件写入总数，label: `action`, `outcome` |
+| `hotplex.audit.chain_breaks` | Counter | Hash Chain 完整性违规检测，label: `reason`（`prev_hash_mismatch` / `self_hash_mismatch`） |
+| `hotplex.audit.spill` | Counter | 队列满时 Spill 到 WAL 的事件，label: `action` (`spill_ok` / `spill_failed`) |
+| `hotplex.audit.write_failures` | Counter | 审计 DB 写入失败，label: `action` (`begin_tx` / `append` / `commit`) |
+| `hotplex.audit.sink_failures` | Counter | AlertSink 扇出投递失败（队列满丢弃），label: `sink`（sink 类型名） |
+
+> `chain_breaks` 的 `reason` 属性描述首个断裂点的类型（`prev_hash_mismatch` = 链间隙/删行，`self_hash_mismatch` = 篡改）。审计告警状态机与处置建议见 [合规与审计](../guides/enterprise/audit.md)。
+
+### 常用查询
+
+```promql
+# Hash Chain 完整性告警（新断裂）
+increase(hotplex_audit_chain_breaks_total[1h]) > 0
+
+# Spill 频率过高（内存缓冲不足，建议增大 channel_cap）
+rate(hotplex_audit_spill_total{action="spill_ok"}[5m]) > 10
+
+# DB 写入失败
+increase(hotplex_audit_write_failures_total[10m]) > 5
+
+# Sink 投递失败（队列满丢弃事件）
+increase(hotplex_audit_sink_failures_total[10m]) > 50
+```
+
 ## SLO 参考
 
 | SLO | 指标 | 目标 |
