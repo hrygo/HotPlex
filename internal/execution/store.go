@@ -34,6 +34,38 @@ const (
 // LeaseTTL is the default lease time-to-live for an active execution.
 const LeaseTTL = 60 // seconds
 
+// RuntimeErrorCodeOperatorAbandoned is the bounded runtime error code written
+// when an operator abandons a fenced execution (#877). It appears in the
+// execution store, the runtime.execution.failed AEP event, and metrics only —
+// never alongside prompt content or raw worker errors.
+const RuntimeErrorCodeOperatorAbandoned = "OPERATOR_ABANDONED"
+
+// FenceDecision is the operator action applied to a fenced execution (#877).
+// Both decisions clear the fence; neither marks the execution delivered or
+// completed and neither re-dispatches the input.
+type FenceDecision string
+
+const (
+	// FenceDecisionResolve clears the fence and keeps runtime_status=unknown.
+	// The operator determined the ambiguity is harmless; a fresh input can
+	// proceed on a new worker.
+	FenceDecisionResolve FenceDecision = "resolve"
+	// FenceDecisionAbandon clears the fence and terminates the runtime as
+	// failed with RuntimeErrorCodeOperatorAbandoned.
+	FenceDecisionAbandon FenceDecision = "abandon"
+)
+
+// FenceActionRequest is the conditional operator action on a fenced execution.
+// ExpectedFenceVersion is the fencing token read by the operator; the update
+// only applies when it still matches (optimistic concurrency across gateway
+// instances). Actor, reason, and evidence stay in the Admin layer — the store
+// persists no operator-supplied free text.
+type FenceActionRequest struct {
+	ExecutionID          string
+	ExpectedFenceVersion int64
+	Decision             FenceDecision
+}
+
 var (
 	// ErrNotFound means the execution does not exist.
 	ErrNotFound = errors.New("execution: record not found")
@@ -52,6 +84,11 @@ var (
 	ErrLeaseExpired = errors.New("execution: lease expired")
 	// ErrRunMismatch means a conditional update did not match the expected worker_run_id.
 	ErrRunMismatch = errors.New("execution: worker run mismatch")
+	// ErrFenceConflict means a conditional fence action did not match: the
+	// record is missing, no longer fenced, or its fence_version moved on
+	// (another operator or gateway instance acted first). The caller must
+	// re-inspect; the store never auto-retries.
+	ErrFenceConflict = errors.New("execution: fence version conflict")
 )
 
 // Record is the secret-free durable representation of an input delivery.
@@ -74,6 +111,13 @@ type Record struct {
 	StartedAt        *int64
 	FinishedAt       *int64
 	FenceReason      string
+	// --- Operator fence action fields (migration 031) ---
+	// FenceVersion is the fencing token: incremented each time the execution
+	// enters the fenced state from a non-fenced state.
+	FenceVersion int64
+	// FenceCreatedAt is the millisecond timestamp at which the current fence
+	// was raised; nil when the execution was never fenced.
+	FenceCreatedAt *int64
 }
 
 // AcceptRequest describes an input that must be durably accepted before dispatch.
@@ -139,6 +183,18 @@ type Store interface {
 	// worker_run_id, only if the current fence_reason matches the given reason.
 	// This is the final step of the fresh-Worker flow.
 	ClearFenceAfterFreshStart(ctx context.Context, executionID, reason, freshWorkerRunID string) error
+
+	// ApplyFenceDecision applies an operator fence action (resolve/abandon) to a
+	// fenced execution, conditional on ExpectedFenceVersion still matching
+	// (#877). Returns the updated record. Neither decision marks the execution
+	// delivered/completed or re-dispatches it. Missing record returns
+	// ErrNotFound; a moved/cleared fence returns ErrFenceConflict.
+	ApplyFenceDecision(ctx context.Context, request FenceActionRequest) (*Record, error)
+
+	// ListFences returns currently fenced executions ordered by fence_created_at
+	// (newest first), optionally filtered by session. limit<=0 uses the store
+	// default; offset supports pagination.
+	ListFences(ctx context.Context, sessionID string, limit, offset int) ([]*Record, error)
 
 	// RenewLeases batch-renews all pending/running executions owned by ownerID,
 	// extending lease_until to now + ttl. Returns the number of renewed records.

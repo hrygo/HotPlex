@@ -380,3 +380,219 @@ func TestAccept_AfterTerminalAllowsNewExecution(t *testing.T) {
 	_, _, err := store.Accept(context.Background(), testAcceptReq("session-seq", "msg-seq-2", "h2"))
 	require.NoError(t, err, "new execution after terminal must be allowed")
 }
+
+// acceptUnknownAndFence drives an execution into the fenced state
+// (runtime unknown + fence_reason set) and returns the fenced record.
+func acceptUnknownAndFence(t *testing.T, store *SQLStore, sessionStore *session.SQLiteStore, sessionID, msgID string) *Record {
+	t.Helper()
+	rec := acceptAndRun(t, store, sessionStore, sessionID, msgID)
+	require.NoError(t, store.FinishRuntime(context.Background(), rec.ExecutionID, testRun, RuntimeUnknown, "TIMEOUT"))
+	fenced, err := store.getByID(context.Background(), rec.ExecutionID)
+	require.NoError(t, err)
+	require.NotEmpty(t, fenced.FenceReason, "helper precondition: record must be fenced")
+	return fenced
+}
+
+func TestApplyFenceDecision_ResolveClearsFence(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	rec := acceptUnknownAndFence(t, store, sessionStore, "session-afr", "msg-afr")
+
+	got, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+		ExecutionID:          rec.ExecutionID,
+		ExpectedFenceVersion: rec.FenceVersion,
+		Decision:             FenceDecisionResolve,
+	})
+	require.NoError(t, err)
+	require.Empty(t, got.FenceReason, "resolve must clear the fence")
+	require.Equal(t, RuntimeUnknown, got.RuntimeStatus, "resolve keeps the runtime unknown, never delivered/completed")
+	require.NotEqual(t, RuntimeCompleted, got.RuntimeStatus)
+	require.NotEqual(t, StatusDelivered, got.Status)
+	require.Equal(t, rec.FenceVersion, got.FenceVersion, "resolve must not bump the fence version")
+}
+
+func TestApplyFenceDecision_AbandonMarksFailed(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	rec := acceptUnknownAndFence(t, store, sessionStore, "session-aab", "msg-aab")
+
+	got, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+		ExecutionID:          rec.ExecutionID,
+		ExpectedFenceVersion: rec.FenceVersion,
+		Decision:             FenceDecisionAbandon,
+	})
+	require.NoError(t, err)
+	require.Empty(t, got.FenceReason, "abandon must clear the fence")
+	require.Equal(t, RuntimeFailed, got.RuntimeStatus)
+	require.Equal(t, RuntimeErrorCodeOperatorAbandoned, got.RuntimeErrorCode)
+	require.NotNil(t, got.FinishedAt)
+}
+
+func TestApplyFenceDecision_RejectsInvalidDecision(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	rec := acceptUnknownAndFence(t, store, sessionStore, "session-aid", "msg-aid")
+
+	for _, decision := range []FenceDecision{"", "force", "RESOLVE", "Abandon"} {
+		_, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+			ExecutionID:          rec.ExecutionID,
+			ExpectedFenceVersion: rec.FenceVersion,
+			Decision:             decision,
+		})
+		require.Error(t, err, "decision %q must be rejected", decision)
+	}
+
+	stored, err := store.getByID(context.Background(), rec.ExecutionID)
+	require.NoError(t, err)
+	require.NotEmpty(t, stored.FenceReason, "rejected decisions must not mutate the record")
+}
+
+func TestApplyFenceDecision_RejectsStaleFenceVersion(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	rec := acceptUnknownAndFence(t, store, sessionStore, "session-asv", "msg-asv")
+
+	_, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+		ExecutionID:          rec.ExecutionID,
+		ExpectedFenceVersion: rec.FenceVersion + 1,
+		Decision:             FenceDecisionResolve,
+	})
+	require.ErrorIs(t, err, ErrFenceConflict)
+
+	stored, err := store.getByID(context.Background(), rec.ExecutionID)
+	require.NoError(t, err)
+	require.NotEmpty(t, stored.FenceReason, "stale version must not mutate the record")
+	require.Equal(t, rec.FenceVersion, stored.FenceVersion)
+}
+
+func TestApplyFenceDecision_RepeatedActionConflicts(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	rec := acceptUnknownAndFence(t, store, sessionStore, "session-arp", "msg-arp")
+
+	_, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+		ExecutionID:          rec.ExecutionID,
+		ExpectedFenceVersion: rec.FenceVersion,
+		Decision:             FenceDecisionResolve,
+	})
+	require.NoError(t, err)
+
+	// Repeating the same action (or switching to abandon) must conflict, not
+	// produce a second state migration.
+	for _, decision := range []FenceDecision{FenceDecisionResolve, FenceDecisionAbandon} {
+		_, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+			ExecutionID:          rec.ExecutionID,
+			ExpectedFenceVersion: rec.FenceVersion,
+			Decision:             decision,
+		})
+		require.ErrorIs(t, err, ErrFenceConflict, "repeated %q must conflict", decision)
+	}
+
+	stored, err := store.getByID(context.Background(), rec.ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, RuntimeUnknown, stored.RuntimeStatus, "no second migration may occur")
+}
+
+func TestApplyFenceDecision_NotFound(t *testing.T) {
+	t.Parallel()
+	store, _ := newTestSQLStore(t)
+
+	_, err := store.ApplyFenceDecision(context.Background(), FenceActionRequest{
+		ExecutionID:          "exec_missing",
+		ExpectedFenceVersion: 1,
+		Decision:             FenceDecisionResolve,
+	})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestFenceVersion_Lifecycle(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	ctx := context.Background()
+	rec := acceptAndRun(t, store, sessionStore, "session-fv", "msg-fv")
+	require.Zero(t, rec.FenceVersion, "fresh execution starts at fence version 0")
+	require.Nil(t, rec.FenceCreatedAt)
+
+	require.NoError(t, store.FinishRuntime(ctx, rec.ExecutionID, testRun, RuntimeUnknown, "TIMEOUT"))
+	fenced, err := store.getByID(ctx, rec.ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), fenced.FenceVersion, "entering the fence bumps the version")
+	require.NotNil(t, fenced.FenceCreatedAt)
+
+	require.NoError(t, store.ClearFenceAfterFreshStart(ctx, rec.ExecutionID, fenced.FenceReason, "run-fresh-1"))
+	cleared, err := store.getByID(ctx, rec.ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), cleared.FenceVersion, "clearing the fence must not bump the version")
+
+	// Late convergence clears the fence without bumping the version.
+	require.NoError(t, store.FinishRuntime(ctx, rec.ExecutionID, "run-fresh-1", RuntimeCompleted, ""))
+	converged, err := store.getByID(ctx, rec.ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), converged.FenceVersion)
+	require.Empty(t, converged.FenceReason)
+}
+
+func TestFenceVersion_SetByLeaseRecoveryPaths(t *testing.T) {
+	t.Parallel()
+
+	t.Run("terminate owner leases", func(t *testing.T) {
+		t.Parallel()
+		store, sessionStore := newTestSQLStore(t)
+		rec := acceptAndRun(t, store, sessionStore, "session-fvt", "msg-fvt")
+
+		terminated, err := store.TerminateOwnerLeases(context.Background(), testOwner, "GATEWAY_SHUTDOWN")
+		require.NoError(t, err)
+		require.Equal(t, int64(1), terminated)
+
+		stored, err := store.getByID(context.Background(), rec.ExecutionID)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), stored.FenceVersion)
+		require.NotNil(t, stored.FenceCreatedAt)
+	})
+
+	t.Run("recover expired leases", func(t *testing.T) {
+		t.Parallel()
+		store, sessionStore := newTestSQLStore(t)
+		rec := acceptAndRun(t, store, sessionStore, "session-fvr", "msg-fvr")
+		// Expire the lease deterministically instead of sleeping.
+		_, err := store.db.Exec(`UPDATE execution_inputs SET lease_until = 1 WHERE execution_id = ?`, rec.ExecutionID)
+		require.NoError(t, err)
+
+		recovery, err := store.RecoverExpiredLeases(context.Background(), nil)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), recovery.Recovered)
+
+		stored, err := store.getByID(context.Background(), rec.ExecutionID)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), stored.FenceVersion)
+		require.NotNil(t, stored.FenceCreatedAt)
+	})
+}
+
+func TestListFences_FiltersAndOrders(t *testing.T) {
+	t.Parallel()
+	store, sessionStore := newTestSQLStore(t)
+	ctx := context.Background()
+
+	fencedA := acceptUnknownAndFence(t, store, sessionStore, "session-lfa", "msg-lfa")
+	fencedB := acceptUnknownAndFence(t, store, sessionStore, "session-lfb", "msg-lfb")
+	acceptAndRun(t, store, sessionStore, "session-lfc", "msg-lfc") // not fenced
+
+	all, err := store.ListFences(ctx, "", 100, 0)
+	require.NoError(t, err)
+	require.Len(t, all, 2, "only fenced executions are listed")
+
+	bySession, err := store.ListFences(ctx, "session-lfa", 100, 0)
+	require.NoError(t, err)
+	require.Len(t, bySession, 1)
+	require.Equal(t, fencedA.ExecutionID, bySession[0].ExecutionID)
+
+	limited, err := store.ListFences(ctx, "", 1, 0)
+	require.NoError(t, err)
+	require.Len(t, limited, 1)
+	offset, err := store.ListFences(ctx, "", 1, 1)
+	require.NoError(t, err)
+	require.Len(t, offset, 1)
+	require.NotEqual(t, limited[0].ExecutionID, offset[0].ExecutionID)
+	_ = fencedB
+}

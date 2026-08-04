@@ -103,6 +103,12 @@ func (s *fakeExecutionStore) FenceBySession(context.Context, string) (*execution
 func (s *fakeExecutionStore) ClearFenceAfterFreshStart(context.Context, string, string, string) error {
 	return nil
 }
+func (s *fakeExecutionStore) ApplyFenceDecision(_ context.Context, _ execution.FenceActionRequest) (*execution.Record, error) {
+	return nil, execution.ErrNotFound
+}
+func (s *fakeExecutionStore) ListFences(context.Context, string, int, int) ([]*execution.Record, error) {
+	return nil, nil
+}
 func (s *fakeExecutionStore) RenewLeases(context.Context, string, int64, []string) (int64, error) {
 	return 0, nil
 }
