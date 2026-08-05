@@ -55,6 +55,7 @@ Quick start:
 		newCronCmd(),
 		newAdminCmd(),
 		newAuditCmd(),
+		newRuntimeCmd(),
 	)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
