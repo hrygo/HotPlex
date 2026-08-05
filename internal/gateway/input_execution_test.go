@@ -97,6 +97,17 @@ func (s *fakeExecutionStore) OpenBySession(context.Context, string) (*execution.
 	}
 	return nil, execution.ErrNotFound
 }
+func (s *fakeExecutionStore) LatestBySession(context.Context, string) (*execution.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.openRecord != nil {
+		return s.openRecord, nil
+	}
+	if s.record != nil {
+		return s.record, nil
+	}
+	return nil, execution.ErrNotFound
+}
 func (s *fakeExecutionStore) FenceBySession(context.Context, string) (*execution.Record, error) {
 	return nil, execution.ErrNotFound
 }

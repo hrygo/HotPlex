@@ -745,6 +745,13 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 		if err == nil {
 			continue
 		}
+		if isContentPresentedErr(err) {
+			// Body delivered, decoration-only failure: healthy turn, keep the
+			// writer registered — detaching would drop the next turn's events.
+			h.log.Warn("gateway: terminal write decoration failed, body already presented",
+				"session_id", msg.Env.SessionID, "err", err)
+			continue
+		}
 		routeErrs = append(routeErrs, err)
 		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
 		h.detachAndCloseSessionWriter(msg.Env.SessionID, conn)
@@ -758,6 +765,24 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 type terminalWriteResult struct {
 	conn SessionWriter
 	ch   chan error
+}
+
+// contentPresentedError is implemented by platform conns whose terminal write
+// errors can prove the message BODY already reached the user even though the
+// write reported a failure (e.g. the Slack streaming close/decoration step
+// failed after the reply text was delivered). Such failures are not delivery
+// failures: the session writer must stay registered for the next turn, and the
+// terminal caller must not see a spurious error.
+type contentPresentedError interface {
+	error
+	BodyPresented() bool
+}
+
+// isContentPresentedErr reports whether err proves the message body was
+// already presented to the user despite the write error.
+func isContentPresentedErr(err error) bool {
+	var cpe contentPresentedError
+	return errors.As(err, &cpe) && cpe.BodyPresented()
 }
 
 // aggregateTerminalWrites collects the per-connection terminal write results
@@ -778,6 +803,13 @@ func (h *Hub) aggregateTerminalWrites(msg *EnvelopeWithConn, writes []terminalWr
 		go func(tw terminalWriteResult) {
 			defer wg.Done()
 			if err := <-tw.ch; err != nil {
+				if isContentPresentedErr(err) {
+					// Body delivered, decoration-only failure: do not count as a
+					// failed terminal delivery and keep the writer registered.
+					h.log.Warn("gateway: terminal platform write decoration failed, body already presented",
+						"session_id", msg.Env.SessionID, "err", err)
+					return
+				}
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()

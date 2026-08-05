@@ -175,6 +175,13 @@ type Store interface {
 	// recovery may have already marked unknown (unknown -> completed/failed).
 	OpenBySession(ctx context.Context, sessionID string) (*Record, error)
 
+	// LatestBySession returns the most recent execution for the session
+	// regardless of runtime status, or ErrNotFound if none exists. Used by the
+	// stop path to identify the turn a stop belongs to: stable across the
+	// stop's own runtime closure, changes only when a new turn accepts a new
+	// execution.
+	LatestBySession(ctx context.Context, sessionID string) (*Record, error)
+
 	// FenceBySession returns the fenced execution for the session (if any), or
 	// ErrNotFound. A fenced session requires fresh Worker before new input.
 	FenceBySession(ctx context.Context, sessionID string) (*Record, error)

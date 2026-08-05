@@ -40,6 +40,13 @@ type pcEntry struct {
 	closeMu sync.Once
 	log     *slog.Logger
 	ctx     context.Context
+
+	// sendMu serializes the closed-check + enqueue sequence in EnqueueWrite
+	// against the close-drain's exit decision in writeLoop. Without it, a
+	// WriteCtx that passed the closed fast-path just before Close() could
+	// still enqueue after the drain's `default` observed an empty channel,
+	// stranding the write (Close's contract is flush, not drop).
+	sendMu sync.Mutex
 }
 
 // platformWrite carries a queued platform envelope and, for terminal events,
@@ -166,11 +173,6 @@ func (e *pcEntry) EnqueueWrite(ctx context.Context, env *events.Envelope, result
 		}
 	}()
 
-	// Fast-path: skip channel send if already closed.
-	if e.closed.Load() {
-		return errors.New("platform conn closed")
-	}
-
 	write := platformWrite{env: env, ctx: ctx}
 	if isTerminalPlatformEvent(env.Event.Type) {
 		terminalCtx, cancel := context.WithTimeout(ctx, e.cfg.TerminalTimeout)
@@ -204,6 +206,24 @@ func (e *pcEntry) EnqueueWrite(ctx context.Context, env *events.Envelope, result
 			cancel()
 		}
 	}
+
+	// The closed check and the enqueue are atomic with respect to the
+	// close-drain's exit decision (writeLoop takes sendMu before observing
+	// the channel as empty and exiting). While the lock is held, no sender
+	// can be between the closed check and the enqueue, and once closed is
+	// true no sender can pass the check at all — so every write admitted
+	// here is either drained by the loop or rejected explicitly, never
+	// stranded. Holding the lock across the non-droppable select is safe:
+	// by close time closeCh is already closed, so the select always
+	// resolves promptly (enqueue, or the closeCh/done/timeout cases).
+	e.sendMu.Lock()
+	defer e.sendMu.Unlock()
+
+	// Fast-path: skip channel send if already closed.
+	if e.closed.Load() {
+		return errors.New("platform conn closed")
+	}
+
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
 			observability.GatewayPlatformDropped().Add(ctx, 1, metric.WithAttributes(attribute.String("event_type", string(env.Event.Type))))
@@ -327,17 +347,13 @@ func (e *pcEntry) writeLoop() {
 			}
 
 		case <-e.closeCh:
-			// The select may have picked this case while WriteCtx sends were
-			// still queued on e.ch (the droppable path is non-blocking), so
-			// drain the remainder before flushing: Close's contract is that
+			// The select may have picked this case while EnqueueWrite sends
+			// were still queued on e.ch (the droppable path is non-blocking),
+			// so drain the remainder before flushing: Close's contract is that
 			// pending writes are flushed, not dropped.
 			for {
 				select {
-				case write, ok := <-e.ch:
-					if !ok {
-						flush(pendingSID)
-						return
-					}
+				case write := <-e.ch:
 					if isDroppable(write.env.Event.Type) {
 						if db.Len() == 0 {
 							pendingSID = write.env.SessionID
@@ -350,8 +366,33 @@ func (e *pcEntry) writeLoop() {
 						e.writeOne(write)
 					}
 				default:
-					flush(pendingSID)
-					return
+					// e.ch is momentarily empty. Acquire sendMu and hold it
+					// across the final drain: once the lock is ours, no
+					// EnqueueWrite can be between its closed-check and enqueue
+					// (and closed is already true, so none can start either).
+					// Any send that completed just before the lock is still in
+					// e.ch and gets flushed here — never stranded.
+					e.sendMu.Lock()
+					for {
+						select {
+						case write := <-e.ch:
+							if isDroppable(write.env.Event.Type) {
+								if db.Len() == 0 {
+									pendingSID = write.env.SessionID
+								}
+								content := extractDeltaContent(write.env)
+								db.WriteString(content)
+								runeCount += utf8.RuneCountInString(content)
+							} else {
+								flush(pendingSID)
+								e.writeOne(write)
+							}
+						default:
+							flush(pendingSID)
+							e.sendMu.Unlock()
+							return
+						}
+					}
 				}
 			}
 

@@ -1107,6 +1107,53 @@ func TestPCEntry_Close_DrainsPending(t *testing.T) {
 	require.Equal(t, "msg0msg1msg2", d.Content)
 }
 
+// TestPCEntry_CloseFlushesInFlightWrites is the regression test for the
+// drain-close race: a WriteCtx that passed the closed fast-path just before
+// Close() must never have its write stranded after the drain loop observed an
+// empty channel and exited. Close's contract is that every accepted (nil-error)
+// write is flushed, not dropped — so the number of envelopes the stub conn
+// receives after Close must equal the number of successful enqueues, even under
+// concurrent Close + writes. Uses channel signaling (no sleeps) so it stays
+// fast under -race.
+func TestPCEntry_CloseFlushesInFlightWrites(t *testing.T) {
+	t.Parallel()
+
+	pc := &mockPlatformConn{}
+	e := newPCEntry(context.Background(), pc, testPCEntryConfig(), slog.Default())
+
+	const (
+		writerCount = 8
+		writesPer   = 200
+	)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var sent atomic.Int64
+
+	for i := 0; i < writerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < writesPer; j++ {
+				env := events.NewEnvelope(aep.NewID(), "s1", int64(j), events.Message, events.MessageData{Content: "x"})
+				if err := e.EnqueueWrite(context.Background(), env, nil); err != nil {
+					// Closed or timed out: the write was explicitly rejected.
+					return
+				}
+				sent.Add(1)
+			}
+		}()
+	}
+
+	close(start) // writers and Close race for the drain window
+	require.NoError(t, e.Close())
+	wg.Wait()
+
+	require.Equal(t, sent.Load(), int64(len(pc.envelopes())),
+		"every accepted write must be flushed by Close, none stranded")
+}
+
 func TestPCEntry_DeltaCoalescing_MergesDeltas(t *testing.T) {
 	t.Parallel()
 	cfg := testPCEntryConfig()

@@ -922,10 +922,18 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 
 	// A new primary turn begins: clear the previous turn's stop claim so this
 	// turn can be stopped again (per-turn single-stop contract, C04/C05). The
-	// fence is same-session/same-run scoped; a replaced worker run is cleared
-	// by its own Claim overwriting the stale entry. Metadata responses and
-	// mid-turn injections do NOT reach this point and keep the claim.
-	h.stopFence.BeginTurn(env.SessionID, workerRunID)
+	// fence is same-session/same-run/same-execution scoped; a new turn carries
+	// a NEW execution ID, so this clear only matches when the execution ledger
+	// is disabled (empty execID) — the exec-scoped key keeps the in-flight
+	// stop's claim intact when the input path races the stop path. A replaced
+	// worker run or execution is cleared by its own Claim overwriting the
+	// stale entry. Metadata responses and mid-turn injections do NOT reach
+	// this point and keep the claim.
+	execID := ""
+	if execRecord != nil {
+		execID = execRecord.ExecutionID
+	}
+	h.stopFence.BeginTurn(env.SessionID, workerRunID, execID)
 
 	if err := w.Input(ctx, content, nil); err != nil {
 		var we *worker.WorkerError

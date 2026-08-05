@@ -65,6 +65,9 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		if h.bridge != nil && attachedWorker != nil {
 			h.bridge.clearWorkerRun(env.SessionID, attachedWorker, "")
 		}
+		// A deleted session can never be stopped again: release its fence
+		// entry so the per-Handler map does not grow with session churn.
+		h.stopFence.Delete(env.SessionID)
 		return nil
 
 	case events.ControlActionStop:
@@ -85,20 +88,39 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 			_, workerRunID, _ = h.bridge.CurrentWorkerBinding(env.SessionID)
 		}
 
+		// The claim is keyed by the turn's execution ID (when the execution
+		// ledger is enabled) so a new turn — which accepts a new execution
+		// record — is always stopable again, while a duplicate stop for the
+		// SAME turn hits the same composite and is rejected even if an input
+		// raced the stop path in between. LatestBySession (not OpenBySession):
+		// the first stop's finishRuntimeOnStop closes the runtime BEFORE a
+		// duplicate stop arrives, so the open-runtime query would resolve to a
+		// different (or no) record and admit the duplicate.
+		var execID string
+		if h.executionStore != nil {
+			if rec, err := h.executionStore.LatestBySession(ctx, env.SessionID); err == nil {
+				execID = rec.ExecutionID
+			}
+		}
+
 		// Per-turn stop fence: admit exactly one effective stop per (session,
-		// run) turn. A duplicate stop returns silently — no second Worker call,
-		// no second Done, no second runtime finish (C04 single-terminal
-		// contract).
-		if !h.stopFence.Claim(env.SessionID, workerRunID) {
+		// run, execution) turn. A duplicate stop returns silently — no second
+		// Worker call, no second Done, no second runtime finish (C04
+		// single-terminal contract).
+		if !h.stopFence.Claim(env.SessionID, workerRunID, execID) {
 			h.log.Debug("gateway: stop already claimed for this turn",
-				"session_id", env.SessionID, "worker_run_id", workerRunID)
+				"session_id", env.SessionID, "worker_run_id", workerRunID, "execution_id", execID)
 			return nil
 		}
+
+		// A stop supersedes any pending LLM auto-retry: the retried input must
+		// not fire after the stop and start a new turn under the fresh claim.
+		h.cancelRetryIfNeeded(env.SessionID)
 
 		if err := w.StopCurrentTurn(ctx); err != nil {
 			// The stop never took effect: roll the claim back so a manual retry
 			// can stop again (failed-abort convergence, session retained).
-			h.stopFence.Rollback(env.SessionID, workerRunID)
+			h.stopFence.Rollback(env.SessionID, workerRunID, execID)
 			h.log.Warn("gateway: stop current turn failed", "session_id", env.SessionID, "err", err)
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop failed: %v", err)
 		}
@@ -227,6 +249,9 @@ func (h *Handler) handleGC(ctx context.Context, env *events.Envelope) error {
 			h.bridge.clearWorkerRun(env.SessionID, w, "")
 		}
 	}
+	// A GC'd session can never be stopped again: release its fence entry so
+	// the per-Handler map does not grow with session churn.
+	h.stopFence.Delete(env.SessionID)
 
 	// Re-read after worker cleanup to avoid stale-snapshot race with concurrent
 	// cleanupCrashedWorker transitions.
