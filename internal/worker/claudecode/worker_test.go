@@ -15,6 +15,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 func hasClaudeBinary() bool {
@@ -1013,4 +1014,49 @@ func TestInitConfig_PermissionSettings(t *testing.T) {
 			require.Equal(t, tt.wantList, permissionAutoApprove.Load())
 		})
 	}
+}
+
+// TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn verifies the user-stop
+// marker is scoped to the current turn: interaction-response metadata
+// (handled by DispatchMetadata) must NOT clear it, while the next primary
+// content (a real protocol send) must clear it immediately before the send.
+func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interaction response metadata keeps stopped", func(t *testing.T) {
+		t.Parallel()
+
+		w := NewWithMocks()
+		mc := newMockConn("user1", "session1")
+		w.testConn = mc
+		w.MarkStopped()
+
+		md := map[string]any{
+			"question_response": map[string]any{
+				"id":      "q_stop_1",
+				"answers": map[string]string{"q1": "yes"},
+			},
+		}
+		err := w.Input(context.Background(), "", md)
+		require.NoError(t, err)
+		require.True(t, w.IsStopped(), "handled metadata must not clear the stopped marker")
+	})
+
+	t.Run("next primary content clears stopped before send", func(t *testing.T) {
+		t.Parallel()
+
+		w := NewWithMocks()
+		mc := newMockConn("user1", "session1")
+		w.testConn = mc
+		w.MarkStopped()
+
+		err := w.Input(context.Background(), "hello again", nil)
+		require.NoError(t, err)
+
+		require.False(t, w.IsStopped(), "a new primary turn must clear the stopped marker")
+		// The protocol fake observed the primary send.
+		sent := mc.sentEnvelopes()
+		require.NotEmpty(t, sent)
+		require.Equal(t, events.Input, sent[0].Event.Type)
+	})
 }

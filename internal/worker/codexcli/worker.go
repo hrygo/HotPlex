@@ -247,6 +247,10 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		return fmt.Errorf("codexcli: app-server not started")
 	}
 
+	// A new primary turn begins here: clear the user-stop marker only after
+	// the connection-existence check above, immediately before the RPC send.
+	w.BeginTurn()
+
 	params := TurnStartParams{
 		ThreadID: tid,
 		Input: []TurnInputItem{

@@ -209,3 +209,10 @@ func (w *BaseWorker) IsStopped() bool { return w.stopped.Load() }
 
 // MarkStopped marks the worker as stopped by user.
 func (w *BaseWorker) MarkStopped() { w.stopped.Store(true) }
+
+// BeginTurn clears the user-stop marker immediately before a new primary turn.
+// Called by each adapter's Input once the input is confirmed as primary content
+// (DispatchMetadata returned handled=false) and immediately before the actual
+// protocol send. The marker is NOT cleared for interaction-response metadata,
+// metadata dispatch errors, or absent connections, and NOT in InjectMidTurn.
+func (w *BaseWorker) BeginTurn() { w.stopped.Store(false) }

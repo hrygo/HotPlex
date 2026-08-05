@@ -1179,3 +1179,51 @@ func TestWorker_StopCurrentTurn_AbortTimeout_InternalCap2s(t *testing.T) {
 
 	assertStopTurnRetention(t, w, mgr, live, sseCtx)
 }
+
+// TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn verifies the user-stop
+// marker is scoped to the current turn: interaction-response metadata
+// (handled by DispatchMetadata) must NOT clear it, while the next primary
+// content (an actual OCS message POST) must clear it before the send.
+func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interaction response metadata keeps stopped", func(t *testing.T) {
+		t.Parallel()
+
+		var receivedPath string
+		w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+			receivedPath = r.URL.Path
+			rw.WriteHeader(http.StatusOK)
+		})
+		w.MarkStopped()
+
+		md := map[string]any{
+			"permission_response": map[string]any{
+				"request_id": "perm_stop_1",
+				"allowed":    true,
+			},
+		}
+		err := w.Input(context.Background(), "", md)
+		require.NoError(t, err)
+		require.Equal(t, "/permission/perm_stop_1/reply", receivedPath)
+		require.True(t, w.IsStopped(), "handled metadata must not clear the stopped marker")
+	})
+
+	t.Run("next primary content clears stopped before send", func(t *testing.T) {
+		t.Parallel()
+
+		var receivedPath string
+		w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+			receivedPath = r.URL.Path
+			rw.WriteHeader(http.StatusOK)
+		})
+		w.MarkStopped()
+
+		err := w.Input(context.Background(), "hello again", nil)
+		require.NoError(t, err)
+
+		require.False(t, w.IsStopped(), "a new primary turn must clear the stopped marker")
+		// The protocol fake observed the primary send (message POST).
+		require.Equal(t, "/session/test-session/message", receivedPath)
+	})
+}

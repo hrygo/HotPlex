@@ -91,6 +91,23 @@ func TestBaseWorker_Wait_NilProc(t *testing.T) {
 	require.Contains(t, err.Error(), "not started")
 }
 
+func TestBaseWorker_BeginTurnClearsStopped(t *testing.T) {
+	t.Parallel()
+
+	w := NewBaseWorker(slog.Default(), nil)
+
+	// Fresh worker: the marker starts false.
+	require.False(t, w.IsStopped(), "stopped marker must start false")
+
+	// StopCurrentTurn sets the marker.
+	w.MarkStopped()
+	require.True(t, w.IsStopped())
+
+	// A new primary turn clears it immediately before the turn starts.
+	w.BeginTurn()
+	require.False(t, w.IsStopped(), "BeginTurn must clear the stopped marker for the next turn")
+}
+
 func TestConn_UserID(t *testing.T) {
 	conn := NewConn(slog.Default(), nil, "test-user", "test-session")
 	require.Equal(t, "test-user", conn.UserID())

@@ -281,6 +281,10 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return nil
 	}
 
+	// A new primary turn begins here: clear the user-stop marker before the
+	// actual protocol send (conn was already checked non-nil above).
+	w.BeginTurn()
+
 	msg := events.NewEnvelope(
 		aep.NewID(),
 		conn.getSessionID(),

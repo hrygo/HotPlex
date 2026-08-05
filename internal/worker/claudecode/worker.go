@@ -497,6 +497,10 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return nil
 	}
 
+	// A new primary turn begins here: clear the user-stop marker before the
+	// actual protocol send (conn was already checked non-nil above).
+	w.BeginTurn()
+
 	// Normal input: use Claude Code's stream-json format
 	// instead of AEP envelope format
 	w.turnMu.Lock()

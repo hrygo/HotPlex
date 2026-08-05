@@ -530,6 +530,10 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return fmt.Errorf("acp: worker connection closed")
 	}
 
+	// A new primary turn begins here: clear the user-stop marker only after
+	// the connection-existence check above, immediately before the prompt RPC.
+	w.BeginTurn()
+
 	// Regular user input → send prompt.
 	w.mapper.Reset()
 	w.mapper.SetTurnActive()
