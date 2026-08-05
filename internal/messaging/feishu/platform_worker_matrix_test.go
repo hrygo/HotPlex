@@ -187,6 +187,12 @@ type recordingConn struct {
 
 	nextTerminalFault atomic.Pointer[error] // error armed for the next terminal write (C07)
 	dropDeltas        atomic.Bool           // armed delta drop (C08)
+
+	// terminalFaultsFired counts how many times the armed terminal fault was
+	// consumed on THIS conn — verification that the arm reached the observed
+	// stream (mutation check: without the SendRawInput transfer the fault
+	// fires on the orphaned conn and this stays 0).
+	terminalFaultsFired atomic.Int32
 }
 
 func newRecordingConn() *recordingConn {
@@ -203,6 +209,7 @@ func (r *recordingConn) WriteCtx(_ context.Context, env *events.Envelope) error 
 			// The terminal delivery failed at the armed stage, but the terminal
 			// stays observable exactly once — the platform's terminal handling
 			// (feishu fallback semantics) still completes the turn.
+			r.terminalFaultsFired.Add(1)
 			r.record(env)
 			return *f
 		}
@@ -330,8 +337,19 @@ func (d *feishuContractDriver) SendRawInput(ctx context.Context, id, content str
 	// Re-join a fresh observation conn per input: after a faulted terminal
 	// write (C07) the hub detaches the failing writer, so the driver reconnects
 	// like the real platform would. The per-turn snapshot is observed on the
-	// fresh conn.
+	// fresh conn. The runner arms scenario faults (C07 terminal fault, C08
+	// delta saturation) BEFORE SendRawInput, so the arms must be transferred
+	// from the previous conn to the fresh one — otherwise the fault fires on
+	// the orphaned conn while the driver observes an un-armed stream.
+	terminalFault := d.rec.nextTerminalFault.Swap(nil)
+	dropDeltas := d.rec.dropDeltas.Swap(false)
 	d.rec = newRecordingConn()
+	if terminalFault != nil {
+		d.rec.nextTerminalFault.Store(terminalFault)
+	}
+	if dropDeltas {
+		d.rec.dropDeltas.Store(true)
+	}
 	d.h.Hub.JoinPlatformSession(d.sessionID, d.rec)
 	d.payloads[id] = content
 	if err := d.send(ctx, id, content); err != nil {
