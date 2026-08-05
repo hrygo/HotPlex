@@ -24,7 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/e2econtract"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
@@ -79,21 +81,32 @@ func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract
 	writeMu := sqlutil.NewWriteMu(sqlutil.DialectSQLite)
 	store, err := session.NewSQLiteStore(context.Background(), cfg, writeMu)
 	require.NoError(t, err, "contracttest: open sqlite store")
+	// The execution store shares the session store's *sql.DB and writeMu, exactly
+	// like production initSQLiteStores (cmd/hotplex/gateway_run.go) — the schema
+	// (execution_inputs) is part of the session store's migrations. Without it the
+	// input path emits no InputAck and surfaces no payload conflicts, which breaks
+	// the C01/C02 contract assertions (task-4 review carry-over). It has no
+	// resources of its own to close: store.Close() releases the shared DB.
+	execStore, err := execution.NewSQLStore(context.Background(), store.DB(), dbutil.DialectSQLite, writeMu, log)
+	require.NoError(t, err, "contracttest: open execution store")
 	cfgStore := config.NewConfigStore(cfg, nil)
 	mgr, err := session.NewManager(context.Background(), log, cfg, cfgStore, store)
 	require.NoError(t, err, "contracttest: create session manager")
 
 	hub := gateway.NewHub(log, cfgStore)
 	bridge := gateway.NewBridge(gateway.BridgeDeps{
-		Log: log,
-		Hub: hub,
-		SM:  mgr,
+		Log:            log,
+		Hub:            hub,
+		SM:             mgr,
+		ExecutionStore: execStore,
 	})
 	handler := gateway.NewHandler(gateway.HandlerDeps{
-		Log:    log,
-		Hub:    hub,
-		SM:     mgr,
-		Bridge: bridge,
+		Log:             log,
+		Hub:             hub,
+		SM:              mgr,
+		Bridge:          bridge,
+		ExecutionStore:  execStore,
+		OwnerInstanceID: "contracttest",
 	})
 
 	sessionID := "contract-" + uuid.NewString()[:8]
