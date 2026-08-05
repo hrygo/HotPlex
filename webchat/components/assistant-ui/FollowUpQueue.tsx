@@ -28,16 +28,25 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
+  const [dismissedFailedId, setDismissedFailedId] = useState<string | null>(
+    null,
+  );
 
-  // Surface failures without an extra click: a failed item needs its status
-  // and retry affordance visible, mirroring the pre-redesign panel contract.
+  // Surface failures when nothing else is open: a failed item needs its
+  // status and retry affordance visible, mirroring the pre-redesign panel
+  // contract. The redirect is gated on `activeItemId === null` so an open
+  // popover (any item) is never hijacked, and an explicitly dismissed failure
+  // (✕ close or pill collapse) stays closed until a different item fails.
   useEffect(() => {
-    const failedItem = queue.items.find((item) => item.status === "failed");
-    if (failedItem && activeItemId !== failedItem.id) {
+    if (activeItemId !== null) return;
+    const failedItem = queue.items.find(
+      (item) => item.status === "failed" && item.id !== dismissedFailedId,
+    );
+    if (failedItem) {
       setActiveItemId(failedItem.id);
       setEditingItemId(null);
     }
-  }, [queue.items, activeItemId]);
+  }, [queue.items, activeItemId, dismissedFailedId]);
 
   if (queue.items.length === 0) return null;
 
@@ -84,10 +93,14 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveItemId((current) =>
-                      current === item.id ? null : item.id,
-                    );
-                    setEditingItemId(null);
+                    if (expanded) {
+                      if (failed) setDismissedFailedId(item.id);
+                      setActiveItemId(null);
+                      setEditingItemId(null);
+                    } else {
+                      setActiveItemId(item.id);
+                      setEditingItemId(null);
+                    }
                   }}
                   aria-expanded={expanded}
                   aria-label={t(
@@ -170,6 +183,9 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
                         <button
                           type="button"
                           onClick={() => {
+                            if (item.status === "failed") {
+                              setDismissedFailedId(item.id);
+                            }
                             setActiveItemId(null);
                             setEditingItemId(null);
                           }}
