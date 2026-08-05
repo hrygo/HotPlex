@@ -53,7 +53,16 @@ func (r *matrixMetadataRecorder) HandleElicitationResponse(_ context.Context, re
 	return nil
 }
 
-func TestInteractionE2EMatrix_AllPlatformsWorkersAndKinds(t *testing.T) {
+// TestInteractionMetadataDispatch_AllPlatformsWorkersAndKinds verifies that
+// Gateway routes interaction response metadata (permission/question/elicitation
+// with the correct requestID and answer payload) to the client for the full
+// platform x worker x kind combination matrix.
+//
+// Evidence boundary: this test ONLY verifies Gateway response metadata
+// dispatch. It does NOT pass through platform adapters (feishu/slack/webchat
+// messaging adapters), Worker parsers/mappers, or any external system — all
+// Worker interactions are mocked, so it must not be treated as an E2E test.
+func TestInteractionMetadataDispatch_AllPlatformsWorkersAndKinds(t *testing.T) {
 	t.Parallel()
 
 	platforms := []string{"feishu", "slack", "webchat"}
