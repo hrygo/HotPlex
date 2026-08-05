@@ -1,6 +1,6 @@
 # 飞书、Slack、WebChat × 四 Worker E2E 可靠性与能力契约设计
 
-**状态**：Approved，待书面审阅
+**状态**：Approved，Implementation-ready
 
 **日期**：2026-08-05
 
@@ -51,6 +51,8 @@
 | G5 | 现有 3 × 4 × 3 interaction 测试只走 Gateway mock 与 metadata dispatch | `internal/gateway/interaction_matrix_test.go` | 改名为准确证据等级；另建真实边界组合测试 |
 | G6 | WebChat E2E 场景主要固定 `codex_cli` | `webchat/e2e/` | 四 Worker 参数化的 ACK、stream、stop、terminal、next-turn |
 | G7 | 缺少跨四 Worker 的 stop 单终态、重复 stop、下一轮复用统一契约 | 四个 `StopCurrentTurn` 实现 | 能力声明与实际协议行为一致 |
+| G8 | WebChat queue 重设计后丢失 `region/list/listitem` 与 indexed action aria-label；现有 Playwright 2026-08-05 实测仅 2/12 PASS，且 CI 未运行该套件 | `FollowUpQueue.tsx`、`chat.spec.ts`、`ci.yml` | 先恢复 12/12 绿色 browser baseline，再扩矩阵并接入 CI |
+| G9 | 四 Worker `MarkStopped()` 后没有在下一主 turn 清零；重复 stop 的 Gateway 路径也没有 per-turn fence | `base/worker.go`、`commands.go`、四个 `Input` | stopped marker 限定当前 turn；重复 stop 只产生一次有效中止/terminal |
 
 OpenCode Server 官方文档定义了 `POST /session/:id/abort`，因此 G4 是 HotPlex 适配层缺口，而不是上游无能力。实现时以[官方 Server API 文档](https://dev.opencode.ai/docs/server/)和当前依赖版本为准，禁止猜测 URL 或响应语义。
 
@@ -222,11 +224,13 @@ Worker fake 位于各 Worker 协议边界之外：
 ### Slice 3：OCS abort 与四 Worker 生命周期
 
 - OCS client 增加有界的 session abort 调用，验证 URL、状态码、超时和 session ID。
-- `StopCurrentTurn` 先快照必要状态，再调用 abort/关闭 SSE；重复 stop 不重复生成 terminal。
+- `StopCurrentTurn` 先快照必要状态，再调用 abort；保留 SSE、singleton ref 和远端 session，重复 stop 不重复生成 terminal。
+- Gateway 增加 per-turn stop fence；四 Worker 只在下一次 primary Input 前清除 stopped marker，metadata/mid-turn 不清除。
 - 四 Worker 运行 C04/C05/C06 与 capability 场景。
 
 ### Slice 4：WebChat 四 Worker 参数化
 
+- 先恢复 queue 的可访问 DOM contract，使现有 `chat.spec.ts` 从已知 2/12 回到 12/12；
 - 参数化 worker selection 和 fake backend；
 - 覆盖 ACK、stream、交互、stop waiter、Done、next-turn；
 - 保留浏览器层断言，不把 Go Gateway 测试重复包装成 Playwright。
@@ -297,10 +301,11 @@ rtk pnpm --dir webchat exec playwright test e2e/platform-worker-matrix.spec.ts
 - [ ] OCS stop 调用远端 session abort，并验证超时、重复 stop、单 terminal 与 next-turn。
 - [ ] 四 Worker 的 stop/reset/resume/interaction/mid-turn manifest 与协议测试一致。
 - [ ] WebChat 四 Worker 参数化场景覆盖 ACK、stream、stop、Done 和 next-turn。
+- [ ] 现有 WebChat queue Playwright 基线 12/12 通过，语义 role/aria-label 与 UI 一致，并由 CI 执行。
 - [ ] 指标、日志与人工证据满足低基数和敏感数据边界。
 - [ ] 人工 runbook 与验收模板落库，真实 12/12 均为绑定当前 commit 的 `PASS`。
 - [ ] Go race、全量 `make check`、WebChat test/Playwright 和文档门禁通过。
 
 ## 15. 开始实施前的门禁
 
-本文件经过书面审阅并确认后，才进入 `writing-plans`，生成精确到文件、测试与提交粒度的实施计划。实施计划不得把真实 12 组合改回自动 CI，也不得降低为抽样人工验证。
+本文件已完成书面确认并进入 `writing-plans`；总计划与五份子计划位于 `docs/superpowers/plans/2026-08-05-*.md`。实施不得把真实 12 组合改回自动 CI，也不得降低为抽样人工验证。
