@@ -195,12 +195,17 @@ one checkpoint row and is irreversible: re-run with --confirm to apply.`,
 				return fmt.Errorf("audit rebase is irreversible; re-run with --confirm")
 			}
 
-			cp, err := audit.Rebase(ctx, store, nextID)
-			if err != nil {
+			if _, err := audit.Rebase(ctx, store, nextID); err != nil {
 				return err
 			}
+			// SaveCheckpoint does not return the inserted row id; re-read the
+			// latest checkpoint to report the real id.
+			latest, err := store.LatestCheckpoint(ctx)
+			if err != nil {
+				return fmt.Errorf("audit rebase: read checkpoint: %w", err)
+			}
 			fmt.Printf("checkpoint written: id=%d next_id=%d anchor_hash=%s\n",
-				cp.ID, cp.NextID, cp.LastSelfHash)
+				latest.ID, latest.NextID, latest.LastSelfHash)
 
 			// Report the repaired state in the same pass.
 			result, err := audit.NewVerifier(store, audit.VerifierConfig{}, log).VerifyOnce(ctx)
