@@ -157,9 +157,9 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 // is ignored. EnqueueWrite never blocks on the write itself, so it is safe to
 // call from the Hub's single router goroutine.
 func (e *pcEntry) EnqueueWrite(ctx context.Context, env *events.Envelope, result chan<- error) (err error) {
-	// Recover from send-on-closed-channel panic caused by the TOCTOU window
-	// between closed.Load() and the channel send. The atomic guard narrows
-	// this window to nanoseconds, but recover() eliminates it entirely.
+	// Defensive recover: e.ch is never closed anymore (Close signals via
+	// closeCh), so a send-on-closed-channel panic cannot occur; keep the guard
+	// in case a future change reintroduces channel closing.
 	defer func() {
 		if r := recover(); r != nil {
 			err = errors.New("platform conn closed")
@@ -237,9 +237,11 @@ func (e *pcEntry) EnqueueWrite(ctx context.Context, env *events.Envelope, result
 func (e *pcEntry) Close() error {
 	var err error
 	e.closeMu.Do(func() {
-		e.closed.Store(true) // set before closing channel to prevent WriteCtx races
-		close(e.closeCh)
-		close(e.ch) // signal writeLoop to drain and exit
+		e.closed.Store(true) // reject new writes before signalling the loop
+		close(e.closeCh)     // writeLoop and WriteCtx observe this; e.ch is never
+		// closed while a send may be in flight, so there is no close/send race
+		// (a concurrent WriteCtx select may still pick `e.ch <- write`, which
+		// stays legal for an open channel).
 		<-e.done
 		err = e.pc.Close()
 	})
@@ -322,6 +324,35 @@ func (e *pcEntry) writeLoop() {
 			} else {
 				flush(pendingSID)
 				e.writeOne(write)
+			}
+
+		case <-e.closeCh:
+			// The select may have picked this case while WriteCtx sends were
+			// still queued on e.ch (the droppable path is non-blocking), so
+			// drain the remainder before flushing: Close's contract is that
+			// pending writes are flushed, not dropped.
+			for {
+				select {
+				case write, ok := <-e.ch:
+					if !ok {
+						flush(pendingSID)
+						return
+					}
+					if isDroppable(write.env.Event.Type) {
+						if db.Len() == 0 {
+							pendingSID = write.env.SessionID
+						}
+						content := extractDeltaContent(write.env)
+						db.WriteString(content)
+						runeCount += utf8.RuneCountInString(content)
+					} else {
+						flush(pendingSID)
+						e.writeOne(write)
+					}
+				default:
+					flush(pendingSID)
+					return
+				}
 			}
 
 		case <-timerCh:
