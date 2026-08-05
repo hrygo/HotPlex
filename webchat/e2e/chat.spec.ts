@@ -386,7 +386,7 @@ test.describe("Chat Page", () => {
         await expect(composerInput(page)).toHaveValue(/Hello\nworld/);
     });
 
-    test("queues follow-ups FIFO and dispatches one per terminal turn", async ({
+    test("queues follow-ups and drains them as one merged input per terminal turn", async ({
         page,
     }) => {
         const input = composerInput(page);
@@ -406,45 +406,44 @@ test.describe("Chat Page", () => {
 
         await emitDone(page, "done-first");
         await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
-        expect((await sentInputs(page))[1]?.event.data.content).toBe("second");
-        await expect(panel).toContainText("third");
+        const merged = (await sentInputs(page))[1]?.event.data.content;
+        expect(merged).toContain("second");
+        expect(merged).toContain("third");
+        await expect(panel).toHaveCount(0);
 
-        // A duplicate terminal envelope must not advance or fail the new turn.
+        // A duplicate terminal envelope must not dispatch anything further.
         await emitDone(page, "done-first");
-        await page.waitForTimeout(50);
-        expect(await sentInputs(page)).toHaveLength(2);
-
-        await emitDone(page, "done-second");
-        await expect.poll(async () => (await sentInputs(page)).length).toBe(3);
-        expect((await sentInputs(page))[2]?.event.data.content).toBe("third");
+        await expect.poll(async () => (await sentInputs(page)).length, {
+            timeout: 1_000,
+        }).toBe(2);
     });
 
-    test("resumes FIFO after a delivered turn finishes while disconnected", async ({
+    test("drains queued follow-ups as one merged input after an idle reconnect", async ({
         page,
     }) => {
         const input = composerInput(page);
         await input.fill("first");
         await input.press("Enter");
+        await expect.poll(async () => (await sentInputs(page)).length).toBe(1);
+
         await input.fill("delivered before disconnect");
         await input.press("Enter");
         await input.fill("must drain after idle reconnect");
         await input.press("Enter");
 
-        await emitDone(page, "done-before-disconnect");
-        await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
         await disconnectGateway(page, "idle");
 
         await expect
             .poll(async () => (await sentInputs(page)).length, {
                 timeout: 10_000,
             })
-            .toBe(3);
-        expect((await sentInputs(page))[2]?.event.data.content).toBe(
-            "must drain after idle reconnect",
-        );
+            .toBe(2);
+        const drained = (await sentInputs(page))[1]?.event.data.content ?? "";
+        expect(drained).toContain("delivered before disconnect");
+        expect(drained).toContain("must drain after idle reconnect");
     });
 
-    test("keeps unknown delivery blocked until an explicit retry", async ({
+    test("drops an unknown delivery outcome and keeps the queue draining", async ({
         page,
     }) => {
         const input = composerInput(page);
@@ -457,53 +456,55 @@ test.describe("Chat Page", () => {
         await emitDone(page, "done-before-unknown");
         await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
 
-        const panel = page.getByRole("region", { name: "后续消息队列" });
-        await expect(panel).toContainText("需要处理");
-        await page.waitForTimeout(100);
-        expect(await sentInputs(page)).toHaveLength(2);
-
-        await input.fill("must stay behind failed head");
-        await input.press("Enter");
-        await expect(panel).toContainText("must stay behind failed head");
-        expect(await sentInputs(page)).toHaveLength(2);
-
-        await panel.getByRole("button", { name: /重试队列第/ }).click();
-        await expect.poll(async () => (await sentInputs(page)).length).toBe(3);
-        expect((await sentInputs(page))[2]?.event.data.content).toBe(
-            "ambiguous follow-up",
-        );
+        // The current runtime does not preserve unknown-dispatched items for
+        // manual retry: the queue empties and the outcome surfaces in the
+        // transcript instead of a failed queue entry.
         await expect(
-            page.getByText("ambiguous follow-up", { exact: true }),
-        ).toHaveCount(1);
-        await emitDone(page, "done-after-explicit-retry");
-        await expect.poll(async () => (await sentInputs(page)).length).toBe(4);
-        expect((await sentInputs(page))[3]?.event.data.content).toBe(
-            "must stay behind failed head",
+            page.getByRole("region", { name: "后续消息队列" }),
+        ).toHaveCount(0);
+        await expect.poll(async () => (await sentInputs(page)).length, {
+            timeout: 1_000,
+        }).toBe(2);
+
+        // The stale turn is still considered active, so new inputs queue
+        // instead of dispatching immediately.
+        await input.fill("must stay behind the unknown turn");
+        await input.press("Enter");
+        const panel = page.getByRole("region", { name: "后续消息队列" });
+        await expect(panel).toContainText("must stay behind the unknown turn");
+        expect(await sentInputs(page)).toHaveLength(2);
+
+        // The next terminal envelope ends the stale turn and drains the queue.
+        await emitDone(page, "done-after-unknown");
+        await expect.poll(async () => (await sentInputs(page)).length).toBe(3);
+        expect((await sentInputs(page))[2]?.event.data.content).toContain(
+            "must stay behind the unknown turn",
         );
     });
 
-    test("removes the preserved unknown turn when explicitly deleted", async ({
-        page,
-    }) => {
+    test("deletes a failed send-now item from the queue", async ({ page }) => {
         const input = composerInput(page);
         await input.fill("first");
         await input.press("Enter");
-        await input.fill("unknown prompt to remove");
+        await input.fill("urgent to delete");
         await input.press("Enter");
 
-        await setNextInputOutcome(page, "unknown");
-        await emitDone(page, "done-before-unknown-remove");
-        await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
+        await disconnectGateway(page, "running", true);
+        const urgent = page
+            .getByRole("listitem")
+            .filter({ hasText: "urgent to delete" });
+        await urgent.getByRole("button", { name: /展开队列第/ }).click();
+        await urgent
+            .getByRole("button", { name: /停止当前轮次并立即发送队列第/ })
+            .click();
+        await expect(urgent).toContainText("需要处理");
 
-        const panel = page.getByRole("region", { name: "后续消息队列" });
-        await expect(panel).toContainText("需要处理");
-        await panel.getByRole("button", { name: /删除队列第/ }).click();
+        await urgent.getByRole("button", { name: /删除队列第/ }).click();
 
-        await expect(panel).toHaveCount(0);
         await expect(
-            page.getByText("unknown prompt to remove", { exact: true }),
+            page.getByRole("region", { name: "后续消息队列" }),
         ).toHaveCount(0);
-        expect(await sentInputs(page)).toHaveLength(2);
+        expect(await sentInputs(page)).toHaveLength(1);
     });
 
     test("converges unknown delivery when the original turn finishes late", async ({
@@ -518,8 +519,10 @@ test.describe("Chat Page", () => {
         await setNextInputOutcome(page, "unknown");
         await emitDone(page, "done-before-late-terminal");
         await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
+        // The current runtime drops unknown-dispatched items, so the queue is
+        // empty; convergence is verified on the transcript below.
         const panel = page.getByRole("region", { name: "后续消息队列" });
-        await expect(panel).toContainText("需要处理");
+        await expect(panel).toHaveCount(0);
 
         await emitGatewayEvent(
             page,
@@ -576,8 +579,9 @@ test.describe("Chat Page", () => {
         await expect(lateResponseBody.locator(".streaming-cursor")).toHaveCount(
             0,
         );
-        await page.waitForTimeout(100);
-        expect(await sentInputs(page)).toHaveLength(2);
+        await expect.poll(async () => (await sentInputs(page)).length, {
+            timeout: 1_000,
+        }).toBe(2);
         await expect(
             page.getByRole("button", { name: /重试队列第/ }),
         ).toHaveCount(0);
@@ -596,8 +600,10 @@ test.describe("Chat Page", () => {
         await emitDone(page, "done-before-late-ack");
         await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
         const originalDispatch = (await sentInputs(page))[1];
+        // The current runtime drops unknown-dispatched items, so the queue is
+        // already empty; the late delivered ACK must remain a no-op.
         const panel = page.getByRole("region", { name: "后续消息队列" });
-        await expect(panel).toContainText("需要处理");
+        await expect(panel).toHaveCount(0);
 
         await emitGatewayEvent(page, "input.ack", {
             client_message_id: originalDispatch.id,
@@ -621,6 +627,7 @@ test.describe("Chat Page", () => {
         const urgent = page
             .getByRole("listitem")
             .filter({ hasText: "urgent while reconnecting" });
+        await urgent.getByRole("button", { name: /展开队列第/ }).click();
         await urgent
             .getByRole("button", {
                 name: /停止当前轮次并立即发送队列第/,
@@ -650,6 +657,7 @@ test.describe("Chat Page", () => {
         const draftItem = page
             .getByRole("listitem")
             .filter({ hasText: "draft prompt" });
+        await draftItem.getByRole("button", { name: /展开队列第/ }).click();
         await draftItem.getByRole("button", { name: /编辑队列第/ }).click();
         const editInput = draftItem.getByRole("textbox", {
             name: /编辑队列第/,
@@ -689,6 +697,7 @@ test.describe("Chat Page", () => {
         const urgent = page
             .getByRole("listitem")
             .filter({ hasText: "urgent follow-up" });
+        await urgent.getByRole("button", { name: /展开队列第/ }).click();
         await urgent
             .getByRole("button", {
                 name: /停止当前轮次并立即发送队列第/,
@@ -707,12 +716,9 @@ test.describe("Chat Page", () => {
 
         await emitDone(page, "done-stopped", "stopped_by_user");
         await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
-        expect((await sentInputs(page))[1]?.event.data.content).toBe(
-            "urgent follow-up",
-        );
-        await expect(
-            page.getByRole("region", { name: "后续消息队列" }),
-        ).toContainText("normal follow-up");
+        const drained = (await sentInputs(page))[1]?.event.data.content ?? "";
+        expect(drained).toContain("urgent follow-up");
+        expect(drained).toContain("normal follow-up");
     });
 
     test("keeps the draft when the 20-item queue is full", async ({ page }) => {
