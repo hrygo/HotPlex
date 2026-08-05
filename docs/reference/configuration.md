@@ -706,7 +706,7 @@ log:
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `events.retention` | duration | `720h` (30天) | `HOTPLEX_EVENTS_RETENTION` | Event store 和 turns 的运行期留存窗口。到期后由事件 GC 清理 |
+| `events.retention` | duration | `720h` (30天) | `HOTPLEX_EVENTS_RETENTION` | Event store 和 turns 的运行期留存窗口。到期后由事件 GC 清理。启动时生效，修改后需重启 |
 | `audit.retention` | duration | `26280h` (3年) | `HOTPLEX_AUDIT_RETENTION` | 审计记录的基础留存窗口，由 audit GC 独立执行 |
 | `audit.full_content_retention` | duration | `2160h` (90天) | `HOTPLEX_AUDIT_FULL_CONTENT_RETENTION` | 审计原文的兼容配置字段；不再影响 event store 或 turns 留存 |
 

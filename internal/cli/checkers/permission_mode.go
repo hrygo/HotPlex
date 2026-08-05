@@ -8,6 +8,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/worker"
 )
 
 // claudeAutoModeChecker verifies the installed Claude Code CLI advertises the
@@ -101,9 +102,9 @@ func (c claudeBypassModeChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	workspaceMode := resolveClaudePermissionMode(cfg.Worker.DefaultPermissionMode, cfg.Worker.ClaudeCode.PermissionMode)
-	platformMode := resolveClaudePermissionMode("", cfg.Worker.ClaudeCode.PermissionMode)
-	if workspaceMode == permissionModeBypass || platformMode == permissionModeBypass {
+	workspaceMode := effectiveClaudeMode(cfg.Worker.DefaultPermissionMode, cfg.Worker.ClaudeCode.PermissionMode)
+	platformMode := effectiveClaudeMode("", cfg.Worker.ClaudeCode.PermissionMode)
+	if workspaceMode == worker.PermissionModeBypass || platformMode == worker.PermissionModeBypass {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -122,44 +123,15 @@ func (c claudeBypassModeChecker) Check(ctx context.Context) cli.Diagnostic {
 	}
 }
 
-const (
-	permissionModeReadOnly  = "read-only"
-	permissionModeWorkspace = "workspace"
-	permissionModeAutoEdit  = "auto-edit"
-	permissionModeBypass    = "bypass"
-)
-
-// resolveClaudePermissionMode mirrors Claude Code's runtime resolution: a
-// platform session has no session mode and therefore uses the operator mode;
-// an explicit workspace default is clamped to that operator ceiling. Empty
-// operator mode preserves the legacy Claude Code bypass default.
-func resolveClaudePermissionMode(sessionMode, operatorMode string) string {
-	effectiveMode := sessionMode
-	if effectiveMode == "" {
-		effectiveMode = operatorMode
+// effectiveClaudeMode resolves the effective Claude Code permission tier via
+// the shared worker resolver and maps the empty result to the legacy bypass
+// default, matching Claude Code's own behavior.
+func effectiveClaudeMode(sessionMode, operatorMode string) string {
+	mode := worker.ResolvePermissionMode(sessionMode, operatorMode)
+	if mode == "" {
+		return worker.PermissionModeBypass
 	}
-	if operatorMode != "" && permissionModeRank(effectiveMode) > permissionModeRank(operatorMode) {
-		effectiveMode = operatorMode
-	}
-	if effectiveMode == "" {
-		return permissionModeBypass
-	}
-	return effectiveMode
-}
-
-func permissionModeRank(mode string) int {
-	switch mode {
-	case permissionModeReadOnly:
-		return 0
-	case permissionModeWorkspace:
-		return 1
-	case permissionModeAutoEdit:
-		return 2
-	case permissionModeBypass:
-		return 3
-	default:
-		return 0
-	}
+	return mode
 }
 
 func hasFeishuClaudeCodeWorker(cfg *config.Config) bool {
