@@ -3,7 +3,9 @@ package slack
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +15,12 @@ import (
 	"github.com/slack-go/slack/slackevents"
 )
 
-const mediaMaxSize = 20 * 1024 * 1024 // 20 MB
+// ErrMediaTooLarge is returned when a Slack media file exceeds the hard
+// 10 MiB ingestion limit. The limit is enforced on the actual bytes written,
+// not just on the declared metadata size.
+var ErrMediaTooLarge = errors.New("slack: media exceeds 10 MiB")
+
+const mediaMaxSize = 10 * 1024 * 1024 // 10 MiB hard limit
 
 const (
 	mediaTypeImage    = "image"
@@ -105,69 +112,156 @@ func fileCategory(f slack.File) string {
 	}
 }
 
-// downloadMedia downloads a file from Slack to local storage.
+// boundedMediaWriter caps the bytes actually written to dst at maxBytes.
+// Writes are allowed while total == maxBytes; a write that would exceed the
+// cap writes only the remaining permitted bytes and then returns
+// ErrMediaTooLarge. The over-limit tail is never written to dst.
+type boundedMediaWriter struct {
+	dst      io.Writer
+	written  int64
+	maxBytes int64
+}
+
+func (w *boundedMediaWriter) Write(p []byte) (int, error) {
+	remaining := w.maxBytes - w.written
+	if remaining <= 0 {
+		return 0, ErrMediaTooLarge
+	}
+	if int64(len(p)) <= remaining {
+		n, err := w.dst.Write(p)
+		w.written += int64(n)
+		return n, err
+	}
+	n, err := w.dst.Write(p[:int(remaining)])
+	w.written += int64(n)
+	if err != nil {
+		return n, err
+	}
+	return int(remaining), ErrMediaTooLarge
+}
+
+// downloadMedia downloads a file from Slack to local storage. The declared
+// size is only a fast pre-check; the actual bytes written are bounded again
+// by boundedMediaWriter, and the file is committed atomically via temp file +
+// rename, so a failed download leaves neither the final path nor temp files.
 func (a *Adapter) downloadMedia(ctx context.Context, m *MediaInfo) (string, error) {
 	if m.Size > mediaMaxSize {
-		return "", fmt.Errorf("file too large: %d bytes", m.Size)
+		return "", fmt.Errorf("file too large: %w", ErrMediaTooLarge)
 	}
 
-	dir, path := mediaFilePath(m)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-
-	f, err := os.Create(path)
+	dir, path, err := mediaFilePath(m)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = f.Close() }()
 
 	downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := a.client.GetFileContext(downloadCtx, m.DownloadURL, f); err != nil {
-		_ = os.Remove(path)
-		return "", fmt.Errorf("get file: %w", err)
+	if err := a.writeMediaAtomic(dir, path, func(w io.Writer) error {
+		return a.client.GetFileContext(downloadCtx, m.DownloadURL, &boundedMediaWriter{dst: w, maxBytes: mediaMaxSize})
+	}); err != nil {
+		return "", err
 	}
-
 	return path, nil
 }
 
 func (a *Adapter) downloadMediaBytes(ctx context.Context, m *MediaInfo) ([]byte, error) {
 	if m.Size > mediaMaxSize {
-		return nil, fmt.Errorf("file too large: %d bytes", m.Size)
+		return nil, fmt.Errorf("file too large: %w", ErrMediaTooLarge)
 	}
 
 	downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	var buf bytes.Buffer
-	if err := a.client.GetFileContext(downloadCtx, m.DownloadURL, &buf); err != nil {
+	if err := a.client.GetFileContext(downloadCtx, m.DownloadURL, &boundedMediaWriter{dst: &buf, maxBytes: mediaMaxSize}); err != nil {
+		if errors.Is(err, ErrMediaTooLarge) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("get file bytes: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
 func (a *Adapter) saveMediaBytes(m *MediaInfo, data []byte) (string, error) {
-	dir, path := mediaFilePath(m)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if len(data) > mediaMaxSize {
+		return "", fmt.Errorf("media too large: %w", ErrMediaTooLarge)
+	}
+
+	dir, path, err := mediaFilePath(m)
+	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+
+	if err := a.writeMediaAtomic(dir, path, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	}); err != nil {
 		return "", err
 	}
 	return path, nil
 }
 
+// writeMediaAtomic writes content through fn into a fresh temp file inside dir
+// and atomically renames it to path. On any failure the temp file is removed;
+// after commit the final file is chmodded 0o600. dir is created 0o700 and
+// re-chmodded to 0o700 when it already exists.
+func (a *Adapter) writeMediaAtomic(dir, path string, fn func(io.Writer) error) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".hotplex-media-*")
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(f.Name(), 0o600); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return err
+	}
+	committed := false
+	defer func() {
+		_ = f.Close()
+		if !committed {
+			_ = os.Remove(f.Name())
+		}
+	}()
+
+	if err := fn(f); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+	committed = true
+	return os.Chmod(path, 0o600)
+}
+
 // mediaFilePath returns (dir, fullPath) for a media file on local storage.
-func mediaFilePath(m *MediaInfo) (string, string) {
+// Type and FileID are validated so the final path can never escape
+// MediaPathPrefix; unknown MIME types get a .bin extension.
+func mediaFilePath(m *MediaInfo) (string, string, error) {
+	switch m.Type {
+	case mediaTypeImage, mediaTypeAudio, mediaTypeVideo, mediaTypeDocument, mediaTypeFile:
+	default:
+		return "", "", fmt.Errorf("slack: invalid media type %q", m.Type)
+	}
+	if m.FileID == "" || m.FileID == "." || m.FileID == ".." || filepath.Base(m.FileID) != m.FileID {
+		return "", "", fmt.Errorf("slack: invalid media file id %q", m.FileID)
+	}
 	ext := mimeExt(m.MimeType)
 	if ext == "" {
-		ext = "." + m.FileID
+		ext = ".bin"
 	}
 	dir := filepath.Join(MediaPathPrefix, m.Type+"s")
 	path := filepath.Join(dir, fmt.Sprintf("%s_%s%s", m.Type, m.FileID, ext))
-	return dir, path
+	return dir, path, nil
 }
 
 func mimeExt(mime string) string {
