@@ -85,7 +85,20 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 			_, workerRunID, _ = h.bridge.CurrentWorkerBinding(env.SessionID)
 		}
 
+		// Per-turn stop fence: admit exactly one effective stop per (session,
+		// run) turn. A duplicate stop returns silently — no second Worker call,
+		// no second Done, no second runtime finish (C04 single-terminal
+		// contract).
+		if !h.stopFence.Claim(env.SessionID, workerRunID) {
+			h.log.Debug("gateway: stop already claimed for this turn",
+				"session_id", env.SessionID, "worker_run_id", workerRunID)
+			return nil
+		}
+
 		if err := w.StopCurrentTurn(ctx); err != nil {
+			// The stop never took effect: roll the claim back so a manual retry
+			// can stop again (failed-abort convergence, session retained).
+			h.stopFence.Rollback(env.SessionID, workerRunID)
 			h.log.Warn("gateway: stop current turn failed", "session_id", env.SessionID, "err", err)
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop failed: %v", err)
 		}

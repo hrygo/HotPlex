@@ -49,6 +49,7 @@ type Handler struct {
 	executionStore  execution.Store
 	repairer        *execution.Repairer
 	ownerInstanceID string
+	stopFence       turnStopFence
 }
 
 // SkillsLocator discovers skills from the filesystem.
@@ -69,6 +70,7 @@ func NewHandler(deps HandlerDeps) *Handler {
 		executionStore:  deps.ExecutionStore,
 		repairer:        deps.Repairer,
 		ownerInstanceID: deps.OwnerInstanceID,
+		// stopFence stays zero-valued: the turn stop fence is ready to use.
 	}
 }
 
@@ -917,6 +919,13 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	if h.bridge != nil {
 		h.bridge.RecordTurnStart(env.SessionID)
 	}
+
+	// A new primary turn begins: clear the previous turn's stop claim so this
+	// turn can be stopped again (per-turn single-stop contract, C04/C05). The
+	// fence is same-session/same-run scoped; a replaced worker run is cleared
+	// by its own Claim overwriting the stale entry. Metadata responses and
+	// mid-turn injections do NOT reach this point and keep the claim.
+	h.stopFence.BeginTurn(env.SessionID, workerRunID)
 
 	if err := w.Input(ctx, content, nil); err != nil {
 		var we *worker.WorkerError
