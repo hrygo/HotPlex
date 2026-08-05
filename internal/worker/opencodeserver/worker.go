@@ -395,12 +395,33 @@ func (w *Worker) Terminate(_ context.Context) error {
 	return nil
 }
 
-// StopCurrentTurn stops the current turn by canceling the SSE stream and releasing the server reference.
+// StopCurrentTurn aborts the current turn on the OCS server in place while
+// retaining the httpConn, SSE subscription, singleton ref, and worker session ID
+// so the session stays resumable. The singleton ref is released exclusively by
+// Terminate/Kill/Wait — an in-place stop is not a termination.
 func (w *Worker) StopCurrentTurn(ctx context.Context) error {
-	w.Log.Info("opencodeserver: stopping current turn via release")
+	// Snapshot conn/addr/client/projectDir/sessionID under w.Mu only; never
+	// hold the lock during the network call.
+	w.Mu.Lock()
+	conn := w.httpConn
+	addr := w.httpAddr
+	client := w.client
+	var sessionID, projectDir string
+	if conn != nil {
+		sessionID = conn.getSessionID()
+		projectDir = conn.projectDir
+	}
+	w.Mu.Unlock()
+
 	w.MarkStopped()
-	w.release()
-	return nil
+	if conn == nil || sessionID == "" || client == nil {
+		return nil
+	}
+
+	// Bound the abort to 2s; WithTimeout preserves an earlier caller deadline.
+	abortCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return abortOCSSession(abortCtx, sessionID, addr, projectDir, client)
 }
 
 // Kill closes the SSE connection and releases the singleton ref.

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -948,4 +949,233 @@ func TestAbortOCSSession_ArgumentValidation(t *testing.T) {
 			require.ErrorContains(t, err, "opencodeserver: abort session")
 		})
 	}
+}
+
+// ─── StopCurrentTurn (in-place abort, issue #954) ─────────────────────────────
+
+// newRunningSingleton returns a singleton manager in the running state holding
+// exactly one ref, so tests can observe that StopCurrentTurn does not release it.
+func newRunningSingleton(t *testing.T) *SingletonProcessManager {
+	t.Helper()
+	mgr := NewSingletonProcessManager(slog.New(slog.NewTextHandler(io.Discard, nil)), config.OpenCodeServerConfig{IdleDrainPeriod: time.Hour})
+	mgr.mu.Lock()
+	mgr.state = stateRunning
+	mgr.refs = 1
+	mgr.mu.Unlock()
+	return mgr
+}
+
+// stopTurnTestWorker wires a Worker to an httptest-backed OCS server with an
+// active httpConn for sessionID/projectDir, plus a singleton holding one ref.
+func stopTurnTestWorker(t *testing.T, server *httptest.Server, mgr *SingletonProcessManager, sessionID, projectDir string) (*Worker, *conn) {
+	t.Helper()
+	live := &conn{
+		sessionID:  sessionID,
+		userID:     "u1",
+		httpAddr:   server.URL,
+		client:     server.Client(),
+		recvCh:     make(chan *events.Envelope, 16),
+		projectDir: projectDir,
+		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	w := New()
+	w.singleton = mgr
+	w.httpAddr = server.URL
+	w.client = server.Client()
+	w.httpConn = live
+	return w, live
+}
+
+// assertStopTurnRetention asserts the frozen StopCurrentTurn retention contract:
+// stopped marker set, same conn, same worker session ID, singleton ref unchanged,
+// SSE subscription not cancelled.
+func assertStopTurnRetention(t *testing.T, w *Worker, mgr *SingletonProcessManager, live *conn, sseCtx context.Context) {
+	t.Helper()
+	require.True(t, w.IsStopped(), "StopCurrentTurn must mark the worker stopped")
+	require.Same(t, live, w.Conn(), "StopCurrentTurn must retain the active conn")
+	require.Equal(t, "ses-live", w.GetWorkerSessionID(), "StopCurrentTurn must retain the worker session ID")
+	mgr.mu.Lock()
+	require.Equal(t, 1, mgr.refs, "StopCurrentTurn must not release the singleton ref")
+	mgr.mu.Unlock()
+	if sseCtx != nil {
+		require.Nil(t, sseCtx.Err(), "StopCurrentTurn must not cancel the SSE subscription")
+	}
+}
+
+func TestWorker_StopCurrentTurn_AbortsWithoutReleasingSession(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu     sync.Mutex
+		aborts []*http.Request
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		aborts = append(aborts, r)
+		mu.Unlock()
+		_, _ = rw.Write([]byte("true"))
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	w, live := stopTurnTestWorker(t, server, mgr, "ses-live", "/tmp/live")
+
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	w.Mu.Lock()
+	w.sseCancel = sseCancel
+	w.Mu.Unlock()
+
+	require.NoError(t, w.StopCurrentTurn(context.Background()))
+
+	mu.Lock()
+	require.Len(t, aborts, 1, "exactly one abort request expected")
+	if len(aborts) == 1 {
+		require.Equal(t, http.MethodPost, aborts[0].Method)
+		require.Equal(t, "/session/ses-live/abort", aborts[0].URL.Path)
+		body, _ := io.ReadAll(aborts[0].Body)
+		require.Empty(t, body, "abort request must carry no body")
+	}
+	mu.Unlock()
+
+	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+}
+
+func TestWorker_StopCurrentTurn_NoActiveConn(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu       sync.Mutex
+		requests int
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		rw.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	w := New()
+	w.singleton = mgr
+	w.httpAddr = server.URL
+	w.client = server.Client()
+
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	w.Mu.Lock()
+	w.sseCancel = sseCancel
+	w.Mu.Unlock()
+
+	require.NoError(t, w.StopCurrentTurn(context.Background()))
+
+	mu.Lock()
+	require.Zero(t, requests, "no network access without an active conn")
+	mu.Unlock()
+	require.True(t, w.IsStopped(), "no active conn still marks the worker stopped")
+	require.True(t, w.Conn() == nil)
+	require.Empty(t, w.GetWorkerSessionID())
+	mgr.mu.Lock()
+	require.Equal(t, 1, mgr.refs, "StopCurrentTurn must not release the singleton ref")
+	mgr.mu.Unlock()
+	require.Nil(t, sseCtx.Err(), "StopCurrentTurn must not cancel the SSE subscription")
+}
+
+func TestWorker_StopCurrentTurn_AbortError500RetainsSession(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.WriteHeader(http.StatusInternalServerError)
+		_, _ = rw.Write([]byte("abort failed"))
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	w, live := stopTurnTestWorker(t, server, mgr, "ses-live", "/tmp/live")
+
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	w.Mu.Lock()
+	w.sseCancel = sseCancel
+	w.Mu.Unlock()
+
+	err := w.StopCurrentTurn(context.Background())
+	require.Error(t, err)
+	require.ErrorContains(t, err, "opencodeserver: abort session")
+	require.ErrorContains(t, err, "status 500")
+
+	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+}
+
+func TestWorker_StopCurrentTurn_AbortTimeout_UsesCallerDeadline(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/session/ses-live/abort", r.URL.Path)
+		<-r.Context().Done() // hold until the caller deadline fires
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	w, live := stopTurnTestWorker(t, server, mgr, "ses-live", "/tmp/live")
+
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	w.Mu.Lock()
+	w.sseCancel = sseCancel
+	w.Mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- w.StopCurrentTurn(ctx) }()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("StopCurrentTurn must honor the caller's shorter deadline")
+	}
+	elapsed := time.Since(start)
+
+	require.True(t, errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
+		"abort must surface the deadline error, got: %v", err)
+	require.Less(t, elapsed, time.Second, "caller deadline (50ms) must win over the 2s internal cap")
+
+	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+}
+
+func TestWorker_StopCurrentTurn_AbortTimeout_InternalCap2s(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/session/ses-live/abort", r.URL.Path)
+		<-r.Context().Done() // hold until the internal 2s cap fires
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	w, live := stopTurnTestWorker(t, server, mgr, "ses-live", "/tmp/live")
+
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	w.Mu.Lock()
+	w.sseCancel = sseCancel
+	w.Mu.Unlock()
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- w.StopCurrentTurn(context.Background()) }()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(4 * time.Second):
+		t.Fatal("StopCurrentTurn must bound the abort with an internal 2s cap")
+	}
+	elapsed := time.Since(start)
+
+	require.True(t, errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
+		"abort must surface the deadline error, got: %v", err)
+	require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond, "abort must hit the ~2s internal cap, not return early")
+
+	assertStopTurnRetention(t, w, mgr, live, sseCtx)
 }
