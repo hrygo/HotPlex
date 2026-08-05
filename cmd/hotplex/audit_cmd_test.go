@@ -68,8 +68,8 @@ func writeBrokenAuditDB(t *testing.T) string {
 
 	store := openAuditStoreAt(t, dbPath)
 	prev := ""
-	for i := int64(0); i < 3; i++ {
-		prev = appendAuditRow(t, store, prev, 1700000000000+i)
+	for i := range 3 {
+		prev = appendAuditRow(t, store, prev, 1700000000000+int64(i))
 	}
 	_, err := store.db.ExecContext(context.Background(), `DELETE FROM user_activity WHERE id = 2`)
 	require.NoError(t, err)
@@ -103,8 +103,8 @@ func TestAuditVerify_IntactChainSucceeds(t *testing.T) {
 
 	store := openAuditStoreAt(t, dbPath)
 	prev := ""
-	for i := int64(0); i < 3; i++ {
-		prev = appendAuditRow(t, store, prev, 1700000000000+i)
+	for i := range 3 {
+		prev = appendAuditRow(t, store, prev, 1700000000000+int64(i))
 	}
 	require.NoError(t, store.Close())
 
@@ -116,4 +116,67 @@ func TestAuditVerify_IntactChainSucceeds(t *testing.T) {
 
 	err := cmd.Execute()
 	require.NoError(t, err)
+}
+
+// TestAuditRebase_FixesBrokenChain pins the repair contract: a chain broken
+// by a historical manual DELETE is repaired by re-anchoring the checkpoint
+// at the first surviving row, after which verify reports a healthy chain.
+func TestAuditRebase_FixesBrokenChain(t *testing.T) {
+	cfgPath := writeBrokenAuditDB(t) // 3 rows, middle row deleted
+
+	cmd := newAuditRebaseCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--next-id", "3", "--confirm"})
+
+	err := cmd.Execute()
+	require.NoError(t, err, "rebase with --confirm must succeed")
+
+	// The rebase command runs verify internally; a separate verify pass must
+	// also report the chain healthy from the new anchor.
+	verifyCmd := newAuditVerifyCmd()
+	verifyCmd.SetArgs([]string{"--config", cfgPath})
+	err = verifyCmd.Execute()
+	require.NoError(t, err, "chain must verify clean after rebase")
+}
+
+// TestAuditRebase_RequiresConfirm pins the confirmation gate: without
+// --confirm the command must fail and must NOT write a checkpoint (the chain
+// stays broken).
+func TestAuditRebase_RequiresConfirm(t *testing.T) {
+	cfgPath := writeBrokenAuditDB(t)
+
+	cmd := newAuditRebaseCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--next-id", "3"})
+
+	err := cmd.Execute()
+	require.Error(t, err, "rebase without --confirm must fail")
+	require.Contains(t, err.Error(), "--confirm")
+
+	verifyCmd := newAuditVerifyCmd()
+	verifyCmd.SetArgs([]string{"--config", cfgPath})
+	err = verifyCmd.Execute()
+	require.Error(t, err, "no checkpoint may be written without confirmation")
+}
+
+// TestAuditRebase_TargetMissing pins the target validation contract: an id
+// with no surviving row must fail loudly instead of anchoring elsewhere.
+func TestAuditRebase_TargetMissing(t *testing.T) {
+	cfgPath := writeBrokenAuditDB(t)
+
+	cmd := newAuditRebaseCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--next-id", "99", "--confirm"})
+
+	err := cmd.Execute()
+	require.Error(t, err, "missing target row must fail")
+	require.Contains(t, err.Error(), "rebase target row not found")
+}
+
+// TestAuditRebase_RequiresNextID pins the required-flag contract.
+func TestAuditRebase_RequiresNextID(t *testing.T) {
+	cfgPath := writeBrokenAuditDB(t)
+
+	cmd := newAuditRebaseCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--confirm"})
+
+	err := cmd.Execute()
+	require.Error(t, err, "missing --next-id must fail")
 }

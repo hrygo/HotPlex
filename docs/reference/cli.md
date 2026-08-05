@@ -285,6 +285,38 @@ advice: chain gap before this row: previous row missing/modified, ...
 |------|--------|------|--------|------|
 | `--config` | | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
 
+### `hotplex audit rebase --next-id <id> --confirm`
+
+修复被历史手工 DELETE 打断的审计 Hash Chain：将链在指定行**重新锚定** —— 该行存储的 `prev_hash` 成为新的 Checkpoint 锚点，`verify` 从该行起重新验证；锚点之前的行保留但不再参与链校验（与 GC 的 Checkpoint 重锚定语义一致）。
+
+这是断链**唯一合法的修复路径**：migration 023/030 拒绝行级 UPDATE 与未锚定 DELETE，断链行无法原地编辑或删除；从备份恢复是另一条路径（会丢失锚点前的记录）。**不可逆**，须 `--confirm` 确认；未确认时仅打印预览、不写任何数据。
+
+**示例**：
+
+```bash
+hotplex audit rebase --next-id 1269 --confirm                 # 在 id=1269 处重新锚定
+hotplex audit rebase --config configs/config-dev.yaml --next-id 1269 --confirm
+```
+
+**输出**：
+
+```
+rebase target: id=1269 ts=2026-07-21T14:15:26+08:00 platform=webchat action=session.create outcome=success
+new checkpoint: next_id=1269 anchor_hash=1a7c83d5...
+checkpoint written: id=7 next_id=1269 anchor_hash=1a7c83d5...
+audit chain OK after rebase: 705 rows checked, no breaks
+```
+
+命令内部执行一次 `verify` 报告修复后状态；锚点后仍有断链时以非零退出码结束。
+
+| 标志 | 短标志 | 类型 | 默认值 | 说明 |
+|------|--------|------|--------|------|
+| `--next-id` | | `int` | 必填 | 链上首个保留行的 id（其 `prev_hash` 成为新锚点） |
+| `--confirm` | | `bool` | `false` | 确认执行不可逆的重锚定 |
+| `--config` | | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+
+> **运维提示**：执行前先停止 Gateway（写操作与运行实例并发会破坏内存写回）；执行后用 `hotplex audit verify` 确认转绿并重启 Gateway。
+
 ---
 
 ## Runtime 运维（#877）
