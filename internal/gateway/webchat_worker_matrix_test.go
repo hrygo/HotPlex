@@ -149,9 +149,11 @@ type recordingConn struct {
 	dropDeltas        atomic.Bool           // armed delta drop (C08)
 
 	// terminalFaultsFired counts how many times the armed terminal fault was
-	// consumed on THIS conn — verification that the arm reached the observed
-	// stream (mutation check: without the SendRawInput transfer the fault
-	// fires on the orphaned conn and this stays 0).
+	// consumed on THIS conn. It is the future C07 assertion hook: once the
+	// stop fence (SP3-T5) lets C07 run, a per-combo assertion can verify the
+	// arm reached the observed stream (without the SendRawInput transfer the
+	// fault fires on the orphaned conn and this stays 0). No assertion
+	// consumes it today.
 	terminalFaultsFired atomic.Int32
 }
 
@@ -287,8 +289,16 @@ func (d *webChatContractDriver) EndScenario(t testing.TB) {
 	// Close the scenario's probe conn so its bridge forwarder drains (the turn
 	// already reached its done, so the forwarder exits cleanly). Without this,
 	// every per-scenario session's forwarder blocks the harness teardown's
-	// WaitForwarders up to its 2s bound — the harness itself only closes the
-	// latest probe.
+	// WaitForwarders up to its 2s bound — the harness closes every probe only
+	// in its own teardown (harness.go: MarkClosed first, then every probe
+	// conn). EndScenario differs from that teardown: the bridge is NOT marked
+	// closed here, so closing a probe whose turn never reached its done (e.g.
+	// a scenario failed and was aborted mid-turn) could make handleWorkerExit
+	// treat the exit as a crash and spawn a resume-fallback worker. In
+	// practice EndScenario only closes probes after their terminal was
+	// observed (SendRawInput captured d.worker on the delivered ack), so no
+	// fallback is triggered; the un-marked-close risk is noted for mid-turn
+	// failure paths.
 	if d.worker != nil {
 		_ = d.worker.Conn().Close()
 		d.worker = nil
@@ -428,6 +438,16 @@ func (d *webChatContractDriver) VisibleTerminals() int {
 // init handshake: it writes an init envelope carrying the combo's worker_type
 // and the scenario client key, and reads the init_ack, whose authoritative
 // session ID anchors all observation.
+//
+// Deviation from brief constraint 1 ("reuse internal/gateway/testutil/ws_mock.go"):
+// testutil.DialAndInit (ws_mock.go) cannot carry HTTP headers, so it cannot
+// present the API key at upgrade time — reuse would force the deferred-init-auth
+// path (init envelope auth.token, conn.go authenticateInit). Authenticating at
+// the HTTP layer (X-API-Key, HandleHTTP) is more faithful to the real webchat
+// client, whose browser session is authenticated before the socket opens. The
+// mock's dial + write-init + read-one-frame body is therefore re-implemented
+// here with header support; ws_mock.go itself is untouched ("only the new test
+// file" constraint).
 func (d *webChatContractDriver) dialAndInit() (*websocket.Conn, string, error) {
 	conn, _, err := websocket.DefaultDialer.Dial(d.wsURL, http.Header{"X-API-Key": []string{wsTestAPIKey}})
 	if err != nil {
