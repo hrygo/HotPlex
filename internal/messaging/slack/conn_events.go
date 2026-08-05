@@ -51,11 +51,17 @@ func (c *SlackConn) recordTerminalFailure(ctx context.Context, result string) {
 // (conn Close, control-command abort): the body-presented case skips any
 // re-delivery, everything else counts as failed delivery.
 func terminalFailureResult(err error) string {
-	var terminalErr *StreamTerminalError
-	if errors.As(err, &terminalErr) && terminalErr.ContentPresented {
+	if isBodyPresentedErr(err) {
 		return "skipped_body_presented"
 	}
 	return "failed"
+}
+
+// isBodyPresentedErr reports whether the terminal close error proves the
+// message body was already delivered to Slack (decoration-only failure).
+func isBodyPresentedErr(err error) bool {
+	var terminalErr *StreamTerminalError
+	return errors.As(err, &terminalErr) && terminalErr.ContentPresented
 }
 
 // notifyStatusFromEvent maps AEP events to processing status indicators.
@@ -166,7 +172,20 @@ func (c *SlackConn) handleError(ctx context.Context, env *events.Envelope) error
 	// so send failures surface here instead of being swallowed by a goroutine.
 	closeErr := c.closeStreamWriter(terminalCtx)
 	if closeErr != nil {
-		closeErr = c.handleTerminalDeliveryError(terminalCtx, closeErr)
+		if isBodyPresentedErr(closeErr) {
+			// Decoration-only failure: the body was already delivered. Keep
+			// the accounting (warn + counter) but no fallback text.
+			c.adapter.Log.Warn("slack: terminal decoration failed after body was presented", "err", closeErr)
+			c.recordTerminalFailure(terminalCtx, "skipped_body_presented")
+		} else {
+			// The body was NOT delivered: skip the generic "Reply delivery
+			// failed" fallback — the worker error text sent below is itself
+			// the recovery message for the user. Layering the generic
+			// fallback in front of it would duplicate and mislead ("try
+			// again" cannot recover the lost answer).
+			c.adapter.Log.Warn("slack: terminal close failed, delivering worker error text instead of generic fallback", "err", closeErr)
+			c.recordTerminalFailure(terminalCtx, "failed")
+		}
 	}
 
 	var sendErr error

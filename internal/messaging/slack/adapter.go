@@ -807,10 +807,18 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		// Abort any active streaming writer — GC/Reset kills the worker without a
 		// done event, so the writer would otherwise remain active until TTL expiry.
 		if conn := a.GetOrCreateConn(channelID, threadTS); conn != nil {
-			if err := conn.closeStreamWriter(ctx); err != nil {
+			// Give the stream close its own fixed budget independent of the
+			// (short) command ctx: a ctx-cancelled StopStream returns an error
+			// after closeStreamWriter already cleared the writer, stranding the
+			// old stream half-open — subsequent deltas would open a SECOND
+			// streaming message in the same thread.
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := conn.closeStreamWriter(closeCtx)
+			closeCancel()
+			if err != nil {
 				a.Log.Warn("slack: failed to close stream on control command",
 					"channel", channelID, "thread", threadTS, "err", err)
-				conn.recordTerminalFailure(ctx, terminalFailureResult(err))
+				conn.recordTerminalFailure(closeCtx, terminalFailureResult(err))
 			}
 		}
 	}
@@ -980,9 +988,19 @@ func (c *SlackConn) writeWithStreaming(ctx context.Context, text string) error {
 	if oldWriter, ok := c.streamWriter.(*NativeStreamingWriter); ok && oldWriter.Expired() {
 		c.streamWriter = nil
 		go func() {
-			if err := oldWriter.Close(); err != nil {
+			// The rotated writer's Close flushes its buffered tail to a
+			// server-expired stream — a StreamTerminalError{ContentPresented:
+			// false} here means the tail was LOST. Surface it through the
+			// terminal failure accounting (fallback counter + structured
+			// failure result) instead of discarding it, so a visible content
+			// gap is never silent. Bound the close by its own deadline; the
+			// rotation must not block the streaming hot path.
+			closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := oldWriter.CloseContext(closeCtx); err != nil {
 				c.adapter.Log.Warn("slack: rotated stream close failed",
 					"channel", c.channelID, "err", err)
+				c.recordTerminalFailure(closeCtx, terminalFailureResult(err))
 			}
 		}()
 		c.adapter.Log.Info("slack: stream rotated",

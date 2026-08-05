@@ -116,6 +116,12 @@ func (e *StreamTerminalError) Error() string {
 	return fmt.Sprintf("slack: stream terminal delivery failed before body was presented: %v", e.Cause)
 }
 
+// BodyPresented reports whether the message body reached the user despite the
+// terminal failure. Implements the gateway's contentPresentedError contract:
+// the hub keeps the session writer registered (and does not count the write
+// as a failed delivery) when this returns true.
+func (e *StreamTerminalError) BodyPresented() bool { return e.ContentPresented }
+
 func (e *StreamTerminalError) Unwrap() error {
 	return e.Cause
 }
@@ -151,6 +157,12 @@ type NativeStreamingWriter struct {
 
 	// 完整性校验
 	failedFlushChunks []string
+	// pendingFlush holds content extracted from buf while appendWithRetry is
+	// in flight. CloseContext's deadline branch reads it so an append stuck
+	// past the terminal budget still reports ContentPresented=false — without
+	// it the in-flight tail would vanish from integrity accounting and the
+	// caller's fallback would be skipped silently.
+	pendingFlush string
 
 	// Post-stream table upgrade: accumulates full content for table detection on Close.
 	fullContent strings.Builder
@@ -259,7 +271,19 @@ func (w *NativeStreamingWriter) flushLoop() {
 	for {
 		select {
 		case <-w.closeChan:
-			w.flushBuffer()
+			if w.flushBuffer() {
+				// Final flush was skipped by the rate limiter: the buffered
+				// tail was never delivered. Record it as an unflushed chunk
+				// so CloseContext's integrity check reports ContentPresented
+				// = false and the connection's fallback machinery triggers —
+				// the user must not lose the reply tail silently.
+				w.mu.Lock()
+				if w.buf.Len() > 0 {
+					w.failedFlushChunks = append(w.failedFlushChunks, w.buf.String())
+					w.buf.Reset()
+				}
+				w.mu.Unlock()
+			}
 			return
 		case <-w.flushTrigger:
 			w.flushBuffer()
@@ -270,19 +294,25 @@ func (w *NativeStreamingWriter) flushLoop() {
 }
 
 // flushBuffer flushes the buffered content to Slack via AppendStream.
-func (w *NativeStreamingWriter) flushBuffer() {
+// Returns true when the flush was SKIPPED by the rate limiter with content
+// still buffered (callers that need the flush to be final — the close path —
+// must then record the leftover as unflushed so integrity accounting stays
+// honest). Mid-turn flush triggers ignore the return value: the buffer is
+// retained and a later trigger retries.
+func (w *NativeStreamingWriter) flushBuffer() bool {
 	w.mu.Lock()
 	if w.buf.Len() == 0 || !w.started {
 		w.mu.Unlock()
-		return
+		return false
 	}
 	// Check rate limit before extracting content to avoid extract-requeue reordering.
 	if w.rateLimiter != nil && !w.rateLimiter.Allow(w.channelID) {
 		w.mu.Unlock()
-		return
+		return true
 	}
 	content := w.buf.String()
 	w.buf.Reset()
+	w.pendingFlush = content
 	w.mu.Unlock()
 
 	// Chunk if too large
@@ -302,6 +332,10 @@ func (w *NativeStreamingWriter) flushBuffer() {
 			w.mu.Unlock()
 		}
 	}
+	w.mu.Lock()
+	w.pendingFlush = ""
+	w.mu.Unlock()
+	return false
 }
 
 const appendTimeout = 10 * time.Second
@@ -367,7 +401,39 @@ func (w *NativeStreamingWriter) CloseContext(ctx context.Context) error {
 	w.mu.Unlock()
 
 	close(w.closeChan)
-	w.wg.Wait()
+	// Bound the final flush by the caller's deadline: appendWithRetry uses a
+	// 10s per-attempt timeout with 3 retries plus rate-limit sleeps, so an
+	// unconstrained wg.Wait could stall the terminal write for 30s+ while the
+	// gateway's terminal budget is only 5s. On timeout the leftover buffer is
+	// recorded as unflushed (ContentPresented=false) so the caller's fallback
+	// fires instead of treating the reply as delivered. The flushLoop
+	// goroutine is not leaked — it always returns on its own after the wait.
+	flushDone := make(chan struct{})
+	go func() {
+		defer close(flushDone)
+		w.wg.Wait()
+	}()
+	select {
+	case <-flushDone:
+	case <-ctx.Done():
+		w.log.Warn("slack: final flush exceeded terminal deadline; marking tail unflushed",
+			"channel", w.channelID)
+		w.mu.Lock()
+		if w.buf.Len() > 0 {
+			w.failedFlushChunks = append(w.failedFlushChunks, w.buf.String())
+			w.buf.Reset()
+		}
+		if w.pendingFlush != "" {
+			// Content already extracted into an in-flight append: it may still
+			// land in Slack after the deadline (the append's own 10s timeout is
+			// longer than the terminal budget), so this is a conservative
+			// report — a decoration-only fallback text is a small price for
+			// never silently dropping the reply tail.
+			w.failedFlushChunks = append(w.failedFlushChunks, w.pendingFlush)
+			w.pendingFlush = ""
+		}
+		w.mu.Unlock()
+	}
 
 	// Read all final state AFTER flushLoop completes to avoid TOCTOU races:
 	// streamExpired may be set during the final flushBuffer() in flushLoop.

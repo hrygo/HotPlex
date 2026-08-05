@@ -436,3 +436,112 @@ func TestNativeStreamingWriter_Close_PreservesIOCompat(t *testing.T) {
 	require.ErrorIs(t, err, stopErr)
 	require.Empty(t, api.posts)
 }
+
+// TestNativeStreamingWriter_CloseContext_RateLimitedFinalFlushNotPresented
+// guards the flushLoop close-path accounting: when the final flush is skipped
+// by the rate limiter, the buffered tail must be recorded as unflushed so
+// CloseContext reports ContentPresented=false and the connection's fallback
+// machinery fires instead of silently losing the reply tail.
+func TestNativeStreamingWriter_CloseContext_RateLimitedFinalFlushNotPresented(t *testing.T) {
+	t.Parallel()
+
+	rl := NewChannelRateLimiter(context.Background())
+	t.Cleanup(rl.Stop)
+	// Exhaust the burst so every subsequent Allow is denied (1 req/s rate
+	// means no token recovery within the test's lifetime).
+	for range 4 {
+		rl.Allow("C1")
+	}
+	require.False(t, rl.Allow("C1"), "precondition: limiter must deny after burst exhaustion")
+
+	api := &streamFakeAPI{}
+	w := NewNativeStreamingWriter(context.Background(), api, "C1", "", "", rl, discardLogger, nil, nil)
+	t.Cleanup(func() { _ = w.Close() })
+
+	_, err := w.Write([]byte("hello"))
+	require.NoError(t, err)
+	// Under flushSize so the threshold trigger is not fired; the periodic
+	// ticker may attempt a flush but the rate limiter denies it, keeping the
+	// tail buffered until close.
+	_, err = w.Write([]byte("tail"))
+	require.NoError(t, err)
+
+	err = w.CloseContext(context.Background())
+
+	var terminalErr *StreamTerminalError
+	require.ErrorAs(t, err, &terminalErr)
+	require.False(t, terminalErr.ContentPresented,
+		"a rate-limited final flush means the buffered tail was never delivered")
+	require.Empty(t, api.posts)
+}
+
+// stuckAppendAPI blocks AppendStreamContext until release is closed, and
+// signals start once the first append attempt is in flight.
+type stuckAppendAPI struct {
+	*streamFakeAPI
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *stuckAppendAPI) AppendStreamContext(context.Context, string, string, ...slack.MsgOption) (string, string, error) {
+	f.once.Do(func() { close(f.started) })
+	<-f.release
+	return "", "", errors.New("append stuck")
+}
+
+// TestNativeStreamingWriter_CloseContext_StuckFinalFlushBoundedByDeadline
+// guards the CloseContext deadline contract: a final flush stuck in
+// AppendStreamContext must not stall the terminal write past the caller's
+// deadline, and the in-flight content must be reported as not-presented so
+// the fallback still fires (never silently drop the reply tail).
+func TestNativeStreamingWriter_CloseContext_StuckFinalFlushBoundedByDeadline(t *testing.T) {
+	t.Parallel()
+
+	api := &stuckAppendAPI{
+		streamFakeAPI: &streamFakeAPI{},
+		started:       make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(api.release) }) })
+
+	w := NewNativeStreamingWriter(context.Background(), api, "C1", "", "", nil, discardLogger, nil, nil)
+	t.Cleanup(func() { _ = w.Close() })
+
+	_, err := w.Write([]byte("hello"))
+	require.NoError(t, err)
+	_, err = w.Write([]byte("tail"))
+	require.NoError(t, err)
+
+	// Wait until the final content is in flight inside AppendStreamContext:
+	// only then is the deadline branch deterministic (pendingFlush set, buf
+	// empty).
+	select {
+	case <-api.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("append never started")
+	}
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err = w.CloseContext(ctx)
+
+	require.Less(t, time.Since(start), 2*time.Second,
+		"CloseContext must not wait past the caller's deadline for a stuck flush")
+	var terminalErr *StreamTerminalError
+	require.ErrorAs(t, err, &terminalErr)
+	require.False(t, terminalErr.ContentPresented,
+		"the in-flight final tail was never delivered — must not report the body as presented")
+	require.Empty(t, api.posts)
+
+	// Release the stuck append so the flushLoop goroutine exits cleanly;
+	// verify it does so without hanging the test.
+	releaseOnce.Do(func() { close(api.release) })
+	require.Eventually(t, func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return w.pendingFlush == ""
+	}, time.Second, 10*time.Millisecond)
+}
