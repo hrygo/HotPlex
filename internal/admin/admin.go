@@ -14,6 +14,7 @@ import (
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
@@ -32,6 +33,11 @@ const (
 	ScopeConfigRead   = "config:read"
 	ScopeAdminRead    = "admin:read"
 	ScopeAdminWrite   = "admin:write"
+	// Runtime operation scopes (#877/#946): fence inspection/actions and
+	// effective runtime plan reads. Granted per-token via admin.token_scopes;
+	// never included in the minimal default scope set.
+	ScopeRuntimeRead  = "runtime:read"
+	ScopeRuntimeWrite = "runtime:write"
 )
 
 // DBExecutor covers the sql.DB methods used by apiKeyUserStore.
@@ -77,6 +83,22 @@ type TurnStatsProvider interface {
 	TurnStats(ctx context.Context, sessionID string) (*eventstore.TurnStats, error)
 	// LatestSeq returns the max persisted event seq for a session (issue #879 #5).
 	LatestSeq(ctx context.Context, sessionID string) (int64, error)
+}
+
+// RuntimeExecutionProvider is the narrow execution-store view used by the
+// runtime operations admin endpoints (#877). Injected from cmd/hotplex so
+// admin stays decoupled from the gateway; errors must preserve
+// execution.ErrNotFound / execution.ErrFenceConflict for status mapping.
+type RuntimeExecutionProvider interface {
+	ListFences(ctx context.Context, sessionID string, limit, offset int) ([]*execution.Record, error)
+	ApplyFenceDecision(ctx context.Context, request execution.FenceActionRequest) (*execution.Record, error)
+}
+
+// RuntimeEventNotifier emits the additive runtime.execution.failed event for
+// an operator abandon (#877). Best-effort: fenced sessions usually have no
+// connected clients, and the store write is already durable when this fires.
+type RuntimeEventNotifier interface {
+	NotifyExecutionAbandoned(ctx context.Context, sessionID, executionID string)
 }
 
 type DebugSessionSnapshot struct {
@@ -129,9 +151,11 @@ type AdminAPI struct {
 	cookieAuth       *security.CookieAuth           // Optional: enables cookie-session fallback (issue #788 A2)
 	idp              *security.LocalAccountProvider // Optional: paired with cookieAuth
 	startedAt        time.Time
-	activityService  *ActivityService // Optional: enables /admin/activity + /admin/users/{id}/activity (issue #833)
-	auditCollector   *audit.Collector // Optional: emits system.audit_export meta-audit rows (issue #833)
-	skillsLocator    *skills.Locator  // Optional: enables /admin/api/skills global skill management (issue #910)
+	activityService  *ActivityService         // Optional: enables /admin/activity + /admin/users/{id}/activity (issue #833)
+	auditCollector   *audit.Collector         // Optional: emits system.audit_export meta-audit rows (issue #833)
+	skillsLocator    *skills.Locator          // Optional: enables /admin/api/skills global skill management (issue #910)
+	runtimeExec      RuntimeExecutionProvider // Optional: enables /admin/executions fence endpoints (#877); nil → 503
+	runtimeNotifier  RuntimeEventNotifier     // Optional: emits runtime.execution.failed on abandon (#877)
 }
 
 type Deps struct {
@@ -200,6 +224,14 @@ func New(deps Deps) *AdminAPI {
 // SetSkillsLocator 注入 skill 定位器，启用 /admin/api/skills 全局 skill 管理
 // （issue #910）。nil 时 skill 端点返回 503。
 func (a *AdminAPI) SetSkillsLocator(l *skills.Locator) { a.skillsLocator = l }
+
+// SetRuntimeExecution injects the execution-store provider that backs the
+// operator fence endpoints (#877). nil-safe: fence endpoints return 503 until
+// wired. The optional notifier emits runtime.execution.failed on abandon.
+func (a *AdminAPI) SetRuntimeExecution(p RuntimeExecutionProvider, n RuntimeEventNotifier) {
+	a.runtimeExec = p
+	a.runtimeNotifier = n
+}
 
 func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -294,6 +326,7 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 			}
 			actor = "admin-token"
 			ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
+			ctx = context.WithValue(ctx, actorContextKey{}, actor)
 			next.ServeHTTP(sw, r.WithContext(ctx))
 			return
 		}
@@ -330,8 +363,10 @@ func (a *AdminAPI) Middleware(next http.Handler) http.Handler {
 				ScopeAdminWrite, ScopeAdminRead,
 				ScopeSessionRead, ScopeSessionWrite, ScopeSessionKill,
 				ScopeStatsRead, ScopeHealthRead, ScopeConfigRead,
+				ScopeRuntimeRead, ScopeRuntimeWrite,
 			}
 			ctx := context.WithValue(r.Context(), scopeContextKey{}, scopes)
+			ctx = context.WithValue(ctx, actorContextKey{}, actor)
 			next.ServeHTTP(sw, r.WithContext(ctx))
 			return
 		}

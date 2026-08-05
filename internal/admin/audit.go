@@ -44,6 +44,9 @@ const (
 	AuditSkillCreate                   = "skill.create" // issue #910 global skill install
 	AuditSkillUpdate                   = "skill.update" // ?replace=true 覆盖
 	AuditSkillDelete                   = "skill.delete"
+	AuditRuntimeFenceAction            = "runtime.fence.action"  // #877 decision-agnostic middleware line
+	AuditRuntimeFenceResolve           = "runtime.fence.resolve" // #877 specific decision (user_activity)
+	AuditRuntimeFenceAbandon           = "runtime.fence.abandon" // #877 specific decision (user_activity)
 
 	// AuditResult* — stable "result" field values. Reuse instead of literals so
 	// dashboard filters stay correct (issue #788 review P3).
@@ -111,6 +114,8 @@ func adminActionFor(method, path string) string {
 		return AuditSessionTerminate
 	case strings.HasSuffix(path, "/run") && strings.Contains(path, "/cron/"):
 		return AuditCronTrigger
+	case strings.Contains(path, "/fence-action"):
+		return AuditRuntimeFenceAction
 	case strings.Contains(path, "/config/rollback"):
 		return AuditConfigRollback
 	case strings.Contains(path, "/config/validate"):
@@ -271,12 +276,12 @@ func (a *AdminAPI) enqueueAdminActivity(r *http.Request, status int, actor, slog
 	enqueueAdminActivity(a.auditCollector, r, status, actor, slogAction)
 }
 
-func enqueueAdminActivity(c *audit.Collector, r *http.Request, status int, actor, slogAction string) {
-	if c == nil {
-		return
-	}
-	userID := actor
-	userIDType := audit.UserIDTypeRegistered // admin cookie → users.id
+// actorIdentity maps an admin actor string to the user_activity identity pair.
+// Shared by the middleware dual-write and handler-specific audit rows (#877)
+// so both namespaces agree on who acted.
+func actorIdentity(actor string) (userID, userIDType string) {
+	userID = actor
+	userIDType = audit.UserIDTypeRegistered // admin cookie → users.id
 	switch actor {
 	case "", "anonymous":
 		userID = audit.AnonymousUserID
@@ -284,6 +289,14 @@ func enqueueAdminActivity(c *audit.Collector, r *http.Request, status int, actor
 	case "admin-token":
 		userIDType = audit.UserIDTypeSystem
 	}
+	return userID, userIDType
+}
+
+func enqueueAdminActivity(c *audit.Collector, r *http.Request, status int, actor, slogAction string) {
+	if c == nil {
+		return
+	}
+	userID, userIDType := actorIdentity(actor)
 	outcome := audit.OutcomeSuccess
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		outcome = audit.OutcomeDenied
