@@ -227,6 +227,7 @@ type recordingConn struct {
 	entries []*events.Envelope
 
 	nextTerminalFault atomic.Pointer[error] // error armed for the next terminal write (C07)
+	terminalFaults    atomic.Int32          // count of armed terminal faults that fired (C07 observability)
 	dropDeltas        atomic.Bool           // armed delta drop (C08)
 }
 
@@ -243,7 +244,10 @@ func (r *recordingConn) WriteCtx(_ context.Context, env *events.Envelope) error 
 		if f := r.nextTerminalFault.Swap(nil); f != nil {
 			// The terminal delivery failed at the armed stage, but the terminal
 			// stays observable exactly once — the platform's terminal handling
-			// still completes the turn.
+			// still completes the turn. terminalFaults makes the fire observable
+			// (the runner's single-terminal/no-replay assertions cannot tell an
+			// armed-and-fired fault from an inert arm).
+			r.terminalFaults.Add(1)
 			r.record(env)
 			return *f
 		}
@@ -375,7 +379,34 @@ func (d *slackContractDriver) SendRawInput(ctx context.Context, id, content stri
 	// write (C07) the hub detaches the failing writer, so the driver reconnects
 	// like the real platform would. The per-turn snapshot is observed on the
 	// fresh conn.
+	//
+	// Any fault armed on the previous conn (FailNextTerminal / SaturateDeltaQueue,
+	// which the runner calls BEFORE SendRawInput) is MOVED to the fresh conn —
+	// otherwise the arm would sit on the orphaned conn and the fault half of
+	// C07/C08 would never fire on the stream the assertions observe (the
+	// single-terminal/no-replay assertions alone cannot tell an armed-and-fired
+	// fault from an inert arm).
+	// Re-join a fresh observation conn per input: after a faulted terminal
+	// write (C07) the hub detaches the failing writer, so the driver reconnects
+	// like the real platform would. The per-turn snapshot is observed on the
+	// fresh conn.
+	//
+	// Any fault armed on the previous conn (FailNextTerminal / SaturateDeltaQueue,
+	// which the runner calls BEFORE SendRawInput) is MOVED to the fresh conn —
+	// otherwise the arm would sit on the orphaned conn and the fault half of
+	// C07/C08 would never fire on the stream the assertions observe (the
+	// single-terminal/no-replay assertions alone cannot tell an armed-and-fired
+	// fault from an inert arm).
+	prev := d.rec
 	d.rec = newRecordingConn()
+	if prev != nil {
+		if f := prev.nextTerminalFault.Swap(nil); f != nil {
+			d.rec.nextTerminalFault.Store(f)
+		}
+		if prev.dropDeltas.Swap(false) {
+			d.rec.dropDeltas.Store(true)
+		}
+	}
 	d.h.Hub.JoinPlatformSession(d.sessionID, d.rec)
 	d.payloads[id] = content
 	d.send(ctx, id, content)
