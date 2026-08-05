@@ -129,6 +129,16 @@ func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *Worker
 // matrix flows keep the synchronous full-turn emission.
 func (p *WorkerProbe) EnableBlocking() { p.blocking.Store(true) }
 
+// MarkExitIntentional flags the probe's upcoming conn close as an intentional
+// scenario teardown rather than a crash. The bridge's handleWorkerExit then
+// treats the exit as a user stop (session → idle, no crash cleanup, no
+// recovery-worker spawn), so the next scenario's init/input cannot race a
+// stale recovery attach (webchat matrix flake root cause).
+func (p *WorkerProbe) MarkExitIntentional() {
+	p.stopped.Store(true)
+	p.stoppedTurn.Store(p.turnN.Load())
+}
+
 // EnteredTurn returns the per-turn signal fired once the probe emitted the
 // pre-terminal content of a turn (and is now holding the terminal).
 func (p *WorkerProbe) EnteredTurn() <-chan struct{} { return p.enteredTurn }

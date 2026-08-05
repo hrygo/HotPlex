@@ -14,7 +14,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -43,9 +42,8 @@ const (
 	harnessTeardown    = 2 * time.Second
 )
 
-// debugLogger is a temporary handler for diagnosing the webchat C04 settle
-// flake (TODO(debug): remove).
-var debugLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+// discardLogger silences gateway log output during contract tests.
+var discardLogger = slog.New(slog.DiscardHandler)
 
 // Harness is a full gateway stack bound to a single WorkerProbe session.
 // It exposes the real gateway entry points (Hub/Bridge/Handler) so contract
@@ -78,7 +76,7 @@ type Harness struct {
 func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract.WorkerProfile) *Harness {
 	t.Helper()
 
-	log := debugLogger
+	log := discardLogger
 	cfg := config.Default()
 	dbPath := filepath.Join(t.TempDir(), "sessions.db")
 	cfg.DB.Path = dbPath

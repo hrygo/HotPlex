@@ -373,8 +373,12 @@ func (d *slackContractDriver) EndScenario(t testing.TB) {
 	// already reached its done, so the forwarder exits cleanly). Without this,
 	// every per-scenario session's forwarder blocks the harness teardown's
 	// WaitForwarders up to its 2s bound — the harness itself only closes the
-	// latest probe.
+	// latest probe. MarkExitIntentional precedes the close so the bridge treats
+	// the exit as a user stop (session → idle, no crash cleanup, no
+	// recovery-worker spawn) — without it the bridge's crash path races the
+	// next scenario's input with a recovery attach (matrix flake root cause).
 	if d.worker != nil {
+		d.worker.MarkExitIntentional()
 		_ = d.worker.Conn().Close()
 		d.worker = nil
 	}

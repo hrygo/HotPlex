@@ -41,7 +41,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -302,19 +301,19 @@ func (d *webChatContractDriver) EndScenario(t testing.TB) {
 	// every per-scenario session's forwarder blocks the harness teardown's
 	// WaitForwarders up to its 2s bound — the harness closes every probe only
 	// in its own teardown (harness.go: MarkClosed first, then every probe
-	// conn). EndScenario differs from that teardown: the bridge is NOT marked
-	// closed here, so closing a probe whose turn never reached its done (e.g.
-	// a scenario failed and was aborted mid-turn) could make handleWorkerExit
-	// treat the exit as a crash and spawn a resume-fallback worker. In
-	// practice EndScenario only closes probes after their terminal was
-	// observed (SendRawInput captured d.worker on the delivered ack), so no
-	// fallback is triggered; the un-marked-close risk is noted for mid-turn
-	// failure paths.
+	// conn). MarkExitIntentional precedes the close so handleWorkerExit treats
+	// the exit as a user stop (session → idle, no crash cleanup, no
+	// recovery-worker spawn): without it, the bridge's crash path terminates
+	// the session AND the next scenario's ws init resumes it again
+	// (conn.go handleExistingSession), racing the scenario's own input
+	// auto-resume with a stale recovery attach — the webchat matrix's
+	// C02/C04/C06/C07/C08 flake root cause.
 	if d.worker != nil {
 		// Release any gated turn (C04): a failed assertion must not strand the
 		// probe's Input goroutine on the terminal gate (ReleaseTerminal is
 		// idempotent).
 		d.worker.ReleaseTerminal()
+		d.worker.MarkExitIntentional()
 		_ = d.worker.Conn().Close()
 		d.worker = nil
 	}
@@ -433,34 +432,19 @@ func (d *webChatContractDriver) SendStopTwice(ctx context.Context) error {
 	// outcome ack fires after w.Input returns): wait for it so no control-plane
 	// leftover is still in flight when the next scenario's init handshake reads
 	// the socket — otherwise the next init_ack reads a stale ack frame.
-	var settled []*events.Envelope
-	var foundSettled atomic.Bool
 	require.Eventually(d.t, func() bool {
-		settled = d.rec.Events()
-		for _, env := range settled {
+		for _, env := range d.rec.Events() {
 			ack, ok := env.Event.Data.(events.InputAckData)
 			if !ok || ack.ClientMessageID != "c04-id-1" {
 				continue
 			}
 			if ack.Status == events.ExecutionStatusDelivered ||
 				ack.Status == events.ExecutionStatusFailed {
-				foundSettled.Store(true)
 				return true
 			}
 		}
 		return false
 	}, driverWaitTimeout, driverWaitPoll, "webchat driver: C04 input never settled after the release")
-	if !foundSettled.Load() {
-		fmt.Fprintf(os.Stderr, "TODO(debug) C04 settle failed: session=%s\n", d.sessionID)
-		for _, env := range settled {
-			fmt.Fprintf(os.Stderr, "TODO(debug) rec: type=%s seq=%d id=%s\n", env.Event.Type, env.Seq, env.ID)
-		}
-		d.wsLogMu.Lock()
-		for _, env := range d.wsLog {
-			fmt.Fprintf(os.Stderr, "TODO(debug) ws: type=%s seq=%d id=%s\n", env.Event.Type, env.Seq, env.ID)
-		}
-		d.wsLogMu.Unlock()
-	}
 	return nil
 }
 
