@@ -127,7 +127,36 @@ func (e *pcEntry) RouteWriteData(data []byte, eventType events.Kind) error {
 // json:"-" fields (e.g. OwnerID) that EncodeJSON omits from pre-encoded bytes.
 func (e *pcEntry) PreferEnvelope() bool { return true }
 
+// WriteCtx enqueues env and, for terminal events, waits up to the configured
+// terminal timeout for the write loop to report the actual platform result.
 func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error) {
+	if !isTerminalPlatformEvent(env.Event.Type) {
+		return e.EnqueueWrite(ctx, env, nil)
+	}
+	terminalCtx, cancel := context.WithTimeout(ctx, e.cfg.TerminalTimeout)
+	defer cancel()
+	ack := make(chan error, 1)
+	if err := e.EnqueueWrite(terminalCtx, env, ack); err != nil {
+		return err
+	}
+	select {
+	case err := <-ack:
+		return err
+	case <-terminalCtx.Done():
+		return fmt.Errorf("platform conn terminal write timeout: %w", terminalCtx.Err())
+	case <-e.closeCh:
+		return errors.New("platform conn closed")
+	case <-e.done:
+		return errors.New("platform conn closed")
+	}
+}
+
+// EnqueueWrite admits env into the write queue and returns without waiting
+// for the platform write result. For terminal events the write loop reports
+// the real result on result (buffered, one-shot); for all other events result
+// is ignored. EnqueueWrite never blocks on the write itself, so it is safe to
+// call from the Hub's single router goroutine.
+func (e *pcEntry) EnqueueWrite(ctx context.Context, env *events.Envelope, result chan<- error) (err error) {
 	// Recover from send-on-closed-channel panic caused by the TOCTOU window
 	// between closed.Load() and the channel send. The atomic guard narrows
 	// this window to nanoseconds, but recover() eliminates it entirely.
@@ -143,14 +172,33 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 	}
 
 	write := platformWrite{env: env, ctx: ctx}
-	var result <-chan error
 	if isTerminalPlatformEvent(env.Event.Type) {
 		terminalCtx, cancel := context.WithTimeout(ctx, e.cfg.TerminalTimeout)
-		defer cancel()
 		write.ctx = terminalCtx
-		ack := make(chan error, 1)
-		write.result = ack
-		result = ack
+		write.result = result
+		ctx = terminalCtx
+		if result != nil {
+			// Budget guard: when the write loop cannot report within the
+			// terminal budget (e.g. a platform write that ignores its
+			// context), complete the caller here. cancel() is deferred to
+			// the guard so terminalCtx stays live for the write loop until
+			// the budget itself expires; the goroutine is bounded by
+			// TerminalTimeout, so it cannot leak. A result already delivered
+			// by the write loop is dropped by the buffered send.
+			go func() {
+				defer cancel()
+				select {
+				case <-terminalCtx.Done():
+					select {
+					case result <- fmt.Errorf("platform conn terminal write timeout: %w", terminalCtx.Err()):
+					default:
+					}
+				case <-e.done:
+				}
+			}()
+		} else {
+			cancel()
+		}
 	}
 	if isDroppable(env.Event.Type) {
 		if len(e.ch) >= e.cfg.DropThreshold {
@@ -166,31 +214,13 @@ func (e *pcEntry) WriteCtx(ctx context.Context, env *events.Envelope) (err error
 		}
 	}
 
-	writeCtx := write.ctx
-	cancel := func() {}
-	if result == nil {
-		writeCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
-	}
+	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	select {
 	case e.ch <- write:
+		return nil
 	case <-writeCtx.Done():
 		return fmt.Errorf("platform conn write timeout: buffer full")
-	case <-e.closeCh:
-		return errors.New("platform conn closed")
-	case <-e.done:
-		return errors.New("platform conn closed")
-	}
-
-	if result == nil {
-		return nil
-	}
-
-	select {
-	case err := <-result:
-		return err
-	case <-writeCtx.Done():
-		return fmt.Errorf("platform conn terminal write timeout: %w", writeCtx.Err())
 	case <-e.closeCh:
 		return errors.New("platform conn closed")
 	case <-e.done:

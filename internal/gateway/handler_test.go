@@ -404,7 +404,8 @@ func (m *mockWorkerForHandler) ResetContext(ctx context.Context) (worker.ResetRe
 	return args.Get(0).(worker.ResetResult), args.Error(1)
 }
 func (m *mockWorkerForHandler) StopCurrentTurn(ctx context.Context) error {
-	return nil
+	args := m.Called(ctx)
+	return args.Error(0)
 }
 func (m *mockWorkerForHandler) IsStopped() bool {
 	return false
