@@ -7,10 +7,12 @@ import (
 	"github.com/hrygo/hotplex/internal/admin"
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/eventstore"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -164,4 +166,43 @@ func (a *botListerAdapter) GetBot(name string) (*admin.BotEntry, bool) {
 	}
 	entry := toAdminBotEntry(e)
 	return &entry, true
+}
+
+// executionProviderAdapter exposes the durable-ingress store to the Admin API
+// for operator fence decisions (#877). Pass-through only — the store owns all
+// conditional-update semantics.
+type executionProviderAdapter struct {
+	store execution.Store
+}
+
+func (a *executionProviderAdapter) ListFences(ctx context.Context, sessionID string, limit, offset int) ([]*execution.Record, error) {
+	return a.store.ListFences(ctx, sessionID, limit, offset)
+}
+
+func (a *executionProviderAdapter) ApplyFenceDecision(ctx context.Context, request execution.FenceActionRequest) (*execution.Record, error) {
+	return a.store.ApplyFenceDecision(ctx, request)
+}
+
+// runtimeEventNotifier emits the additive runtime.execution.failed event with
+// OPERATOR_ABANDONED after an abandon decision, so connected clients observe
+// the terminal state. Best-effort by contract: fenced sessions rarely have
+// live connections and the store write is already durable.
+type runtimeEventNotifier struct {
+	hub *gateway.Hub
+}
+
+func (n *runtimeEventNotifier) NotifyExecutionAbandoned(ctx context.Context, sessionID, executionID string) {
+	if n.hub == nil {
+		return
+	}
+	seq := n.hub.NextSeq(sessionID)
+	if seq == 0 {
+		return
+	}
+	env := events.NewEnvelope(aep.NewID(), sessionID, seq, events.RuntimeExecutionFailed, events.RuntimeExecutionData{
+		ExecutionID: executionID,
+		Status:      string(execution.RuntimeFailed),
+		ErrorCode:   events.ErrCodeOperatorAbandoned,
+	})
+	_ = n.hub.SendToSession(ctx, env)
 }

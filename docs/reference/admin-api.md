@@ -54,8 +54,12 @@ admin:
 | `stats:read` | - | - | 🟢 Read | - | - | - | `GET /admin/stats`<br>`GET /admin/metrics`<br>`GET /admin/sessions/pool` |
 | `config:read` | - | - | - | 🟢 Read | - | - | `POST /admin/config/validate` |
 | `config:write` | - | - | - | 🟠 Write | - | - | `POST /admin/config/rollback` |
+| `runtime:read` | - | - | - | - | - | - | `GET /admin/executions/fences`<br>`GET /admin/sessions/{id}/runtime-plan`（需与 `session:read` 同时持有） |
+| `runtime:write` | - | - | - | - | - | - | `POST /admin/executions/{id}/fence-action` |
 | `admin:read` | - | - | - | - | 🟢 Read | 🟢 Read | `GET /admin/logs`<br>`GET /admin/debug/...`<br>`GET /admin/bots`<br>`GET /admin/cron/jobs` |
 | `admin:write` | - | - | - | - | - | 🟠 Write | `POST/PATCH/DELETE /admin/cron/jobs`<br>`POST /admin/cron/jobs/{id}/run` |
+
+> 💡 **Scope 蕴含**：`admin:write` 蕴含 `admin:read`、`runtime:read`、`runtime:write`；`admin:read` 蕴含 `config:read`（#877）。
 
 > 💡 **图例**：🟢 **Read** (只读查询) | 🟠 **Write** (状态变更/操作) | 🔴 **Delete** (物理删除)
 
@@ -100,6 +104,7 @@ Rate Limit 和 IP Whitelist 支持配置热重载，无需重启生效。
 | Session | `session.delete` / `session.terminate` / `session.patch` / `session.put` |
 | Audit | `audit.identity_link.create` / `audit.identity_link.delete` |
 | Config | `config.rollback` / `config.validate` |
+| Runtime Fence（#877） | `runtime.fence.action`（middleware slog，decision 无关）<br>`runtime.fence.resolve` / `runtime.fence.abandon`（`user_activity` 行，含 reason/evidence_ref） |
 | 多租户成员/邀请 | `member.status.update` / `invitation.create` / `invitation.delete` |
 | 认证拒绝 | `auth.denied` |
 
@@ -144,6 +149,37 @@ curl -H "Authorization: Bearer $TOKEN" \
 **POST /admin/sessions/{id}/terminate** — 将会话状态迁移至 `terminated`（软终止，保留记录）。DELETE 则为物理删除。
 
 > **注意**：会话创建不通过 Admin API，而是通过 Gateway API（`POST /api/sessions`）或 WebSocket `init` 握手完成。Admin API 仅提供只读查询和终止/删除操作。
+
+### Runtime Operations（#877 / #946）
+
+| 方法 | 路径 | Scope | 说明 |
+|------|------|-------|------|
+| GET | `/admin/executions/fences` | `runtime:read` | 列出阻塞新输入的 fenced executions |
+| POST | `/admin/executions/{id}/fence-action` | `runtime:write` | 应用 operator 决策（resolve/abandon），以 fence_version 为条件 |
+| GET | `/admin/sessions/{id}/runtime-plan` | `runtime:read` + `session:read` | 会话的 desired-state plan（redacted）与 observed bootstrap 摘要 |
+
+**GET /admin/executions/fences** — 列出运行时结局不明（runtime unknown）并触发 fence 的 execution。fenced execution 会阻塞同 session 的新输入，直至 operator 决策。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `session_id` | string | "" | 按 session 过滤 |
+| `limit` | int | 100 | 每页数量（上限 500） |
+| `offset` | int | 0 | 偏移量 |
+
+返回 `{"fences": [...], "limit": N, "offset": N}`。列表项为刻意收窄的无密投影：`execution_id`、`session_id`、`delivery_status`、`runtime_status`、`fence_reason`、`fence_version`、`fence_created_at`、`updated_at` —— 不含 payload 指纹、错误细节或任何用户内容派生字段。
+
+**POST /admin/executions/{id}/fence-action** — operator 决策入口。请求体：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `decision` | string | ✅ | `resolve`（清除 fence，runtime 保持 unknown）或 `abandon`（清除 fence，runtime 置 failed 并补发 `runtime.execution.failed` 事件） |
+| `expected_fence_version` | int | ✅ | 取自 `fences list` 的 `fence_version`；条件更新不匹配时返回 `409 FENCE_CONFLICT` |
+| `reason` | string | ✅ | operator 理由，1–512 字符；仅进入审计层，execution store 永不保存 |
+| `evidence_ref` | string | - | 工单/run 引用指针，≤256 字符；仅指针，不允许内联内容 |
+
+错误码：`400 BAD_REQUEST`（字段校验）/ `403 INSUFFICIENT_SCOPE` / `404 FENCE_NOT_FOUND` / `409 FENCE_CONFLICT` / `503 SERVICE_UNAVAILABLE`（store 未配置或超时）。收到 409 必须重新 inspect 当前 fence 状态后审慎重试 —— 并发 operator 或 inspect 与 action 之间的网关重启都会触发冲突，服务端不自动重试。`abandon` 成功后 best-effort 通知在线连接终态。
+
+**GET /admin/sessions/{id}/runtime-plan** — 返回会话的 EffectiveRuntimePlan 诊断投影（#946 spec §6.6）：`plan`（redacted view：plan hash、worker_type、permission/sandbox 摘要、env key **名称**、source refs、warnings、blocked codes）与 `observed`（bootstrap 状态：`planned` / `unknown` / `declared` 及 permission ceiling）。投影由会话持久化事实 + 当前 config 按需计算，无 plan 表、无第二份持久化真相；blocked plan 返回 200 并携带 bounded 拦截原因与空 `plan_hash`（blocked 是有效诊断载荷，不是 HTTP 错误）。响应永不包含 prompt、完整命令、model、工具清单或任何值内容。
 
 ### 监控指标
 
@@ -490,14 +526,16 @@ zip 格式、文件类型白名单与安全约束同上方「Skill 管理（admi
 | 403 | `PERMISSION_DENIED` | 非 admin 试图在 workspace Create/Update 设置或修改 `permission_mode`（admin-only 字段，r3 #804） |
 | 404 | `NOT_FOUND` | Session/Cron Job/Invitation 未找到 |
 | 404 | `WORKSPACE_NOT_FOUND` | workspace id 不存在 |
+| 404 | `FENCE_NOT_FOUND` | fence-action 目标 execution 不存在 |
 | 409 | `CONFLICT` | 资源状态冲突 |
+| 409 | `FENCE_CONFLICT` | fence_version 条件更新失败；重新 inspect 后审慎重试，勿自动重试（#877） |
 | 409 | `WORKSPACE_VERSION_MISMATCH` | PATCH workspace 乐观并发冲突（`updated_at` CAS 失败，re-fetch 后重试） |
 | 409 | `WORKSPACE_NOT_EMPTY` | workspace 存在活跃会话，拒绝改 `work_dir` / 删除 |
 | 409 | `WORK_DIR_TAKEN` | workspace `work_dir` 已被该 owner 的其他 workspace 占用 |
 | 429 | `RATE_LIMITED` | 触发 Rate Limit |
 | 500 | `INTERNAL` | Handler panic、未分类内部错误 |
 | 501 | `NOT_IMPLEMENTED` | 该接口尚未实现 |
-| 503 | `SERVICE_UNAVAILABLE` | 数据库故障、Cron 未启用 |
+| 503 | `SERVICE_UNAVAILABLE` | 数据库故障、Cron 未启用、execution store 未配置或超时 |
 | 503 | `NO_IDP` | 未配置身份提供者 |
 
 ## 常用操作示例
@@ -529,4 +567,18 @@ curl -H "Authorization: Bearer $TOKEN" \
 # 触发 Cron 任务
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   http://localhost:9999/admin/cron/jobs/daily-health/run
+
+# 列出 fenced executions（#877）
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9999/admin/executions/fences
+
+# 决策一条 fence（expected_fence_version 取自上面的列表；冲突时重新 inspect）
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"abandon","expected_fence_version":3,"reason":"worker host lost, verified via run log","evidence_ref":"OPS-1234"}' \
+  http://localhost:9999/admin/executions/exec-abc/fence-action
+
+# 查看会话的 effective runtime plan（#946）
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:9999/admin/sessions/abc-123/runtime-plan
 ```

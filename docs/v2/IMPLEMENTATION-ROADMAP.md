@@ -24,6 +24,8 @@
 | Runtime Observability | [#850](https://github.com/hrygo/hotplex/issues/850) | runtime spans/metrics 基线 | 新属性保持低基数和统一命名 |
 | RuntimeContext | [#852](https://github.com/hrygo/hotplex/issues/852) | eventstore/turns/worker session/workspace context 接口 | 不新建 memory product |
 | Durable Ingress | [#878](https://github.com/hrygo/hotplex/issues/878) | input ledger、single-active gate、owner lease、runtime/delivery 分离、ambiguity fence、late convergence、有界 repairer | #851/#947 复用 execution identity、lease 和 fence |
+| Fence Escape Hatch | [#877](https://github.com/hrygo/hotplex/issues/877) | fence 持久化（`fence_created_at`/`fence_version`）、条件 resolve/abandon（跨实例 409 冲突）、审计、Admin API、CLI、doctor | operator 决策不自动重试、不伪装成功、不重投旧 input；`fence_version` 是唯一并发条件 |
+| EffectiveRuntimePlan (shadow) | [#946](https://github.com/hrygo/hotplex/issues/946) | redacted plan 投影 + canonical hash、fail-closed blocked codes、WS/REST 影子解析、Admin/doctor 只读路径 | dispatch 仍以 legacy SessionStartParams 为准；plan hash 永不进入 metric label；worker start/recipe dry-run 的 authoritative 切换属后续切片 |
 
 完整 AEP runtime event contract 仍由 [#849](https://github.com/hrygo/hotplex/issues/849) 跟踪；#878 交付的最小 `runtime.execution.*` 事件不代表 #849 全部完成。
 
@@ -59,16 +61,16 @@
 
 ## 当前交付切片
 
-| 顺序 | 切片 | 直接产出 | 验证重点 |
-| ---: | --- | --- | --- |
-| 1 | #877 fenced execution operator action | 有审计、可授权、可恢复的 session 解锁 | 三重失败、late completion、权限和审计 |
-| 2 | #946 EffectiveRuntimePlan + observed bootstrap | WS/REST/doctor/worker/admin/recipe 统一 plan | canonical hash、redaction、四 Worker、drift/unknown |
-| 3 | #867 env allowlist + isolation report | compat/strict profile 和真实 enforcement 状态 | 三平台 env、filesystem/network evidence |
-| 4 | #947 Cron/Webhook/message durable effect | 第一条 `desired → effect → observed → reconcile` 闭环 | 重启、多实例、timeout、5xx、响应丢失、晚到确认 |
-| 5 | #851 bounded ExecutionQueue | FIFO metadata、attempt、timeout/retry reason、queue state | race、现有 turn/LLM/crash 语义兼容 |
-| 6 | #868 Execution Cockpit | canonical runtime facts 的只读 timeline | 查询预算、授权、redaction、低基数 |
-| 7 | #870 Coding Ops Recipes | versioned manifest、dry-run plan、effect-backed delivery | 幂等、权限、双数据库、非 DAG 边界 |
-| 8 | #948 Capability Inventory | scope precedence、hash、safe materialization | safe path/size/XML/Windows、admin-gated promotion |
+| 顺序 | 切片 | 直接产出 | 验证重点 | 状态 |
+| ---: | --- | --- | --- | --- |
+| 1 | #877 fenced execution operator action | 有审计、可授权、可恢复的 session 解锁 | 三重失败、late completion、权限和审计 | ✅ 已交付（PR #953） |
+| 2 | #946 EffectiveRuntimePlan + observed bootstrap | WS/REST/doctor/worker/admin/recipe 统一 plan | canonical hash、redaction、四 Worker、drift/unknown | 🟡 shadow first slice 已交付（PR #953）；worker start/recipe authoritative 切换未开始 |
+| 3 | #867 env allowlist + isolation report | compat/strict profile 和真实 enforcement 状态 | 三平台 env、filesystem/network evidence | 未开始 |
+| 4 | #947 Cron/Webhook/message durable effect | 第一条 `desired → effect → observed → reconcile` 闭环 | 重启、多实例、timeout、5xx、响应丢失、晚到确认 | 未开始 |
+| 5 | #851 bounded ExecutionQueue | FIFO metadata、attempt、timeout/retry reason、queue state | race、现有 turn/LLM/crash 语义兼容 | 未开始 |
+| 6 | #868 Execution Cockpit | canonical runtime facts 的只读 timeline | 查询预算、授权、redaction、低基数 | 未开始 |
+| 7 | #870 Coding Ops Recipes | versioned manifest、dry-run plan、effect-backed delivery | 幂等、权限、双数据库、非 DAG 边界 | 未开始 |
+| 8 | #948 Capability Inventory | scope precedence、hash、safe materialization | safe path/size/XML/Windows、admin-gated promotion | 未开始 |
 
 ## Stage 1: Runtime Contract
 

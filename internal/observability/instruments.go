@@ -1106,6 +1106,21 @@ var (
 
 	repairDropped     metric.Int64Counter
 	repairDroppedInit sync.Once
+
+	runtimeFenceActions     metric.Int64Counter
+	runtimeFenceActionsInit sync.Once
+
+	runtimeFenceConflicts     metric.Int64Counter
+	runtimeFenceConflictsInit sync.Once
+
+	runtimePlanResolutions     metric.Int64Counter
+	runtimePlanResolutionsInit sync.Once
+
+	runtimePlanBlocked     metric.Int64Counter
+	runtimePlanBlockedInit sync.Once
+
+	runtimePlanObserved     metric.Int64Counter
+	runtimePlanObservedInit sync.Once
 )
 
 func ExecutionAccept() metric.Int64Counter {
@@ -1406,4 +1421,94 @@ func RepairDropped() metric.Int64Counter {
 		}
 	})
 	return repairDropped
+}
+
+// ─── Runtime Fence Instruments (#877) ───────────────────────────────
+
+// RuntimeFenceActions counts operator fence decisions applied via the Admin
+// API. Labels: decision (resolve|abandon), result (ok|conflict|error).
+// Low-cardinality only — no execution IDs or actors (#877 spec §11).
+func RuntimeFenceActions() metric.Int64Counter {
+	runtimeFenceActionsInit.Do(func() {
+		var err error
+		runtimeFenceActions, err = Meter().Int64Counter(
+			"hotplex.runtime.fence_actions",
+			metric.WithDescription("Operator fence decisions applied. Labels: decision (resolve|abandon), result (ok|conflict|error)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.fence_actions", err)
+		}
+	})
+	return runtimeFenceActions
+}
+
+// RuntimeFenceConflicts counts fence-version conflicts (409). A rising value
+// means operators (or gateway restarts between inspect and action) raced on
+// the same fence; investigate before retrying.
+func RuntimeFenceConflicts() metric.Int64Counter {
+	runtimeFenceConflictsInit.Do(func() {
+		var err error
+		runtimeFenceConflicts, err = Meter().Int64Counter(
+			"hotplex.runtime.fence_conflicts",
+			metric.WithDescription("Fence-version conflicts on operator decisions (conditional update matched 0 rows)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.fence_conflicts", err)
+		}
+	})
+	return runtimeFenceConflicts
+}
+
+// ─── Runtime Plan Instruments (#946) ────────────────────────────────
+
+// RuntimePlanResolutions counts EffectiveRuntimePlan resolutions in shadow
+// mode. Labels: result (ok|blocked). The plan hash is NEVER a label
+// (high cardinality — #946 spec §6.4).
+func RuntimePlanResolutions() metric.Int64Counter {
+	runtimePlanResolutionsInit.Do(func() {
+		var err error
+		runtimePlanResolutions, err = Meter().Int64Counter(
+			"hotplex.runtime.plan_resolutions",
+			metric.WithDescription("Effective runtime plan resolutions. Labels: result (ok|blocked)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.plan_resolutions", err)
+		}
+	})
+	return runtimePlanResolutions
+}
+
+// RuntimePlanBlocked counts fail-closed plan block reasons (#946 spec §6.2).
+// Labels: code (unknown_worker_type|invalid_permission_mode|
+// invalid_sandbox_mode|facts_missing_or_conflicting|capability_unverifiable|
+// secret_shaped_value). Low-cardinality only.
+func RuntimePlanBlocked() metric.Int64Counter {
+	runtimePlanBlockedInit.Do(func() {
+		var err error
+		runtimePlanBlocked, err = Meter().Int64Counter(
+			"hotplex.runtime.plan_blocked",
+			metric.WithDescription("Blocked effective runtime plans by fail-closed reason code"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.plan_blocked", err)
+		}
+	})
+	return runtimePlanBlocked
+}
+
+// RuntimePlanObserved counts observed-bootstrap states served by the plan
+// read path (#946 spec §6.5). Labels: state
+// (planned|unknown|declared|partial|enforced). Low-cardinality only.
+func RuntimePlanObserved() metric.Int64Counter {
+	runtimePlanObservedInit.Do(func() {
+		var err error
+		runtimePlanObserved, err = Meter().Int64Counter(
+			"hotplex.runtime.plan_observed",
+			metric.WithDescription("Observed runtime plan bootstrap states served. Labels: state (planned|unknown|declared|partial|enforced)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.plan_observed", err)
+		}
+	})
+	return runtimePlanObserved
 }

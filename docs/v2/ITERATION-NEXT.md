@@ -5,6 +5,8 @@
 > **前置完成**: Wave 1 链首 #847/#848/#850/#852/#866 已合并（PR #924）· #878 epic 已关闭
 > **范围决策**: 核心（#869 + #877）· 快速收尾（#927）
 > **依据**: `docs/v2/IMPLEMENTATION-STATUS-AND-PLAN.md` 四收窄与刻意延后决策
+>
+> **执行状态（2026-08-05 更新）**: #927 ✅ closed（docs patrol）· #869 ✅ closed（canonical schema + cross-SDK conformance）· #877 ✅ 已由 PR #953 交付（待合并关闭）· 同 PR 追加交付 #946 EffectiveRuntimePlan shadow first slice（依据 [Runtime Operations 下一迭代详细设计](../superpowers/specs/2026-08-05-runtime-operations-next-iteration-design.md)，#946 为本迭代范围追加项）
 
 ---
 
@@ -49,9 +51,9 @@ Day 1-3 #877 fence escape hatch（与 #869 可并行：fence_created_at + 时间
 
 ## 四、验收门禁（Definition of Done）
 
-- [ ] #927: `reference/admin-api.md` 补全 2 个端点；`make docs-build` 绿（62 篇无断链）。
-- [ ] #869: 一个 corpus 被 Go/TS/Python/Java 测试消费；runtime 事件覆盖；未知加性 kind 安全可忽略；field/tag drift 失败 CI 且 diff 可读；生成确定性强；协议 + SDK 文档更新。
-- [ ] #877: fenced session 不超过配置最大存活时间（默认 30min 可调）；force-clear 设 `unknown` + 独立 reason（`FENCE_FORCE_CLEARED` / `FENCE_ADMIN_CLEARED`）；不重投原始输入；admin 覆盖走现有 Bearer+scope 鉴权 + 审计日志；force-clear 发射 `runtime.execution.failed` 事件；测试覆盖自动清除、手动清除、审计、事件发射、清除后接受新输入。
+- [x] #927: `reference/admin-api.md` 补全 2 个端点；`make docs-build` 绿（62 篇无断链）。
+- [x] #869: 一个 corpus 被 Go/TS/Python/Java 测试消费；runtime 事件覆盖；未知加性 kind 安全可忽略；field/tag drift 失败 CI 且 diff 可读；生成确定性强；协议 + SDK 文档更新。
+- [x] #877: 按 [下一迭代详细设计](../superpowers/specs/2026-08-05-runtime-operations-next-iteration-design.md) §5 交付——原规划的时间界 force-clear 被 spec 收窄为 **operator-only 决策**（fence 不自动过期，避免把未知执行悄悄放行）：fence 持久化（`fence_created_at`/`fence_version`）；resolve/abandon 以 fence_version 为条件（冲突 409，不自动重试、不重投原始输入、不伪装成功）；Bearer + `runtime:*` scope 鉴权 + `user_activity`/slog 双审计；abandon 置 `failed`（OPERATOR_ABANDONED）并发射 `runtime.execution.failed` 事件；CLI 只走 Admin API；测试覆盖三重失败、晚到收敛、跨实例竞态、审计与权限。
 - [ ] 每个 PR：`make check` + `make docs-build` 通过。
 - [ ] 迭代末：#869/#877/#927 关闭，CI 绿。
 

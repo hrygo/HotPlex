@@ -13,6 +13,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -483,17 +484,51 @@ func TestHandleControl_Stop_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	w := new(mockWorkerForHandler)
+	w.On("StopCurrentTurn", mock.Anything).Return(nil)
 	w.On("Terminate", mock.Anything).Return(nil).Maybe()
 	mgr.AttachWorker(context.Background(), sid, w)
 
-	conn, _ := newTestWSConnPair(t)
-	t.Cleanup(func() { conn.Close() })
-	hub.JoinSession(sid, newConn(hub, conn, sid, nil))
+	// The stop must converge the pending execution runtime (acceptance A3:
+	// Gateway stopped_by_user closed loop).
+	execStore := &fakeExecutionStore{openRecord: testExecutionRecord(execution.StatusDelivered)}
+	handler.executionStore = execStore
+
+	clientConn, serverConn := newTestWSConnPair(t)
+	t.Cleanup(func() { clientConn.Close() })
+	hub.JoinSession(sid, newConn(hub, clientConn, sid, nil))
 
 	env := controlEnvelope(sid, string(events.ControlActionStop))
 	env.OwnerID = "user1"
 	err = handler.handleControl(context.Background(), env)
 	require.NoError(t, err)
+
+	// The stop must reach the worker, not just return locally.
+	w.AssertCalled(t, "StopCurrentTurn", mock.Anything)
+
+	// The pending execution runtime is converged to failed/terminated.
+	execStore.mu.Lock()
+	require.Equal(t, execution.RuntimeFailed, execStore.finishStatus)
+	execStore.mu.Unlock()
+
+	// The client must observe the terminal done event with the stop reason.
+	// finishRuntimeOnStop emits an additive runtime.execution.failed event
+	// before the done envelope, so read until done (bounded).
+	var doneEnv events.Envelope
+	require.Eventually(t, func() bool {
+		_ = serverConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, data, err := serverConn.ReadMessage()
+		if err != nil {
+			return false
+		}
+		if err := json.Unmarshal(data, &doneEnv); err != nil {
+			return false
+		}
+		return doneEnv.Event.Type == events.Done
+	}, 3*time.Second, 100*time.Millisecond)
+	require.Equal(t, events.Done, doneEnv.Event.Type)
+	doneData, ok := doneEnv.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "stopped_by_user", doneData["reason"])
 }
 
 func TestHandleControl_Terminate_Unauthorized(t *testing.T) {

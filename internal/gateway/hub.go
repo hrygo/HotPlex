@@ -88,6 +88,13 @@ type SessionWriter interface {
 	PreferEnvelope() bool
 }
 
+// platformWriteAsync is implemented by pcEntry. It admits a terminal event
+// without blocking on the platform write result; the write loop reports the
+// real result on the caller-supplied channel.
+type platformWriteAsync interface {
+	EnqueueWrite(ctx context.Context, env *events.Envelope, result chan<- error) error
+}
+
 // Hub is the central message router and connection registry.
 // All WebSocket connections and session→connection mappings are managed here.
 type Hub struct {
@@ -165,6 +172,14 @@ func (m *EnvelopeWithConn) complete(err error) {
 	case m.result <- err:
 	default:
 	}
+}
+
+// asyncTerminal reports whether the caller of SendToSession is waiting on the
+// real platform write result of a terminal event. For such messages the result
+// is completed by the platform write loop (or by routeMessage when nothing was
+// enqueued), never synchronously by the router.
+func (m *EnvelopeWithConn) asyncTerminal() bool {
+	return m.result != nil && m.Env != nil && isTerminalPlatformEvent(m.Env.Event.Type)
 }
 
 // NewHub creates a new Hub.
@@ -642,7 +657,9 @@ func (h *Hub) Run() {
 				)
 				err := h.routeMessage(msg)
 				span.End()
-				msg.complete(err)
+				if !msg.asyncTerminal() {
+					msg.complete(err)
+				}
 				if msg.afterDrain != nil {
 					msg.afterDrain()
 				}
@@ -653,6 +670,18 @@ func (h *Hub) Run() {
 
 func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 	conns := h.snapshotConns(msg.Env.SessionID)
+	terminalAsync := msg.asyncTerminal()
+	var terminalWrites []terminalWriteResult
+	var routeErrs []error
+	// Terminal callers wait on a result channel. When no per-connection
+	// aggregator was started, complete them on every exit path (no
+	// subscribers, encode failure, or synchronous write errors); otherwise
+	// the aggregator owns completion.
+	defer func() {
+		if terminalAsync && len(terminalWrites) == 0 {
+			msg.complete(errors.Join(routeErrs...))
+		}
+	}()
 
 	if len(conns) == 0 {
 		observability.GatewayNoSubscribersDropped().Add(h.ctx, 1, metric.WithAttributes(attribute.String("event_type", string(msg.Env.Event.Type))))
@@ -688,7 +717,6 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 		return err
 	}
 
-	var routeErrs []error
 	for _, conn := range conns {
 		var err error
 		if conn.PreferEnvelope() {
@@ -700,7 +728,17 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 			if msg.routeCtx != nil {
 				routeCtx = msg.routeCtx
 			}
-			err = conn.RouteWrite(routeCtx, msg.Env)
+			if async, ok := conn.(platformWriteAsync); ok && terminalAsync {
+				// Terminal writes must never block the single router: admit
+				// only; a per-connection result channel is completed by the
+				// write loop (or its budget guard) and aggregated off-router.
+				perConn := make(chan error, 1)
+				if err = async.EnqueueWrite(routeCtx, msg.Env, perConn); err == nil {
+					terminalWrites = append(terminalWrites, terminalWriteResult{conn: conn, ch: perConn})
+				}
+			} else {
+				err = conn.RouteWrite(routeCtx, msg.Env)
+			}
 		} else {
 			err = conn.RouteWriteData(data, msg.Env.Event.Type)
 		}
@@ -711,7 +749,46 @@ func (h *Hub) routeMessage(msg *EnvelopeWithConn) error {
 		h.log.Warn("gateway: write failed", "session_id", msg.Env.SessionID, "err", err)
 		h.detachAndCloseSessionWriter(msg.Env.SessionID, conn)
 	}
+	if len(terminalWrites) > 0 {
+		go h.aggregateTerminalWrites(msg, terminalWrites, errors.Join(routeErrs...))
+	}
 	return errors.Join(routeErrs...)
+}
+
+type terminalWriteResult struct {
+	conn SessionWriter
+	ch   chan error
+}
+
+// aggregateTerminalWrites collects the per-connection terminal write results
+// off the router goroutine, detaches failed writers, and completes the caller
+// with the joined error. Each result channel is guaranteed a value within the
+// terminal budget (write loop or its guard), so this goroutine cannot leak.
+func (h *Hub) aggregateTerminalWrites(msg *EnvelopeWithConn, writes []terminalWriteResult, baseErr error) {
+	var (
+		mu   sync.Mutex
+		errs []error
+		wg   sync.WaitGroup
+	)
+	if baseErr != nil {
+		errs = append(errs, baseErr)
+	}
+	for _, tw := range writes {
+		wg.Add(1)
+		go func(tw terminalWriteResult) {
+			defer wg.Done()
+			if err := <-tw.ch; err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+				h.log.Warn("gateway: terminal platform write failed",
+					"session_id", msg.Env.SessionID, "err", err)
+				h.detachAndCloseSessionWriter(msg.Env.SessionID, tw.conn)
+			}
+		}(tw)
+	}
+	wg.Wait()
+	msg.complete(errors.Join(errs...))
 }
 
 // detachAndCloseSessionWriter removes a failed writer from routing before
@@ -745,7 +822,9 @@ func (h *Hub) drainBroadcast() {
 		case msg := <-h.broadcast:
 			if msg != nil && msg.Env != nil {
 				err := h.routeMessage(msg)
-				msg.complete(err)
+				if !msg.asyncTerminal() {
+					msg.complete(err)
+				}
 				if msg.afterDrain != nil {
 					msg.afterDrain()
 				}

@@ -120,6 +120,14 @@ func setupRoutes(
 	if deps.SkillsLocator != nil {
 		adminAPI.SetSkillsLocator(deps.SkillsLocator)
 	}
+	// Operator fence decisions (#877): list fenced executions + resolve/abandon.
+	// Nil store → endpoints answer 503 instead of crashing the mux.
+	if deps.ExecutionStore != nil {
+		adminAPI.SetRuntimeExecution(
+			&executionProviderAdapter{store: deps.ExecutionStore},
+			&runtimeEventNotifier{hub: hub},
+		)
+	}
 
 	if cfg.Admin.RateLimitEnabled {
 		limiter := admin.NewRateLimiter(cfg.Admin.RequestsPerSec, cfg.Admin.Burst)
@@ -165,6 +173,12 @@ func setupRoutes(
 	adminMux.HandleFunc("DELETE /admin/sessions/{id}", adminAPI.DeleteSession)
 	adminMux.HandleFunc("POST /admin/sessions/{id}/terminate", adminAPI.TerminateSession)
 	adminMux.HandleFunc("GET /admin/sessions/{id}/stats", adminAPI.HandleSessionStats)
+	adminMux.HandleFunc("GET /admin/sessions/{id}/runtime-plan", adminAPI.HandleSessionRuntimePlan)
+
+	// Runtime fence API (#877): inspect fenced executions, resolve/abandon with
+	// a fencing token. GET needs runtime:read, POST needs runtime:write.
+	adminMux.HandleFunc("GET /admin/executions/fences", adminAPI.HandleListFences)
+	adminMux.HandleFunc("POST /admin/executions/{id}/fence-action", adminAPI.HandleFenceAction)
 
 	// User activity API (issue #833) - by-user audit query + export
 	adminMux.HandleFunc("GET /admin/users/{id}/activity", adminAPI.HandleUserActivity)

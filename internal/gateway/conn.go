@@ -632,8 +632,9 @@ func (c *Conn) webchatStartParams(sessionID string, initData InitData, workDir, 
 		ClientKey:    clientKey,
 		WorkspaceID:  c.workspaceID,
 	}
-	ShadowCompareStartParams(c.log,
-		BuildWebChatInput(initData.WorkerType, initData.Config.AllowedTools, c.userID, c.workspaceID), p)
+	in := BuildWebChatInput(initData.WorkerType, initData.Config.AllowedTools, c.userID, c.workspaceID)
+	ShadowCompareStartParams(c.log, in, p)
+	ShadowResolvePlan(c.log, in)
 	return p
 }
 

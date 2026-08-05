@@ -20,9 +20,18 @@ var abortTriggers = map[string]bool{
 
 var abortTriggersMu sync.RWMutex
 
+// RegisterAbortTrigger registers a custom abort trigger. The word is
+// normalized the same way input is (trim, lowercase, trailing punctuation
+// stripped) so registration always matches user input; blank words are
+// ignored.
 func RegisterAbortTrigger(word string) {
+	t := strings.TrimSpace(strings.ToLower(word))
+	t = trimTrailingPunct(t)
+	if t == "" {
+		return
+	}
 	abortTriggersMu.Lock()
-	abortTriggers[word] = true
+	abortTriggers[t] = true
 	abortTriggersMu.Unlock()
 }
 

@@ -406,7 +406,7 @@ swagger:
 	@mkdir -p $(SWAGGER_DIR)
 	@swag init \
 		--generalInfo doc.go \
-		--dir cmd/hotplex,internal/admin,internal/gateway \
+		--dir cmd/hotplex,internal/admin,internal/gateway,internal/agentspec \
 		--output $(SWAGGER_DIR) \
 		--outputTypes json \
 		--parseInternal \

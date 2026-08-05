@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentspec"
 	"github.com/hrygo/hotplex/internal/worker"
 )
 
@@ -75,4 +76,50 @@ func TestShadowCompareStartParams_ResolveDivergence(t *testing.T) {
 	require.Contains(t, out, "resolve divergence", "expected a quiet resolve-divergence log")
 	require.False(t, strings.Contains(out, "worker_type divergence"),
 		"field-mismatch Warn must not fire on the resolve-divergence path")
+}
+
+// TestShadowResolvePlan_NilLogger: a nil logger must be a safe no-op.
+func TestShadowResolvePlan_NilLogger(t *testing.T) {
+	t.Parallel()
+	require.NotPanics(t, func() {
+		ShadowResolvePlan(nil, BuildWebChatInput(worker.TypeClaudeCode, nil, "u1", "ws1"))
+	})
+}
+
+// TestShadowResolvePlan_Blocked: the empty test-binary registry rejects any
+// non-empty worker type fail-closed; the shadow logs the bounded blocked codes
+// (never a silent success) and never panics.
+func TestShadowResolvePlan_Blocked(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	require.NotPanics(t, func() {
+		ShadowResolvePlan(log,
+			BuildWebChatInput(worker.WorkerType("not-registered-in-test"), nil, "u1", "ws1"))
+	})
+
+	out := buf.String()
+	require.Contains(t, out, "runtime plan shadow: blocked")
+	require.Contains(t, out, agentspec.BlockUnknownWorkerType)
+}
+
+// TestShadowResolvePlan_OkWithWarnings: an empty worker type resolves (the
+// registry decides at dispatch) but the plan warns the desired state is
+// unproven; the shadow logs the warning codes with the plan hash.
+func TestShadowResolvePlan_OkWithWarnings(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	require.NotPanics(t, func() {
+		ShadowResolvePlan(log, BuildWebChatInput(worker.WorkerType(""), nil, "u1", "ws1"))
+	})
+
+	out := buf.String()
+	require.Contains(t, out, "runtime plan shadow: warnings")
+	require.Contains(t, out, agentspec.WarnWorkerTypeUnresolved)
+	require.Contains(t, out, "plan_hash")
+	require.False(t, strings.Contains(out, "runtime plan shadow: blocked"),
+		"an ok plan must not log the blocked path")
 }

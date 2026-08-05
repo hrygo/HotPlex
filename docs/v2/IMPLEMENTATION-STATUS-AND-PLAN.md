@@ -32,7 +32,8 @@
 | **#852** RuntimeContext | Wave2 | ✅ 已实现（PR #924） | 只读 Load facade 交付（四源 + 适配器边界，commit 0239992a）；Save 留待后续 slice |
 | **#866** 持久化快照 | Wave1 延伸 | ✅ 已实现（PR #924） | 快照值对象 + context_json 折叠 + 恢复 + 审计指纹（无迁移，commit dd9482dc） |
 | **#868** Execution Cockpit | Wave3 | ❌ 未启动 | 依赖多已由 epic 满足；epic 关闭后解锁 |
-| **#877** fence escape hatch | epic 后续 | ❌ 未启动 | 被 #878 阻塞；epic 关闭后解锁（2-3 天） |
+| **#877** fence escape hatch | epic 后续 | ✅ 已实现（PR #953，待合并） | fence 持久化 + `fence_version` 条件 resolve/abandon + 审计 + Admin API/CLI/doctor 全交付 |
+| **#946** EffectiveRuntimePlan | Runtime Contract | 🟡 shadow first slice 已交付（PR #953，待合并） | 剩余：worker start / recipe dry-run 的 authoritative 切换与四 Worker observed 报告 |
 | **#867** worker env allowlist | 独立安全轨 | ❌ 未启动（BuildEnv 仍 blocklist） | 全量，跨三平台，可并行 |
 | **#869** AEP canonical schema | 独立基建 | ❌ 未启动 | 全量；#849 命名稳定后 |
 | **#870** Coding Ops Recipes | 独立 scheduler | ❌ 未启动 | 较大；#847/#849/#851 稳定后 |
@@ -117,6 +118,17 @@
 | **#851 剩余**（完整 ExecutionQueue：FIFO / attempt / retry / timeout / queue state） | 超时、重试、queue state 语义需与现有 turn timeout、LLM retry、crash synthetic turn 协调一致，属设计决策非机械实现 | 单活跃门 first cut 已由 #878 交付；等调度语义对齐 |
 | **#867** worker env allowlist + 隔离 profile | **allowlist 完整性风险**：漏一个合法 env var 会静默打断 worker；须跨三平台（Linux/macOS/Windows）逐项验证 PATH/HOME/locale/temp 且有兼容模式迁移路径 | 独立安全轨，非 Wave 1 关键路径，任意时间可插入 |
 
+### 本轮交付（PR #953，2026-08-05，runtime operations 下一迭代）
+
+设计依据：[Runtime Operations 下一迭代详细设计](../superpowers/specs/2026-08-05-runtime-operations-next-iteration-design.md)（继承 2026-08-04 Runtime Operations Contract）。
+
+| Issue | 交付内容 | 验证 |
+|-------|----------|------|
+| #877 | execution store fence 持久化（`fence_created_at`/`fence_version`，SQLite+PG 成对迁移）；`fence_version` 条件 resolve/abandon（跨实例 409 冲突，不自动重试、不重投、不伪装成功）；Admin API（`runtime:*` scope + `user_activity`/slog 双审计）；`hotplex runtime fences` CLI（Admin API only）；doctor `runtime.fenced_executions`（只读） | 三重失败、晚到收敛、跨实例竞态、权限与审计测试；real-PG `-tags pg -p 1` |
+| #946 | `EffectiveRuntimePlan` resolver（redacted view + canonical hash + fail-closed blocked codes）；WS/REST 入口影子解析（legacy dispatch 不受影响）；`GET /admin/sessions/{id}/runtime-plan`；doctor `runtime.effective_plan`；plan 指标（hash 不入 label） | WS≡REST 等价哈希、redaction、normalization、blocked/warnings 测试 |
+
+刻意保持：dispatch 仍以 legacy `SessionStartParams` 为准（#946 为 shadow first slice）；blocked plan 永不静默成功；execution store 只存 payload 指纹，operator reason/evidence_ref 只进审计层。
+
 ---
 
 ## 五、风险与缺口
@@ -136,7 +148,8 @@
 ```
 关键路径：#878 ✅已关闭 → **#847** → #848 → #849(剩余) → #850 → #852 → #866
                                        └→ #869 → (锁定协议)
-解锁后：  #868 / #877（epic 关闭即解锁）
+已交付：  #877 ✅（PR #953）· #946 🟡 shadow first slice（PR #953）
+解锁后：  #868（epic 关闭即解锁）
 平行：    #867 / #871（任意时间插入）
 延后：    #870
 ```

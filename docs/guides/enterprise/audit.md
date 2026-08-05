@@ -116,9 +116,9 @@ audit:
 
 | 配置项 | 类型 | 默认值 | 环境变量 | 说明 |
 |--------|------|--------|----------|------|
-| `audit.enabled` | bool | `true` | `AUDIT_ENABLED` | 是否启用审计系统 |
-| `audit.retention` | duration | `26280h`（3 年） | `AUDIT_RETENTION` | 审计记录保留时长 |
-| `audit.full_content_retention` | duration | `2160h`（90 天） | `AUDIT_FULL_CONTENT_RETENTION` | 兼容配置字段；不影响 event store 或 turns 的留存 |
+| `audit.enabled` | bool | `true` | `HOTPLEX_AUDIT_ENABLED` | 是否启用审计系统 |
+| `audit.retention` | duration | `26280h`（3 年） | `HOTPLEX_AUDIT_RETENTION` | 审计记录保留时长 |
+| `audit.full_content_retention` | duration | `2160h`（90 天） | `HOTPLEX_AUDIT_FULL_CONTENT_RETENTION` | 兼容配置字段；不影响 event store 或 turns 的留存 |
 
 **事件与审计留存相互独立**：event store 与 turns 只按 `events.retention` 清理；入站消息原文由 audit 记录保留并按 `audit.retention` 独立清理。`audit.full_content_retention` 为兼容字段，不会延长 event/turn 副本或 `event_ref` 的可用时间。
 
@@ -126,10 +126,10 @@ audit:
 
 | 配置项 | 类型 | 默认值 | 环境变量 | 说明 |
 |--------|------|--------|----------|------|
-| `audit.collector.channel_cap` | int | `4096` | `AUDIT_COLLECTOR_CHANNEL_CAP` | 内存 channel 容量 |
-| `audit.collector.batch_interval` | duration | `1s` | `AUDIT_COLLECTOR_BATCH_INTERVAL` | 批量刷写间隔 |
-| `audit.collector.batch_size` | int | `100` | `AUDIT_COLLECTOR_BATCH_SIZE` | 每批最大事件数 |
-| `audit.collector.spill_dir` | string | `~/.hotplex/data/audit-spill` | `AUDIT_COLLECTOR_SPILL_DIR` | WAL 溢出目录 |
+| `audit.collector.channel_cap` | int | `4096` | `HOTPLEX_AUDIT_COLLECTOR_CHANNEL_CAP` | 内存 channel 容量 |
+| `audit.collector.batch_interval` | duration | `1s` | `HOTPLEX_AUDIT_COLLECTOR_BATCH_INTERVAL` | 批量刷写间隔 |
+| `audit.collector.batch_size` | int | `100` | `HOTPLEX_AUDIT_COLLECTOR_BATCH_SIZE` | 每批最大事件数 |
+| `audit.collector.spill_dir` | string | `~/.hotplex/data/audit-spill` | `HOTPLEX_AUDIT_COLLECTOR_SPILL_DIR` | WAL 溢出目录 |
 
 > **调优建议**：高并发场景（>1000 sessions）建议将 `channel_cap` 提升至 `8192`，`batch_size` 提升至 `200`。溢出目录建议使用独立磁盘以减少 I/O 竞争。
 

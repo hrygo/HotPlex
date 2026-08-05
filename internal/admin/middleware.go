@@ -12,6 +12,11 @@ import (
 
 type scopeContextKey struct{}
 
+// actorContextKey carries the authenticated admin actor resolved by the
+// Middleware ("admin-token" for Bearer, uid for cookie fallback). Handlers
+// must read the actor from here — never from client-supplied fields (#877).
+type actorContextKey struct{}
+
 func getScopes(r *http.Request) []string {
 	if scopes, ok := r.Context().Value(scopeContextKey{}).([]string); ok {
 		return scopes
@@ -19,9 +24,22 @@ func getScopes(r *http.Request) []string {
 	return nil
 }
 
+// ActorFromRequest returns the authenticated admin actor for audit trails.
+// Falls back to "anonymous" when auth never resolved (pre-auth failures).
+func ActorFromRequest(r *http.Request) string {
+	if actor, ok := r.Context().Value(actorContextKey{}).(string); ok && actor != "" {
+		return actor
+	}
+	return "anonymous"
+}
+
 // scopeImplies maps a scope to the lower-privilege scopes it grants.
+// admin:write implies the runtime scopes (#877): fence resolve/abandon and
+// runtime-plan reads are admin-tier operations, so tokens holding the top
+// scope gain them without a config change; dedicated tokens can still be
+// granted runtime:read/runtime:write individually via admin.token_scopes.
 var scopeImplies = map[string][]string{
-	ScopeAdminWrite: {ScopeAdminRead},
+	ScopeAdminWrite: {ScopeAdminRead, ScopeRuntimeRead, ScopeRuntimeWrite},
 	ScopeAdminRead:  {ScopeConfigRead},
 }
 

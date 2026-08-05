@@ -1628,6 +1628,141 @@
                 }
             }
         },
+        "/admin/executions/fences": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Lists executions whose runtime ended ambiguous and raised a fence. Requires runtime:read scope.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "List fenced executions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 100, max 500)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Pagination offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "fences list",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope: need runtime:read",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Execution store not configured",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/executions/{id}/fence-action": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Resolves (clears fence, keeps runtime unknown) or abandons (clears fence, fails runtime with OPERATOR_ABANDONED) a fenced execution. Conditional on expected_fence_version; conflicts return 409. Requires runtime:write scope.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Apply operator fence action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Operator decision",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.fenceActionBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Applied decision and updated execution fact",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid decision, fence version, reason, or evidence_ref",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope: need runtime:write",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Execution not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Fence version conflict: re-inspect before retrying",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Execution store not configured or timed out",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/health": {
             "get": {
                 "security": [
@@ -2003,6 +2138,64 @@
                     },
                     "500": {
                         "description": "Failed to delete session",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/sessions/{id}/runtime-plan": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearerAuth": []
+                    }
+                ],
+                "description": "Returns the redacted desired-state runtime plan and observed bootstrap summary for a session. Requires runtime:read and session:read scopes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin API"
+                ],
+                "summary": "Get session runtime plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.RuntimePlanReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing session ID",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient scope: need runtime:read and session:read",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Plan resolution failed",
                         "schema": {
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
@@ -3678,6 +3871,17 @@
                 }
             }
         },
+        "admin.RuntimePlanReport": {
+            "type": "object",
+            "properties": {
+                "observed": {
+                    "$ref": "#/definitions/agentspec.ObservedSummary"
+                },
+                "plan": {
+                    "$ref": "#/definitions/agentspec.EffectiveRuntimePlanView"
+                }
+            }
+        },
         "admin.STTAttrs": {
             "type": "object",
             "properties": {
@@ -3997,6 +4201,23 @@
                 }
             }
         },
+        "admin.fenceActionBody": {
+            "type": "object",
+            "properties": {
+                "decision": {
+                    "type": "string"
+                },
+                "evidence_ref": {
+                    "type": "string"
+                },
+                "expected_fence_version": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.skillInstallResponse": {
             "type": "object",
             "properties": {
@@ -4033,6 +4254,121 @@
             "type": "object",
             "properties": {
                 "permission_mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentspec.EffectiveRuntimePlanView": {
+            "type": "object",
+            "properties": {
+                "blocked": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentspec.PlanBlockReason"
+                    }
+                },
+                "capability_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "config_hash": {
+                    "type": "string"
+                },
+                "env_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "env_profile": {
+                    "type": "string"
+                },
+                "permission_mode": {
+                    "type": "string"
+                },
+                "plan_hash": {
+                    "type": "string"
+                },
+                "resolver": {
+                    "type": "string"
+                },
+                "sandbox_mode": {
+                    "type": "string"
+                },
+                "skill_hash": {
+                    "type": "string"
+                },
+                "skip_permissions": {
+                    "type": "boolean"
+                },
+                "source_refs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentspec.PlanSourceRef"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/agentspec.PlanWarning"
+                    }
+                },
+                "worker_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentspec.ObservedSummary": {
+            "type": "object",
+            "properties": {
+                "permission_ceiling": {
+                    "description": "PermissionCeiling is the first effective permission tier the Worker\nreported after a successful start/resume — declared by the Worker, not\nindependently enforced (empty when never reported).",
+                    "type": "string"
+                },
+                "state": {
+                    "description": "State is one of the Observed* constants.",
+                    "type": "string"
+                },
+                "worker_type": {
+                    "description": "WorkerType is the worker type the session actually runs (observed fact).",
+                    "type": "string"
+                }
+            }
+        },
+        "agentspec.PlanBlockReason": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentspec.PlanSourceRef": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "agentspec.PlanWarning": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
                     "type": "string"
                 }
             }

@@ -55,7 +55,7 @@ func TestResolvePermissionMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := resolvePermissionMode(tt.sessionMode, tt.operatorMode)
+			got := worker.ResolvePermissionMode(tt.sessionMode, tt.operatorMode)
 			require.Equal(t, tt.want, got)
 		})
 	}

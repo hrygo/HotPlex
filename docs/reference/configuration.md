@@ -133,8 +133,8 @@ Admin API 管理端点配置。
 | `enabled` | bool | `true` | `HOTPLEX_ADMIN_ENABLED` | 是否启用 Admin API |
 | `addr` | string | `localhost:9999` | `HOTPLEX_ADMIN_ADDR` | Admin API 监听地址。默认仅绑定 localhost |
 | `tokens` | []string | `[]` | `HOTPLEX_ADMIN_TOKEN_1..N` | 认证 token 列表。**只能通过环境变量设置**，支持编号后缀用于轮换 |
-| `token_scopes` | map[string][]string | `nil` | — | 每 token 的权限范围映射 |
-| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未配置 scopes 的 token 的默认权限范围。`admin:write` 隐含 `admin:read` → `config:read` |
+| `token_scopes` | map[string][]string | `nil` | — | 每 token 的权限范围映射。可用 scope：`health:read` / `session:read` / `session:write` / `session:delete` / `stats:read` / `config:read` / `config:write` / `admin:read` / `admin:write` / `runtime:read` / `runtime:write`（runtime 二者服务 fence 决策与 runtime-plan 读取，#877/#946） |
+| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未配置 scopes 的 token 的默认权限范围。`admin:write` 隐含 `admin:read` 与 `runtime:read`/`runtime:write`；`admin:read` 隐含 `config:read` |
 | `ip_whitelist_enabled` | bool | `false` | — | 是否启用 IP 白名单 |
 | `allowed_cidrs` | []string | `["127.0.0.0/8", "10.0.0.0/8"]` | — | 允许访问的 CIDR 列表 |
 | `rate_limit_enabled` | bool | `true` | — | 是否启用速率限制 |
@@ -706,7 +706,7 @@ log:
 
 | 字段 | 类型 | 默认值 | 环境变量 | 说明 |
 |------|------|--------|----------|------|
-| `events.retention` | duration | `720h` (30天) | `HOTPLEX_EVENTS_RETENTION` | Event store 和 turns 的运行期留存窗口。到期后由事件 GC 清理 |
+| `events.retention` | duration | `720h` (30天) | `HOTPLEX_EVENTS_RETENTION` | Event store 和 turns 的运行期留存窗口。到期后由事件 GC 清理。启动时生效，修改后需重启 |
 | `audit.retention` | duration | `26280h` (3年) | `HOTPLEX_AUDIT_RETENTION` | 审计记录的基础留存窗口，由 audit GC 独立执行 |
 | `audit.full_content_retention` | duration | `2160h` (90天) | `HOTPLEX_AUDIT_FULL_CONTENT_RETENTION` | 审计原文的兼容配置字段；不再影响 event store 或 turns 留存 |
 

@@ -63,6 +63,23 @@ func permissionModeRank(mode string) int {
 	}
 }
 
+// ResolvePermissionMode returns the effective permission tier for a session.
+// An empty session mode (platform/cron sessions) falls back to the
+// operator-configured default; a non-empty session mode is then clamped to
+// never exceed the operator tier, which is a permissiveness ceiling (mirrors
+// codex's codexSandboxRank/codexApprovalRank clamp). Empty results keep the
+// legacy per-worker default semantics and are interpreted by callers.
+func ResolvePermissionMode(sessionMode, operatorMode string) string {
+	effective := sessionMode
+	if effective == "" {
+		effective = operatorMode
+	}
+	if operatorMode != "" && permissionModeRank(effective) > permissionModeRank(operatorMode) {
+		effective = operatorMode
+	}
+	return effective
+}
+
 // PermissionCeiling stores a Worker session's immutable maximum permission tier.
 // Its zero value is ready for use.
 type PermissionCeiling struct {

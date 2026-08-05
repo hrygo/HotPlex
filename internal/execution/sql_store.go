@@ -70,18 +70,20 @@ func (s *SQLStore) withWriteLock(fn func() error) error {
 const executionColumns = `execution_id, session_id, client_message_id, payload_hash, status,
 	error_code, created_at, updated_at, delivered_at,
 	owner_instance_id, worker_run_id, lease_until,
-	runtime_status, runtime_error_code, started_at, finished_at, fence_reason`
+	runtime_status, runtime_error_code, started_at, finished_at, fence_reason,
+	fence_version, fence_created_at`
 
 func (s *SQLStore) scanRecord(sc interface {
 	Scan(dest ...any) error
 }) (*Record, error) {
 	r := new(Record)
-	var deliveredAt, startedAt, finishedAt sql.NullInt64
+	var deliveredAt, startedAt, finishedAt, fenceCreatedAt sql.NullInt64
 	err := sc.Scan(
 		&r.ExecutionID, &r.SessionID, &r.ClientMessageID, &r.PayloadHash, &r.Status,
 		&r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &deliveredAt,
 		&r.OwnerInstanceID, &r.WorkerRunID, &r.LeaseUntil,
 		&r.RuntimeStatus, &r.RuntimeErrorCode, &startedAt, &finishedAt, &r.FenceReason,
+		&r.FenceVersion, &fenceCreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -95,7 +97,22 @@ func (s *SQLStore) scanRecord(sc interface {
 	if finishedAt.Valid {
 		r.FinishedAt = &finishedAt.Int64
 	}
+	if fenceCreatedAt.Valid {
+		r.FenceCreatedAt = &fenceCreatedAt.Int64
+	}
 	return r, nil
+}
+
+// fenceEntryBump returns the SET fragments that increment fence_version and
+// stamp fence_created_at when a row enters the fenced state. The CASE guards
+// keep the bump idempotent: only the transition from a non-fenced row counts
+// as fence entry. Empty when the update does not raise a fence.
+func (s *SQLStore) fenceEntryBump(setsFence bool) string {
+	if !setsFence {
+		return ""
+	}
+	return `, fence_version = CASE WHEN fence_reason = '' THEN fence_version + 1 ELSE fence_version END,
+	    fence_created_at = CASE WHEN fence_reason = '' THEN ` + s.dbNowMillisExpr() + ` ELSE fence_created_at END`
 }
 
 func (s *SQLStore) Accept(ctx context.Context, request AcceptRequest) (*Record, bool, error) {
@@ -356,7 +373,7 @@ func (s *SQLStore) FinishRuntime(ctx context.Context, executionID, workerRunID s
 		result, err := s.db.ExecContext(ctx, s.rebind(`
 			UPDATE execution_inputs
 			SET runtime_status = ?, runtime_error_code = ?, finished_at = ?,
-			    fence_reason = ?, updated_at = ?
+			    fence_reason = ?, updated_at = ?`+s.fenceEntryBump(fenceReason != "")+`
 			WHERE execution_id = ? AND worker_run_id = ?
 			  AND runtime_status IN `+currentFilter),
 			status, errorCode, now, fenceReason, now,
@@ -489,6 +506,124 @@ func (s *SQLStore) ClearFenceAfterFreshStart(ctx context.Context, executionID, r
 	return nil
 }
 
+// listFencesDefaultLimit bounds ListFences when the caller passes no limit.
+const listFencesDefaultLimit = 100
+
+func (s *SQLStore) ApplyFenceDecision(ctx context.Context, request FenceActionRequest) (*Record, error) {
+	if request.ExecutionID == "" {
+		return nil, errors.New("execution: execution id is required")
+	}
+	switch request.Decision {
+	case FenceDecisionResolve, FenceDecisionAbandon:
+	default:
+		return nil, fmt.Errorf("execution: invalid fence decision %q", request.Decision)
+	}
+
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	now := time.Now().UnixMilli()
+	var rows int64
+	err := s.withWriteLock(func() error {
+		var (
+			result sql.Result
+			err    error
+		)
+		if request.Decision == FenceDecisionResolve {
+			// Resolve clears the fence and keeps runtime_status=unknown: it
+			// never marks the execution delivered/completed.
+			result, err = s.db.ExecContext(ctx, s.rebind(`
+				UPDATE execution_inputs
+				SET fence_reason = '', updated_at = ?
+				WHERE execution_id = ? AND fence_reason <> '' AND fence_version = ?`),
+				now, request.ExecutionID, request.ExpectedFenceVersion)
+		} else {
+			// Abandon terminates the runtime as failed. The runtime_status
+			// predicate makes terminal non-regression explicit at the SQL
+			// level: fenced rows are runtime-unknown by construction.
+			result, err = s.db.ExecContext(ctx, s.rebind(`
+				UPDATE execution_inputs
+				SET fence_reason = '', runtime_status = ?, runtime_error_code = ?,
+				    finished_at = ?, updated_at = ?
+				WHERE execution_id = ? AND fence_reason <> '' AND fence_version = ?
+				  AND runtime_status = ?`),
+				RuntimeFailed, RuntimeErrorCodeOperatorAbandoned, now, now,
+				request.ExecutionID, request.ExpectedFenceVersion, RuntimeUnknown)
+		}
+		if err != nil {
+			return fmt.Errorf("execution: apply fence decision: %w", err)
+		}
+		rows, _ = result.RowsAffected()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		current, err := s.getByID(ctx, request.ExecutionID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fenceConflictFor(current, request.ExpectedFenceVersion)
+	}
+	return s.getByID(ctx, request.ExecutionID)
+}
+
+// fenceConflictFor classifies a failed conditional fence update so operators
+// get an actionable 409 instead of a silent no-op.
+func fenceConflictFor(current *Record, expectedVersion int64) error {
+	if current.FenceReason == "" {
+		return fmt.Errorf("%w: fence already cleared", ErrFenceConflict)
+	}
+	if current.FenceVersion != expectedVersion {
+		return fmt.Errorf("%w: fence version is %d, expected %d", ErrFenceConflict, current.FenceVersion, expectedVersion)
+	}
+	return fmt.Errorf("%w: runtime status is %q", ErrFenceConflict, current.RuntimeStatus)
+}
+
+func (s *SQLStore) ListFences(ctx context.Context, sessionID string, limit, offset int) ([]*Record, error) {
+	if limit <= 0 {
+		limit = listFencesDefaultLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	query := `
+		SELECT ` + executionColumns + `
+		FROM execution_inputs
+		WHERE fence_reason <> ''`
+	args := []any{}
+	if sessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sessionID)
+	}
+	// COALESCE keeps legacy rows (fenced before migration 031, created_at
+	// NULL) ordered deterministically across dialects.
+	query += ` ORDER BY COALESCE(fence_created_at, 0) DESC, created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, s.rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("execution: list fences: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	records := make([]*Record, 0, limit)
+	for rows.Next() {
+		r, err := s.scanRecord(rows)
+		if err != nil {
+			return nil, fmt.Errorf("execution: list fences scan: %w", err)
+		}
+		records = append(records, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("execution: list fences iterate: %w", err)
+	}
+	return records, nil
+}
+
 func (s *SQLStore) RenewLeases(ctx context.Context, ownerID string, ttlSeconds int64, excludeExecutionIDs []string) (int64, error) {
 	if ownerID == "" {
 		return 0, errors.New("execution: owner id is required")
@@ -596,7 +731,8 @@ func (s *SQLStore) RecoverExpiredLeases(ctx context.Context, trackedExecutionIDs
 			    runtime_error_code = 'GATEWAY_LEASE_EXPIRED',
 			    fence_reason = 'GATEWAY_LEASE_EXPIRED',
 			    finished_at = `+s.dbNowMillisExpr()+`,
-			    updated_at = `+s.dbNowMillisExpr()+`
+			    updated_at = `+s.dbNowMillisExpr()+
+			s.fenceEntryBump(true)+`
 			WHERE runtime_status IN ('pending', 'running')
 			  AND lease_until <= `+s.dbNowMillisExpr()))
 		if err != nil {
@@ -678,7 +814,7 @@ func (s *SQLStore) TerminateOwnerLeases(ctx context.Context, ownerID, reason str
 			    runtime_error_code = ?,
 			    fence_reason = ?,
 			    finished_at = ?,
-			    updated_at = ?
+			    updated_at = ?`+s.fenceEntryBump(true)+`
 			WHERE owner_instance_id = ?
 			  AND runtime_status IN ('pending', 'running')`),
 			reason, reason, reason, now, now, ownerID)

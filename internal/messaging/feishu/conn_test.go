@@ -85,7 +85,6 @@ func TestFeishuConn_HandleDone_SendsShortTerminalFallbackWhenBodyNotPresented(t 
 		return nil, apiErr
 	})))
 	ctrl := NewStreamingCardController(ctrlClient, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
-	ctrl.terminalFailures = terminalFailures
 	ctrl.phase.Store(int32(PhaseStreaming))
 	ctrl.mu.Lock()
 	ctrl.cardID = "card-1"
@@ -108,7 +107,7 @@ func TestFeishuConn_HandleDone_SendsShortTerminalFallbackWhenBodyNotPresented(t 
 	require.Len(t, sentBodies, 1)
 	require.Contains(t, sentBodies[0], terminalDeliveryFallbackText)
 	require.NotContains(t, sentBodies[0], "full worker response must not be sent again")
-	require.Equal(t, map[string]int64{"pending": 1, "sent": 1}, terminalFailureResults(t, reader))
+	require.Equal(t, map[string]int64{"sent": 1}, terminalFailureResults(t, reader))
 }
 
 func TestFeishuConn_HandleDone_JoinsFallbackFailureWithTerminalDeliveryError(t *testing.T) {
@@ -122,7 +121,6 @@ func TestFeishuConn_HandleDone_JoinsFallbackFailureWithTerminalDeliveryError(t *
 		return nil, apiErr
 	})))
 	ctrl := NewStreamingCardController(ctrlClient, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
-	ctrl.terminalFailures = terminalFailures
 	ctrl.phase.Store(int32(PhaseStreaming))
 	ctrl.mu.Lock()
 	ctrl.cardID = "card-1"
@@ -145,7 +143,7 @@ func TestFeishuConn_HandleDone_JoinsFallbackFailureWithTerminalDeliveryError(t *
 	require.ErrorIs(t, err, apiErr)
 	require.ErrorContains(t, err, "terminal fallback delivery")
 	require.ErrorContains(t, err, "lark client not initialized")
-	require.Equal(t, map[string]int64{"pending": 1, "failed": 1}, terminalFailureResults(t, reader))
+	require.Equal(t, map[string]int64{"failed": 1}, terminalFailureResults(t, reader))
 }
 
 func TestFeishuConn_HandleDone_SkipsStaticFallbackWhenBodyAlreadyPresented(t *testing.T) {
@@ -187,7 +185,6 @@ func TestFeishuConn_HandleDone_SkipsStaticFallbackWhenBodyAlreadyPresented(t *te
 		}, nil
 	})))
 	ctrl := NewStreamingCardController(ctrlClient, limiter, discardLogger, "TestBot", 0, "", "", "", nil)
-	ctrl.terminalFailures = terminalFailures
 	ctrl.phase.Store(int32(PhaseStreaming))
 	ctrl.mu.Lock()
 	ctrl.cardID = "card-1"
@@ -208,7 +205,7 @@ func TestFeishuConn_HandleDone_SkipsStaticFallbackWhenBodyAlreadyPresented(t *te
 	mu.Lock()
 	defer mu.Unlock()
 	require.Empty(t, sentBodies)
-	require.Equal(t, map[string]int64{"pending": 1, "skipped_body_presented": 1}, terminalFailureResults(t, reader))
+	require.Equal(t, map[string]int64{"skipped_body_presented": 1}, terminalFailureResults(t, reader))
 }
 
 func TestFeishuConn_TerminalHandlersShareCallerDeadlineAcrossCloseAndFallback(t *testing.T) {
@@ -251,7 +248,7 @@ func TestFeishuConn_TerminalHandlersShareCallerDeadlineAcrossCloseAndFallback(t 
 			ctrl.mu.Lock()
 			ctrl.cardID = "card-1"
 			ctrl.msgID = "msg-1"
-			ctrl.buf.WriteString("terminal body")
+			ctrl.buf.WriteString("full worker response")
 			ctrl.mu.Unlock()
 
 			adapter := newTestAdapter(t)

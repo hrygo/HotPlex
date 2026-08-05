@@ -97,6 +97,10 @@ const (
 	ErrCodeResumeRetry             ErrorCode = "RESUME_RETRY"
 	ErrCodeNotSupported            ErrorCode = "NOT_SUPPORTED"
 	ErrCodeTurnTimeout             ErrorCode = "TURN_TIMEOUT"
+	// ErrCodeOperatorAbandoned marks a fenced execution the operator chose to
+	// abandon (#877). Additive constant only — reuses the existing
+	// runtime.execution.failed Kind, no wire-contract change.
+	ErrCodeOperatorAbandoned ErrorCode = "OPERATOR_ABANDONED"
 )
 
 // Envelope is the unified AEP v1 message envelope, shared by both client→gateway and gateway→client.
