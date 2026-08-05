@@ -215,6 +215,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
+  // Done is terminal per turn. The gateway can replay the same envelope (e.g.
+  // after a reconnect) and some workers emit done twice; each distinct event
+  // must settle at most once so a replay can never re-emit 'done' or resolve a
+  // NEWER pending stop/input. Bounded so a long-lived session cannot grow this
+  // without limit (same cap as hotplex-runtime-adapter.ts).
+  private static readonly DONE_DEDUP_CAP = 256;
+  private processedDoneEventIds = new Set<string>();
   private pendingConnectReject: ((err: Error) => void) | null = null;
   private connectPromise: Promise<InitAckData> | null = null;
   private connectTarget: string | null = null;
@@ -613,6 +620,18 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       }
 
       case EventKind.Done: {
+        if (this.processedDoneEventIds.has(env.id)) {
+          // Replayed envelope for an already-settled event: do not re-emit
+          // 'done' and do not settle a newer pending stop/input.
+          break;
+        }
+        this.processedDoneEventIds.add(env.id);
+        if (this.processedDoneEventIds.size > BrowserHotPlexClient.DONE_DEDUP_CAP) {
+          const oldest = this.processedDoneEventIds.values().next().value;
+          if (oldest) {
+            this.processedDoneEventIds.delete(oldest);
+          }
+        }
         const doneData = event.data as DoneData;
         this.emit('done', doneData, env);
         this._settleStop({ kind: 'resolve', data: doneData });

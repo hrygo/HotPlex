@@ -92,6 +92,11 @@ function initAck(sessionId: string): Envelope {
     };
 }
 
+/** A done envelope with an explicit event id, so replayed events are testable. */
+function doneEnvelope(id: string, data: Record<string, unknown>): Envelope {
+    return { ...envelope(EventKind.Done, data), id };
+}
+
 describe("BrowserHotPlexClient connection handoff", () => {
     afterEach(() => {
         ControlledWebSocket.reset();
@@ -863,13 +868,39 @@ describe("BrowserHotPlexClient input retry identity", () => {
         expect(internal.pendingInput).toBeNull();
         await expect(pending).rejects.toThrow("link lost");
     });
+});
+
+// ============================================================================
+// Stop waiter state machine — parameterized across every worker type so the
+// stop contract (shared Promise, single send, done dedup, timeout, disconnect,
+// next-turn) holds for all four workers, not just CodexCLI.
+// ============================================================================
+
+describe.each([
+    ["W-C", WorkerType.ClaudeCode],
+    ["W-O", WorkerType.OpenCodeServer],
+    ["W-X", WorkerType.CodexCLI],
+    ["W-A", WorkerType.ACP],
+] as const)("%s browser stop contract", (_id, workerType) => {
+    let lastStopClient: BrowserHotPlexClient | null = null;
+
+    afterEach(() => {
+        // Each worker row must end with the stop waiter fully settled — no
+        // pending promise and no armed stop timer/listener left behind.
+        const internal = lastStopClient as unknown as { pendingStop: unknown } | null;
+        if (internal) {
+            expect(internal.pendingStop).toBeNull();
+        }
+        lastStopClient = null;
+    });
 
     it("keeps pending input until stop reaches a terminal done event", async () => {
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
-            workerType: WorkerType.CodexCLI,
+            workerType,
         });
+        lastStopClient = client;
         const internal = client as unknown as {
             _sessionId: string;
             _connected: boolean;
@@ -880,7 +911,7 @@ describe("BrowserHotPlexClient input retry identity", () => {
         internal._sessionId = "session-1";
         internal._connected = true;
         internal.ws = { readyState: 1 };
-        vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+        const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
 
         const pending = client.sendInputAsync("hello");
         expect(internal.pendingInput).not.toBeNull();
@@ -890,24 +921,34 @@ describe("BrowserHotPlexClient input retry identity", () => {
         expect(internal.pendingInput).not.toBeNull();
         expect(() => client.sendInput("too early")).toThrow("Input already pending");
 
-        route(client, envelope(EventKind.Done, {
-            success: true,
-            reason: "stopped_by_user",
-        }));
+        route(client, doneEnvelope("done-stop-1", { success: true, reason: "stopped_by_user" }));
 
         await expect(stopped).resolves.toMatchObject({
             reason: "stopped_by_user",
         });
         expect(internal.pendingInput).toBeNull();
         await expect(pending).resolves.toBeUndefined();
+
+        // A settled turn frees the input slot: the next input can be sent
+        // immediately and is resolved by the next turn's own Done.
+        const next = client.sendInputAsync("after-done");
+        expect(send).toHaveBeenLastCalledWith(expect.objectContaining({
+            event: expect.objectContaining({
+                type: EventKind.Input,
+                data: expect.objectContaining({ content: "after-done" }),
+            }),
+        }));
+        route(client, doneEnvelope("done-after-1", { success: true }));
+        await expect(next).resolves.toBeUndefined();
     });
 
     it("coalesces repeated stop requests and accepts natural completion", async () => {
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
-            workerType: WorkerType.CodexCLI,
+            workerType,
         });
+        lastStopClient = client;
         const internal = client as unknown as {
             _sessionId: string;
             _connected: boolean;
@@ -934,8 +975,9 @@ describe("BrowserHotPlexClient input retry identity", () => {
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
-            workerType: WorkerType.CodexCLI,
+            workerType,
         });
+        lastStopClient = client;
         const internal = client as unknown as {
             _sessionId: string;
             _connected: boolean;
@@ -968,8 +1010,9 @@ describe("BrowserHotPlexClient input retry identity", () => {
         vi.stubGlobal("WebSocket", { OPEN: 1 });
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
-            workerType: WorkerType.CodexCLI,
+            workerType,
         });
+        lastStopClient = client;
         const internal = client as unknown as {
             _sessionId: string;
             _connected: boolean;
@@ -1000,8 +1043,9 @@ describe("BrowserHotPlexClient input retry identity", () => {
         vi.stubGlobal("WebSocket", { OPEN: 1, CONNECTING: 0 });
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
-            workerType: WorkerType.CodexCLI,
+            workerType,
         });
+        lastStopClient = client;
         const internal = client as unknown as {
             _sessionId: string;
             _connected: boolean;
@@ -1017,5 +1061,72 @@ describe("BrowserHotPlexClient input retry identity", () => {
         client.disconnect();
 
         await expect(stopped).rejects.toThrow("Client disconnected");
+    });
+
+    it("resolves a stopped Done once, ignores a replayed Done, and opens the next turn", async () => {
+        vi.stubGlobal("WebSocket", { OPEN: 1 });
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType,
+        });
+        lastStopClient = client;
+        const internal = client as unknown as {
+            _sessionId: string;
+            _connected: boolean;
+            pendingInput: unknown;
+            pendingStop: unknown;
+            ws: { readyState: number } | null;
+            _send(value: Envelope): void;
+        };
+        internal._sessionId = "session-1";
+        internal._connected = true;
+        internal.ws = { readyState: 1 };
+        const send = vi.spyOn(internal, "_send").mockImplementation(() => undefined);
+        const doneListener = vi.fn();
+        client.on("done", doneListener);
+
+        const pending = client.sendInputAsync("first");
+        const stopped = client.stopCurrentTurn();
+        const stoppedDone = doneEnvelope("done-stop-1", { success: true, reason: "stopped_by_user" });
+        route(client, stoppedDone);
+
+        await expect(stopped).resolves.toMatchObject({ reason: "stopped_by_user" });
+        await expect(pending).resolves.toBeUndefined();
+        expect(doneListener).toHaveBeenCalledTimes(1);
+        expect(internal.pendingStop).toBeNull();
+        expect(internal.pendingInput).toBeNull();
+
+        // The same Done envelope routed again (reconnect replay, or a worker
+        // emitting done twice) must not re-emit 'done' or double-settle.
+        route(client, stoppedDone);
+        expect(doneListener).toHaveBeenCalledTimes(1);
+        expect(internal.pendingStop).toBeNull();
+        expect(internal.pendingInput).toBeNull();
+
+        // The settled turn freed the input slot: the next turn starts a fresh
+        // pending on the same client.
+        const next = client.sendInputAsync("next");
+        expect(send).toHaveBeenLastCalledWith(expect.objectContaining({
+            event: expect.objectContaining({
+                type: EventKind.Input,
+                data: expect.objectContaining({ content: "next" }),
+            }),
+        }));
+        let nextSettled = false;
+        void next.finally(() => {
+            nextSettled = true;
+        });
+
+        // A stale replay must not complete the newer turn either.
+        route(client, stoppedDone);
+        expect(nextSettled).toBe(false);
+        expect(doneListener).toHaveBeenCalledTimes(1);
+
+        // Only the next turn's own Done resolves it.
+        route(client, doneEnvelope("done-next-1", { success: true, reason: "completed" }));
+        await expect(next).resolves.toBeUndefined();
+        expect(doneListener).toHaveBeenCalledTimes(2);
+        expect(internal.pendingStop).toBeNull();
+        expect(internal.pendingInput).toBeNull();
     });
 });
