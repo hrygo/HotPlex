@@ -487,12 +487,15 @@ func (d *webChatContractDriver) sendRawInputBlocked(ctx context.Context, id, con
 	d.payloads[id] = content
 
 	// The input is delivered over the real socket; the server-side handler
-	// blocks on the turn gate until SendStopTwice releases it, so it must be
-	// sent asynchronously.
-	sendDone := make(chan error, 1)
-	go func() {
-		sendDone <- d.send(ctx, id, content)
-	}()
+	// blocks on the turn gate until SendStopTwice releases it. The write
+	// itself returns as soon as the frame is queued (gorilla WriteJSON never
+	// waits for a server response), so the send stays synchronous — the
+	// blocking happens server-side, and a goroutine write here would race
+	// SendStopTwice's control frames on d.ws (gorilla Conn is not safe for
+	// concurrent writes).
+	if err := d.send(ctx, id, content); err != nil {
+		return err
+	}
 
 	// The scenario's probes exist since the init handshake, but auto-resume may
 	// replace the worker while the input is being processed — poll every probe
@@ -510,7 +513,6 @@ func (d *webChatContractDriver) sendRawInputBlocked(ctx context.Context, id, con
 		}
 		return false
 	}, driverWaitTimeout, driverWaitPoll, "webchat driver: C04 turn gate never reached")
-	_ = sendDone
 	d.worker = probe
 	return nil
 }
@@ -665,7 +667,7 @@ func (d *webChatContractDriver) wsSawContent(text string) func() bool {
 // send enters the REAL raw ingress: an AEP input envelope over the scenario's
 // WebSocket connection, with the client message id in env.id (the execution
 // store's idempotency key).
-func (d *webChatContractDriver) send(ctx context.Context, id, content string) error {
+func (d *webChatContractDriver) send(_ context.Context, id, content string) error {
 	env := map[string]any{
 		"version": events.Version,
 		"id":      id,
