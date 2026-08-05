@@ -60,14 +60,16 @@ type Harness struct {
 	observer  *observerConn
 
 	probeMu sync.Mutex
-	probe   *WorkerProbe
+	probe   *WorkerProbe   // latest probe (what Worker() returns)
+	probes  []*WorkerProbe // every probe created for this harness (teardown closes all)
 }
 
 // NewHarness builds a full gateway stack against a temp SQLite store and
 // starts one platform session for profile on platform. The probe worker is
 // created through the bridge's WorkerFactory seam, which rejects any worker
 // type that does not match the profile. All teardown is registered on t:
-// probe conn close (so the forwarder can exit) → Bridge.Shutdown(hub) →
+// Bridge.MarkClosed → close every probe conn (so all forwarders exit; the
+// closed flag makes handleWorkerExit skip crash recovery) → Bridge.Shutdown →
 // Hub.Shutdown → Manager.Close → store.Close, each bounded by a 2s context.
 func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract.WorkerProfile) *Harness {
 	t.Helper()
@@ -125,16 +127,24 @@ func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract
 	bridge.SetWorkerFactory(&probeFactory{h: h, profile: profile, sessionID: sessionID})
 
 	// Register teardown before the session start so a failed start still tears
-	// the stack down (the probe is nil-safe in cleanup).
+	// the stack down (the probes slice is nil-safe in cleanup).
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), harnessTeardown)
 		defer cancel()
-		// Close the probe's event source first so the bridge forwarder drains
-		// and exits; Bridge.Shutdown's WaitForwarders then completes without a
-		// 2s timeout. Emit is synchronous with Input, so no mapper write is in
-		// flight at teardown — the close cannot race a send on recvCh.
-		if probe := h.Worker(); probe != nil {
-			_ = probe.Conn().Close()
+		// Mark the bridge closed FIRST: handleWorkerExit then skips crash
+		// recovery, so closing probe conns whose turn never ran (the harness
+		// session's own probe) cannot spawn a resume-fallback worker. Then
+		// close EVERY probe's event source so all forwarders drain; the harness
+		// creates one probe per platform session, and closing only the latest
+		// left the earlier forwarders blocking until WaitForwarders' 2s bound.
+		// Emit is synchronous with Input, so no mapper write is in flight — the
+		// close cannot race a send on recvCh.
+		bridge.MarkClosed()
+		h.probeMu.Lock()
+		probes := append([]*WorkerProbe(nil), h.probes...)
+		h.probeMu.Unlock()
+		for _, p := range probes {
+			_ = p.Conn().Close()
 		}
 		h.Bridge.Shutdown(cleanupCtx)
 		_ = h.Hub.Shutdown(cleanupCtx)
@@ -172,6 +182,7 @@ func (h *Harness) setProbe(p *WorkerProbe) {
 	h.probeMu.Lock()
 	defer h.probeMu.Unlock()
 	h.probe = p
+	h.probes = append(h.probes, p)
 }
 
 // WaitForKinds blocks until every event kind in kinds has been observed on the
