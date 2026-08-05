@@ -16,8 +16,6 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcardkit "github.com/larksuite/oapi-sdk-go/v3/service/cardkit/v1"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 
 	"github.com/hrygo/hotplex/internal/messaging"
 	"github.com/hrygo/hotplex/internal/messaging/phrases"
@@ -59,13 +57,6 @@ func newTerminalDeliveryError(contentPresented bool, errs ...error) error {
 		ContentPresented: contentPresented,
 		err:              errors.Join(append([]error{ErrTerminalDelivery}, errs...)...),
 	}
-}
-
-func (c *StreamingCardController) terminalFailureCounter() metric.Int64Counter {
-	if c.terminalFailures != nil {
-		return c.terminalFailures
-	}
-	return observability.StreamingTerminalFailures()
 }
 
 const (
@@ -137,10 +128,9 @@ type StreamingCardController struct {
 	failedFlushes   int
 
 	// Reliability — metrics and health tracking.
-	streamStartTime  time.Time
-	ttlWarnOnce      sync.Once
-	bytesWritten     int64
-	terminalFailures metric.Int64Counter // test injection; nil uses observability accessor
+	streamStartTime time.Time
+	ttlWarnOnce     sync.Once
+	bytesWritten    int64
 
 	// Tool state — tool call/result display strip.
 	toolEntries       []toolEntry // ring buffer, max 2 entries
@@ -886,10 +876,6 @@ func (c *StreamingCardController) Close(ctx context.Context) error {
 	}
 
 	err := newTerminalDeliveryError(bodyPresented, terminalErrs...)
-	if err != nil {
-		c.terminalFailureCounter().Add(ctx, 1,
-			metric.WithAttributes(attribute.String("fallback_result", "pending")))
-	}
 	return err
 }
 

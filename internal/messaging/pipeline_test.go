@@ -53,6 +53,16 @@ func TestRegisterAbortTrigger(t *testing.T) {
 	// this is a package-level registry; test only verifies registration works.
 }
 
+func TestRegisterAbortTrigger_NormalizesInput(t *testing.T) {
+	RegisterAbortTrigger("  Stop Now!  ")
+	require.True(t, IsAbortCommand("stop now"), "registered trigger must match normalized input")
+	require.True(t, IsAbortCommand("STOP NOW."), "case/punctuation variants must match")
+
+	RegisterAbortTrigger("   ")
+	RegisterAbortTrigger("")
+	require.False(t, IsAbortCommand(""), "blank registrations must not create an empty trigger")
+}
+
 func TestDetectCommand(t *testing.T) {
 	t.Parallel()
 

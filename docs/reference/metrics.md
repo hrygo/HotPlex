@@ -266,7 +266,7 @@ rate(hotplex_cron_duration_sum[5m]) / rate(hotplex_cron_duration_count[5m])
 | `hotplex.streaming.card.rotations` | Counter | Streaming Card TTL 触发的旋转次数 |
 | `hotplex.streaming.card.rotation_failures` | Counter | 旋转失败数，label: `phase` |
 | `hotplex.streaming.card.flush_fallbacks` | Counter | CardKit 降级到 IM Patch 的次数 |
-| `hotplex.streaming.terminal_failures` | Counter | 终态 CardKit/IM Patch 或收尾装饰失败次数，label: `fallback_result`（`pending` / `sent` / `failed` / `skipped_body_presented`） |
+| `hotplex.streaming.terminal_failures` | Counter | 终态 CardKit/IM Patch 或收尾装饰失败次数，每次终态失败只计一次，label: `fallback_result`（`sent` / `failed` / `skipped_body_presented`） |
 
 ## ACP 指标
 

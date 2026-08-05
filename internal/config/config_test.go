@@ -559,6 +559,15 @@ func TestLoad_NumberedEnv(t *testing.T) {
 	require.Contains(t, cfg.Security.APIKeys, "key1")
 }
 
+func TestLoad_EventsRetentionEnvOverride(t *testing.T) {
+	t.Setenv("HOTPLEX_EVENTS_RETENTION", "168h")
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+
+	require.Equal(t, 168*time.Hour, cfg.Events.Retention)
+}
+
 func TestAutoRetryConfig_Defaults(t *testing.T) {
 	t.Parallel()
 
