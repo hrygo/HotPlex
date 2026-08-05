@@ -643,6 +643,68 @@ test.describe("Chat Page", () => {
         ).toHaveLength(0);
     });
 
+    test("closes failed popovers without ping-pong and re-surfaces re-failed items", async ({
+        page,
+    }) => {
+        const input = composerInput(page);
+        await input.fill("first");
+        await input.press("Enter");
+        await input.fill("fail alpha");
+        await input.press("Enter");
+        await input.fill("fail beta");
+        await input.press("Enter");
+
+        await disconnectGateway(page, "running", true);
+
+        const alpha = page
+            .getByRole("listitem")
+            .filter({ hasText: "fail alpha" });
+        const beta = page
+            .getByRole("listitem")
+            .filter({ hasText: "fail beta" });
+
+        // Fail both items via send-now while the turn is disconnected.
+        await alpha.getByRole("button", { name: /展开队列第/ }).click();
+        await alpha
+            .getByRole("button", { name: /停止当前轮次并立即发送队列第/ })
+            .click();
+        await expect(alpha).toContainText("需要处理");
+        await beta.getByRole("button", { name: /展开队列第/ }).click();
+        await beta
+            .getByRole("button", { name: /停止当前轮次并立即发送队列第/ })
+            .click();
+        await expect(beta).toContainText("需要处理");
+
+        // ✕-closing one failed popover must be end-state-reaching even with
+        // another failed item present — no ping-pong back to the other one.
+        await beta.getByRole("button", { name: "✕", exact: true }).click();
+        await expect(
+            page.getByRole("button", { name: /停止当前轮次并立即发送队列第/ }),
+        ).toHaveCount(0);
+        await expect(page.getByRole("listitem")).toHaveCount(2);
+
+        // A new failure episode on the same item works again: retry moves it
+        // out of the failed set, and the next send-now failure is a fresh
+        // transition that re-surfaces its popover.
+        await beta.getByRole("button", { name: /展开队列第/ }).click();
+        await beta.getByRole("button", { name: /重试队列第/ }).click();
+        await expect(
+            page.getByRole("button", { name: /停止当前轮次并立即发送队列第/ }),
+        ).toHaveCount(0);
+
+        await beta.getByRole("button", { name: /展开队列第/ }).click();
+        await beta
+            .getByRole("button", { name: /停止当前轮次并立即发送队列第/ })
+            .click();
+        await expect(beta).toContainText("需要处理");
+
+        // The re-opened popover closes cleanly again.
+        await beta.getByRole("button", { name: "✕", exact: true }).click();
+        await expect(
+            page.getByRole("button", { name: /停止当前轮次并立即发送队列第/ }),
+        ).toHaveCount(0);
+    });
+
     test("edits and deletes queued prompts before their only dispatch", async ({
         page,
     }) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 
@@ -28,25 +28,29 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
-  const [dismissedFailedId, setDismissedFailedId] = useState<string | null>(
-    null,
-  );
+  const prevFailedIdsRef = useRef<ReadonlySet<string>>(new Set());
 
-  // Surface failures when nothing else is open: a failed item needs its
-  // status and retry affordance visible, mirroring the pre-redesign panel
-  // contract. The redirect is gated on `activeItemId === null` so an open
-  // popover (any item) is never hijacked, and an explicitly dismissed failure
-  // (✕ close or pill collapse) stays closed until a different item fails.
+  // Auto-open the popover only when an item *transitions* into the failed
+  // state while nothing else is open, mirroring the pre-redesign panel
+  // contract where a failed item's status and retry affordance were always
+  // visible. Triggering on the transition (previous failed-set vs current
+  // failed-set) keeps ✕ close end-state-reaching with any number of failed
+  // items, and a new failure episode on the same item (failed → retried →
+  // failed again) surfaces again.
   useEffect(() => {
-    if (activeItemId !== null) return;
-    const failedItem = queue.items.find(
-      (item) => item.status === "failed" && item.id !== dismissedFailedId,
+    const currentFailedIds = new Set(
+      queue.items
+        .filter((item) => item.status === "failed")
+        .map((item) => item.id),
     );
-    if (failedItem) {
-      setActiveItemId(failedItem.id);
-      setEditingItemId(null);
-    }
-  }, [queue.items, activeItemId, dismissedFailedId]);
+    const newlyFailedId = [...currentFailedIds].find(
+      (id) => !prevFailedIdsRef.current.has(id),
+    );
+    prevFailedIdsRef.current = currentFailedIds;
+    if (newlyFailedId === undefined || activeItemId !== null) return;
+    setActiveItemId(newlyFailedId);
+    setEditingItemId(null);
+  }, [queue.items, activeItemId]);
 
   if (queue.items.length === 0) return null;
 
@@ -93,14 +97,10 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    if (expanded) {
-                      if (failed) setDismissedFailedId(item.id);
-                      setActiveItemId(null);
-                      setEditingItemId(null);
-                    } else {
-                      setActiveItemId(item.id);
-                      setEditingItemId(null);
-                    }
+                    setActiveItemId((current) =>
+                      current === item.id ? null : item.id,
+                    );
+                    setEditingItemId(null);
                   }}
                   aria-expanded={expanded}
                   aria-label={t(
@@ -183,9 +183,6 @@ export function FollowUpQueue({ queue, isStopping }: FollowUpQueueProps) {
                         <button
                           type="button"
                           onClick={() => {
-                            if (item.status === "failed") {
-                              setDismissedFailedId(item.id);
-                            }
                             setActiveItemId(null);
                             setEditingItemId(null);
                           }}
