@@ -94,6 +94,22 @@ var knownSandboxModes = map[string]struct{}{
 	"danger-full-access": {},
 }
 
+// ObservedSummary is the bounded observed-bootstrap projection served
+// alongside the desired-state plan (#946 spec §6.5/§6.6): only verifiable
+// facts (worker type, the Worker-reported permission tier) plus the mapping
+// state. A config hash, an HTTP 200, a Worker done, or an audit row alone
+// never lift the state to ObservedEnforced.
+type ObservedSummary struct {
+	// State is one of the Observed* constants.
+	State string `json:"state"`
+	// WorkerType is the worker type the session actually runs (observed fact).
+	WorkerType string `json:"worker_type,omitempty"`
+	// PermissionCeiling is the first effective permission tier the Worker
+	// reported after a successful start/resume — declared by the Worker, not
+	// independently enforced (empty when never reported).
+	PermissionCeiling string `json:"permission_ceiling,omitempty"`
+}
+
 // PlanSourceRef records which precedence level supplied a resolved field. The
 // slice order is semantic (field precedence) and MUST NOT be reordered by
 // canonicalization (#946 spec §6.3 rule 4).

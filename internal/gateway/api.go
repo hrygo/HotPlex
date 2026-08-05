@@ -364,7 +364,9 @@ func (g *GatewayAPI) CreateSession(w http.ResponseWriter, r *http.Request) {
 	// normalized construction agrees with this legacy shape. REST has no
 	// AllowedTools source (nil) — the documented WS≠REST divergence. The legacy
 	// params stay authoritative in first-cut.
-	ShadowCompareStartParams(g.log, BuildWebChatInput(wt, nil, userID, sessionWorkspaceID), startParams)
+	in := BuildWebChatInput(wt, nil, userID, sessionWorkspaceID)
+	ShadowCompareStartParams(g.log, in, startParams)
+	ShadowResolvePlan(g.log, in)
 	if err := g.bridge.StartSession(r.Context(), startParams); err != nil {
 		g.log.Error("gateway: create session failed", "session_id", id, "worker_type", wt, "work_dir", workDir, "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "failed to create session")

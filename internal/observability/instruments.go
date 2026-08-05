@@ -1112,6 +1112,15 @@ var (
 
 	runtimeFenceConflicts     metric.Int64Counter
 	runtimeFenceConflictsInit sync.Once
+
+	runtimePlanResolutions     metric.Int64Counter
+	runtimePlanResolutionsInit sync.Once
+
+	runtimePlanBlocked     metric.Int64Counter
+	runtimePlanBlockedInit sync.Once
+
+	runtimePlanObserved     metric.Int64Counter
+	runtimePlanObservedInit sync.Once
 )
 
 func ExecutionAccept() metric.Int64Counter {
@@ -1448,4 +1457,58 @@ func RuntimeFenceConflicts() metric.Int64Counter {
 		}
 	})
 	return runtimeFenceConflicts
+}
+
+// ─── Runtime Plan Instruments (#946) ────────────────────────────────
+
+// RuntimePlanResolutions counts EffectiveRuntimePlan resolutions in shadow
+// mode. Labels: result (ok|blocked). The plan hash is NEVER a label
+// (high cardinality — #946 spec §6.4).
+func RuntimePlanResolutions() metric.Int64Counter {
+	runtimePlanResolutionsInit.Do(func() {
+		var err error
+		runtimePlanResolutions, err = Meter().Int64Counter(
+			"hotplex.runtime.plan_resolutions",
+			metric.WithDescription("Effective runtime plan resolutions. Labels: result (ok|blocked)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.plan_resolutions", err)
+		}
+	})
+	return runtimePlanResolutions
+}
+
+// RuntimePlanBlocked counts fail-closed plan block reasons (#946 spec §6.2).
+// Labels: code (unknown_worker_type|invalid_permission_mode|
+// invalid_sandbox_mode|facts_missing_or_conflicting|capability_unverifiable|
+// secret_shaped_value). Low-cardinality only.
+func RuntimePlanBlocked() metric.Int64Counter {
+	runtimePlanBlockedInit.Do(func() {
+		var err error
+		runtimePlanBlocked, err = Meter().Int64Counter(
+			"hotplex.runtime.plan_blocked",
+			metric.WithDescription("Blocked effective runtime plans by fail-closed reason code"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.plan_blocked", err)
+		}
+	})
+	return runtimePlanBlocked
+}
+
+// RuntimePlanObserved counts observed-bootstrap states served by the plan
+// read path (#946 spec §6.5). Labels: state
+// (planned|unknown|declared|partial|enforced). Low-cardinality only.
+func RuntimePlanObserved() metric.Int64Counter {
+	runtimePlanObservedInit.Do(func() {
+		var err error
+		runtimePlanObserved, err = Meter().Int64Counter(
+			"hotplex.runtime.plan_observed",
+			metric.WithDescription("Observed runtime plan bootstrap states served. Labels: state (planned|unknown|declared|partial|enforced)"),
+		)
+		if err != nil {
+			warnInstrument("hotplex.runtime.plan_observed", err)
+		}
+	})
+	return runtimePlanObserved
 }

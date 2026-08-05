@@ -173,6 +173,7 @@ func setupRoutes(
 	adminMux.HandleFunc("DELETE /admin/sessions/{id}", adminAPI.DeleteSession)
 	adminMux.HandleFunc("POST /admin/sessions/{id}/terminate", adminAPI.TerminateSession)
 	adminMux.HandleFunc("GET /admin/sessions/{id}/stats", adminAPI.HandleSessionStats)
+	adminMux.HandleFunc("GET /admin/sessions/{id}/runtime-plan", adminAPI.HandleSessionRuntimePlan)
 
 	// Runtime fence API (#877): inspect fenced executions, resolve/abandon with
 	// a fencing token. GET needs runtime:read, POST needs runtime:write.
