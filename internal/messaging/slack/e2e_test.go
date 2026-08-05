@@ -584,6 +584,7 @@ func TestE2E_SlackConn_WriteCtx_NilEnvelope(t *testing.T) {
 func TestE2E_SlackConn_WriteCtx_StatusUpdates(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)
+	a.client = &stubSlackClient{} // error events now surface send failures synchronously
 	conn := NewSlackConn(a, "C123", "123.456", "")
 	ctx := context.Background()
 

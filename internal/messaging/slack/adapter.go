@@ -807,7 +807,11 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		// Abort any active streaming writer — GC/Reset kills the worker without a
 		// done event, so the writer would otherwise remain active until TTL expiry.
 		if conn := a.GetOrCreateConn(channelID, threadTS); conn != nil {
-			conn.closeStreamWriter()
+			if err := conn.closeStreamWriter(ctx); err != nil {
+				a.Log.Warn("slack: failed to close stream on control command",
+					"channel", channelID, "thread", threadTS, "err", err)
+				conn.recordTerminalFailure(ctx, terminalFailureResult(err))
+			}
 		}
 	}
 
@@ -861,7 +865,7 @@ type SlackConn struct {
 	messageTS string // anchor message for typing indicator cleanup
 
 	handlerMu      sync.Mutex // serializes control commands and message handling per thread
-	streamWriter   *NativeStreamingWriter
+	streamWriter   streamContentCloser
 	streamWriterMu sync.Mutex
 	mu             sync.RWMutex // protects workDir
 	workDir        string       // current workDir identity for session key derivation
@@ -969,12 +973,18 @@ func (c *SlackConn) writeWithStreaming(ctx context.Context, text string) error {
 	defer c.streamWriterMu.Unlock()
 
 	// TTL rotation: proactively replace expired streams before
-	// Slack's server-side streaming limit kicks in.
-	if c.streamWriter != nil && c.streamWriter.Expired() {
-		oldWriter := c.streamWriter
-		oldWriter.SetSkipFallback()
+	// Slack's server-side streaming limit kicks in. The old writer no longer
+	// sends a fallback itself; its stop failure is best-effort (the content
+	// continues streaming into the replacement writer). Expired is a
+	// NativeStreamingWriter-only capability, so the check type-asserts.
+	if oldWriter, ok := c.streamWriter.(*NativeStreamingWriter); ok && oldWriter.Expired() {
 		c.streamWriter = nil
-		go func() { _ = oldWriter.Close() }()
+		go func() {
+			if err := oldWriter.Close(); err != nil {
+				c.adapter.Log.Warn("slack: rotated stream close failed",
+					"channel", c.channelID, "err", err)
+			}
+		}()
 		c.adapter.Log.Info("slack: stream rotated",
 			"channel", c.channelID,
 			"old_msg_ts", oldWriter.messageTS)
@@ -1160,31 +1170,43 @@ func (c *SlackConn) tryFileUpload(ctx context.Context, text string) bool {
 }
 
 // getStreamWriter returns the current stream writer (thread-safe).
-func (c *SlackConn) getStreamWriter() *NativeStreamingWriter {
+func (c *SlackConn) getStreamWriter() streamContentCloser {
 	c.streamWriterMu.Lock()
 	defer c.streamWriterMu.Unlock()
 	return c.streamWriter
 }
 
-// closeStreamWriter closes and clears the stream writer.
-// The lock is released before calling Close() to avoid a deadlock:
-// Close() → onComplete → writeWithStreaming's callback → Lock(streamWriterMu).
-func (c *SlackConn) closeStreamWriter() {
+// closeStreamWriter closes and clears the stream writer, returning the
+// terminal close error. CloseContext runs outside the lock — the lock is
+// released first to avoid a deadlock:
+// CloseContext() → onComplete → writeWithStreaming's callback → Lock(streamWriterMu).
+// A nil writer is a nil no-op; once cleared, the call stays idempotent.
+func (c *SlackConn) closeStreamWriter(ctx context.Context) error {
 	c.streamWriterMu.Lock()
 	w := c.streamWriter
 	c.streamWriter = nil
 	c.streamWriterMu.Unlock()
 
-	if w != nil {
-		_ = w.Close()
+	if w == nil {
+		return nil
 	}
+	return w.CloseContext(ctx)
 }
 
-// Close removes the conn from the adapter registry and cleans up the stream writer.
+// Close removes the conn from the adapter registry and cleans up the stream
+// writer. Close cannot propagate the stream error (PlatformConn.Close has no
+// error return), so it is surfaced as a structured Warn plus the terminal
+// failure counter.
 func (c *SlackConn) Close() error {
 	c.adapter.DeleteConn(c.channelID, c.threadTS)
 
-	c.closeStreamWriter()
+	closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.closeStreamWriter(closeCtx); err != nil {
+		c.adapter.Log.Warn("slack: close failed to finalize stream",
+			"channel", c.channelID, "thread", c.threadTS, "err", err)
+		c.recordTerminalFailure(closeCtx, terminalFailureResult(err))
+	}
 
 	c.clearStatus(context.Background())
 

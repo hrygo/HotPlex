@@ -258,14 +258,16 @@ func AssistantSnapshotDrift() metric.Int64Counter {
 }
 
 // PlatformTerminalFallback counts synthetic terminal messages emitted by a
-// platform adapter when the worker produced nothing displayable, e.g. a Feishu
-// placeholder replaced by an empty-success terminal (Turn-Integrity Fix E).
+// platform adapter when the worker produced nothing displayable (e.g. a Feishu
+// placeholder replaced by an empty-success terminal, Turn-Integrity Fix E) or
+// when a streaming terminal close failed before the body was presented and the
+// platform delivered the fixed short fallback text (Slack terminal fallback).
 func PlatformTerminalFallback() metric.Int64Counter {
 	platformTerminalFallbackInit.Do(func() {
 		var err error
 		platformTerminalFallback, err = Meter().Int64Counter(
 			"hotplex.messaging.platform_terminal_fallback_total",
-			metric.WithDescription("Platform-side terminal fallbacks replacing an empty placeholder/partial"),
+			metric.WithDescription("Platform-side terminal fallbacks replacing an empty/undelivered streaming terminal"),
 		)
 		if err != nil {
 			warnInstrument("hotplex.messaging.platform_terminal_fallback_total", err)
@@ -787,10 +789,12 @@ func StreamingCardFlushFallbacks() metric.Int64Counter {
 	return streamingCardFlushFallbacks
 }
 
-// StreamingTerminalFailures counts terminal-card finalization failures. The
-// fallback_result attribute records whether the connection later sent the short
-// static terminal fallback, could not send it, or skipped it because the body
-// was already visible.
+// StreamingTerminalFailures counts platform streaming terminal finalization
+// failures (Feishu streaming cards and Slack streaming writers). The
+// fallback_result attribute records whether the connection later sent the
+// short static terminal fallback, could not send it, or skipped it because the
+// body was already visible; the platform attribute identifies the messaging
+// platform.
 func StreamingTerminalFailures() metric.Int64Counter {
 	streamingTerminalFailuresInit.Do(func() {
 		var err error
@@ -805,7 +809,7 @@ func StreamingTerminalFailures() metric.Int64Counter {
 func newStreamingTerminalFailures(meter metric.Meter) (metric.Int64Counter, error) {
 	return meter.Int64Counter(
 		"hotplex.streaming.terminal_failures",
-		metric.WithDescription("Streaming card terminal delivery failures by fallback result"),
+		metric.WithDescription("Platform streaming terminal delivery failures by fallback result and platform"),
 	)
 }
 

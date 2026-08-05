@@ -87,6 +87,39 @@ func containsAny(str string, substrs []string) bool {
 	return false
 }
 
+// streamContentCloser is the minimal package-private surface SlackConn needs
+// from a streaming writer: content read-back for terminal delivery, Write for
+// delta streaming, and CloseContext so the terminal close shares the caller's
+// deadline with any fallback. Not exported — tests fake it with sentinel errors.
+type streamContentCloser interface {
+	Content() string
+	Write([]byte) (int, error)
+	Close() error
+	CloseContext(context.Context) error
+}
+
+// StreamTerminalError reports a streaming finalization failure while
+// preserving whether the terminal body was already presented. A
+// decoration-only failure (for example the final StopStream call) must remain
+// observable without causing the connection to send the response body a
+// second time — callers use ContentPresented to decide whether a fixed short
+// fallback is still necessary.
+type StreamTerminalError struct {
+	Cause            error
+	ContentPresented bool
+}
+
+func (e *StreamTerminalError) Error() string {
+	if e.ContentPresented {
+		return fmt.Sprintf("slack: stream terminal delivery failed after body was presented: %v", e.Cause)
+	}
+	return fmt.Sprintf("slack: stream terminal delivery failed before body was presented: %v", e.Cause)
+}
+
+func (e *StreamTerminalError) Unwrap() error {
+	return e.Cause
+}
+
 // NativeStreamingWriter wraps Slack's three-phase streaming API
 // into a standard io.WriteCloser. First Write() starts the stream,
 // subsequent calls buffer content, Close() ends it with fallback.
@@ -125,7 +158,6 @@ type NativeStreamingWriter struct {
 	// TTL rotation
 	streamStartTime time.Time
 	streamExpired   bool
-	skipFallback    bool // suppress fallback PostMessage during rotation
 }
 
 // NewNativeStreamingWriter creates a new streaming writer for Slack.
@@ -214,15 +246,6 @@ func (w *NativeStreamingWriter) Expired() bool {
 		return false
 	}
 	return time.Since(w.streamStartTime) > StreamRotationTTL
-}
-
-// SetSkipFallback suppresses the fallback PostMessage in Close().
-// Called by writeWithStreaming before rotation to prevent sending
-// duplicate content when the stream's output is already displayed.
-func (w *NativeStreamingWriter) SetSkipFallback() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.skipFallback = true
 }
 
 // flushLoop background goroutine: periodic + threshold-triggered flush.
@@ -319,8 +342,22 @@ func (w *NativeStreamingWriter) appendWithRetry(content string) error {
 	return lastErr
 }
 
-// Close ends the stream, runs integrity check, and fallbacks if needed.
+// Close ends the stream under a fixed 10s budget. Kept for io.WriteCloser
+// compatibility; terminal paths should call CloseContext instead so the close
+// and the outer fallback share one deadline.
 func (w *NativeStreamingWriter) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return w.CloseContext(ctx)
+}
+
+// CloseContext ends the stream and reports finalization failures as a typed
+// StreamTerminalError. ContentPresented is true when every buffered chunk was
+// flushed to Slack before the failure; only decoration (StopStream) failed.
+// The writer never re-sends content itself — terminal fallback is the
+// connection's responsibility (handleTerminalDeliveryError), so the full
+// answer is never duplicated and the fixed fallback stays short.
+func (w *NativeStreamingWriter) CloseContext(ctx context.Context) error {
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
@@ -337,9 +374,7 @@ func (w *NativeStreamingWriter) Close() error {
 	w.mu.Lock()
 	started := w.started
 	streamExpired := w.streamExpired
-	shouldSkipFallback := w.skipFallback
 	failedChunks := w.failedFlushChunks
-	fullContent := w.fullContent.String()
 	w.mu.Unlock()
 
 	if !started {
@@ -360,9 +395,7 @@ func (w *NativeStreamingWriter) Close() error {
 			"duration", duration)
 	}
 
-	// Use a fresh context for cleanup since startCtx may be cancelled
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	var terminalErrs []error
 
 	// Plain stop — the old code passed MsgOptionBlocks + MsgOptionText(content)
 	// to StopStreamContext, which caused content duplication: MsgOptionText appended
@@ -370,35 +403,28 @@ func (w *NativeStreamingWriter) Close() error {
 	// identical appearance x2. MsgOptionBlocks may also conflict with markdown_text
 	// (markdown_text_conflict) or fail via chat.update (block_mismatch on rich_text
 	// blocks created by streaming). Plain stop avoids all of these issues.
-	_, _, stopErr := w.client.StopStreamContext(cleanupCtx, w.channelID, w.messageTS)
+	_, _, stopErr := w.client.StopStreamContext(ctx, w.channelID, w.messageTS)
 	if stopErr != nil {
 		w.log.Warn("slack: stop stream failed", "channel", w.channelID, "err", stopErr)
+		terminalErrs = append(terminalErrs, stopErr)
 	}
 
 	if w.onComplete != nil {
 		w.onComplete(w.messageTS)
 	}
 
-	if !integrityOK && !shouldSkipFallback {
-		label := "Stream expired"
-		if !streamExpired {
-			label = "Stream interrupted"
-		}
-		fallbackText := fmt.Sprintf("⚠️ *%s, resending complete content:*\n\n%s", label, fullContent)
-		opts := []slack.MsgOption{slack.MsgOptionText(fallbackText, false)}
-		if w.threadTS != "" {
-			opts = append(opts, slack.MsgOptionTS(w.threadTS))
-		}
-		if w.teamID != "" {
-			opts = append(opts, slack.MsgOptionRecipientTeamID(w.teamID))
-		}
-		_, _, err := w.client.PostMessageContext(cleanupCtx, w.channelID, opts...)
-		if err != nil {
-			w.log.Error("slack: fallback PostMessage failed",
-				"channel", w.channelID, "err", err)
-		}
+	if !integrityOK {
+		terminalErrs = append(terminalErrs,
+			fmt.Errorf("slack: %d stream chunk(s) failed to flush", len(failedChunks)))
 	}
-	return nil
+
+	if len(terminalErrs) == 0 {
+		return nil
+	}
+	return &StreamTerminalError{
+		Cause:            errors.Join(terminalErrs...),
+		ContentPresented: integrityOK,
+	}
 }
 
 // Content returns the full accumulated text (thread-safe).
