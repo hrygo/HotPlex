@@ -1,249 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
+import {
+    installMockGateway,
+    sentEvents,
+    sentInputs,
+    emitGatewayEvent,
+    emitDone,
+    type MockGatewayWindow,
+} from "./fixtures/mock-gateway";
 
 const COMPOSER_PLACEHOLDER = "输入消息，或输入 '/' 使用命令...";
-
-type SentEnvelope = {
-    id: string;
-    event: { type: string; data: Record<string, unknown> };
-};
-
-async function installMockGateway(page: Page) {
-    await page.addInitScript(() => {
-        type Envelope = {
-            version: string;
-            id: string;
-            seq: number;
-            session_id: string;
-            timestamp: number;
-            event: { type: string; data: Record<string, unknown> };
-        };
-        type TestWindow = typeof window & {
-            __aepEvents: Envelope[];
-            __mockAEP: {
-                emit(
-                    type: string,
-                    data: Record<string, unknown>,
-                    id?: string,
-                ): void;
-                disconnect(): void;
-                pauseNextConnect(): void;
-                setNextInitState(state: "idle" | "running"): void;
-                setNextInputOutcome(
-                    outcome: "delivered" | "unknown" | "failed",
-                ): void;
-            };
-        };
-
-        const testWindow = window as TestWindow;
-        const NativeWebSocket = window.WebSocket;
-        testWindow.__aepEvents = [];
-        let serverSequence = 0;
-        let activeSocket: MockWebSocket | null = null;
-        let nextInitState: "idle" | "running" = "idle";
-        let nextInputOutcome: "delivered" | "unknown" | "failed" = "delivered";
-        let pauseNextSocketOpen = false;
-
-        class MockWebSocket extends EventTarget {
-            static readonly CONNECTING = 0;
-            static readonly OPEN = 1;
-            static readonly CLOSING = 2;
-            static readonly CLOSED = 3;
-
-            readonly url: string;
-            readyState = MockWebSocket.CONNECTING;
-            onopen: ((event: Event) => void) | null = null;
-            onmessage: ((event: MessageEvent) => void) | null = null;
-            onerror: ((event: Event) => void) | null = null;
-            onclose: ((event: CloseEvent) => void) | null = null;
-
-            constructor(url: string | URL) {
-                super();
-                this.url = String(url);
-                activeSocket = this;
-                queueMicrotask(() => {
-                    if (pauseNextSocketOpen) {
-                        pauseNextSocketOpen = false;
-                        return;
-                    }
-                    this.readyState = MockWebSocket.OPEN;
-                    const event = new Event("open");
-                    this.dispatchEvent(event);
-                    this.onopen?.(event);
-                });
-            }
-
-            send(payload: string) {
-                const envelope = JSON.parse(payload) as Envelope;
-                testWindow.__aepEvents.push(envelope);
-                if (envelope.event.type === "init") {
-                    this.emit("init_ack", { state: nextInitState });
-                    return;
-                }
-                if (envelope.event.type === "input") {
-                    const outcome = nextInputOutcome;
-                    nextInputOutcome = "delivered";
-                    queueMicrotask(() => {
-                        this.emit("input.ack", {
-                            client_message_id: envelope.id,
-                            execution_id: `execution-${envelope.id}`,
-                            status: "accepted",
-                        });
-                        this.emit("input.ack", {
-                            client_message_id: envelope.id,
-                            execution_id: `execution-${envelope.id}`,
-                            status: outcome,
-                            ...(outcome === "delivered"
-                                ? {}
-                                : {
-                                      error_code: `TEST_${outcome.toUpperCase()}`,
-                                  }),
-                        });
-                    });
-                    return;
-                }
-                if (envelope.event.type === "ping") {
-                    this.emit("pong", {});
-                }
-            }
-
-            close(code = 1000, reason = "mock closed") {
-                if (this.readyState === MockWebSocket.CLOSED) return;
-                this.readyState = MockWebSocket.CLOSED;
-                if (activeSocket === this) activeSocket = null;
-                const event = new CloseEvent("close", { code, reason });
-                this.dispatchEvent(event);
-                this.onclose?.(event);
-            }
-
-            emit(type: string, data: Record<string, unknown>, id?: string) {
-                serverSequence += 1;
-                const envelope: Envelope = {
-                    version: "aep/v1",
-                    id: id ?? `server-${serverSequence}`,
-                    seq: serverSequence,
-                    session_id: "session-e2e",
-                    timestamp: Date.now(),
-                    event: { type, data },
-                };
-                const event = new MessageEvent("message", {
-                    data: JSON.stringify(envelope),
-                });
-                this.dispatchEvent(event);
-                this.onmessage?.(event);
-            }
-        }
-
-        testWindow.__mockAEP = {
-            emit(type, data, id) {
-                activeSocket?.emit(type, data, id);
-            },
-            disconnect() {
-                activeSocket?.close(1012, "mock reconnect");
-            },
-            pauseNextConnect() {
-                pauseNextSocketOpen = true;
-            },
-            setNextInitState(state) {
-                nextInitState = state;
-            },
-            setNextInputOutcome(outcome) {
-                nextInputOutcome = outcome;
-            },
-        };
-        const RoutedWebSocket = new Proxy(NativeWebSocket, {
-            construct(Target, args) {
-                const [rawUrl] = args as [string | URL];
-                const url = new URL(String(rawUrl), window.location.href);
-                if (url.pathname !== "/ws") {
-                    return Reflect.construct(Target, args);
-                }
-                return new MockWebSocket(rawUrl);
-            },
-        });
-        Object.defineProperty(window, "WebSocket", {
-            configurable: true,
-            writable: true,
-            value: RoutedWebSocket,
-        });
-    });
-
-    await page.route("**/api/**", async (route) => {
-        const request = route.request();
-        const url = new URL(request.url());
-        const json = (body: unknown, status = 200) =>
-            route.fulfill({
-                status,
-                contentType: "application/json",
-                body: JSON.stringify(body),
-            });
-
-        if (url.pathname === "/api/auth/me") {
-            await json({
-                id: "user-e2e",
-                username: "e2e",
-                display_name: "E2E User",
-                role: "admin",
-                status: "active",
-                created_at: 1,
-                updated_at: 1,
-            });
-            return;
-        }
-        if (url.pathname === "/api/workspaces" && request.method() === "GET") {
-            await json({
-                workspaces: [
-                    {
-                        id: "workspace-e2e",
-                        name: "E2E Workspace",
-                        work_dir: "/tmp/e2e",
-                        owner_user_id: "user-e2e",
-                        worker_preference: "codex_cli",
-                        permission_mode: "workspace",
-                        agent_config_overrides: "{}",
-                        status: "active",
-                        created_at: 1,
-                        updated_at: 1,
-                    },
-                ],
-                limit: 100,
-                offset: 0,
-            });
-            return;
-        }
-        if (url.pathname === "/api/sessions" && request.method() === "GET") {
-            await json({
-                sessions: [
-                    {
-                        id: "session-e2e",
-                        user_id: "user-e2e",
-                        worker_type: "codex_cli",
-                        state: "idle",
-                        title: "Queue E2E",
-                        work_dir: "/tmp/e2e",
-                        created_at: new Date(1).toISOString(),
-                        updated_at: new Date(2).toISOString(),
-                    },
-                ],
-                limit: 20,
-                offset: 0,
-            });
-            return;
-        }
-        if (url.pathname === "/api/sessions/session-e2e/history") {
-            await json({ records: [], has_more: false });
-            return;
-        }
-        if (url.pathname === "/api/workers") {
-            await json([{ type: "codex_cli", installed: true }]);
-            return;
-        }
-        if (request.method() === "DELETE") {
-            await route.fulfill({ status: 204 });
-            return;
-        }
-        await json({});
-    });
-}
 
 async function waitForChatReady(page: Page) {
     await page.getByPlaceholder(COMPOSER_PLACEHOLDER).waitFor({
@@ -260,82 +25,14 @@ function sendButton(page: Page) {
     return page.getByRole("button", { name: "发送消息" });
 }
 
-async function sentInputs(page: Page): Promise<SentEnvelope[]> {
-    return page.evaluate(() =>
-        (
-            (window as typeof window & { __aepEvents: SentEnvelope[] })
-                .__aepEvents ?? []
-        ).filter((event) => event.event.type === "input"),
-    );
-}
-
-async function sentEvents(page: Page): Promise<SentEnvelope[]> {
-    return page.evaluate(
-        () =>
-            (window as typeof window & { __aepEvents: SentEnvelope[] })
-                .__aepEvents ?? [],
-    );
-}
-
-async function emitDone(page: Page, id: string, reason = "completed") {
-    await page.evaluate(
-        ({ eventId, doneReason }) => {
-            (
-                window as typeof window & {
-                    __mockAEP: {
-                        emit(
-                            type: string,
-                            data: Record<string, unknown>,
-                            id?: string,
-                        ): void;
-                    };
-                }
-            ).__mockAEP.emit(
-                "done",
-                { success: true, reason: doneReason },
-                eventId,
-            );
-        },
-        { eventId: id, doneReason: reason },
-    );
-}
-
-async function emitGatewayEvent(
-    page: Page,
-    type: string,
-    data: Record<string, unknown>,
-    id?: string,
-) {
-    await page.evaluate(
-        ({ eventType, eventData, eventId }) => {
-            (
-                window as typeof window & {
-                    __mockAEP: {
-                        emit(
-                            type: string,
-                            data: Record<string, unknown>,
-                            id?: string,
-                        ): void;
-                    };
-                }
-            ).__mockAEP.emit(eventType, eventData, eventId);
-        },
-        { eventType: type, eventData: data, eventId: id },
-    );
-}
-
 async function setNextInputOutcome(
     page: Page,
     outcome: "delivered" | "unknown" | "failed",
 ) {
     await page.evaluate((nextOutcome) => {
-        (
-            window as typeof window & {
-                __mockAEP: {
-                    setNextInputOutcome(value: typeof nextOutcome): void;
-                };
-            }
-        ).__mockAEP.setNextInputOutcome(nextOutcome);
+        (window as unknown as MockGatewayWindow).__mockAEP.setNextInputOutcome(
+            nextOutcome,
+        );
     }, outcome);
 }
 
@@ -346,15 +43,7 @@ async function disconnectGateway(
 ) {
     await page.evaluate(
         ({ state, pause }) => {
-            const mock = (
-                window as typeof window & {
-                    __mockAEP: {
-                        setNextInitState(value: typeof state): void;
-                        pauseNextConnect(): void;
-                        disconnect(): void;
-                    };
-                }
-            ).__mockAEP;
+            const mock = (window as unknown as MockGatewayWindow).__mockAEP;
             mock.setNextInitState(state);
             if (pause) mock.pauseNextConnect();
             mock.disconnect();
@@ -365,7 +54,7 @@ async function disconnectGateway(
 
 test.describe("Chat Page", () => {
     test.beforeEach(async ({ page }) => {
-        await installMockGateway(page);
+        await installMockGateway(page, "codex_cli");
         await page.goto("/");
         await waitForChatReady(page);
     });
