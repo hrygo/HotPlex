@@ -281,8 +281,14 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return nil
 	}
 
-	// A new primary turn begins here: clear the user-stop marker before the
-	// actual protocol send (conn was already checked non-nil above).
+	// A new primary turn begins here. OCS's conn.Send blocks until the turn
+	// completes, so the marker cannot be cleared after the send returns — the
+	// next turn's Done (emitted by the converter when the server reaches idle)
+	// would race the clear and get suppressed. Instead capture the current
+	// stopped state, clear it before the send, and restore it if the send
+	// fails: a failed send means the new turn never started, so the previous
+	// turn's stopped marker must be preserved.
+	wasStopped := w.IsStopped()
 	w.BeginTurn()
 
 	msg := events.NewEnvelope(
@@ -297,6 +303,9 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	)
 
 	if err := conn.Send(ctx, msg); err != nil {
+		if wasStopped {
+			w.MarkStopped()
+		}
 		return fmt.Errorf("opencodeserver: send input: %w", err)
 	}
 
@@ -425,7 +434,15 @@ func (w *Worker) StopCurrentTurn(ctx context.Context) error {
 	// Bound the abort to 2s; WithTimeout preserves an earlier caller deadline.
 	abortCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	return abortOCSSession(abortCtx, sessionID, addr, projectDir, client)
+	if err := abortOCSSession(abortCtx, sessionID, addr, projectDir, client); err != nil {
+		// The abort never took effect — the turn is still running and the
+		// gateway rolls back its stop fence. Unmark so the turn's legitimate
+		// Done is not suppressed forever (the OCS server resumes/emits idle
+		// on its own and may publish a Done for the interrupted turn).
+		w.ClearStopped()
+		return err
+	}
+	return nil
 }
 
 // Kill closes the SSE connection and releases the singleton ref.
@@ -977,6 +994,21 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 
 			if recvCh == nil {
 				return
+			}
+
+			// While the user-stop marker is set (StopCurrentTurn admitted), the
+			// gateway's synthetic done(stopped_by_user) is the authoritative
+			// terminal for the stopped turn. The OCS server's abort always
+			// transitions the session to idle, and the converter emits its own
+			// Done (and possibly Error+Done with a fresh id) for that idle
+			// transition — a terminal the gateway's per-turn fence does not
+			// dedup. Suppress those worker-emitted terminal envelopes so exactly
+			// one terminal reaches the client per turn. BeginTurn (next primary
+			// input) clears the marker, so later turns' Dones flow normally.
+			if w.IsStopped() && (env.Event.Type == events.Done || env.Event.Type == events.Error) {
+				w.Log.Debug("opencodeserver: suppressing worker-emitted terminal event while stopped",
+					"event_type", env.Event.Type, "event_id", env.ID, "session_id", sessionID)
+				continue
 			}
 
 			if isDroppable(env.Event.Type) {

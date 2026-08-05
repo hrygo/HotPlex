@@ -987,11 +987,14 @@ func stopTurnTestWorker(t *testing.T, server *httptest.Server, mgr *SingletonPro
 }
 
 // assertStopTurnRetention asserts the frozen StopCurrentTurn retention contract:
-// stopped marker set, same conn, same worker session ID, singleton ref unchanged,
-// SSE subscription not cancelled.
-func assertStopTurnRetention(t *testing.T, w *Worker, mgr *SingletonProcessManager, live *conn, sseCtx context.Context) {
+// same conn, same worker session ID, singleton ref unchanged, SSE subscription
+// not cancelled. expectStopped reflects the stop outcome: a SUCCESSFUL abort
+// keeps the marker set (post-abort terminal envelopes are suppressed); a FAILED
+// abort (HTTP error or deadline) unmarks the worker so the turn's legitimate
+// terminal event flows normally (the gateway rolls back its stop fence).
+func assertStopTurnRetention(t *testing.T, w *Worker, mgr *SingletonProcessManager, live *conn, sseCtx context.Context, expectStopped bool) {
 	t.Helper()
-	require.True(t, w.IsStopped(), "StopCurrentTurn must mark the worker stopped")
+	require.Equal(t, expectStopped, w.IsStopped(), "StopCurrentTurn stopped marker must reflect the abort outcome")
 	require.Same(t, live, w.Conn(), "StopCurrentTurn must retain the active conn")
 	require.Equal(t, "ses-live", w.GetWorkerSessionID(), "StopCurrentTurn must retain the worker session ID")
 	mgr.mu.Lock()
@@ -1037,7 +1040,7 @@ func TestWorker_StopCurrentTurn_AbortsWithoutReleasingSession(t *testing.T) {
 	}
 	mu.Unlock()
 
-	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+	assertStopTurnRetention(t, w, mgr, live, sseCtx, true)
 }
 
 func TestWorker_StopCurrentTurn_NoActiveConn(t *testing.T) {
@@ -1102,7 +1105,7 @@ func TestWorker_StopCurrentTurn_AbortError500RetainsSession(t *testing.T) {
 	require.ErrorContains(t, err, "opencodeserver: abort session")
 	require.ErrorContains(t, err, "status 500")
 
-	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+	assertStopTurnRetention(t, w, mgr, live, sseCtx, false)
 }
 
 func TestWorker_StopCurrentTurn_AbortTimeout_UsesCallerDeadline(t *testing.T) {
@@ -1141,7 +1144,7 @@ func TestWorker_StopCurrentTurn_AbortTimeout_UsesCallerDeadline(t *testing.T) {
 		"abort must surface the deadline error, got: %v", err)
 	require.Less(t, elapsed, time.Second, "caller deadline (50ms) must win over the 2s internal cap")
 
-	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+	assertStopTurnRetention(t, w, mgr, live, sseCtx, false)
 }
 
 func TestWorker_StopCurrentTurn_AbortTimeout_InternalCap2s(t *testing.T) {
@@ -1177,7 +1180,7 @@ func TestWorker_StopCurrentTurn_AbortTimeout_InternalCap2s(t *testing.T) {
 		"abort must surface the deadline error, got: %v", err)
 	require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond, "abort must hit the ~2s internal cap, not return early")
 
-	assertStopTurnRetention(t, w, mgr, live, sseCtx)
+	assertStopTurnRetention(t, w, mgr, live, sseCtx, false)
 }
 
 // TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn verifies the user-stop
@@ -1226,4 +1229,103 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 		// The protocol fake observed the primary send (message POST).
 		require.Equal(t, "/session/test-session/message", receivedPath)
 	})
+}
+
+// TestForwardBusEvents_SuppressesTerminalWhileStopped is the regression test
+// for the OCS double-terminal finding: while the user-stop marker is set (a
+// stop was admitted), worker-emitted terminal envelopes (the converter's fresh
+// Done/Error for the post-abort session.idle transition) must be suppressed —
+// the gateway's synthetic done(stopped_by_user) is authoritative for that
+// turn. A State event is used as an ordered barrier: it is non-droppable and
+// forwarded, so once it arrives the suppressed Done/Error are guaranteed to
+// have been processed.
+func TestForwardBusEvents_SuppressesTerminalWhileStopped(t *testing.T) {
+	t.Parallel()
+
+	w := New()
+	w.httpConn = &conn{
+		sessionID: "s",
+		recvCh:    make(chan *events.Envelope, 16),
+		log:       w.Log,
+	}
+
+	busCh := make(chan *events.Envelope, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.forwardBusEvents(ctx, "s", busCh)
+
+	w.MarkStopped()
+
+	// Post-abort terminal envelopes arrive on the bus while stopped.
+	busCh <- events.NewEnvelope(aep.NewID(), "s", 0, events.Done, events.DoneData{Success: true})
+	busCh <- events.NewEnvelope(aep.NewID(), "s", 0, events.Error, events.ErrorData{Code: events.ErrCodeInternalError, Message: "aborted"})
+	// Barrier: non-terminal, must be forwarded.
+	busCh <- events.NewEnvelope(aep.NewID(), "s", 0, events.State, events.StateData{State: events.StateRunning})
+
+	select {
+	case env := <-w.httpConn.recvCh:
+		require.Equal(t, events.State, env.Event.Type,
+			"terminal events must be suppressed while stopped; got %s", env.Event.Type)
+	case <-time.After(2 * time.Second):
+		t.Fatal("barrier State event never forwarded")
+	}
+
+	// A new primary turn clears the marker; the next Done flows normally.
+	w.BeginTurn()
+	busCh <- events.NewEnvelope(aep.NewID(), "s", 0, events.Done, events.DoneData{Success: true})
+	select {
+	case env := <-w.httpConn.recvCh:
+		require.Equal(t, events.Done, env.Event.Type, "Done must flow after BeginTurn clears the marker")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Done never forwarded after BeginTurn")
+	}
+}
+
+// TestOpenCodeServerWorker_InputSendFailureRestoresStopped verifies the
+// capture-restore contract: when the protocol send fails, the new turn never
+// started, so the previous turn's stopped marker must be preserved (the bridge
+// crash fallback must not re-run a stopped turn).
+func TestOpenCodeServerWorker_InputSendFailureRestoresStopped(t *testing.T) {
+	t.Parallel()
+
+	w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		rw.WriteHeader(http.StatusInternalServerError)
+	})
+	w.MarkStopped()
+
+	err := w.Input(context.Background(), "hello", nil)
+	require.Error(t, err, "send failure must surface to the caller")
+	require.True(t, w.IsStopped(), "a failed send must restore the stopped marker")
+}
+
+// TestOpenCodeServerWorker_StopAbortFailureUnmarks verifies that a FAILED stop
+// attempt unmarks the worker: the gateway rolls back its stop fence and sends
+// an error, the turn is still running, and its legitimate terminal event must
+// flow normally rather than being suppressed forever.
+func TestOpenCodeServerWorker_StopAbortFailureUnmarks(t *testing.T) {
+	t.Parallel()
+
+	w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		rw.WriteHeader(http.StatusInternalServerError)
+	})
+	w.MarkStopped()
+
+	err := w.StopCurrentTurn(context.Background())
+	require.Error(t, err, "failed abort must surface to the gateway")
+	require.False(t, w.IsStopped(), "a failed stop attempt must clear the marker")
+}
+
+// TestOpenCodeServerWorker_StopAbortSuccessKeepsMarker verifies a SUCCESSFUL
+// stop keeps the marker set so post-abort terminal envelopes stay suppressed
+// until the next turn.
+func TestOpenCodeServerWorker_StopAbortSuccessKeepsMarker(t *testing.T) {
+	t.Parallel()
+
+	w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		_, _ = rw.Write([]byte("false")) // OCS: no active turn — still success for idempotent abort
+	})
+	w.MarkStopped()
+
+	require.NoError(t, w.StopCurrentTurn(context.Background()))
+	require.True(t, w.IsStopped(), "a successful stop keeps the marker set")
 }

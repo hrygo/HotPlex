@@ -247,10 +247,6 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		return fmt.Errorf("codexcli: app-server not started")
 	}
 
-	// A new primary turn begins here: clear the user-stop marker only after
-	// the connection-existence check above, immediately before the RPC send.
-	w.BeginTurn()
-
 	params := TurnStartParams{
 		ThreadID: tid,
 		Input: []TurnInputItem{
@@ -288,6 +284,12 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		w.mu.Unlock()
 	}
 
+	// A new primary turn began here: the turn/start RPC succeeded, so the new
+	// turn is running. Clear the user-stop marker AFTER the successful send —
+	// a failed send means the new turn never started, so the previous turn's
+	// stopped marker must be preserved (the bridge crash fallback must not
+	// re-run a stopped turn).
+	w.BeginTurn()
 	w.SetLastIO(time.Now())
 	return nil
 }
@@ -540,7 +542,14 @@ func (w *AppServerWorker) StopCurrentTurn(ctx context.Context) error {
 		return nil
 	}
 	w.MarkStopped()
-	return w.manager.InterruptTurn(tid, turnID)
+	if err := w.manager.InterruptTurn(tid, turnID); err != nil {
+		// The interrupt never took effect — the turn is still running and the
+		// gateway rolls back its stop fence. Unmark so the turn's completion
+		// is not misread as a user-stop (crash fallback preserved correctly).
+		w.ClearStopped()
+		return err
+	}
+	return nil
 }
 
 // InjectMidTurn steers the active turn with supplemental user input via the

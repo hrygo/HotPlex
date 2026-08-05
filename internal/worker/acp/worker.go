@@ -530,8 +530,14 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return fmt.Errorf("acp: worker connection closed")
 	}
 
-	// A new primary turn begins here: clear the user-stop marker only after
-	// the connection-existence check above, immediately before the prompt RPC.
+	// A new primary turn begins here. ACP's Prompt RPC blocks until the turn
+	// completes, so the marker cannot be cleared after the RPC returns — it
+	// would stay set through the entire new turn, mislabeling a crash during
+	// the new turn as a user-stop (crash fallback would skip re-running it).
+	// Capture the current stopped state, clear it before the prompt, and
+	// restore it if the prompt fails: a failed send means the new turn never
+	// started, so the previous turn's stopped marker must be preserved.
+	wasStopped := w.IsStopped()
 	w.BeginTurn()
 
 	// Regular user input → send prompt.
@@ -566,6 +572,12 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	}
 	result, promptErr := w.client.Prompt(pctx, w.GetWorkerSessionID(), content)
 	if promptErr != nil {
+		// The prompt failed — the new turn never started. If the worker had a
+		// pending user-stop, restore the marker so the previous stop is not
+		// lost (crash fallback must not re-run a stopped turn).
+		if wasStopped {
+			w.MarkStopped()
+		}
 		// Always emit error sequence to client.
 		envs := w.mapper.MapPromptError(promptErr)
 		for _, env := range envs {
@@ -738,7 +750,14 @@ func (w *Worker) StopCurrentTurn(ctx context.Context) error {
 	}
 	cancelCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	return client.Cancel(cancelCtx, w.GetWorkerSessionID())
+	if err := client.Cancel(cancelCtx, w.GetWorkerSessionID()); err != nil {
+		// The cancel never took effect — the turn is still running and the
+		// gateway rolls back its stop fence. Unmark so the turn's completion
+		// is not misread as a user-stop (crash fallback preserved correctly).
+		w.ClearStopped()
+		return err
+	}
+	return nil
 }
 
 // ─── Conn ────────────────────────────────────────────────────────────────────

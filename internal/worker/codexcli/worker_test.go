@@ -3172,11 +3172,13 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 
 		err := wk.Input(context.Background(), "hello again", nil)
 		// Call times out (no real codex process responds); the error proves
-		// the RPC path was taken, and the marker must already be clear.
+		// the RPC path was taken. The RPC FAILED — the new turn never started —
+		// so the previous turn's stopped marker must be preserved (the bridge
+		// crash fallback must not re-run a stopped turn).
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "codexcli: turn/start:")
 
-		require.False(t, wk.IsStopped(), "a new primary turn must clear the stopped marker")
+		require.True(t, wk.IsStopped(), "a failed send must restore the stopped marker")
 		// The protocol fake observed the primary send (turn/start frame).
 		written := buf.String()
 		require.Contains(t, written, `"method":"turn/start"`)
