@@ -9,6 +9,7 @@ package contracttest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -85,17 +86,59 @@ type WorkerProbe struct {
 	profile    e2econtract.WorkerProfile
 	conn       *probeConn
 	inputCalls atomic.Int32
-	stopCalls  atomic.Int32
-	stopped    atomic.Bool
+	stopCalls  atomic.Int32 // RAW StopCurrentTurn invocations; the gateway's
+	// turn fence (internal/gateway/stop_fence.go) is the authority that admits
+	// exactly one effective stop per turn.
+	stopped atomic.Bool // per-turn stopped marker: set by StopCurrentTurn,
+	// cleared by Input (mirrors production BaseWorker.BeginTurn)
+	turnN       atomic.Int64 // current turn ordinal, incremented by Input
+	stoppedTurn atomic.Int64 // turn ordinal the stop landed on (per-turn fence)
+
+	// Turn gate for the lifecycle contract tests (C04/C05). Zero value is
+	// non-blocking: the platform matrix flows emit the full turn synchronously
+	// with Input, exactly as before.
+	blocking      atomic.Bool
+	enteredTurn   chan struct{} // buffered(1): probe signals the pre-terminal content was emitted
+	allowTerminal chan struct{} // buffered(1): test releases the held terminal
+	holdTerminal  []*events.Envelope
+
+	failNextStop atomic.Bool // arming the next StopCurrentTurn to fail (failed-abort contract)
 }
+
+// FailNextStop arms the NEXT StopCurrentTurn to return an error, simulating a
+// real worker abort failure (e.g. OCS 500/timeout). The probe marks the turn
+// stopped before failing, matching the production adapters (MarkStopped runs
+// before the abort network call).
+func (p *WorkerProbe) FailNextStop() { p.failNextStop.Store(true) }
 
 // NewWorkerProbe creates a probe bound to the given worker profile. The probe's
 // connection uses sessionID verbatim so contract assertions can match it.
 func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *WorkerProbe {
 	return &WorkerProbe{
-		Worker:  noop.NewWorker(),
-		profile: profile,
-		conn:    newProbeConn(sessionID, "contract-user"),
+		Worker:        noop.NewWorker(),
+		profile:       profile,
+		conn:          newProbeConn(sessionID, "contract-user"),
+		enteredTurn:   make(chan struct{}, 1),
+		allowTerminal: make(chan struct{}, 1),
+	}
+}
+
+// EnableBlocking arms the per-turn gate: EmitBasicTurn holds the terminal
+// behind allowTerminal and signals enteredTurn once the pre-terminal content
+// was emitted. Only the lifecycle contract tests enable it; the platform
+// matrix flows keep the synchronous full-turn emission.
+func (p *WorkerProbe) EnableBlocking() { p.blocking.Store(true) }
+
+// EnteredTurn returns the per-turn signal fired once the probe emitted the
+// pre-terminal content of a turn (and is now holding the terminal).
+func (p *WorkerProbe) EnteredTurn() <-chan struct{} { return p.enteredTurn }
+
+// ReleaseTerminal lets the held terminal of the current turn through. When the
+// turn was stopped in the meantime, the terminal is suppressed instead.
+func (p *WorkerProbe) ReleaseTerminal() {
+	select {
+	case p.allowTerminal <- struct{}{}:
+	default:
 	}
 }
 
@@ -115,10 +158,14 @@ func (p *WorkerProbe) Resume(_ context.Context, _ worker.SessionInfo) error {
 	return nil
 }
 
-// Input records the call then emits one fixture-driven turn through the real
+// Input records the call, resets the per-turn stopped marker (production
+// semantics: BaseWorker.BeginTurn clears the user-stop marker before each
+// primary turn), then emits one fixture-driven turn through the real
 // parser/mapper of the probe's worker type.
 func (p *WorkerProbe) Input(_ context.Context, _ string, _ map[string]any) error {
 	p.inputCalls.Add(1)
+	p.turnN.Add(1)
+	p.stopped.Store(false)
 	return p.EmitBasicTurn(context.Background())
 }
 
@@ -128,11 +175,16 @@ func (p *WorkerProbe) ResetContext(_ context.Context) (worker.ResetResult, error
 	return worker.ResetResult{}, nil
 }
 
-// StopCurrentTurn is CompareAndSwap-guarded so the effective stop counts once;
-// later calls are no-ops.
+// StopCurrentTurn records the invocation and marks the current turn stopped.
+// The single-effective-stop guarantee is owned by the gateway's turn fence
+// (internal/gateway/stop_fence.go), not by this probe: a duplicate stop never
+// reaches the Worker call at all, so stopCalls stays 1 under the fence.
 func (p *WorkerProbe) StopCurrentTurn(_ context.Context) error {
-	if p.stopped.CompareAndSwap(false, true) {
-		p.stopCalls.Add(1)
+	p.stopCalls.Add(1)
+	p.stopped.Store(true)
+	p.stoppedTurn.Store(p.turnN.Load())
+	if p.failNextStop.Swap(false) {
+		return errors.New("contracttest: injected stop failure")
 	}
 	return nil
 }
@@ -142,24 +194,72 @@ func (p *WorkerProbe) IsStopped() bool { return p.stopped.Load() }
 // InputCalls returns how many times Input was invoked.
 func (p *WorkerProbe) InputCalls() int { return int(p.inputCalls.Load()) }
 
-// StopCalls returns how many times StopCurrentTurn made an effective stop.
+// StopCalls returns how many times StopCurrentTurn was invoked.
 func (p *WorkerProbe) StopCalls() int { return int(p.stopCalls.Load()) }
 
 // EmitBasicTurn drives the probe's worker-type fixture through the real
 // parser/mapper and writes every mapper-produced envelope verbatim into the
-// probe connection.
+// probe connection. When the turn gate is armed (EnableBlocking), the terminal
+// envelopes are held off the wire and Input returns right after the
+// pre-terminal content — exactly like a production worker whose Input is a
+// delivery while the turn keeps running. The held terminal is released by
+// ReleaseTerminal: a turn stopped in the meantime (StopCurrentTurn before the
+// release) has its terminal suppressed, so the interrupted turn never
+// completes on the wire. Platform queues (feishu chatQueue, slack event
+// goroutines, webchat async dispatch) therefore stay free to process the stop
+// while the fixture turn is still live.
 func (p *WorkerProbe) EmitBasicTurn(_ context.Context) error {
 	switch p.profile.Type {
 	case worker.TypeClaudeCode:
-		return p.emitClaude()
+		if err := p.emitClaude(); err != nil {
+			return err
+		}
 	case worker.TypeOpenCodeSrv:
-		return p.emitOpenCodeServer()
+		if err := p.emitOpenCodeServer(); err != nil {
+			return err
+		}
 	case worker.TypeCodexCLI:
-		return p.emitCodex()
+		if err := p.emitCodex(); err != nil {
+			return err
+		}
 	case worker.TypeACP:
-		return p.emitACP()
+		if err := p.emitACP(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("contracttest: unsupported worker type %q", p.profile.Type)
+	}
+	if !p.blocking.Load() {
+		return nil
+	}
+	// Gate the held terminal: signal the test that the turn reached the wire
+	// (start/delta visible), then return — the terminal is finished by the
+	// release goroutine below, which observes the stop if one lands in the
+	// meantime. The held slice is handed off to the goroutine so a later turn's
+	// emission never races it.
+	select {
+	case p.enteredTurn <- struct{}{}:
+	default:
+	}
+	held := p.holdTerminal
+	p.holdTerminal = nil
+	go p.finishHeldTurn(held, p.turnN.Load())
+	return nil
+}
+
+// finishHeldTurn waits for the release, then emits the held terminal or
+// suppresses it when THIS turn was stopped in the meantime (per-turn scoped
+// via the turn ordinal — a later turn's Input resetting the stopped marker
+// must not release an earlier turn's held terminal). It runs in its own
+// goroutine per gated turn, and only one release is consumed per turn
+// (allowTerminal is buffered(1)).
+func (p *WorkerProbe) finishHeldTurn(held []*events.Envelope, turn int64) {
+	<-p.allowTerminal
+	if p.stopped.Load() && p.stoppedTurn.Load() == turn {
+		return
+	}
+	for _, env := range held {
+		p.conn.write(env)
 	}
 }
 
@@ -221,7 +321,17 @@ func (p *WorkerProbe) emitACP() error {
 }
 
 func (p *WorkerProbe) writeAll(envs []*events.Envelope) {
+	if !p.blocking.Load() {
+		for _, env := range envs {
+			p.conn.write(env)
+		}
+		return
+	}
 	for _, env := range envs {
+		if env.Event.Type == events.Done {
+			p.holdTerminal = append(p.holdTerminal, env)
+			continue
+		}
 		p.conn.write(env)
 	}
 }

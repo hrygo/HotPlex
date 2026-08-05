@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -42,8 +43,9 @@ const (
 	harnessTeardown    = 2 * time.Second
 )
 
-// discardLogger silences gateway log output during contract tests.
-var discardLogger = slog.New(slog.DiscardHandler)
+// debugLogger is a temporary handler for diagnosing the webchat C04 settle
+// flake (TODO(debug): remove).
+var debugLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 // Harness is a full gateway stack bound to a single WorkerProbe session.
 // It exposes the real gateway entry points (Hub/Bridge/Handler) so contract
@@ -62,6 +64,8 @@ type Harness struct {
 	probeMu sync.Mutex
 	probe   *WorkerProbe   // latest probe (what Worker() returns)
 	probes  []*WorkerProbe // every probe created for this harness (teardown closes all)
+
+	nextProbeBlocking atomic.Bool // arm the NEXT probe for the turn-gate mode (matrix C04)
 }
 
 // NewHarness builds a full gateway stack against a temp SQLite store and
@@ -74,7 +78,7 @@ type Harness struct {
 func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract.WorkerProfile) *Harness {
 	t.Helper()
 
-	log := discardLogger
+	log := debugLogger
 	cfg := config.Default()
 	dbPath := filepath.Join(t.TempDir(), "sessions.db")
 	cfg.DB.Path = dbPath
@@ -185,6 +189,29 @@ func (h *Harness) setProbe(p *WorkerProbe) {
 	h.probes = append(h.probes, p)
 }
 
+// EnableProbeBlocking arms every probe created from now on to run in the
+// blocking turn-gate mode (C04: the fixture terminal is held until released,
+// and a stop before the release suppresses it). The arm persists until
+// DisableProbeBlocking — scenario drivers call it at BeginScenario (C04) and
+// clear it at EndScenario, because a scenario's input may create MORE than one
+// probe (e.g. webchat auto-resume replaces the worker mid-scenario) and every
+// one of them must be gated for the stop to land deterministically.
+func (h *Harness) EnableProbeBlocking() { h.nextProbeBlocking.Store(true) }
+
+// DisableProbeBlocking clears the blocking arm so later scenarios run with the
+// synchronous full-turn emission (the zero-value behavior).
+func (h *Harness) DisableProbeBlocking() { h.nextProbeBlocking.Store(false) }
+
+// Probes returns a snapshot of every probe created for this harness, oldest
+// first (the harness's own platform-session probe is the first entry).
+func (h *Harness) Probes() []*WorkerProbe {
+	h.probeMu.Lock()
+	defer h.probeMu.Unlock()
+	out := make([]*WorkerProbe, len(h.probes))
+	copy(out, h.probes)
+	return out
+}
+
 // WaitForKinds blocks until every event kind in kinds has been observed on the
 // harness's platform observer, then returns the full ordered event log. Fails
 // the test if the kinds are not all observed within harnessWaitTimeout.
@@ -244,6 +271,9 @@ func (f *probeFactory) NewWorker(wt worker.WorkerType) (worker.Worker, error) {
 		return nil, fmt.Errorf("contracttest: harness profile %s cannot create worker type %s", f.profile.Type, wt)
 	}
 	probe := NewWorkerProbe(f.profile, f.sessionID)
+	if f.h.nextProbeBlocking.Load() {
+		probe.EnableBlocking()
+	}
 	f.h.setProbe(probe)
 	return probe, nil
 }

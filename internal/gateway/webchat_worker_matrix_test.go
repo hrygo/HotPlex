@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -222,6 +223,8 @@ type webChatContractDriver struct {
 
 	payloads map[string]string // client message id -> content (C02 conflict detection)
 
+	scenarioID string // scenario id stashed from BeginScenario (C04 turn-gate path)
+
 	nextDeliveryFault atomic.Pointer[error] // error armed for the next SendRawInput (C03)
 }
 
@@ -252,10 +255,18 @@ func newWebChatContractDriver(t *testing.T, h *contracttest.Harness, combo e2eco
 
 func (d *webChatContractDriver) BeginScenario(t testing.TB, scenarioID string) {
 	d.t = t
+	d.scenarioID = scenarioID
 	// Unique client identity per scenario: the init envelope's session_id is a
 	// client key, so the server derives a fresh session per scenario while
 	// C05's within-scenario reuse still holds (same WS conn, same session).
 	d.clientKey = "ws-" + scenarioID
+	// C04: the init handshake below creates the scenario's probe, so the
+	// blocking turn-gate mode must be armed on the harness BEFORE the socket
+	// opens — the fixture terminal then stays gated until SendStopTwice
+	// releases it.
+	if scenarioID == "C04-stop" {
+		d.h.EnableProbeBlocking()
+	}
 	ws, sessionID, err := d.dialAndInit()
 	require.NoError(t, err, "webchat: real AEP init handshake must succeed")
 	d.ws = ws
@@ -300,12 +311,26 @@ func (d *webChatContractDriver) EndScenario(t testing.TB) {
 	// fallback is triggered; the un-marked-close risk is noted for mid-turn
 	// failure paths.
 	if d.worker != nil {
+		// Release any gated turn (C04): a failed assertion must not strand the
+		// probe's Input goroutine on the terminal gate (ReleaseTerminal is
+		// idempotent).
+		d.worker.ReleaseTerminal()
 		_ = d.worker.Conn().Close()
 		d.worker = nil
 	}
+	// The C04 blocking arm is scenario-scoped: clear it so the next scenario's
+	// probes run with the synchronous full-turn emission.
+	d.h.DisableProbeBlocking()
 }
 
 func (d *webChatContractDriver) SendRawInput(ctx context.Context, id, content string) error {
+	if d.scenarioID == "C04-stop" {
+		// C04: the probe holds its fixture terminal behind the turn gate so the
+		// stop deterministically lands while the turn is live; the interrupted
+		// turn's terminal is suppressed on the wire. SendStopTwice releases the
+		// gate.
+		return d.sendRawInputBlocked(ctx, id, content)
+	}
 	if f := d.nextDeliveryFault.Swap(nil); f != nil {
 		// C03: the client's send failed before the envelope entered the
 		// gateway; nothing was accepted, so the same id is retryable at the
@@ -385,7 +410,109 @@ func (d *webChatContractDriver) SendStopTwice(ctx context.Context) error {
 	if err := d.sendControl(ctx, events.ControlActionStop); err != nil {
 		return err
 	}
-	return d.sendControl(ctx, events.ControlActionStop)
+	if err := d.sendControl(ctx, events.ControlActionStop); err != nil {
+		return err
+	}
+	// Both control frames are processed asynchronously by the server (conn.go
+	// ReadPump dispatches input/control in goroutines): wait for the effective
+	// stop to land on the probe before releasing the gated terminal, so the
+	// release deterministically observes stopped=true and suppresses the
+	// fixture terminal (the turn-gate contract of C04).
+	require.Eventually(d.t, func() bool {
+		if p := d.h.Worker(); p != nil && p.StopCalls() >= 1 {
+			return true
+		}
+		return false
+	}, driverWaitTimeout, driverWaitPoll, "webchat driver: stop never landed on the probe")
+	// Release the gated fixture terminal: the turn was stopped, so the probe
+	// suppresses the held terminal and the C04 input settles.
+	if p := d.h.Worker(); p != nil {
+		p.ReleaseTerminal()
+	}
+	// The released input completes asynchronously on the server (the delivered
+	// outcome ack fires after w.Input returns): wait for it so no control-plane
+	// leftover is still in flight when the next scenario's init handshake reads
+	// the socket — otherwise the next init_ack reads a stale ack frame.
+	var settled []*events.Envelope
+	var foundSettled atomic.Bool
+	require.Eventually(d.t, func() bool {
+		settled = d.rec.Events()
+		for _, env := range settled {
+			ack, ok := env.Event.Data.(events.InputAckData)
+			if !ok || ack.ClientMessageID != "c04-id-1" {
+				continue
+			}
+			if ack.Status == events.ExecutionStatusDelivered ||
+				ack.Status == events.ExecutionStatusFailed {
+				foundSettled.Store(true)
+				return true
+			}
+		}
+		return false
+	}, driverWaitTimeout, driverWaitPoll, "webchat driver: C04 input never settled after the release")
+	if !foundSettled.Load() {
+		fmt.Fprintf(os.Stderr, "TODO(debug) C04 settle failed: session=%s\n", d.sessionID)
+		for _, env := range settled {
+			fmt.Fprintf(os.Stderr, "TODO(debug) rec: type=%s seq=%d id=%s\n", env.Event.Type, env.Seq, env.ID)
+		}
+		d.wsLogMu.Lock()
+		for _, env := range d.wsLog {
+			fmt.Fprintf(os.Stderr, "TODO(debug) ws: type=%s seq=%d id=%s\n", env.Event.Type, env.Seq, env.ID)
+		}
+		d.wsLogMu.Unlock()
+	}
+	return nil
+}
+
+// sendRawInputBlocked is the C04 path: the probe already runs in blocking
+// turn-gate mode (armed in BeginScenario, before the init handshake created
+// it), the input is delivered over the real socket (the server-side handler
+// blocks on the gate until SendStopTwice releases it), and this method waits
+// on the probe's enteredTurn signal instead of the delivery-outcome ack.
+func (d *webChatContractDriver) sendRawInputBlocked(ctx context.Context, id, content string) error {
+	if f := d.nextDeliveryFault.Swap(nil); f != nil {
+		return *f
+	}
+	// Re-join a fresh observation conn (same as the sync path).
+	terminalFault := d.rec.nextTerminalFault.Swap(nil)
+	dropDeltas := d.rec.dropDeltas.Swap(false)
+	d.rec = newRecordingConn()
+	if terminalFault != nil {
+		d.rec.nextTerminalFault.Store(terminalFault)
+	}
+	if dropDeltas {
+		d.rec.dropDeltas.Store(true)
+	}
+	d.h.Hub.JoinPlatformSession(d.sessionID, d.rec)
+	d.payloads[id] = content
+
+	// The input is delivered over the real socket; the server-side handler
+	// blocks on the turn gate until SendStopTwice releases it, so it must be
+	// sent asynchronously.
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- d.send(ctx, id, content)
+	}()
+
+	// The scenario's probes exist since the init handshake, but auto-resume may
+	// replace the worker while the input is being processed — poll every probe
+	// for the enteredTurn signal (pre-terminal content on the wire, terminal
+	// gated) and settle on whichever one the turn actually reached.
+	var probe *contracttest.WorkerProbe
+	require.Eventually(d.t, func() bool {
+		for _, p := range d.h.Probes() {
+			select {
+			case <-p.EnteredTurn():
+				probe = p
+				return true
+			default:
+			}
+		}
+		return false
+	}, driverWaitTimeout, driverWaitPoll, "webchat driver: C04 turn gate never reached")
+	_ = sendDone
+	d.worker = probe
+	return nil
 }
 
 func (d *webChatContractDriver) Reset(ctx context.Context) error {

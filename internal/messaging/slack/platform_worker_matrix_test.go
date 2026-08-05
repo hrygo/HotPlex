@@ -293,6 +293,8 @@ type slackContractDriver struct {
 
 	payloads map[string]string // client message id -> content (C02 conflict detection)
 
+	scenarioID string // scenario id stashed from BeginScenario (C04 turn-gate path)
+
 	nextDeliveryFault atomic.Pointer[error] // error armed for the next SendRawInput (C03)
 }
 
@@ -329,6 +331,7 @@ func newSlackContractDriver(t *testing.T, h *contracttest.Harness, combo e2econt
 
 func (d *slackContractDriver) BeginScenario(t testing.TB, scenarioID string) {
 	d.t = t
+	d.scenarioID = scenarioID
 	// Unique client/session identity per scenario: the derived session key is
 	// deterministic in (user, worker, slack channel), so a fresh user per
 	// scenario isolates sessions while C05's within-scenario reuse still holds.
@@ -357,6 +360,15 @@ func (d *slackContractDriver) EndScenario(t testing.TB) {
 	d.nextDeliveryFault.Store(nil)
 	d.rec.nextTerminalFault.Store(nil)
 	d.rec.dropDeltas.Store(false)
+	// Release any gated turn (C04): a failed assertion must not strand the
+	// probe's Input goroutine on the terminal gate (ReleaseTerminal is
+	// idempotent).
+	if d.worker != nil {
+		d.worker.ReleaseTerminal()
+	}
+	// The C04 blocking arm is scenario-scoped: clear it so the next scenario's
+	// probes run with the synchronous full-turn emission.
+	d.h.DisableProbeBlocking()
 	// Close the scenario's probe conn so its bridge forwarder drains (the turn
 	// already reached its done, so the forwarder exits cleanly). Without this,
 	// every per-scenario session's forwarder blocks the harness teardown's
@@ -369,6 +381,13 @@ func (d *slackContractDriver) EndScenario(t testing.TB) {
 }
 
 func (d *slackContractDriver) SendRawInput(ctx context.Context, id, content string) error {
+	if d.scenarioID == "C04-stop" {
+		// C04: the probe holds its fixture terminal behind the turn gate so the
+		// stop deterministically lands while the turn is live; the interrupted
+		// turn's terminal is suppressed on the wire. SendStopTwice releases the
+		// gate.
+		return d.sendRawInputBlocked(ctx, id, content)
+	}
 	if f := d.nextDeliveryFault.Swap(nil); f != nil {
 		// C03: the platform→gateway delivery failed before the adapter was
 		// entered; nothing was recorded, so the same id is retryable at the
@@ -457,8 +476,73 @@ func (d *slackContractDriver) FailNextDelivery(err error) {
 }
 
 func (d *slackContractDriver) SendStopTwice(ctx context.Context) error {
-	d.send(ctx, "c04-stop-1", "stop")
-	return d.send(ctx, "c04-stop-2", "stop")
+	// "/stop" is the real platform command: ParseControlCommand resolves it to
+	// control.stop, which the gateway's per-turn fence admits exactly once.
+	d.send(ctx, "c04-stop-1", "/stop")
+	d.send(ctx, "c04-stop-2", "/stop")
+	// Both stops are processed asynchronously (events dispatch in goroutines):
+	// wait for the effective stop to land on the probe before releasing the
+	// gated terminal, so the release deterministically observes stopped=true
+	// and suppresses the fixture terminal.
+	require.Eventually(d.t, func() bool {
+		if p := d.h.Worker(); p != nil && p.StopCalls() >= 1 {
+			return true
+		}
+		return false
+	}, driverWaitTimeout, driverWaitPoll, "slack driver: stop never landed on the probe")
+	// Release the gated fixture terminal: the turn was stopped, so the probe
+	// suppresses the held terminal and the C04 input settles.
+	if p := d.h.Worker(); p != nil {
+		p.ReleaseTerminal()
+	}
+	return nil
+}
+
+// sendRawInputBlocked is the C04 path: the harness arms the NEXT probe in
+// blocking turn-gate mode, the input is delivered asynchronously (the probe's
+// Input blocks on the gate until SendStopTwice releases it), and this method
+// waits on the probe's enteredTurn signal instead of the delivery-outcome ack.
+func (d *slackContractDriver) sendRawInputBlocked(ctx context.Context, id, content string) error {
+	if f := d.nextDeliveryFault.Swap(nil); f != nil {
+		return *f
+	}
+	prev := d.rec
+	d.rec = newRecordingConn()
+	if prev != nil {
+		if f := prev.nextTerminalFault.Swap(nil); f != nil {
+			d.rec.nextTerminalFault.Store(f)
+		}
+		if prev.dropDeltas.Swap(false) {
+			d.rec.dropDeltas.Store(true)
+		}
+	}
+	d.h.Hub.JoinPlatformSession(d.sessionID, d.rec)
+	d.payloads[id] = content
+
+	d.h.EnableProbeBlocking()
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- d.send(ctx, id, content)
+	}()
+
+	// The C04 input's session creates a probe (auto-resume may replace it
+	// mid-processing) — poll every probe for the enteredTurn signal
+	// (pre-terminal content on the wire, terminal gated) and settle on
+	// whichever one the turn actually reached.
+	var probe *contracttest.WorkerProbe
+	require.Eventually(d.t, func() bool {
+		for _, p := range d.h.Probes() {
+			select {
+			case <-p.EnteredTurn():
+				probe = p
+				return true
+			default:
+			}
+		}
+		return false
+	}, driverWaitTimeout, driverWaitPoll, "slack driver: C04 turn gate never reached")
+	d.worker = probe
+	return nil
 }
 
 func (d *slackContractDriver) Reset(ctx context.Context) error {

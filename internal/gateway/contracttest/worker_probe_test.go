@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -53,8 +54,11 @@ func TestWorkerProbe_UsesRealParserAndMapper(t *testing.T) {
 }
 
 // TestWorkerProbe_StateMachine verifies the probe's own counters: Input advances
-// inputCalls and emits a turn; StopCurrentTurn is CompareAndSwap-guarded so the
-// effective stop counts exactly once and IsStopped flips.
+// inputCalls and emits a turn; StopCurrentTurn records EVERY invocation (the
+// single-effective-stop guarantee is owned by the gateway's turn fence, not by
+// the probe) and flips the per-turn stopped marker; the next Input resets the
+// marker so the following turn can complete normally (production
+// BaseWorker.BeginTurn semantics).
 func TestWorkerProbe_StateMachine(t *testing.T) {
 	t.Parallel()
 
@@ -71,8 +75,97 @@ func TestWorkerProbe_StateMachine(t *testing.T) {
 
 	require.NoError(t, probe.StopCurrentTurn(context.Background()))
 	require.NoError(t, probe.StopCurrentTurn(context.Background()))
-	require.Equal(t, 1, probe.StopCalls())
+	require.Equal(t, 2, probe.StopCalls(), "the probe counts raw StopCurrentTurn invocations")
 	require.True(t, probe.IsStopped())
+
+	// The next primary turn resets the per-turn stopped marker.
+	require.NoError(t, probe.Input(context.Background(), "hello again", nil))
+	require.Equal(t, 2, probe.InputCalls())
+	require.False(t, probe.IsStopped(), "a new primary turn must clear the per-turn stopped marker")
+}
+
+// TestWorkerProbe_TurnGate verifies the blocking turn gate used by the C04/C05
+// lifecycle contract tests: with the gate armed, EmitBasicTurn signals
+// enteredTurn after the pre-terminal content and Input returns immediately
+// (production delivery semantics — the turn keeps running off the Input call);
+// the terminal stays off the wire until the release, and a stop before the
+// release suppresses it (the interrupted turn never completes on the wire).
+func TestWorkerProbe_TurnGate(t *testing.T) {
+	t.Parallel()
+
+	probe := NewWorkerProbe(e2econtract.WorkerProfiles()[0], "session-contract")
+	probe.EnableBlocking()
+
+	inputDone := make(chan error, 1)
+	go func() {
+		inputDone <- probe.Input(context.Background(), "hello", nil)
+	}()
+
+	select {
+	case <-probe.EnteredTurn():
+	case <-time.After(5 * time.Second):
+		t.Fatal("probe: enteredTurn not signaled before the gate")
+	}
+	require.NoError(t, <-inputDone, "probe: gated Input must return after the pre-terminal content")
+
+	// While the terminal is held, only the pre-terminal content is visible.
+	envs := probe.Conn().(*probeConn).Events()
+	for _, env := range envs {
+		require.NotEqual(t, events.Done, env.Event.Type, "probe: terminal must be held behind the gate")
+	}
+
+	require.NoError(t, probe.StopCurrentTurn(context.Background()))
+	probe.ReleaseTerminal()
+	// The release goroutine consumes the gate and suppresses the held terminal;
+	// require.Never proves the suppression stays (no late emission).
+	require.Never(t, func() bool {
+		for _, env := range probe.Conn().(*probeConn).Events() {
+			if env.Event.Type == events.Done {
+				return true
+			}
+		}
+		return false
+	}, 200*time.Millisecond, 10*time.Millisecond, "probe: stopped turn must not emit its terminal")
+}
+
+// TestWorkerProbe_TurnGateReleased verifies that a released (non-stopped) turn
+// does emit its held terminal.
+func TestWorkerProbe_TurnGateReleased(t *testing.T) {
+	t.Parallel()
+
+	probe := NewWorkerProbe(e2econtract.WorkerProfiles()[0], "session-contract")
+	probe.EnableBlocking()
+
+	inputDone := make(chan error, 1)
+	go func() {
+		inputDone <- probe.Input(context.Background(), "hello", nil)
+	}()
+
+	select {
+	case <-probe.EnteredTurn():
+	case <-time.After(5 * time.Second):
+		t.Fatal("probe: enteredTurn not signaled before the gate")
+	}
+	require.NoError(t, <-inputDone, "probe: gated Input must return after the pre-terminal content")
+
+	probe.ReleaseTerminal()
+	// The released terminal is emitted by the release goroutine.
+	require.Eventually(t, func() bool {
+		for _, env := range probe.Conn().(*probeConn).Events() {
+			if env.Event.Type == events.Done {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "probe: released turn must emit its terminal")
+
+	var terminals int
+	for _, env := range probe.Conn().(*probeConn).Events() {
+		if env.Event.Type == events.Done {
+			terminals++
+		}
+	}
+	require.Equal(t, 1, terminals, "released turn must emit exactly one terminal")
 }
 
 // TestWorkerProbe_CapabilitiesMatchAdapters locks the frozen capability manifest
