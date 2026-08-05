@@ -66,6 +66,11 @@ func TestRunCoreScenarios_ExactEight(t *testing.T) {
 		"only the C04 scenario may fail")
 	require.Contains(t, failing.nameFor("C04-stop"), "F-C/feishu/claude_code/C04-stop",
 		"the failed scenario's subtest name must contain F-C/feishu/claude_code/C04-stop")
+	// The simulated failure must not disturb orchestration: every scenario
+	// still begins (and its EndScenario runs) even when a scenario reports a
+	// driver-level failure.
+	require.Equal(t, expectedCoreScenarioIDs, failing.ids(),
+		"the simulated C04 failure must not stop or reorder the remaining scenarios")
 }
 
 // recordingDriver is a scripted PlatformDriver that records the runner's

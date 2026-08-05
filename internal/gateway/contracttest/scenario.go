@@ -91,8 +91,18 @@ func RunCoreScenarios(t *testing.T, combo e2econtract.Combination, driver Platfo
 			defer driver.EndScenario(t)
 			sc.run(t, combo, driver)
 		}) {
-			// The scenario (or its EndScenario) failed — stop the rest of the
-			// combination immediately.
+			// A scenario (or its EndScenario) failed — stop the remaining
+			// scenarios of this combination immediately: continuing on polluted
+			// state would only produce misleading results (brief Step 3).
+			//
+			// This branch cannot be unit-pinned by a genuinely failing scenario
+			// inside a green test: Go marks the whole ancestor chain failed on
+			// any subtest failure (Fail() propagates via parent.Fail()), so a
+			// failing run can never be contained in a passing test — verified
+			// empirically with a throwaway failing-C04 run (evidence in
+			// .superpowers/.../task-4-report.md). Real platform drivers
+			// (Tasks 6–8) exercise this branch whenever a scenario assertion or
+			// EndScenario genuinely fails.
 			return
 		}
 	}
@@ -203,17 +213,22 @@ func scenarioC04(t *testing.T, _ e2econtract.Combination, driver PlatformDriver)
 
 func scenarioC05(t *testing.T, _ e2econtract.Combination, driver PlatformDriver) {
 	requireNoErr(t, driver.SendRawInput(t.Context(), "c05-id-1", "c05 first"), "C05: first input")
-	driver.WaitForTerminal(t)
+	log1 := driver.WaitForTerminal(t)
 
 	requireNoErr(t, driver.SendRawInput(t.Context(), "c05-id-2", "c05 second"), "C05: next-turn input on the same session")
-	log := driver.WaitForTerminal(t)
-	terms := terminalsIn(log)
+	log2 := driver.WaitForTerminal(t)
+	terms := terminalsIn(log2)
 	requireOne(t, terms, "C05: the next turn must produce exactly one terminal, got %d", len(terms))
 	requireEq(t, events.Done, terms[0].Event.Type, "C05: the next turn must complete with a done")
 	requireTrue(t, doneReason(terms[0]) != "stopped_by_user", "C05: the next turn must complete normally, not stopped")
 	requireEq(t, 2, driver.DeliveredInputs(), "C05: two inputs across two turns")
-	for _, env := range log {
-		requireEq(t, log[0].SessionID, env.SessionID, "C05: the session must stay stable within the scenario")
+	// The next turn must reuse the session of the previous turn — a driver
+	// that starts a fresh session for the second input must fail here.
+	requireNotEmpty(t, log1, "C05: the first turn must be observed")
+	requireNotEmpty(t, log2, "C05: the next turn must be observed")
+	requireEq(t, log1[0].SessionID, log2[0].SessionID, "C05: the next turn must reuse the same session")
+	for _, env := range log2 {
+		requireEq(t, log2[0].SessionID, env.SessionID, "C05: the session must stay stable within the scenario")
 	}
 }
 
