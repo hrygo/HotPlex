@@ -60,10 +60,12 @@ HotPlex 2.0 是 **self-hosted Agent Runtime Gateway**：
 | Session | `CREATED/RUNNING/IDLE/TERMINATED/DELETED` 状态机，SQLite/PostgreSQL 持久化，用户与 workspace 绑定 | 已交付 |
 | Worker | `claude_code`、`opencode_server`、`codex_cli`、`acp` 注册式适配器 | 已交付 |
 | AgentSpec | config、init metadata、workspace 和 worker 选项的只读归一化模型 | 已交付，[#847](https://github.com/hrygo/hotplex/issues/847) |
+| EffectiveRuntimePlan | desired-state plan 的 redacted 投影 + canonical hash；WS/REST 影子解析、Admin/doctor 只读路径（dispatch 仍以 legacy 参数为准） | shadow first slice 已交付，[#946](https://github.com/hrygo/hotplex/issues/946) |
 | AgentIdentity | identity 贯穿 session context、runtime metadata、audit 和 trace | 已交付，[#848](https://github.com/hrygo/hotplex/issues/848) |
 | AEP | `pkg/events` 是唯一 wire contract；Envelope、Metadata、OwnerID 和最小 `runtime.execution.*` 事件可用 | 已交付基线；完整 runtime observability 仍由 [#849](https://github.com/hrygo/hotplex/issues/849) 跟踪 |
 | Event Store | inbound/outbound 事件持久化、turn 聚合、崩溃/超时 synthetic turn | 已交付 |
 | Durable Ingress / Execution | input payload 指纹、owner instance、lease、delivery/runtime 状态分离、single-active gate、`SESSION_BUSY`、ambiguity fence、late convergence、有界 repairer | 已交付，[#878](https://github.com/hrygo/hotplex/issues/878) |
+| Runtime Operations | fenced execution operator escape hatch：`fences list` / `resolve` / `abandon`，`fence_version` 条件并发保护（409 冲突）、审计（actor/reason/evidence_ref）、Admin API + CLI + doctor 检查 | 已交付，[#877](https://github.com/hrygo/hotplex/issues/877) |
 | RuntimeContext | 从 eventstore、turns、worker session 和 workspace metadata 读取上下文的持久化接口 | 已交付，[#852](https://github.com/hrygo/hotplex/issues/852) |
 | Observability | OpenTelemetry bootstrap、runtime spans、Prometheus worker/session/gateway 指标 | 已交付，[#850](https://github.com/hrygo/hotplex/issues/850) |
 | Security / Audit | API key、cookie admin fallback、workspace owner 校验、tool/user/admin audit、链式完整性校验 | 已交付 |
@@ -115,6 +117,7 @@ Reconciliation / Repair / Fence / Operator Action
 ### 当前事实
 
 - AgentSpec、AgentIdentity、RuntimeContext 和 runtime spans 已交付；
+- #946 shadow first slice 已交付：`EffectiveRuntimePlan` resolver（redacted view + canonical hash + fail-closed blocked codes）在 WS/REST 入口影子运行，Admin `runtime-plan` 与 doctor `runtime.effective_plan` 提供只读投影；dispatch 仍以 legacy SessionStartParams 为准；
 - AEP 已具备最小 execution metadata/events，完整 runtime observability 契约仍未完成；
 - 四类 Worker 继续使用现有 `worker.Register()` 和 adapter contract。
 
@@ -138,6 +141,7 @@ Reconciliation / Repair / Fence / Operator Action
 ### 当前事实
 
 - #878 已交付 single-active gate、owner lease、delivery/runtime 分离、ambiguity fence、late convergence 和有界 repairer；
+- #877 已交付 fenced execution 的 operator escape hatch：fence 持久化（`fence_created_at`/`fence_version`）、条件决策（resolve/abandon，跨实例 409 冲突）、审计、Admin API、CLI 与 doctor 检查；fence 永不伪装成功、不自动重投；
 - Cron/platform delivery 仍依赖进程内 retry 路径，不能作为重启和多实例后的最终事实源。
 
 ### 冻结契约
@@ -160,6 +164,7 @@ Reconciliation / Repair / Fence / Operator Action
 ### 当前事实
 
 - RuntimeContext、eventstore、execution、audit、trace 和 metrics 已提供运营事实基础；
+- fence operator action（#877）已按统一 authorization（Bearer + `runtime:*` scope）、redaction（无密列表投影）和 audit（`user_activity` + slog 双记录）交付，是本 stage "diagnostics、reconciliation 和 operator action 统一约束" 的第一个落地切片；
 - 当前 admin/runtime UI 尚未形成统一 execution timeline。
 
 ### 冻结契约

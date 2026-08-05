@@ -33,6 +33,11 @@ hotplex
 ├── security         # 安全审计
 ├── audit            # 审计链操作
 │   └── verify       # 校验审计 Hash Chain 完整性（只读）
+├── runtime          # Runtime 运维（fence 检查与决策）
+│   └── fences
+│       ├── list     # 列出阻塞新输入的 fenced executions
+│       ├── resolve  # 解除 fence（runtime 保持 unknown）
+│       └── abandon  # 放弃执行（runtime 置 failed）
 ├── config           # 配置管理
 │   └── validate     # 验证配置文件
 ├── onboard          # 交互式配置向导
@@ -219,6 +224,13 @@ hotplex doctor --json              # JSON 输出（用于脚本集成）
 | `1` | 存在失败项 |
 | `3` | `--fix` 模式下部分修复失败 |
 
+**runtime 类别新增检查项**（#877 / #946）：
+
+| 检查项 | 说明 |
+|--------|------|
+| `runtime.fenced_executions` | 只读检查当前被 fence 阻塞的 executions（SQLite 经 `PRAGMA query_only` 只读打开；无 fence → Pass，有 fence → Warn 并给出 `hotplex runtime fences list` 提示；不提供 FixFunc —— operator 决策必须走审计过的 Admin API；PostgreSQL 后端指向 Admin API） |
+| `runtime.effective_plan` | 用共享 agentspec resolver 对配置驱动的消息平台（slack/feishu/yuanxin）逐个解析 desired-state EffectiveRuntimePlan（只读，不触 DB/网络）；输出 plan hash / worker / permission / sandbox 摘要，blocked plan 以 Warn 呈现（blocked 永不视为静默成功）；webchat 为请求驱动，不在本地探测 |
+
 ---
 
 ## 安全审计
@@ -272,6 +284,57 @@ advice: chain gap before this row: previous row missing/modified, ...
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
 | `--config` | | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+
+---
+
+## Runtime 运维（#877）
+
+### `hotplex runtime fences`
+
+检查并决策 fenced executions（Worker 运行结局不明、触发 fence 的投递）。**全部经由 Admin API over HTTP —— CLI 从不为 fence 读写打开数据库**；token 取自 `admin.tokens[0]`，可用 `HOTPLEX_ADMIN_TOKEN` 覆盖（分置 admin 部署）。
+
+#### `hotplex runtime fences list`
+
+列出当前阻塞新输入的 fenced executions（表格或 JSON）。
+
+```bash
+hotplex runtime fences list
+hotplex runtime fences list --session-id sess-1 --json
+```
+
+| 标志 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--session-id` | `string` | "" | 按 session 过滤 |
+| `--json` | `bool` | `false` | JSON 输出 |
+| `--limit` | `int` | 100 | 最大条数（上限 500） |
+| `--config` / `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+
+输出列：`EXECUTION` / `SESSION` / `RUNTIME` / `REASON` / `FENCE VERSION` / `FENCED AT`。表格尾部提示决策命令模板。
+
+#### `hotplex runtime fences resolve <execution-id>` / `abandon <execution-id>`
+
+- **resolve**：清除 fence，runtime 保持 `unknown`，解除 session 阻塞（晚到终态事件仍可收敛）。
+- **abandon**：清除 fence，runtime 置 `failed`（`OPERATOR_ABANDONED`），并向在线连接补发 `runtime.execution.failed` 事件。
+
+两者均为**不可逆 operator 决策**，强制显式确认与条件版本：
+
+```bash
+hotplex runtime fences abandon exec-abc \
+  --fence-version 3 \
+  --reason "worker host lost, verified via run log" \
+  --evidence-ref OPS-1234 \
+  --confirm
+```
+
+| 标志 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `--fence-version` | `int64` | ✅ | 取自 `fences list` 的预期 fence 版本；不匹配返回 `409 FENCE_CONFLICT` |
+| `--reason` | `string` | ✅ | operator 理由（1–512 字符），仅进审计层 |
+| `--evidence-ref` | `string` | - | 证据指针（工单/run ID，≤256 字符） |
+| `--confirm` | `bool` | ✅ | 缺失时命令直接拒绝执行 |
+| `--config` / `-c` | `string` | - | 配置文件路径 |
+
+**冲突语义**：决策以 `fence_version` 为条件更新；并发 operator 或 inspect 与 action 之间的网关重启会产生 `409 FENCE_CONFLICT`，命令以非零码退出并提示重新 inspect —— **CLI 永不自动重试非幂等决策**。
 
 ---
 

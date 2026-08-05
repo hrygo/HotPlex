@@ -133,8 +133,8 @@ Admin API 管理端点配置。
 | `enabled` | bool | `true` | `HOTPLEX_ADMIN_ENABLED` | 是否启用 Admin API |
 | `addr` | string | `localhost:9999` | `HOTPLEX_ADMIN_ADDR` | Admin API 监听地址。默认仅绑定 localhost |
 | `tokens` | []string | `[]` | `HOTPLEX_ADMIN_TOKEN_1..N` | 认证 token 列表。**只能通过环境变量设置**，支持编号后缀用于轮换 |
-| `token_scopes` | map[string][]string | `nil` | — | 每 token 的权限范围映射 |
-| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未配置 scopes 的 token 的默认权限范围。`admin:write` 隐含 `admin:read` → `config:read` |
+| `token_scopes` | map[string][]string | `nil` | — | 每 token 的权限范围映射。可用 scope：`health:read` / `session:read` / `session:write` / `session:delete` / `stats:read` / `config:read` / `config:write` / `admin:read` / `admin:write` / `runtime:read` / `runtime:write`（runtime 二者服务 fence 决策与 runtime-plan 读取，#877/#946） |
+| `default_scopes` | []string | `["session:read", "session:write", "session:delete", "stats:read", "health:read", "admin:write"]` | — | 未配置 scopes 的 token 的默认权限范围。`admin:write` 隐含 `admin:read` 与 `runtime:read`/`runtime:write`；`admin:read` 隐含 `config:read` |
 | `ip_whitelist_enabled` | bool | `false` | — | 是否启用 IP 白名单 |
 | `allowed_cidrs` | []string | `["127.0.0.0/8", "10.0.0.0/8"]` | — | 允许访问的 CIDR 列表 |
 | `rate_limit_enabled` | bool | `true` | — | 是否启用速率限制 |

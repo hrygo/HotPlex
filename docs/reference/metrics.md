@@ -343,6 +343,35 @@ rate(hotplex_repair_success_total[5m]) / rate(hotplex_repair_attempts_total[5m])
 rate(hotplex_repair_timeout_total[5m]) / rate(hotplex_repair_attempts_total[5m])
 ```
 
+## Runtime Operations 指标（#877 / #946）
+
+Operator fence 决策与 EffectiveRuntimePlan 影子解析子系统。全部低基数：
+不含 execution ID、session ID、actor、plan hash（plan hash 只出现在日志与
+Admin 响应中，永不作为指标 label）。
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `hotplex.runtime.fence_actions` | Counter | 通过 Admin API 应用的 operator fence 决策，labels: `decision`（resolve\|abandon）、`result`（ok\|conflict\|error） |
+| `hotplex.runtime.fence_conflicts` | Counter | fence-version 冲突（409，条件更新匹配 0 行）；上升说明 operator 或网关重启在 inspect 与 action 之间发生竞态 |
+| `hotplex.runtime.plan_resolutions` | Counter | EffectiveRuntimePlan 影子解析次数，label: `result`（ok\|blocked） |
+| `hotplex.runtime.plan_blocked` | Counter | fail-closed 拦截的 plan，label: `code`（unknown_worker_type\|invalid_permission_mode\|invalid_sandbox_mode\|facts_missing_or_conflicting\|capability_unverifiable\|secret_shaped_value） |
+| `hotplex.runtime.plan_observed` | Counter | plan 读路径返回的 observed bootstrap 状态，label: `state`（planned\|unknown\|declared\|partial\|enforced） |
+
+### 常用查询
+
+```promql
+# 当前被 fence 阻塞的处置速率（ok 为成功决策，conflict 需人工复查后重试）
+sum by (decision, result) (rate(hotplex_runtime_fence_actions_total[5m]))
+
+# fence 冲突率（持续非零说明存在并发 operator 或重启竞态）
+rate(hotplex_runtime_fence_conflicts_total[5m])
+
+# plan 拦截率（影子模式下非零即配置边界问题，blocked plan 永不静默成功）
+sum(rate(hotplex_runtime_plan_blocked_total[5m]))
+/
+sum(rate(hotplex_runtime_plan_resolutions_total[5m]))
+```
+
 ## Turn-Integrity 诊断指标
 
 Turn-Integrity 子系统（Fix E）用于检测和量化空 success turn、stale forwarder

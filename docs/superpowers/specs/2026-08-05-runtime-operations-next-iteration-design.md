@@ -1,9 +1,9 @@
 ---
 title: "HotPlex Runtime Operations 下一迭代详细设计"
 type: design-spec
-status: proposed
-design_status: proposed
-implementation_status: not_started
+status: accepted
+design_status: accepted
+implementation_status: delivered
 date: 2026-08-05
 owners: [hotplex-runtime]
 issue_refs: ["#877", "#946"]
@@ -19,7 +19,7 @@ references:
 
 ## 1. 文档状态与决策边界
 
-本文是下一迭代的 proposed design spec，不代表实现已经完成，也不把本文中的推荐行为标记为已交付能力。实现前需要确认本 spec 的两个垂直切片边界、API 命名、状态迁移和验收标准。
+本文是下一迭代的 accepted design spec。**实现状态（2026-08-05 更新）**：#877 与 #946 shadow first slice 已由 PR #953（分支 `feat/runtime-operations-next-iteration`）交付，验收证据见 §12.4；开工闸门（§16）的五项确认在实现前全部接受，其中第 1/2 项按 §5 收窄为 operator-only 语义（fence 不自动过期）。
 
 本 spec 继承已批准的 [Runtime Operations Contract](2026-08-04-runtime-operations-contract.md)，只把其中当前迭代的 #877 与 #946 范围具体化：
 
@@ -538,6 +538,26 @@ rtk git diff --check
 
 真实 PostgreSQL 测试依赖 `HOTPLEX_TEST_PG_DSN`；未配置时只能报告环境未执行，不能报告 PostgreSQL 验证完成。
 
+### 12.4 验收结果（2026-08-05，PR #953）
+
+测试环境：darwin/arm64 · Go 1.26 · PostgreSQL 16.11（docker `hotplex-postgres`，127.0.0.1:5432，`HOTPLEX_TEST_PG_DSN` 已配置）。
+
+| 验证项 | 命令 | 结果 |
+|---|---|---|
+| §12.1/§12.2 SQLite 聚焦矩阵 | `go test ./internal/execution ./internal/admin ./internal/agentspec ./internal/gateway ./internal/cli/... ./cmd/hotplex -count=1 -race` | ✅ 1687 tests passed（13 packages） |
+| §12.1 PostgreSQL 条件更新 / 迁移 / 跨实例 | `go test -tags pg -p 1 ./internal/execution ./internal/session/sql -count=1 -race` | ✅ ok（execution 14.8s · session/sql 5.7s，exit 0） |
+| 全量质量门禁（fmt / lint / test / build） | `make check` | ✅ exit 0 · golangci-lint 0 issues |
+| Swagger + 文档构建 | `make docs-build`（依赖 swagger，含于 make check） | ✅ 63 docs 无断链 |
+| 空白/补丁卫生 | `git diff --check` | ✅ clean |
+
+类别覆盖位置：
+
+- Store / State / Concurrency / Late event / Restart → `internal/execution/` fence-action 与竞态测试（三重失败、stale `fence_version` 409、晚到 done 收敛、terminal 不回退）；
+- Security / Audit / API → `internal/admin/fences_test.go`（scope 403、409 FENCE_CONFLICT、503、actor 来自鉴权上下文、`user_activity` + slog 双审计、reason/evidence 校验与脱敏）；
+- CLI / Doctor → `cmd/hotplex` runtime fences 命令测试（Admin API only、`--confirm`/`--fence-version` 强制、409 非零退出）+ `internal/cli/checkers/execution_fences_test.go` / `effective_plan_test.go`；
+- Resolver / Hash / Redaction / Observed → `internal/agentspec/plan_test.go`（等价输入同 hash、secret/command/raw error 不入 view 与 hash、blocked codes fail-closed）；
+- Equivalence / Shadow → `internal/gateway/agentspec_test.go`（nil logger、blocked、warnings 路径；legacy dispatch 不受影响）；Admin 读路径 → `internal/admin/runtime_plan_test.go`（双 scope、blocked plan 仍 200 且 hash 为空、observed 边界）。
+
 ## 13. 发布、暂停与回滚
 
 ### 发布顺序
@@ -589,36 +609,34 @@ rtk git diff --check
 
 ### #877 完成
 
-- [ ] `GET /admin/executions/fences` 可读取 redacted fence facts，并有 runtime:read + session/workspace authorization。
-- [ ] `POST /admin/executions/{id}/fence-action` 支持 resolve/abandon、runtime:write、reason/evidence 校验和 409 fencing conflict。
-- [ ] SQLite/PostgreSQL 条件更新一致，两个实例竞争只能成功一个 action。
-- [ ] resolve 保留 unknown，不重投旧 input；abandon 写入 bounded `OPERATOR_ABANDONED` failed fact。
-- [ ] late completion、restart、重复 action 和旧 worker run 语义有测试。
-- [ ] Admin audit、runtime event 和 CLI/doctor 证据脱敏并可查询。
+- [x] `GET /admin/executions/fences` 可读取 redacted fence facts，并有 runtime:read + session/workspace authorization。（`internal/admin/fences.go` + `fences_test.go` scope 表驱动 403）
+- [x] `POST /admin/executions/{id}/fence-action` 支持 resolve/abandon、runtime:write、reason/evidence 校验和 409 fencing conflict。（409 FENCE_CONFLICT 测试 + reason 1–512 / evidence_ref ≤256 校验）
+- [x] SQLite/PostgreSQL 条件更新一致，两个实例竞争只能成功一个 action。（execution 竞态测试 + `-tags pg -p 1` real-PG 通过，§12.4）
+- [x] resolve 保留 unknown，不重投旧 input；abandon 写入 bounded `OPERATOR_ABANDONED` failed fact。（store 状态测试 + `runtime.execution.failed` 事件测试）
+- [x] late completion、restart、重复 action 和旧 worker run 语义有测试。（晚到 done 收敛、terminal 不回退、重复 action 幂等返回）
+- [x] Admin audit、runtime event 和 CLI/doctor 证据脱敏并可查询。（`user_activity` + slog 双审计；reason/evidence 仅审计层、不入 execution facts；doctor 只读）
 
 ### #946 first slice 完成
 
-- [ ] `Resolver.ResolvePlan`、redacted public view 和 canonical SHA-256 hash 已存在并有确定性测试。
-- [ ] WS/REST semantic equivalent input 产生相同 plan hash。
-- [ ] doctor、Admin diagnostics 和 shadow comparison 消费同一 resolver。
-- [ ] 四类 Worker 的 observed state 不把 planned/unknown 误报为 enforced。
-- [ ] 不新增 plan parallel store，不改变 legacy dispatch，不泄露敏感字段。
+- [x] `Resolver.ResolvePlan`、redacted public view 和 canonical SHA-256 hash 已存在并有确定性测试。（`internal/agentspec/plan_test.go`）
+- [x] WS/REST semantic equivalent input 产生相同 plan hash。（shadow 等价测试于 `internal/gateway/agentspec_test.go`）
+- [x] doctor、Admin diagnostics 和 shadow comparison 消费同一 resolver。（三处均调用 `Resolver{}.ResolvePlan` / `ShadowResolvePlan`）
+- [x] 四类 Worker 的 observed state 不把 planned/unknown 误报为 enforced。（first slice 只输出 planned/unknown/declared，`observedSummaryFor` 表驱动边界测试）
+- [x] 不新增 plan parallel store，不改变 legacy dispatch，不泄露敏感字段。（on-demand 投影；redaction 测试断言 command/model/budget/secret 不出现）
 
 ### 全局门禁
 
-- [ ] 受影响模块 `go test -race -count=1` 通过。
-- [ ] PostgreSQL 受影响路径在配置 DSN 时通过；未配置时明确标注未执行。
-- [ ] `make check`、`make docs-build`、`git diff --check` 通过。
-- [ ] 代码、测试、API 文档、CLI 文档、Roadmap 和 Issue 状态相互可追踪。
+- [x] 受影响模块 `go test -race -count=1` 通过。（1687 tests，§12.4）
+- [x] PostgreSQL 受影响路径在配置 DSN 时通过；未配置时明确标注未执行。（本次已配置 DSN，real-PG 16.11 通过，§12.4）
+- [x] `make check`、`make docs-build`、`git diff --check` 通过。（§12.4）
+- [x] 代码、测试、API 文档、CLI 文档、Roadmap 和 Issue 状态相互可追踪。（`docs/reference/{metrics,admin-api,cli,configuration}.md` + `docs/v2/*` + 本 spec §12.4 同步更新；#877/#946 跟踪中）
 
 ## 16. 开工闸门
 
-实现前需确认：
+实现前需确认（**2026-08-05：五项全部接受，闸门通过，Task 1–8 已执行完毕**）：
 
-1. 是否接受 `resolve` 只清 fence、保留 `unknown` 的语义；
-2. 是否接受 `abandon` 仅写 `failed/OPERATOR_ABANDONED`、不改变 delivery 的语义；
-3. 是否接受 `runtime:read` / `runtime:write` 两个新 scope 和本文 API 路径；
-4. 是否接受 #946 first slice 保持 shadow/read-only，不在本迭代切换 authoritative dispatch；
-5. 是否接受本迭代不包含 #867、#947、#851、#868。
-
-以上确认完成后，按现有实施计划执行 Task 1–8；任一确认未通过，先修改本 spec，不直接进入代码实现。
+1. ✅ 接受 `resolve` 只清 fence、保留 `unknown` 的语义（已按此实现）；
+2. ✅ 接受 `abandon` 仅写 `failed/OPERATOR_ABANDONED`、不改变 delivery 的语义（已按此实现）；
+3. ✅ 接受 `runtime:read` / `runtime:write` 两个新 scope 和本文 API 路径（已按此实现并写入 `docs/reference/{admin-api,configuration}.md`）；
+4. ✅ 接受 #946 first slice 保持 shadow/read-only，不在本迭代切换 authoritative dispatch（dispatch 仍以 legacy `SessionStartParams` 为准）；
+5. ✅ 接受本迭代不包含 #867、#947、#851、#868（见 `docs/v2/IMPLEMENTATION-ROADMAP.md` 当前交付切片 3–6 行）。
