@@ -1076,7 +1076,7 @@ func (a *Adapter) postFile(ctx context.Context, channelID, threadTS, filePath, t
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
-	if len(data) > mediaMaxSize {
+	if len(data) > uploadMaxSize {
 		return "", fmt.Errorf("file too large: %d bytes", len(data))
 	}
 

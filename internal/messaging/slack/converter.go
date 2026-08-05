@@ -22,6 +22,12 @@ var ErrMediaTooLarge = errors.New("slack: media exceeds 10 MiB")
 
 const mediaMaxSize = 10 * 1024 * 1024 // 10 MiB hard limit
 
+// uploadMaxSize is the outbound upload limit for locally-generated files
+// (Slack's default 20 MB). It is deliberately separate from the 10 MiB
+// ingestion cap: downloads and saves stay bounded, uploads keep the
+// platform default.
+const uploadMaxSize = 20 * 1024 * 1024 // 20 MB (Slack default)
+
 const (
 	mediaTypeImage    = "image"
 	mediaTypeAudio    = "audio"
@@ -137,7 +143,9 @@ func (w *boundedMediaWriter) Write(p []byte) (int, error) {
 	if err != nil {
 		return n, err
 	}
-	return int(remaining), ErrMediaTooLarge
+	// Report the bytes actually written — the io.Writer contract is n < len(p)
+	// with an error, never an over-report, even on a short write with nil err.
+	return n, ErrMediaTooLarge
 }
 
 // downloadMedia downloads a file from Slack to local storage. The declared
@@ -239,8 +247,12 @@ func (a *Adapter) writeMediaAtomic(dir, path string, fn func(io.Writer) error) e
 	if err := os.Rename(f.Name(), path); err != nil {
 		return err
 	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
 	committed = true
-	return os.Chmod(path, 0o600)
+	return nil
 }
 
 // mediaFilePath returns (dir, fullPath) for a media file on local storage.

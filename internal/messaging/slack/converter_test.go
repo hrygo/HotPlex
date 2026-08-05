@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +39,55 @@ func (f *fakeFileClient) GetFileContext(_ context.Context, _ string, w io.Writer
 		remaining -= n
 	}
 	return nil
+}
+
+// uploadRecordingClient records UploadFileContext calls and always succeeds.
+type uploadRecordingClient struct {
+	SlackAPI
+	calls int
+}
+
+func (c *uploadRecordingClient) UploadFileContext(_ context.Context, _ slack.UploadFileParameters) (*slack.FileSummary, error) {
+	c.calls++
+	return &slack.FileSummary{ID: "F_UPLOADED"}, nil
+}
+
+// TestPostFile_UploadLimitBoundary guards the outbound upload limit: locally-
+// generated files up to the platform default 20 MB must still upload, and
+// over-limit payloads are rejected before any API call. This pins the 20 MB
+// value that the ingestion const change (10 MiB) must not silently tighten.
+func TestPostFile_UploadLimitBoundary(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		size      int
+		wantError bool
+	}{
+		{name: "exact 20 MB uploads", size: 20 * 1024 * 1024},
+		{name: "one byte over 20 MB rejected", size: 20*1024*1024 + 1, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := newTestAdapter(t)
+			client := &uploadRecordingClient{}
+			a.client = client
+
+			filePath := filepath.Join(t.TempDir(), "upload.bin")
+			require.NoError(t, os.WriteFile(filePath, make([]byte, tc.size), 0o600))
+
+			id, err := a.postFile(context.Background(), "C1", "", filePath, "upload")
+			if tc.wantError {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "file too large")
+				require.Equal(t, 0, client.calls, "over-limit upload must be rejected before calling the API")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "F_UPLOADED", id)
+			require.Equal(t, 1, client.calls)
+		})
+	}
 }
 
 // withMediaPrefix runs fn with the package global MediaPathPrefix temporarily
