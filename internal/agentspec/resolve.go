@@ -95,10 +95,7 @@ func (r Resolver) Resolve(in Input) (AgentSpec, error) {
 	// change webchat model visibility. The contract field stays nil in first-cut.
 
 	// ── Policy ──────────────────────────────────────────────────────────────
-	pm := in.InitMeta.PermissionMode
-	if pm == "" {
-		pm = in.WorkspacePerm
-	}
+	pm := resolvePermissionMode(in, wt)
 	if pm != "" {
 		if err := worker.ValidatePermissionMode(pm); err != nil {
 			return AgentSpec{}, fmt.Errorf("agentspec: permission mode: %w", err)
@@ -122,6 +119,67 @@ func (r Resolver) Resolve(in Input) (AgentSpec, error) {
 	}
 
 	return spec, nil
+}
+
+// resolvePermissionMode mirrors the bridge's permission inputs for the plan
+// projection. Explicit init and workspace values win; a workspace without an
+// explicit override receives the configured global ceiling. Platform sessions
+// without a workspace retain their worker-specific operator defaults.
+func resolvePermissionMode(in Input, workerType string) string {
+	if mode := in.InitMeta.PermissionMode; mode != "" {
+		return mode
+	}
+	if mode := in.WorkspacePerm; mode != "" {
+		return mode
+	}
+	if in.Cfg == nil {
+		return ""
+	}
+	if in.WorkspaceID != "" {
+		return worker.NormalizePermissionMode(in.Cfg.Worker.DefaultPermissionMode)
+	}
+
+	switch workerType {
+	case string(worker.TypeClaudeCode):
+		if mode := in.Cfg.Worker.ClaudeCode.PermissionMode; mode != "" {
+			return mode
+		}
+		return worker.PermissionModeBypass
+	case string(worker.TypeCodexCLI):
+		return permissionModeFromCodexConfig(in.Cfg.Worker.CodexCLI.Sandbox, in.Cfg.Worker.CodexCLI.ApprovalMode)
+	case string(worker.TypeOpenCodeSrv):
+		return worker.PermissionModeBypass
+	case string(worker.TypeACP):
+		if in.Cfg.Worker.ACP.AutoApprove != nil && !*in.Cfg.Worker.ACP.AutoApprove {
+			return worker.PermissionModeWorkspace
+		}
+		return worker.PermissionModeBypass
+	default:
+		return ""
+	}
+}
+
+func permissionModeFromCodexConfig(sandbox, approval string) string {
+	switch sandbox {
+	case "read-only":
+		return worker.PermissionModeReadOnly
+	case "workspace-write":
+		switch approval {
+		case "never":
+			return worker.PermissionModeAutoEdit
+		case "on-request":
+			return worker.PermissionModeWorkspace
+		default:
+			return worker.PermissionModeReadOnly
+		}
+	case "danger-full-access":
+		if approval == "never" {
+			return worker.PermissionModeBypass
+		}
+		return worker.PermissionModeReadOnly
+	default:
+		return worker.PermissionModeReadOnly
+	}
 }
 
 // isMessagingPlatform reports whether the platform resolves worker_type via the

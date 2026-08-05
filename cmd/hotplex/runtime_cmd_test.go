@@ -3,11 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 func newFenceTestServer(t *testing.T, handler http.HandlerFunc) *fenceAdminClient {
@@ -84,6 +89,55 @@ func TestFenceAdminClient_NotFound(t *testing.T) {
 	_, err := client.fenceAction(context.Background(), "missing", "resolve", 1, "r", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "FENCE_NOT_FOUND")
+}
+
+func TestNewFenceAdminClient_UsesAdminAddress(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	writeFenceClientConfig(t, configPath, "localhost:8888", "localhost:9999", "test-token")
+
+	client, err := newFenceAdminClient(configPath)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:9999", client.baseURL)
+}
+
+func TestNewFenceAdminClient_UsesRunningConfigPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOTPLEX_HOME", filepath.Join(t.TempDir(), "hotplex"))
+
+	runningConfigPath := filepath.Join(t.TempDir(), "running.yaml")
+	writeFenceClientConfig(t, runningConfigPath, "localhost:8888", "localhost:19999", "running-token")
+	writeGatewayState(runningConfigPath, false)
+	t.Cleanup(removeGatewayState)
+
+	client, err := newFenceAdminClient(config.DefaultConfigPath)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:19999", client.baseURL)
+	require.Equal(t, "running-token", client.token)
+}
+
+func TestNewFenceAdminClient_ExplicitConfigPathWins(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOTPLEX_HOME", filepath.Join(t.TempDir(), "hotplex"))
+
+	runningConfigPath := filepath.Join(t.TempDir(), "running.yaml")
+	explicitConfigPath := filepath.Join(t.TempDir(), "explicit.yaml")
+	writeFenceClientConfig(t, runningConfigPath, "localhost:8888", "localhost:19999", "running-token")
+	writeFenceClientConfig(t, explicitConfigPath, "localhost:8888", "localhost:29999", "explicit-token")
+	writeGatewayState(runningConfigPath, false)
+	t.Cleanup(removeGatewayState)
+
+	client, err := newFenceAdminClient(explicitConfigPath)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:29999", client.baseURL)
+	require.Equal(t, "explicit-token", client.token)
+}
+
+func writeFenceClientConfig(t *testing.T, path, gatewayAddr, adminAddr, token string) {
+	t.Helper()
+	content := fmt.Sprintf("gateway:\n  addr: %q\nadmin:\n  addr: %q\n  tokens: [%q]\n", gatewayAddr, adminAddr, token)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }
 
 func TestFenceActionCmd_RequiresConfirm(t *testing.T) {

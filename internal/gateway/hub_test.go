@@ -718,6 +718,14 @@ func (m *blockingPlatformConn) WriteCtx(ctx context.Context, _ *events.Envelope)
 
 func (m *blockingPlatformConn) Close() error { return nil }
 
+type panicPlatformConn struct{}
+
+func (panicPlatformConn) WriteCtx(context.Context, *events.Envelope) error {
+	panic("platform write panic")
+}
+
+func (panicPlatformConn) Close() error { return nil }
+
 type postCancelBlockingPlatformConn struct {
 	entered       chan struct{}
 	parentExpired chan struct{}
@@ -880,6 +888,33 @@ func TestHub_TerminalWriteBudgetCancelsBackgroundWriteAndUnblocksOtherSessions(t
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 	case <-time.After(time.Second):
 		t.Fatal("terminal write did not finish within its configured budget")
+	}
+}
+
+func TestHub_TerminalWriteCompletesWhenWriterExits(t *testing.T) {
+	t.Parallel()
+
+	h := newTestHub(t)
+	entry := newPCEntry(context.Background(), panicPlatformConn{}, testPCEntryConfig(), slog.Default())
+	t.Cleanup(func() { _ = entry.Close() })
+	h.mu.Lock()
+	h.sessions["panic-terminal"] = map[SessionWriter]bool{entry: true}
+	h.everHadConn["panic-terminal"] = true
+	h.mu.Unlock()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- h.SendToSession(context.Background(), events.NewEnvelope(
+			aep.NewID(), "panic-terminal", 0, events.Done, events.DoneData{Success: true},
+		))
+	}()
+
+	select {
+	case err := <-result:
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "platform conn closed")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("terminal send did not complete after the platform writer exited")
 	}
 }
 

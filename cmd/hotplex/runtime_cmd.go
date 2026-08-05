@@ -70,10 +70,16 @@ type fenceAdminClient struct {
 	http    *http.Client
 }
 
-// newFenceAdminClient resolves the gateway base URL and admin token from the
-// local config (same host trust model as the rest of the CLI). The token can
-// be overridden with HOTPLEX_ADMIN_TOKEN for split-admin deployments.
+// newFenceAdminClient resolves the Admin API address and token from the
+// running Gateway's config when the caller did not select an explicit config.
+// The token can be overridden with HOTPLEX_ADMIN_TOKEN for split-admin
+// deployments.
 func newFenceAdminClient(configPath string) (*fenceAdminClient, error) {
+	if configPath == "" || configPath == config.DefaultConfigPath {
+		if state, stateErr := readGatewayState(); stateErr == nil && state.ConfigPath != "" {
+			configPath = state.ConfigPath
+		}
+	}
 	absPath, err := config.ExpandAndAbs(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve config path: %w", err)
@@ -92,9 +98,9 @@ func newFenceAdminClient(configPath string) (*fenceAdminClient, error) {
 		token = cfg.Admin.Tokens[0]
 	}
 
-	addr := cfg.Gateway.Addr
+	addr := cfg.Admin.Addr
 	if addr == "" {
-		addr = ":8888"
+		addr = "localhost:9999"
 	}
 	if strings.HasPrefix(addr, ":") {
 		addr = "localhost" + addr

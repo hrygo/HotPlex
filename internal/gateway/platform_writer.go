@@ -194,6 +194,10 @@ func (e *pcEntry) EnqueueWrite(ctx context.Context, env *events.Envelope, result
 					default:
 					}
 				case <-e.done:
+					select {
+					case result <- errors.New("platform conn closed"):
+					default:
+					}
 				}
 			}()
 		} else {

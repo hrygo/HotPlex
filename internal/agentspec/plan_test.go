@@ -38,6 +38,40 @@ func TestResolvePlan_Success(t *testing.T) {
 	require.Contains(t, plan.SourceRefs, PlanSourceRef{Field: "sandbox_mode", Source: PlanSourceBaseConfig})
 }
 
+func TestResolvePlan_UsesConfiguredWorkspacePermission(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.Messaging.Feishu.WorkerType = "claude_code"
+	cfg.Worker.DefaultPermissionMode = worker.PermissionModeReadOnly
+
+	plan, err := testResolver().ResolvePlan(Input{
+		Cfg:         cfg,
+		Platform:    "feishu",
+		WorkspaceID: "workspace-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeReadOnly, plan.AgentSpec.Policy.PermissionMode)
+	require.Contains(t, plan.SourceRefs, PlanSourceRef{
+		Field: "permission_mode", Source: PlanSourceBaseConfig,
+	})
+}
+
+func TestResolvePlan_UsesConfiguredOperatorPermissionWithoutWorkspace(t *testing.T) {
+	t.Parallel()
+	cfg := config.Default()
+	cfg.Messaging.Feishu.WorkerType = "claude_code"
+	cfg.Worker.ClaudeCode.PermissionMode = worker.PermissionModeReadOnly
+
+	plan, err := testResolver().ResolvePlan(Input{Cfg: cfg, Platform: "feishu"})
+
+	require.NoError(t, err)
+	require.Equal(t, worker.PermissionModeReadOnly, plan.AgentSpec.Policy.PermissionMode)
+	require.Contains(t, plan.SourceRefs, PlanSourceRef{
+		Field: "permission_mode", Source: PlanSourceBaseConfig,
+	})
+}
+
 // TestResolvePlan_Determinism: same Input → same plan hash; a different
 // effective field → different hash. The hash is a pure function of the
 // redacted desired state.

@@ -335,9 +335,12 @@ func planSourceRefs(in Input, spec AgentSpec) []PlanSourceRef {
 		refs = append(refs, PlanSourceRef{Field: "model", Source: PlanSourceInitMetadata})
 	}
 	if spec.Policy.PermissionMode != "" {
-		source := PlanSourceWorkspaceOverride
-		if in.InitMeta.PermissionMode != "" {
+		source := PlanSourceBaseConfig
+		switch {
+		case in.InitMeta.PermissionMode != "":
 			source = PlanSourceInitMetadata
+		case in.WorkspacePerm != "":
+			source = PlanSourceWorkspaceOverride
 		}
 		refs = append(refs, PlanSourceRef{Field: "permission_mode", Source: source})
 	}
