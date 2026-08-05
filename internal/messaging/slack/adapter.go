@@ -438,14 +438,24 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		}
 	}
 
-	// Dedup
+	// Dedup with conditional commit: the entry is only kept when the message
+	// was actually consumed (delivered to the worker or handled as a command /
+	// interaction response). Rejected deliveries roll back so the platform's
+	// retry of the same ClientMsgID is not silently deduplicated.
 	platformMsgID := msgEvent.ClientMsgID
 	if platformMsgID == "" {
 		platformMsgID = msgEvent.TimeStamp
 	}
-	if !a.Dedup.TryRecord(platformMsgID) {
+	dedupHandle, recorded := a.Dedup.TryRecordWithHandle(platformMsgID)
+	if !recorded {
 		return
 	}
+	accepted := false
+	defer func() {
+		if !accepted {
+			a.Dedup.Rollback(dedupHandle)
+		}
+	}()
 
 	// Resolve user mentions: <@UID> → @DisplayName, remove bot self-mentions
 	text = a.userCache.ResolveMentions(ctx, text, a.botID)
@@ -518,6 +528,7 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		}
 		_, _, _ = a.client.PostMessageContext(ctx, channelID, opts...)
 		_ = a.ClearStatus(ctx, channelID, threadTS)
+		accepted = true
 		return
 	case messaging.CmdControl:
 		conn := a.GetOrCreateConn(channelID, threadTS)
@@ -527,6 +538,7 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
 		a.handleTextControlCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Control)
+		accepted = true
 		return
 	case messaging.CmdWorker:
 		conn := a.GetOrCreateConn(channelID, threadTS)
@@ -540,11 +552,13 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
 		a.handleTextWorkerCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Worker)
+		accepted = true
 		return
 	}
 
 	// Check if text is a response to a pending interaction (text fallback for Block Kit failures).
 	if a.checkPendingInteraction(ctx, text, channelID, threadTS, userID) {
+		accepted = true
 		return
 	}
 
@@ -582,6 +596,10 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
 				"⚠️ Failed to process your message. Please try again or use /reset to restart the session.")
 		}
+		// Delivery failed: keep accepted=false so the dedup entry is rolled
+		// back and a platform retry of the same ClientMsgID can be delivered.
+	} else {
+		accepted = true
 	}
 }
 
@@ -594,8 +612,9 @@ func (a *Adapter) GetOrCreateConn(channelID, threadTS string) *SlackConn {
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, teamID, threadTS, userID, text string) error {
 	if a.Bridge() == nil {
-		a.Log.Warn("slack: bridge not configured, dropping message", "channel", channelID, "user", userID)
-		return nil
+		// Must error (not return nil) so handleMessageEvent rolls back the
+		// dedup entry: a message dropped without a bridge was never delivered.
+		return fmt.Errorf("slack: bridge not configured")
 	}
 
 	conn := a.GetOrCreateConn(channelID, threadTS)

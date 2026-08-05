@@ -191,7 +191,9 @@ func makeGroupEvent(channelID, userID, text string) slackevents.EventsAPIEvent {
 
 func TestE2E_DMBasicPasses(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	// A bridge is required: without it the message is rejected (dedup rolled
+	// back), which is the "bridge not configured" contract.
+	a, _ := newAdapterWithCapture(t)
 
 	evt := makeDMEvent("U_ALICE", "hello")
 	require.True(t, handleAndCheck(t, a, evt), "DM should pass through pipeline")
@@ -199,7 +201,7 @@ func TestE2E_DMBasicPasses(t *testing.T) {
 
 func TestE2E_DMWithThread(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	a, _ := newAdapterWithCapture(t)
 
 	// DM without thread passes
 	evt := makeMessageEvent("D999", "", "U_BOB", "hi there", "")
@@ -252,7 +254,9 @@ func TestE2E_ExpiredMessageBlocked(t *testing.T) {
 
 func TestE2E_DedupPipeline(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	// Successful delivery commits the dedup entry; a bridge is required so the
+	// first message is accepted (not rolled back as undeliverable).
+	a, _ := newAdapterWithCapture(t)
 
 	evt := makeDMEvent("U_ALICE", "hello")
 
@@ -262,7 +266,7 @@ func TestE2E_DedupPipeline(t *testing.T) {
 
 func TestE2E_DedupFallbackToTimestamp(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	a, _ := newAdapterWithCapture(t)
 
 	evt := makeDMEvent("U_ALICE", "hello")
 	msg := evt.InnerEvent.Data.(*slackevents.MessageEvent)
@@ -284,7 +288,7 @@ func TestE2E_GateDMDisabled(t *testing.T) {
 
 func TestE2E_GateDMAllowlist(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	a, _ := newAdapterWithCapture(t)
 	a.Gate = messaging.NewGate("allowlist", "open", false, []string{"U_ALLOWED"}, nil, nil)
 
 	require.True(t, handleAndCheck(t, a, makeDMEvent("U_ALLOWED", "hello")),
@@ -295,7 +299,7 @@ func TestE2E_GateDMAllowlist(t *testing.T) {
 
 func TestE2E_GateGroupRequireMention(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	a, _ := newAdapterWithCapture(t)
 	a.Gate = messaging.NewGate("open", "open", true, nil, nil, nil)
 
 	require.False(t, handleAndCheck(t, a, makeGroupEvent("C123", "U_ALICE", "hello")),
@@ -351,7 +355,7 @@ func TestE2E_AbortCommandRoutesControlStop(t *testing.T) {
 
 func TestE2E_RichTextPasses(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	a, _ := newAdapterWithCapture(t)
 
 	section := slack.NewRichTextSection(
 		slack.NewRichTextSectionTextElement("from blocks", nil),
@@ -741,7 +745,7 @@ func TestE2E_FormatMrkdwn_TableRendering(t *testing.T) {
 
 func TestE2E_GroupMention_PassesFilter(t *testing.T) {
 	t.Parallel()
-	a := newTestAdapter(t)
+	a, _ := newAdapterWithCapture(t)
 
 	// First message in channel → passes (bot claims thread)
 	evt1 := makeGroupEvent("C_OWN", "U_ALICE", "<@B_TEST> help")
@@ -1012,4 +1016,209 @@ func TestE2E_ConvertMessage_LargeFileClassified(t *testing.T) {
 	require.Len(t, media, 1)
 	require.Equal(t, "document", media[0].Type)
 	// downloadMedia will reject on size, but classification works
+}
+
+// ---------------------------------------------------------------------------
+// handleMessageEvent: conditional dedup commit (rollback rejected messages)
+// ---------------------------------------------------------------------------
+
+// stubSlackClient no-ops outbound posts so failure-path user notifications do
+// not panic in tests (real Slack calls are never made).
+type stubSlackClient struct {
+	SlackAPI
+}
+
+func (c *stubSlackClient) PostMessageContext(_ context.Context, _ string, _ ...slack.MsgOption) (string, string, error) {
+	return "", "", nil
+}
+
+func (c *stubSlackClient) PostEphemeralContext(_ context.Context, _, _ string, _ ...slack.MsgOption) (string, error) {
+	return "", nil
+}
+
+func (c *stubSlackClient) AddReactionContext(_ context.Context, _ string, _ slack.ItemRef) error {
+	return nil
+}
+
+func (c *stubSlackClient) RemoveReactionContext(_ context.Context, _ string, _ slack.ItemRef) error {
+	return nil
+}
+
+// failOnceHandler records Handle calls; the first call fails with a controlled
+// error and all later calls succeed.
+type failOnceHandler struct {
+	failed bool
+	calls  []capturedCall
+}
+
+func (h *failOnceHandler) Handle(_ context.Context, env *events.Envelope) error {
+	data, ok := env.Event.Data.(map[string]any)
+	if ok {
+		content, _ := data["content"].(string)
+		metadata, _ := data["metadata"].(map[string]any)
+		h.calls = append(h.calls, capturedCall{
+			OwnerID:   env.OwnerID,
+			SessionID: env.SessionID,
+			Text:      content,
+			Metadata:  metadata,
+		})
+	}
+	if !h.failed {
+		h.failed = true
+		return fmt.Errorf("simulated worker delivery failure")
+	}
+	return nil
+}
+
+// blockableHandler records Handle calls, signals inFlight once, then blocks
+// until release or context cancellation — precise ordering for interleaving
+// tests without time.Sleep.
+type blockableHandler struct {
+	inFlight chan struct{}
+	release  chan struct{}
+	calls    []capturedCall
+}
+
+func (h *blockableHandler) Handle(ctx context.Context, env *events.Envelope) error {
+	data, ok := env.Event.Data.(map[string]any)
+	if ok {
+		content, _ := data["content"].(string)
+		metadata, _ := data["metadata"].(map[string]any)
+		h.calls = append(h.calls, capturedCall{
+			OwnerID:   env.OwnerID,
+			SessionID: env.SessionID,
+			Text:      content,
+			Metadata:  metadata,
+		})
+	}
+	close(h.inFlight)
+	select {
+	case <-h.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestHandleMessageEvent_RollsBackDedupAfterDeliveryFailure(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	a.client = &stubSlackClient{}
+
+	handler := &failOnceHandler{}
+	bridge := messaging.NewBridge(
+		slog.Default(), messaging.PlatformSlack, nil, handler, nil,
+		"test_worker", "", "/tmp", "",
+	)
+	require.NoError(t, a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge}))
+
+	evt := makeDMEvent("U_ALICE", "retry after failure")
+	msg := evt.InnerEvent.Data.(*slackevents.MessageEvent)
+	msg.ClientMsgID = "delivery-failure-retry-id"
+
+	ctx := context.Background()
+
+	// First delivery fails with a controlled handler error.
+	a.handleMessageEvent(ctx, msg, "T_TEST")
+	require.Len(t, handler.calls, 1, "first attempt must reach the bridge")
+	require.Zero(t, dedupCount(a), "failed delivery must roll back so the same ID is retryable")
+
+	// Same ClientMsgID retried after recovery succeeds (exactly one successful
+	// worker input in total — the failed attempt only reached the bridge).
+	a.handleMessageEvent(ctx, msg, "T_TEST")
+	require.Len(t, handler.calls, 2, "retry must reach the bridge again")
+
+	// A third identical event is deduplicated after the successful retry.
+	a.handleMessageEvent(ctx, msg, "T_TEST")
+	require.Len(t, handler.calls, 2, "duplicate after success must not reach the bridge")
+	require.False(t, a.Dedup.TryRecord(msg.ClientMsgID), "successful delivery keeps the record")
+}
+
+func TestHandleMessageEvent_RollsBackEmptyMessage(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	// Use an alphanumeric bot ID: ResolveMentions only strips <@ID> mentions
+	// matching [A-Z0-9]+ (real Slack IDs have no underscores).
+	a.botID = "B123456"
+
+	// Group message whose text is only a bot self-mention: ResolveMentions
+	// strips it, leaving empty text and no media → nothing was consumed.
+	evt := makeGroupEvent("C12345", "U_ALICE", "<@B123456>")
+	msg := evt.InnerEvent.Data.(*slackevents.MessageEvent)
+
+	a.handleMessageEvent(context.Background(), msg, "T_TEST")
+
+	require.True(t, a.Dedup.TryRecord(msg.ClientMsgID),
+		"mention-only message must roll back so the same ID is retryable")
+}
+
+func TestHandleMessageEvent_StaleRollbackCannotEraseNewGeneration(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	a.client = &stubSlackClient{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	inFlight := make(chan struct{})
+	release := make(chan struct{})
+	handler := &blockableHandler{inFlight: inFlight, release: release}
+	bridge := messaging.NewBridge(
+		slog.Default(), messaging.PlatformSlack, nil, handler, nil,
+		"test_worker", "", "/tmp", "",
+	)
+	require.NoError(t, a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge}))
+
+	evt := makeDMEvent("U_ALICE", "new generation")
+	msg := evt.InnerEvent.Data.(*slackevents.MessageEvent)
+	const id = "stale-rollback-generation-id"
+	msg.ClientMsgID = id
+
+	// Old generation: records the ID, then its (failed) delivery rolls back.
+	// The handle is kept so a late rollback can be replayed after a new
+	// generation has re-recorded the same ID.
+	staleHandle, recorded := a.Dedup.TryRecordWithHandle(id)
+	require.True(t, recorded)
+	a.Dedup.Rollback(staleHandle)
+
+	// New generation: real handleMessageEvent re-records the same ID and is
+	// now in-flight inside Bridge.Handle.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.handleMessageEvent(ctx, msg, "T_TEST")
+	}()
+	select {
+	case <-inFlight:
+	case <-time.After(5 * time.Second):
+		t.Fatal("new generation never reached the bridge")
+	}
+	require.Len(t, handler.calls, 1, "new generation must reach the bridge exactly once")
+
+	// The stale rollback from the old generation must not erase the new record.
+	a.Dedup.Rollback(staleHandle)
+	require.False(t, a.Dedup.TryRecord(id), "stale rollback must not erase the new generation's record")
+
+	// New generation completes successfully → its record stays committed.
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("new generation never completed")
+	}
+	require.False(t, a.Dedup.TryRecord(id), "successful delivery keeps the new record")
+}
+
+func TestHandleMessageEvent_KeepsDedupAfterSuccessfulDelivery(t *testing.T) {
+	t.Parallel()
+	a, calls := newAdapterWithCapture(t)
+
+	evt := makeDMEvent("U_ALICE", "dedupe after success")
+	msg := evt.InnerEvent.Data.(*slackevents.MessageEvent)
+
+	a.handleMessageEvent(context.Background(), msg, "T_TEST")
+	a.handleMessageEvent(context.Background(), msg, "T_TEST")
+
+	require.Len(t, *calls, 1, "same raw event must deliver to the worker exactly once")
+	require.False(t, a.Dedup.TryRecord(msg.ClientMsgID), "successful delivery keeps the record")
 }
