@@ -225,12 +225,6 @@ func (r *recordingConn) Events() []*events.Envelope {
 	return out
 }
 
-func (r *recordingConn) Clear() {
-	r.mu.Lock()
-	r.entries = r.entries[:0]
-	r.mu.Unlock()
-}
-
 func (r *recordingConn) Close() error { return nil }
 
 // ─── feishuContractDriver ─────────────────────────────────────────────────────
@@ -400,10 +394,9 @@ func (d *feishuContractDriver) Reset(ctx context.Context) error {
 	if err := d.send(ctx, "c06-reset", "/reset"); err != nil {
 		return err
 	}
-	// The post-reset turn is observed from a fresh snapshot; the reset's
-	// context_reset State envelope may land before or after this call returns
-	// and is not a terminal, so either position is harmless.
-	d.rec.Clear()
+	// The post-reset turn is observed from a fresh snapshot — SendRawInput
+	// replaces the recording conn anyway — and the reset's context_reset State
+	// envelope is not a terminal, so either position is harmless.
 	return nil
 }
 
@@ -487,13 +480,20 @@ func (d *feishuContractDriver) waitConflict(id string) error {
 }
 
 // snapshot returns the platform-visible turn stream. Control-plane artifacts
-// the real FeishuConn renders nothing for are excluded — they race the probe's
-// synchronously-emitted done both in delivery position and in seq allocation
-// (machine-audit findings, see task report):
+// the real FeishuConn renders nothing for are excluded:
 //   - delivery-outcome input.acks (status delivered/failed — the durable
-//     acceptance ack with status accepted is kept: the scenarios assert it);
-//   - runtime.execution.* correlation events, whose seq is allocated after the
-//     done's but which are delivered before it;
+//     acceptance ack with status accepted is kept: the scenarios assert it).
+//     These are the GENUINE overtake: ack.Priority is PriorityControl
+//     (handler.go sendInputAck), so the hub writes them directly to the
+//     session conns (hub.go sendControlToSession) instead of queueing them
+//     behind the broadcast-queued terminal done (hub.go SendToSession's
+//     terminal path) — the echo can land after the done and with a higher seq,
+//     racing the probe's synchronously-emitted done.
+//   - runtime.execution.* correlation events: finishRuntimeOnDone emits them
+//     in-order from the same forwarder goroutine immediately before the done's
+//     own SendToSession (bridge_forward.go), so their seq and delivery
+//     position are consistent — they are control-plane correlation events the
+//     FeishuConn renders nothing for, hence excluded from the stream.
 //   - anything after the first terminal — the stream is anchored at the
 //     terminal (AEP: done is the last S→C event of a turn).
 func (d *feishuContractDriver) snapshot() []*events.Envelope {
