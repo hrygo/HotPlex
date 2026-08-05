@@ -3,12 +3,14 @@ package opencodeserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -794,4 +796,156 @@ func TestInput_QuestionResponse_WithProjectDir(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "/question/q_789/reply", receivedPath)
 	require.Equal(t, "directory=%2Ftest%2Fworkspace", receivedQuery)
+}
+
+// ─── abortOCSSession (POST /session/{id}/abort) ───────────────────────────────
+
+func TestAbortOCSSession_RequestContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotMethod string
+		gotPath   string
+		gotQuery  string
+		gotBody   []byte
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.EscapedPath()
+		gotQuery = r.URL.Query().Get("directory")
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = rw.Write([]byte("true"))
+	}))
+	t.Cleanup(server.Close)
+
+	err := abortOCSSession(context.Background(), "ses/contract", server.URL, "/tmp/project with space", server.Client())
+	require.NoError(t, err)
+
+	require.Equal(t, http.MethodPost, gotMethod)
+	require.Equal(t, "/session/ses%2Fcontract/abort", gotPath)
+	require.Equal(t, "/tmp/project with space", gotQuery)
+	require.Empty(t, gotBody)
+}
+
+func TestAbortOCSSession_RequestContract_NoDirectoryWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = rw.Write([]byte("true"))
+	}))
+	t.Cleanup(server.Close)
+
+	err := abortOCSSession(context.Background(), "ses/contract", server.URL, "", server.Client())
+	require.NoError(t, err)
+	require.Empty(t, gotQuery, "directory query param must be omitted when projectDir is empty")
+}
+
+func TestAbortOCSSession_ResponseSemantics(t *testing.T) {
+	t.Parallel()
+
+	bigBody := strings.Repeat("a", 4096) + strings.Repeat("b", 4096)
+
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		handler     http.HandlerFunc // overrides status/body when set
+		callTimeout time.Duration
+		wantErr     bool
+		errContains []string
+		errNotIn    []string
+		errIs       []error
+	}{
+		{name: "200 true is success", status: http.StatusOK, body: "true"},
+		{name: "200 false is success (no active turn)", status: http.StatusOK, body: "false"},
+		{name: "200 malformed body is stable decode error", status: http.StatusOK, body: "not-json", wantErr: true, errContains: []string{"opencodeserver: abort session"}},
+		{
+			name:        "500 non-200 error reads at most 4096 body bytes",
+			status:      http.StatusInternalServerError,
+			body:        bigBody,
+			wantErr:     true,
+			errContains: []string{"opencodeserver: abort session", strings.Repeat("a", 4096)},
+			errNotIn:    []string{"bbb"}, // tail marker; "abort"/"body" contain no triple-b
+		},
+		{
+			name: "server holds request until ctx done → caller deadline",
+			handler: func(rw http.ResponseWriter, r *http.Request) {
+				<-r.Context().Done()
+			},
+			callTimeout: 50 * time.Millisecond,
+			wantErr:     true,
+			errIs:       []error{context.DeadlineExceeded, context.Canceled},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				if tt.handler != nil {
+					tt.handler(rw, r)
+					return
+				}
+				rw.WriteHeader(tt.status)
+				_, _ = rw.Write([]byte(tt.body))
+			}))
+			t.Cleanup(server.Close)
+
+			ctx := context.Background()
+			if tt.callTimeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tt.callTimeout)
+				t.Cleanup(cancel)
+			}
+
+			err := abortOCSSession(ctx, "ses/contract", server.URL, "", server.Client())
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, s := range tt.errContains {
+				require.ErrorContains(t, err, s)
+			}
+			for _, s := range tt.errNotIn {
+				require.NotContains(t, err.Error(), s)
+			}
+			if len(tt.errIs) > 0 {
+				matched := false
+				for _, want := range tt.errIs {
+					if errors.Is(err, want) {
+						matched = true
+						break
+					}
+				}
+				require.True(t, matched, "error should wrap one of %v, got: %v", tt.errIs, err)
+			}
+		})
+	}
+}
+
+func TestAbortOCSSession_ArgumentValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		sessionID string
+		httpAddr  string
+		client    *http.Client
+	}{
+		{name: "empty sessionID", sessionID: "", httpAddr: "http://localhost:1", client: &http.Client{}},
+		{name: "empty httpAddr", sessionID: "s1", httpAddr: "", client: &http.Client{}},
+		{name: "nil client", sessionID: "s1", httpAddr: "http://localhost:1", client: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := abortOCSSession(context.Background(), tt.sessionID, tt.httpAddr, "", tt.client)
+			require.ErrorContains(t, err, "opencodeserver: abort session")
+		})
+	}
 }

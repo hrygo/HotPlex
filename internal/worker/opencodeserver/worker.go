@@ -1045,6 +1045,46 @@ func deleteOCSSession(ctx context.Context, sessionID, httpAddr string, client *h
 	return nil
 }
 
+// abortOCSSession sends the OCS official POST /session/{id}/abort request and
+// reports whether an active turn was aborted. OCS responds 200 with a JSON
+// boolean: both true (aborted) and false (no active turn) are success for the
+// caller's idempotent-abort intent. Non-200 responses only surface the first
+// 4096 body bytes so a misbehaving server cannot flood logs with a full body.
+func abortOCSSession(ctx context.Context, sessionID, httpAddr, projectDir string, client *http.Client) error {
+	if sessionID == "" || httpAddr == "" || client == nil {
+		return fmt.Errorf("opencodeserver: abort session: invalid arguments")
+	}
+
+	u := httpAddr + "/session/" + url.PathEscape(sessionID) + "/abort"
+	if projectDir != "" {
+		q := url.Values{}
+		q.Set("directory", projectDir)
+		u += "?" + q.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: abort session: build request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: abort session %s: %w", sessionID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("opencodeserver: abort session %s: status %d, body: %s", sessionID, resp.StatusCode, string(body))
+	}
+
+	var aborted bool
+	if err := json.NewDecoder(resp.Body).Decode(&aborted); err != nil {
+		return fmt.Errorf("opencodeserver: abort session: decode response: %w", err)
+	}
+	return nil
+}
+
 func (w *Worker) httpPost(ctx context.Context, path string, payload any) error {
 	w.Mu.Lock()
 	addr := w.httpAddr
