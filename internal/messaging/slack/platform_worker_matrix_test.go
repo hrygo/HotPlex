@@ -246,10 +246,13 @@ func (r *recordingConn) WriteCtx(_ context.Context, env *events.Envelope) error 
 			// stays observable exactly once — the platform's terminal handling
 			// still completes the turn. terminalFaults makes the fire observable
 			// (the runner's single-terminal/no-replay assertions cannot tell an
-			// armed-and-fired fault from an inert arm).
+			// armed-and-fired fault from an inert arm). The fault is reported as
+			// body-presented: the hub must keep this writer registered, otherwise
+			// the same-turn delivered ack (sent after the terminal) finds an
+			// empty writer snapshot and is silently dropped (C07 driver timeout).
 			r.terminalFaults.Add(1)
 			r.record(env)
-			return *f
+			return &terminalPresentedError{cause: *f}
 		}
 	}
 	r.record(env)
@@ -271,6 +274,17 @@ func (r *recordingConn) Events() []*events.Envelope {
 }
 
 func (r *recordingConn) Close() error { return nil }
+
+// terminalPresentedError wraps a C07 armed fault as body-presented (the hub's
+// contentPresentedError contract): the terminal was recorded by this conn
+// before the fault fired, so the hub must NOT detach the writer. Detaching
+// would drop the same-turn delivered ack, which the hub sends after the
+// terminal via the writer snapshot.
+type terminalPresentedError struct{ cause error }
+
+func (e *terminalPresentedError) Error() string       { return e.cause.Error() }
+func (e *terminalPresentedError) Unwrap() error       { return e.cause }
+func (e *terminalPresentedError) BodyPresented() bool { return true }
 
 // ─── slackContractDriver ──────────────────────────────────────────────────────
 
