@@ -27,6 +27,7 @@ type forwardOpts struct {
 	workDir     string
 	retryDepth  int
 	lastInput   string
+	lastReplay  worker.InputReplay
 	workerRunID string
 }
 
@@ -296,6 +297,7 @@ type fallbackParams struct {
 	retryDepth    int
 	workerType    worker.WorkerType
 	lastInput     string
+	lastReplay    worker.InputReplay
 	crashedWorker worker.Worker
 	sessPlatform  string
 	sessOwner     string
@@ -330,7 +332,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 
 	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
 	if p.retryDepth == 0 {
-		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1, lastInput: p.lastInput}); err != nil {
+		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1, lastInput: p.lastInput, lastReplay: p.lastReplay}); err != nil {
 			if errors.Is(err, worker.ErrResumeCheckFailed) {
 				b.log.Warn("bridge: resume verification failed during crash recovery; preserving session context",
 					"session_id", p.sessionID, "worker_type", p.workerType, "err", err)
@@ -407,9 +409,13 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		Generation: p.accGeneration,
 		TurnNum:    0, // fresh start resets turn count
 	})
-	if p.lastInput != "" {
-		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(p.lastInput))
-		if err := w.Input(context.Background(), p.lastInput, nil); err != nil {
+	if p.lastInput != "" || p.lastReplay.Content != "" || p.lastReplay.Skill != nil {
+		replay := p.lastReplay
+		if replay.Content == "" && replay.Skill == nil {
+			replay.Content = p.lastInput
+		}
+		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(replay.Content), "skill", replay.Skill != nil)
+		if err := deliverInputReplay(context.Background(), w, replay); err != nil {
 			b.log.Warn("bridge: input re-delivery failed", "session_id", p.sessionID, "err", err)
 		}
 	}

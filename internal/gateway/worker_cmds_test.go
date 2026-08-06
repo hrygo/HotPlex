@@ -81,4 +81,5 @@ func TestHandleSetPermMode_ForwardsCanonicalModeFromBothEntryPoints(t *testing.T
 func TestClassifyWorkerError_PermissionModeUnsupported(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, events.ErrCodeNotSupported, classifyWorkerError(worker.ErrNotImplemented))
+	require.Equal(t, events.ErrCodeNotSupported, classifyWorkerError(worker.ErrSkillNotSupported))
 }

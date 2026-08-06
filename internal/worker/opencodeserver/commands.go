@@ -35,6 +35,20 @@ type ServerCommander struct {
 	permissionCeilingAllowedTools []string
 }
 
+// InvokeSkill implements the OpenCode Server native slash-command endpoint.
+// The server resolves and loads the Skill; HotPlex only sends its canonical
+// name and user arguments.
+func (c *ServerCommander) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	body := map[string]any{
+		"command":   invocation.Name,
+		"arguments": invocation.Args,
+	}
+	if err := c.doPost(ctx, "/session/"+url.PathEscape(c.getSessionID())+"/command", body, nil); err != nil {
+		return fmt.Errorf("opencode skill %q: %w", invocation.Name, err)
+	}
+	return nil
+}
+
 // ModelRef stores model selection for subsequent message requests.
 type ModelRef struct {
 	ProviderID string
@@ -457,6 +471,7 @@ func (c *ServerCommander) lastAssistantMessageID(ctx context.Context) string {
 var (
 	_ worker.ControlRequester = (*ServerCommander)(nil)
 	_ worker.WorkerCommander  = (*ServerCommander)(nil)
+	_ worker.SkillInvoker     = (*ServerCommander)(nil)
 )
 
 type openCodeMessage struct {

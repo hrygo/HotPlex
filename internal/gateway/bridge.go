@@ -601,11 +601,9 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 	// Capture pending input before terminating so it can be re-delivered to the new worker.
 	// This prevents input loss when ResumeSession is called concurrently (e.g., a
 	// second user message arrives while attemptResumeFallback is starting a fresh worker).
-	var pendingInput string
+	var pendingReplay worker.InputReplay
 	if existing := b.sm.GetWorker(id); existing != nil {
-		if ir, ok := existing.(worker.InputRecoverer); ok {
-			pendingInput = ir.LastInput()
-		}
+		pendingReplay = snapshotInputReplay(existing.Conn())
 		_ = existing.Terminate(context.Background())
 		b.sm.DetachWorker(id)
 		b.clearWorkerRun(id, existing, "")
@@ -689,10 +687,11 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 	// This covers the case where a concurrent message triggered ResumeSession while
 	// attemptResumeFallback was starting a fresh worker — the fresh worker's buffered
 	// input would otherwise be lost when the old worker is terminated here.
-	if pendingInput != "" {
+	if pendingReplay.Content != "" || pendingReplay.Skill != nil {
 		b.log.Info("bridge: re-delivering pending input to resumed worker",
-			"session_id", id, "content_len", len(pendingInput))
-		if err := w.Input(ctx, pendingInput, nil); err != nil {
+			"session_id", id, "content_len", len(pendingReplay.Content),
+			"skill", pendingReplay.Skill != nil)
+		if err := deliverInputReplay(ctx, w, pendingReplay); err != nil {
 			b.log.Warn("bridge: pending input re-delivery failed",
 				"session_id", id, "err", err)
 		}
@@ -1177,6 +1176,20 @@ func sanitizeLastInput(input string) string {
 		return ""
 	}
 	return strings.Join(filtered, "\n")
+}
+
+func deliverInputReplay(ctx context.Context, w worker.Worker, replay worker.InputReplay) error {
+	if replay.Skill == nil {
+		if replay.Content == "" {
+			return nil
+		}
+		return w.Input(ctx, replay.Content, nil)
+	}
+	invoker, ok := w.(worker.SkillInvoker)
+	if !ok {
+		return fmt.Errorf("%w: worker %s cannot replay native Skill %q", worker.ErrSkillNotSupported, w.Type(), replay.Skill.Name)
+	}
+	return invoker.InvokeSkill(ctx, *replay.Skill)
 }
 
 // firstNonEmpty returns the first non-empty string from the given values.

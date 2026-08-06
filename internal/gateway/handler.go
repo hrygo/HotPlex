@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -385,8 +386,35 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		}
 		return err
 	}
+	if invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content); err != nil {
+		if errors.Is(err, skills.ErrAmbiguousInvocation) {
+			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
+		}
+		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skill resolution failed: %v", err)
+	} else if matched {
+		return h.deliverSkillToWorker(ctx, env, content, invocation)
+	}
 
 	return h.deliverToWorker(ctx, env, content)
+}
+
+func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content string) (worker.SkillInvocation, bool, error) {
+	if h.skillsLocator == nil {
+		return worker.SkillInvocation{}, false, nil
+	}
+	si, err := h.sm.Get(ctx, sessionID)
+	if err != nil {
+		return worker.SkillInvocation{}, false, err
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return worker.SkillInvocation{}, false, err
+	}
+	catalog, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
+	if err != nil {
+		return worker.SkillInvocation{}, false, err
+	}
+	return resolveSkillInvocation(content, catalog)
 }
 
 func (h *Handler) cancelRetryIfNeeded(sessionID string) {
@@ -591,7 +619,7 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 		}
 	}()
 	deliverAsNewTurn := func() (bool, error) {
-		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, false)
+		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, false)
 		if errors.Is(err, execution.ErrSessionBusy) {
 			return false, nil
 		}
@@ -701,19 +729,33 @@ func (h *Handler) notifySupplement(ctx context.Context, sessionID, mode string) 
 func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error {
 	data, _ := env.Event.Data.(map[string]any)
 	content, _ := data["content"].(string)
+	invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content)
+	if err != nil {
+		if errors.Is(err, skills.ErrAmbiguousInvocation) {
+			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
+		}
+		return err
+	}
+	if matched {
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, false)
+	}
 	// The Bridge already holds the session replay read fence. Returning a raw
 	// busy result lets replayPending requeue without recursively entering the
 	// supplement handler and acquiring the same RWMutex behind a queued writer.
-	return h.deliverToWorkerWithBusyHandling(ctx, env, content, false)
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, false)
 }
 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
-	return h.deliverToWorkerWithBusyHandling(ctx, env, content, true)
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, true)
 }
 
-func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, handleBusy bool) error {
+func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope, content string, invocation worker.SkillInvocation) error {
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, true)
+}
+
+func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.SkillInvocation, handleBusy bool) error {
 	inputReceivedAt := time.Now()
 	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
@@ -935,20 +977,67 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	}
 	h.stopFence.BeginTurn(env.SessionID, workerRunID, execID)
 
-	if err := w.Input(ctx, content, nil); err != nil {
+	var inputErr error
+	if invocation != nil {
+		resolvedInvocation := *invocation
+		resolvedInvocation.Mode = skillInvocationMode(w.Type())
+		invocation = &resolvedInvocation
+		if provider, ok := w.(worker.SkillCatalogProvider); ok {
+			descriptors, catalogErr := provider.ListInvokableSkills(ctx, si.WorkDir)
+			if catalogErr != nil {
+				if h.bridge != nil {
+					h.bridge.ClearTurnStart(env.SessionID)
+				}
+				finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError,
+					"worker %s Skill catalog failed: %v", w.Type(), catalogErr)
+			}
+			advertised := false
+			for _, descriptor := range descriptors {
+				if descriptor.Name == invocation.Name {
+					advertised = true
+					break
+				}
+			}
+			if !advertised {
+				if h.bridge != nil {
+					h.bridge.ClearTurnStart(env.SessionID)
+				}
+				finishOutcome(execution.StatusFailed, events.ErrCodeNotSupported)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+					"worker %s does not advertise Skill %q", w.Type(), invocation.Name)
+			}
+		}
+		invoker, ok := w.(worker.SkillInvoker)
+		if !ok {
+			if h.bridge != nil {
+				h.bridge.ClearTurnStart(env.SessionID)
+			}
+			finishOutcome(execution.StatusFailed, events.ErrCodeNotSupported)
+			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+				"worker %s does not support native Skill invocation", w.Type())
+		}
+		inputErr = invoker.InvokeSkill(ctx, *invocation)
+	} else {
+		inputErr = w.Input(ctx, content, nil)
+	}
+	if inputErr != nil {
 		var we *worker.WorkerError
-		if errors.As(err, &we) && we.Kind == worker.ErrKindTimeout {
+		if errors.As(inputErr, &we) && we.Kind == worker.ErrKindTimeout {
 			h.log.Info("gateway: worker input delivery timed out (worker still processing)", "session_id", env.SessionID)
 			finishOutcome(execution.StatusUnknown, events.ErrCodeExecutionTimeout)
 			return nil
 		}
-		h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
+		h.log.Warn("gateway: worker input", "err", inputErr, "session_id", env.SessionID)
 		// Input never reached the worker: clear the turn start so a later Done
 		// (or crash-cleanup) cannot bill idle time to a turn that never ran.
 		if h.bridge != nil {
 			h.bridge.ClearTurnStart(env.SessionID)
 		}
-		code := classifyWorkerError(err)
+		code := classifyWorkerError(inputErr)
 		finishOutcome(execution.StatusFailed, code)
 		// ErrKindUnavailable (e.g. ACP session lost) means the worker's
 		// internal session is dead but the process may still be alive.
@@ -958,7 +1047,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			h.bridge.cleanupCrashedWorker(env.SessionID, w)
 		}
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
-		return h.sendErrorf(ctx, env, code, "worker input failed: %v", err)
+		return h.sendErrorf(ctx, env, code, "worker input failed: %v", inputErr)
 	}
 	if h.bridge != nil && execRecord != nil {
 		h.bridge.markTurnWorkerAccepted(env.SessionID, execRecord.ExecutionID)
@@ -982,6 +1071,21 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		h.bridge.CaptureInbound(ctx, env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
 	}
 	return nil
+}
+
+func skillInvocationMode(workerType worker.WorkerType) worker.SkillInvocationMode {
+	switch workerType {
+	case worker.TypeClaudeCode:
+		return worker.SkillModeTextCommand
+	case worker.TypeOpenCodeSrv:
+		return worker.SkillModeRPCCommand
+	case worker.TypeCodexCLI:
+		return worker.SkillModeStructuredSkill
+	case worker.TypeACP:
+		return worker.SkillModeAdvertisedCommand
+	default:
+		return ""
+	}
 }
 
 func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope) (*execution.Record, bool, error) {

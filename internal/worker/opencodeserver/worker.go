@@ -61,6 +61,7 @@ var (
 	_ worker.SessionConn         = (*conn)(nil)
 	_ worker.ControlRequester    = (*Worker)(nil)
 	_ worker.WorkerCommander     = (*Worker)(nil)
+	_ worker.SkillInvoker        = (*Worker)(nil)
 	_ worker.SystemPromptUpdater = (*Worker)(nil)
 )
 
@@ -309,6 +310,33 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return fmt.Errorf("opencodeserver: send input: %w", err)
 	}
 
+	w.SetLastIO(time.Now())
+	return nil
+}
+
+// InvokeSkill sends a resolved Skill through OpenCode's native command API.
+// It intentionally does not route through conn.Send, whose contract is the
+// ordinary /message input path.
+func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	w.Mu.Lock()
+	commander := w.cmd
+	conn := w.httpConn
+	w.Mu.Unlock()
+	if commander == nil {
+		return fmt.Errorf("opencodeserver: worker not started")
+	}
+
+	wasStopped := w.IsStopped()
+	w.BeginTurn()
+	if conn != nil {
+		conn.setSkillReplay(invocation)
+	}
+	if err := commander.InvokeSkill(ctx, invocation); err != nil {
+		if wasStopped {
+			w.MarkStopped()
+		}
+		return err
+	}
 	w.SetLastIO(time.Now())
 	return nil
 }
@@ -1249,10 +1277,11 @@ type conn struct {
 	jsonSchema   map[string]any // parsed from SessionInfo.JSONSchema
 	variant      string         // reasoning effort variant (e.g. "high", "low")
 
-	mu        sync.Mutex
-	closed    bool
-	closeOnce sync.Once
-	lastInput string // cached for crash recovery re-delivery
+	mu         sync.Mutex
+	closed     bool
+	closeOnce  sync.Once
+	lastInput  string // cached for crash recovery re-delivery
+	lastReplay worker.InputReplay
 }
 
 type ocsModelRef struct {
@@ -1260,7 +1289,10 @@ type ocsModelRef struct {
 	ModelID    string `json:"modelID"`
 }
 
-var _ worker.InputRecoverer = (*conn)(nil)
+var (
+	_ worker.InputRecoverer       = (*conn)(nil)
+	_ worker.InputReplayRecoverer = (*conn)(nil)
+)
 
 func (c *conn) LastInput() string {
 	if c == nil {
@@ -1269,6 +1301,29 @@ func (c *conn) LastInput() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastInput
+}
+
+func (c *conn) LastInputReplay() worker.InputReplay {
+	if c == nil {
+		return worker.InputReplay{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	replay := c.lastReplay
+	if replay.Skill != nil {
+		invocation := *replay.Skill
+		replay.Skill = &invocation
+	}
+	return replay
+}
+
+func (c *conn) setSkillReplay(invocation worker.SkillInvocation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastReplay = worker.InputReplay{Content: "/" + invocation.Name, Skill: &invocation}
+	if invocation.Args != "" {
+		c.lastReplay.Content += " " + invocation.Args
+	}
 }
 
 func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
@@ -1295,6 +1350,7 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	if content != "" {
 		c.mu.Lock()
 		c.lastInput = content
+		c.lastReplay = worker.InputReplay{Content: content}
 		c.mu.Unlock()
 	}
 

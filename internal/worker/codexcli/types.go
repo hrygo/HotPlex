@@ -246,7 +246,9 @@ type TurnStartParams struct {
 
 type TurnInputItem struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
+	Name string `json:"name,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 type ThreadUnsubscribeParams struct {

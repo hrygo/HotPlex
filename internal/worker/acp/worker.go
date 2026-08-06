@@ -33,6 +33,8 @@ var (
 	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
 	_ worker.WorkerCommander                  = (*Worker)(nil)
 	_ worker.ControlRequester                 = (*Worker)(nil)
+	_ worker.SkillInvoker                     = (*Worker)(nil)
+	_ worker.SkillCatalogProvider             = (*Worker)(nil)
 	_ worker.PermissionCeilingReporter        = (*Worker)(nil)
 	_ base.MetadataHandler                    = (*Worker)(nil)
 	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
@@ -181,6 +183,11 @@ type Worker struct {
 	// pendingRequests stores non-permission server-initiated requests (questions, elicitations)
 	// for forwarding client responses back to the agent as JSON-RPC responses.
 	pendingRequests sync.Map // requestID (string) → *JSONRPCRequest
+
+	// availableCommands is the ACP agent's session-scoped command catalog.
+	// User Skills are invokable only when the agent advertises them here.
+	skillMu           sync.RWMutex
+	availableCommands map[string]worker.SkillDescriptor
 
 	// initResult caches the ACP initialize handshake result for agent discovery and capability checks.
 	initResult *InitializeResult
@@ -883,6 +890,9 @@ func (w *Worker) resetSession(ctx context.Context) error {
 	w.mapper.Reset()
 	w.systemPromptInjected.Store(false)
 	w.jsonSchemaInjected.Store(false)
+	w.skillMu.Lock()
+	clear(w.availableCommands)
+	w.skillMu.Unlock()
 	// Note: systemPrompt and jsonSchema values are intentionally preserved across reset (set at Start time from session config).
 	// Clear stale pending entries from the old session.
 	w.pendingPerm.Range(func(key, _ any) bool {
@@ -1083,6 +1093,7 @@ func (w *Worker) processNotification(ctx context.Context, notif *JSONRPCNotifica
 		tw.Log("←", notif)
 	}
 	w.SetLastIO(time.Now())
+	w.updateAvailableCommands(notif.Params)
 	envelopes := w.mapper.MapNotification(ctx, notif)
 	for _, env := range envelopes {
 		conn.TrySend(env)
