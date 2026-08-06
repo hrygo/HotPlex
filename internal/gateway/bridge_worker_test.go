@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -216,4 +217,63 @@ func TestResolveWorkspacePermissionMode(t *testing.T) {
 		require.Equal(t, 2, strings.Count(buf.String(), "level=WARN"),
 			"expected warn re-armed after success, got: %s", buf.String())
 	})
+}
+
+// replayInvokerWorker records InvokeSkill calls; mockWorkerForHandler alone
+// does NOT implement worker.SkillInvoker.
+type replayInvokerWorker struct {
+	mockWorkerForHandler
+	invoked worker.SkillInvocation
+}
+
+func (w *replayInvokerWorker) InvokeSkill(_ context.Context, invocation worker.SkillInvocation) error {
+	w.invoked = invocation
+	return nil
+}
+
+func TestDeliverInputReplayUsesNativeInvokerWhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	b := &Bridge{log: testLogger(t)}
+	w := &replayInvokerWorker{}
+	replay := worker.InputReplay{
+		Content: "/oracle-dba 10.102.78.1",
+		Skill:   &worker.SkillInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
+	}
+
+	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
+	require.Equal(t, *replay.Skill, w.invoked)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestDeliverInputReplayFallsBackToTextWithoutSkillInvoker(t *testing.T) {
+	t.Parallel()
+
+	// Regression: a replacement worker without SkillInvoker (e.g. worker_type
+	// changed during recovery) used to drop the pending Skill input entirely.
+	// It must degrade to the reconstructed slash text instead.
+	b := &Bridge{log: testLogger(t)}
+	w := new(mockWorkerForHandler)
+	w.On("Input", mock.Anything, "/oracle-dba 10.102.78.1", mock.Anything).Return(nil).Once()
+	replay := worker.InputReplay{
+		Content: "/oracle-dba 10.102.78.1",
+		Skill:   &worker.SkillInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
+	}
+
+	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
+	w.AssertExpectations(t)
+}
+
+func TestDeliverInputReplayErrorsWhenNoInvokerAndNoText(t *testing.T) {
+	t.Parallel()
+
+	b := &Bridge{log: testLogger(t)}
+	w := new(mockWorkerForHandler)
+	replay := worker.InputReplay{
+		Skill: &worker.SkillInvocation{Name: "oracle-dba"},
+	}
+
+	err := b.deliverInputReplay(t.Context(), w, replay)
+	require.ErrorIs(t, err, worker.ErrSkillNotSupported)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
 }

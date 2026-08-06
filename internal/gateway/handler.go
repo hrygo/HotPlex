@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,10 @@ type Handler struct {
 	repairer        *execution.Repairer
 	ownerInstanceID string
 	stopFence       turnStopFence
+
+	homeDirOnce sync.Once
+	homeDir     string
+	homeDirErr  error
 }
 
 // SkillsLocator discovers skills from the filesystem.
@@ -402,11 +407,21 @@ func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content
 	if h.skillsLocator == nil {
 		return worker.SkillInvocation{}, false, nil
 	}
+	// Only slash-prefixed input can be a Skill invocation. Gating here keeps
+	// the ordinary-message hot path free of session lookups and filesystem
+	// catalog scans.
+	if !strings.HasPrefix(strings.TrimSpace(content), "/") {
+		return worker.SkillInvocation{}, false, nil
+	}
 	si, err := h.sm.Get(ctx, sessionID)
 	if err != nil {
-		return worker.SkillInvocation{}, false, err
+		// Fall through to the normal delivery path, which re-checks the
+		// session and reports the canonical session-not-found error. Skill
+		// resolution must not mask a concurrent delete/GC with a generic
+		// internal error here.
+		return worker.SkillInvocation{}, false, nil
 	}
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := h.userHomeDir()
 	if err != nil {
 		return worker.SkillInvocation{}, false, err
 	}
@@ -415,6 +430,16 @@ func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content
 		return worker.SkillInvocation{}, false, err
 	}
 	return resolveSkillInvocation(content, catalog)
+}
+
+// userHomeDir caches os.UserHomeDir for the process lifetime: it is consulted
+// on every slash-prefixed input and /skills listing, and the home directory
+// does not change mid-process.
+func (h *Handler) userHomeDir() (string, error) {
+	h.homeDirOnce.Do(func() {
+		h.homeDir, h.homeDirErr = os.UserHomeDir()
+	})
+	return h.homeDir, h.homeDirErr
 }
 
 func (h *Handler) cancelRetryIfNeeded(sessionID string) {
@@ -570,14 +595,23 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 // the fallback pending buffer. Falls back to the legacy SESSION_BUSY error
 // only when bridge buffering is unavailable.
 //
+// invocation carries the resolved native Skill invocation when the busy input
+// is a Skill; nil for ordinary text. Skill inputs never take the mid-turn
+// text-injection path — injecting the raw slash text would silently degrade
+// the native invocation. They are delivered as a fresh turn when the gate is
+// already released, or buffered otherwise; both paths preserve Skill semantics
+// (the buffer path stashes the invocation for DeliverReplay).
+//
 // Decision order:
-//  1. Worker implements MidTurnInjector AND !IsStopped → InjectMidTurn.
+//  1. invocation != nil → deliver as a new turn if the gate is released,
+//     otherwise fall through to the buffer.
+//  2. Worker implements MidTurnInjector AND !IsStopped → InjectMidTurn.
 //     Success → metric + capture + "injected" notify + return nil.
 //     Failure → re-check the gate; deliver as a new turn if released, otherwise
 //     fall through to the buffer.
-//  2. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
-//  3. Otherwise → legacy sendErrorf SESSION_BUSY.
-func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string) error {
+//  3. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
+//  4. Otherwise → legacy sendErrorf SESSION_BUSY.
+func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string, invocation *worker.SkillInvocation) error {
 	if h.bridge == nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
 	}
@@ -610,7 +644,7 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 	case supplementNormal:
 		unlockSession()
 		sessionLocked = false
-		return h.deliverToWorker(ctx, env, content)
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, invocation, true)
 	}
 	committed := false
 	defer func() {
@@ -619,7 +653,7 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 		}
 	}()
 	deliverAsNewTurn := func() (bool, error) {
-		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, false)
+		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, invocation, false)
 		if errors.Is(err, execution.ErrSessionBusy) {
 			return false, nil
 		}
@@ -629,7 +663,16 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 		}
 		return true, err
 	}
-	if w := h.sm.GetWorker(env.SessionID); w != nil {
+	if invocation != nil {
+		// A resolved Skill must keep its native semantics: mid-turn text
+		// injection would degrade it to an ordinary prompt. Deliver it as a
+		// fresh turn when the gate was released between busy-detection and
+		// now; otherwise fall through to the pending buffer, whose replay
+		// re-dispatches through the Skill path (stashInvocation below).
+		if handled, deliverErr := deliverAsNewTurn(); handled {
+			return deliverErr
+		}
+	} else if w := h.sm.GetWorker(env.SessionID); w != nil {
 		if inj, ok := w.(worker.MidTurnInjector); ok && !w.IsStopped() {
 			// Re-check the active gate immediately before injecting. A race
 			// window exists between the SESSION_BUSY detection (in
@@ -672,6 +715,9 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 				}
 			}
 		}
+	}
+	if invocation != nil {
+		stashInvocation(env, *invocation, content)
 	}
 	if !h.bridge.BufferPending(env.SessionID, env, content) {
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "supplement buffer is full")
@@ -736,6 +782,17 @@ func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error
 		}
 		return err
 	}
+	if !matched {
+		// The Skill may have been removed or renamed from the filesystem
+		// catalog while the input was buffered. Fall back to the invocation
+		// resolved at buffer time instead of silently degrading the replay to
+		// raw slash text (which would leak the command to the model). The
+		// delivery path still validates the Worker's authoritative catalog
+		// and fails loudly when the Skill is no longer supported.
+		if stashed, ok := invocationFromMetadata(env.Metadata, content); ok {
+			invocation, matched = stashed, true
+		}
+	}
 	if matched {
 		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, false)
 	}
@@ -778,7 +835,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			if !handleBusy {
 				return execution.ErrSessionBusy
 			}
-			return h.handleSupplementOnBusy(ctx, env, content)
+			return h.handleSupplementOnBusy(ctx, env, content, invocation)
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
 		// A genuine new input failed to durably register; cancel any in-flight
@@ -997,6 +1054,14 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			for _, descriptor := range descriptors {
 				if descriptor.Name == invocation.Name {
 					advertised = true
+					// The Worker's catalog is authoritative for resolution.
+					// Prefer its path over the HotPlex filesystem scan, which
+					// may diverge (symlink resolution, /private/var aliases,
+					// different scan roots) and leave the native Skill item
+					// pointing at a path the Worker cannot resolve.
+					if descriptor.Path != "" {
+						resolvedInvocation.Path = descriptor.Path
+					}
 					break
 				}
 			}

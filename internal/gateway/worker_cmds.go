@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -243,7 +242,7 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := h.userHomeDir()
 	if err != nil {
 		h.log.Warn("skills list: failed to resolve home directory, global skills may be incomplete", "err", err)
 	}

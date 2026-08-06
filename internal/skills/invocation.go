@@ -26,6 +26,19 @@ func ParseInvocation(content string, catalog []Skill) (Invocation, bool, error) 
 	}
 
 	input := content[1:]
+
+	// Count name occurrences up front. A duplicated canonical name makes a
+	// winning match ambiguous, but the duplicate check must run AFTER the
+	// longest-match scan: an early return on the first duplicate would shadow
+	// a longer unique name (e.g. catalog {build, build, build-tool} must
+	// resolve "/build-tool x" to build-tool, not fail on "build").
+	nameCounts := make(map[string]int, len(catalog))
+	for _, skill := range catalog {
+		if skill.Name != "" {
+			nameCounts[skill.Name]++
+		}
+	}
+
 	var best Invocation
 	bestLen := -1
 	seenNames := make(map[string]struct{}, len(catalog))
@@ -35,9 +48,6 @@ func ParseInvocation(content string, catalog []Skill) (Invocation, bool, error) 
 			continue
 		}
 		if _, seen := seenNames[name]; seen {
-			if strings.HasPrefix(input, name) {
-				return Invocation{Name: name, Args: strings.TrimSpace(input[len(name):])}, true, ErrAmbiguousInvocation
-			}
 			continue
 		}
 		seenNames[name] = struct{}{}
@@ -65,6 +75,9 @@ func ParseInvocation(content string, catalog []Skill) (Invocation, bool, error) 
 
 	if bestLen < 0 {
 		return Invocation{}, false, nil
+	}
+	if nameCounts[best.Name] > 1 {
+		return best, true, ErrAmbiguousInvocation
 	}
 	return best, true, nil
 }

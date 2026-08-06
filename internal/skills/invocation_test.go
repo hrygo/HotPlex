@@ -80,3 +80,60 @@ func TestParseInvocationRejectsDuplicateNames(t *testing.T) {
 		t.Fatalf("ParseInvocation() error = %v, want ErrAmbiguousInvocation", err)
 	}
 }
+
+func TestParseInvocationDuplicateDoesNotShadowLongerUniqueMatch(t *testing.T) {
+	t.Parallel()
+
+	// Regression: the duplicate-name check used to short-circuit before the
+	// longest-match scan, so the duplicated short name "build" reported a
+	// spurious ambiguity for "/build-tool x" instead of matching build-tool.
+	catalog := []Skill{
+		{Name: "build"},
+		{Name: "build"},
+		{Name: "build-tool"},
+	}
+	got, matched, err := ParseInvocation("/build-tool x", catalog)
+	if err != nil {
+		t.Fatalf("ParseInvocation() error = %v, want nil", err)
+	}
+	if !matched {
+		t.Fatal("ParseInvocation() matched = false, want true")
+	}
+	want := Invocation{Name: "build-tool", Args: "x"}
+	if got != want {
+		t.Fatalf("ParseInvocation() = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseInvocationAmbiguityFollowsLongestMatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		catalog []Skill
+		content string
+	}{
+		{
+			name:    "duplicated long name stays ambiguous",
+			catalog: []Skill{{Name: "build"}, {Name: "build-tool"}, {Name: "build-tool"}},
+			content: "/build-tool x",
+		},
+		{
+			name:    "duplicated compact-only match stays ambiguous",
+			catalog: []Skill{{Name: "build"}, {Name: "build"}},
+			content: "/build-tool x",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, matched, err := ParseInvocation(tt.content, tt.catalog)
+			if !matched {
+				t.Fatal("ParseInvocation() matched = false, want true")
+			}
+			if !errors.Is(err, ErrAmbiguousInvocation) {
+				t.Fatalf("ParseInvocation() error = %v, want ErrAmbiguousInvocation", err)
+			}
+		})
+	}
+}

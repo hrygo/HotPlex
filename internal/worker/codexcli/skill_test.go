@@ -82,6 +82,68 @@ func TestAppConnSkillReplayRetainsNativeInvocation(t *testing.T) {
 	require.Equal(t, &want, got.Skill)
 }
 
+func TestAppConnTextReplayReplacesSkillReplay(t *testing.T) {
+	t.Parallel()
+
+	conn := &appConn{}
+	conn.setSkillReplay(worker.SkillInvocation{
+		Name: "oracle-dba",
+		Args: "10.102.78.1",
+		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	})
+	conn.setTextReplay("thanks")
+
+	got := conn.LastInputReplay()
+	require.Equal(t, "thanks", got.Content)
+	require.Nil(t, got.Skill, "ordinary text input must clear the native Skill replay")
+}
+
+func TestAppServerWorkerInputRefreshesReplayAfterSkill(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	var buf strings.Builder
+	mgr.stdin = struct {
+		io.Writer
+		io.Closer
+	}{
+		Writer: &buf,
+		Closer: io.NopCloser(nil),
+	}
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+
+	conn := &appConn{}
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thr-replay",
+		conn:       conn,
+	}
+
+	// A Skill invocation registers the native replay...
+	err := w.InvokeSkill(t.Context(), worker.SkillInvocation{
+		Name: "oracle-dba",
+		Args: "10.102.78.1",
+		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	})
+	require.Error(t, err) // turn/start times out against the fake stdin
+	require.NotNil(t, conn.LastInputReplay().Skill)
+
+	// ...and an ordinary text input must replace it, so crash recovery never
+	// re-invokes the stale Skill after the user moved on to plain text.
+	err = w.Input(t.Context(), "thanks", nil)
+	require.Error(t, err) // turn/start times out against the fake stdin
+	got := conn.LastInputReplay()
+	require.Equal(t, "thanks", got.Content)
+	require.Nil(t, got.Skill)
+}
+
 func TestAppServerWorkerListInvokableSkillsParsesNativeResponse(t *testing.T) {
 	t.Parallel()
 

@@ -175,6 +175,18 @@ func (c *appConn) setSkillReplay(invocation worker.SkillInvocation) {
 	}
 	c.mu.Unlock()
 }
+
+// setTextReplay records an ordinary text input as the crash-recovery replay,
+// replacing any earlier native Skill invocation. Without this update a crash
+// after a plain-text turn would re-invoke the previous, now stale Skill.
+func (c *appConn) setTextReplay(content string) {
+	if content == "" {
+		return
+	}
+	c.mu.Lock()
+	c.lastReplay = worker.InputReplay{Content: content}
+	c.mu.Unlock()
+}
 func (c *appConn) Recv() <-chan *events.Envelope { return c.recvCh }
 func (c *appConn) TrySend(env *events.Envelope) bool {
 	select {
@@ -262,6 +274,16 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 	if handled {
 		w.SetLastIO(time.Now())
 		return nil
+	}
+
+	w.mu.Lock()
+	conn := w.conn
+	w.mu.Unlock()
+	if conn != nil {
+		// The ordinary text path must refresh the crash-recovery replay just
+		// like InvokeSkill does; otherwise recovery after a plain-text turn
+		// would re-invoke the previous stale Skill.
+		conn.setTextReplay(content)
 	}
 
 	content = w.injectHistoryPrefix(content)

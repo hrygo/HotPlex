@@ -691,7 +691,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		b.log.Info("bridge: re-delivering pending input to resumed worker",
 			"session_id", id, "content_len", len(pendingReplay.Content),
 			"skill", pendingReplay.Skill != nil)
-		if err := deliverInputReplay(ctx, w, pendingReplay); err != nil {
+		if err := b.deliverInputReplay(ctx, w, pendingReplay); err != nil {
 			b.log.Warn("bridge: pending input re-delivery failed",
 				"session_id", id, "err", err)
 		}
@@ -1178,18 +1178,29 @@ func sanitizeLastInput(input string) string {
 	return strings.Join(filtered, "\n")
 }
 
-func deliverInputReplay(ctx context.Context, w worker.Worker, replay worker.InputReplay) error {
+func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay worker.InputReplay) error {
 	if replay.Skill == nil {
 		if replay.Content == "" {
 			return nil
 		}
 		return w.Input(ctx, replay.Content, nil)
 	}
-	invoker, ok := w.(worker.SkillInvoker)
-	if !ok {
+	if invoker, ok := w.(worker.SkillInvoker); ok {
+		return invoker.InvokeSkill(ctx, *replay.Skill)
+	}
+	// The replacement Worker lacks a native Skill path — typically because
+	// worker_type changed between the crash and recovery. Dropping the input
+	// would silently lose the user's last message, so fall back to the
+	// reconstructed slash text. This is a recovery-only degradation (the
+	// in-session dispatch path still refuses to retry a Skill as text) and
+	// matches the pre-change crash-recovery semantics of re-delivering the
+	// last input as text.
+	if replay.Content == "" {
 		return fmt.Errorf("%w: worker %s cannot replay native Skill %q", worker.ErrSkillNotSupported, w.Type(), replay.Skill.Name)
 	}
-	return invoker.InvokeSkill(ctx, *replay.Skill)
+	b.log.Warn("bridge: replaying native Skill as text, replacement worker lacks SkillInvoker",
+		"worker_type", w.Type(), "skill", replay.Skill.Name)
+	return w.Input(ctx, replay.Content, nil)
 }
 
 // firstNonEmpty returns the first non-empty string from the given values.
