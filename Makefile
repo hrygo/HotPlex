@@ -61,7 +61,7 @@ CYAN   := \033[36m
 .PHONY: gateway-start gateway-stop gateway-status gateway-logs
 .PHONY: webchat-dev webchat-stop webchat-embed webchat-rebuild webchat-reset
 .PHONY: docs-build docs-clean docs-lint swagger
-.PHONY: dev-build coverage test-slack-e2e
+.PHONY: dev-build coverage test-slack-e2e test-contract-matrix
 .PHONY: test test-short lint fmt quality check clean
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -189,6 +189,9 @@ test-short:
 	@echo "$(CYAN)Testing...$(RESET)"
 	@GORACE="history_size=5" go test -short -race -count=1 -shuffle=on -timeout 5m ./...
 	@echo "  $(GREEN)✓ Tests passed$(RESET)"
+
+test-contract-matrix:
+	@./scripts/test-contract-matrix.sh
 
 coverage:
 	@echo "$(CYAN)Generating coverage report...$(RESET)"
