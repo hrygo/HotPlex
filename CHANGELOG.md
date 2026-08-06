@@ -1,23 +1,46 @@
 # Changelog
 
-## [Unreleased]
+## [1.39.0] - 2026-08-06
 
 ### Summary
 
-审计 Hash Chain 根因修复：**DELETE 保护 + 全断点报告**。历史上手工/脚本删除可在不写 Checkpoint 的情况下静默断链（`broken_id=1253` 事件成因），本次通过 `trg_ua_no_delete` 触发器将删除限定为 checkpoint 锚定路径（GC prune / `DeleteBefore`），Verifier 从"只报第一处断裂"改为一次报告全部断裂点（上限 50），并新增 `hotplex audit verify` 只读命令用于主动校验。
+v1.39.0 是一次 minor 版本更新，核心主题是 **运维闭环与可靠性契约**。三个主线：① **Runtime 运维迭代**（#877/#946）——执行 fence 条件化决策（双实例竞态安全）、`hotplex runtime fences` 命令族、EffectiveRuntimePlan 期望状态解析与 `/admin/sessions/{id}/runtime-plan` 只读投影；② **审计链根因修复**（#949/#950）——DELETE 触发器保护、全断点校验、`audit verify`/`audit rebase` 命令与零丢失日志管道；③ **平台 × Worker 可靠性契约矩阵**（#955）——12 组合 96 场景契约测试 CI 门禁，顺带修复了 seq 严格递增、终态写入异步化、Feishu/OCS/Slack 端到端消息链与媒体摄入边界等一批可靠性问题。WebChat 增加 Codex 认证失效的可操作重登录提示，README 面向新用户全面改版。
 
 ### Added
 
+- **Runtime Ops**: `hotplex runtime fences list/resolve/abandon` — operator fence CLI over the Admin API (never opens the DB), conditional on `--fence-version`, `--confirm` required, 409 FENCE_CONFLICT exits non-zero with re-inspection guidance. (#877)
+- **Runtime Ops**: Execution fence decisions — `fence_version` conditional update (migration 031, SQLite + PostgreSQL) so concurrent gateways cannot double-migrate a fenced execution; `resolve` keeps runtime unknown, `abandon` fails it with `OPERATOR_ABANDONED`; late events converge but never regress a terminal state.
+- **Runtime Ops**: Admin fence endpoints — `GET /admin/executions/fences` (runtime:read) and `POST /admin/executions/{id}/fence-action` (runtime:write) with audit (`runtime.fence.action`) and metrics (`hotplex.runtime.fence_actions`, `hotplex.runtime.fence_conflicts`).
+- **Runtime Ops**: EffectiveRuntimePlan desired-state resolver (#946) — shadow-mode plan identity with canonical hash, fail-closed `ErrPlanBlocked` for unknown worker/sandbox/permission combos, `Redacted()` choke point for Admin/doctor surfaces; `GET /admin/sessions/{id}/runtime-plan` redacted projection.
+- **Runtime Ops**: `hotplex runtime` command family and doctor checkers — `runtime.fenced_executions` (read-only SQLite probe), `runtime.effective_plan`, `execution_fences`.
 - **Audit**: `hotplex audit verify` — read-only on-demand chain verification CLI (no migrations applied, safe against read-only copies), reports every break (up to 50) with per-reason non-PII diagnostics and remediation advice, exits non-zero on a broken chain for CI/cron gating.
-- **Audit**: Verifier collects ALL breaks in one pass (`BrokenRows`), surfaces `broken_count` / `broken_ids` on the first WARN; cursor advances past breaks so later gaps (e.g. id=1269) are no longer masked by the first one (id=1253). Per-reason hash diagnostics are no longer conflated: `prev_hash_mismatch` exposes expected/actual prev_hash, `self_hash_mismatch` exposes expected/actual self_hash.
-- **Audit**: `trg_ua_no_delete` (migration 030, SQLite + PostgreSQL) — DELETE rejected unless covered by a checkpoint anchor; the anchor is written in the same transaction as the delete by the GC prune / `DeleteBefore` paths; `DeleteBefore` rewritten as checkpoint-anchored prefix prune.
+- **Audit**: `hotplex audit rebase --next-id N --confirm` — operator repair CLI that re-anchors a broken hash chain at a surviving row (the only legitimate repair since migrations 023/030 reject row UPDATE and un-anchored DELETE).
+- **Audit**: `trg_ua_no_delete` (migration 030, SQLite + PostgreSQL) — DELETE rejected unless covered by a checkpoint anchor; `DeleteBefore` rewritten as checkpoint-anchored prefix prune.
+- **Reliability**: Platform × Worker contract matrix (#955) — gateway contract harness, shared scenario runner, real worker probe mappers, and 12 platform-worker combinations (slack/feishu/webchat/opencode-server × 4 workers) gated in CI via `scripts/test-contract-matrix.sh`.
+- **WebChat UI**: Codex auth-expiry error mapping — token refresh / logout / 401 signatures now show an actionable re-login prompt instead of raw CLI errors. (#956)
+- **CLI**: `worker.claude_bypass_mode` doctor checker — warns when Claude Code runs in bypass permission mode.
 
 ### Changed
 
-- **Audit GC**: prune sequence reordered to anchor-first (checkpoint before DELETE) to satisfy the new trigger contract; empty-table correction checkpoint preserves genesis semantics.
-- **Audit metric**: `hotplex_audit_chain_breaks_total` keeps the `reason` attribute on each increment.
-- **Admin audit logging**: `admin_audit` now resolves the logger at call time (`slog.Default()`), so records flow through the configured JSON/lumberjack pipeline instead of the logger captured at package init (which bypassed the pipeline entirely); `SetAuditLogger(nil)` clears a test override so the default is followed again.
-- **Audit zero-loss**: a failed regular batch flush now re-spills the in-flight batch (previously discarded), matching the spill-drain path's zero-loss contract.
+- **Gateway Core**: Per-session `SeqOrderLock` — seq allocation order now equals broadcast enqueue order, fixing seq inversion under concurrent producers that violated the AEP strictly-increasing contract.
+- **Gateway Core**: Terminal writes decoupled from the routing goroutine — pcEntry enqueues and returns, per-conn result + `aggregateTerminalWrites` collect outcomes, bounded lifecycle with no goroutine leak.
+- **Gateway Core**: Exec-scoped stop fence keyed by `(run, execution)` — a new turn's execution admits its own stop, duplicate stops stay rejected, pending LLM auto-retry is cancelled on stop.
+- **Audit**: `admin_audit` resolves the logger at call time (`slog.Default()`), so records flow through the configured JSON/lumberjack pipeline; failed regular batch flush re-spills in-flight events (zero-loss).
+- **Audit**: Break-alert state machine — first WARN carries `broken_at`/hash/advice diagnostics (PII excluded), repeats downgrade to DEBUG with `first_seen`/`occurrences`, INFO `resolved` after repair.
+- **Messaging**: Feishu/Slack hardening — bounded media reads and temp-file restrictions, retry-safe queue admission and dedup, abort commands routed through control stop, terminal delivery failures surfaced.
+- **Messaging**: Slack streaming writer teardown fence — rate-limited final flush records unflushed tail instead of dropping; body-presented terminal errors no longer detach the platform conn.
+- **Configuration**: `HOTPLEX_EVENTS_RETENTION` env now actually binds (documented but previously ignored); unified `worker.ResolvePermissionMode` shared by doctor and claudecode.
+- **SDK/Docs**: README product-first overhaul for new users (#938); v2 roadmap finalized with qm-based runtime research; per-module AGENTS.md hierarchy established.
+
+### Fixed
+
+- **Gateway Core**: Concurrent-producer seq inversion — `processForwardedEvent` allocated seq upfront but enqueued at the end; stop-synthesized `done` could broadcast before earlier events, violating the AEP strictly-increasing contract (fixed via `SeqOrderLock`).
+- **WebChat UI**: Codex auth-expiry errors (token refresh / logout / 401) previously rendered raw English CLI output — now mapped to actionable re-login guidance with a source prefix. (#956)
+- **Messaging**: Feishu Claude Code end-to-end chain — terminal write errors now propagate from gateway to platform, terminal write budgets bounded, terminal cleanup detached from routing. (#943)
+- **Worker**: OCS stop contract — abort retains SSE subscription, post-abort converter terminal suppressed while the user-stop marker is set (exactly one terminal per stopped turn); failed stop attempts clear the marker so the legitimate terminal still flows.
+- **Messaging**: Slack terminal delivery accounting — `CloseContext` bounded by caller deadline, pending flush tracked so content in-flight at expiry is never reported presented; rollback of rejected message dedup.
+- **Gateway Core**: pcEntry close drain — writeLoop's closeCh race could flush an empty buffer and drop the coalesce window; close now consumes the channel remainder before flushing.
+
 
 ## [1.38.1] - 2026-07-27
 
