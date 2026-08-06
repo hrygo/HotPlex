@@ -11,6 +11,7 @@ This directory contains installation and deployment scripts for HotPlex Worker G
 | `docker-build.sh` | Build Docker image | `./scripts/docker-build.sh` |
 | `uninstall.sh` | Complete uninstallation | `sudo ./scripts/uninstall.sh` |
 | `validate-acpx-spec.sh` | Validate ACPX spec via acpx CLI | `./scripts/validate-acpx-spec.sh` |
+| `verify_worker_native_commands.py` | Run bounded Live probes for four Worker native command paths | `python scripts/verify_worker_native_commands.py` |
 | `hotplex.service` | Systemd service unit | Install via `install.sh` |
 
 ## Installation Scripts
@@ -237,6 +238,23 @@ The Worker-ACPX-Spec.md has been superseded by [ACP-Worker-Spec.md](../docs/spec
 # Output shows pass/fail for each test
 # Summary includes overall validation status
 ```
+
+### verify_worker_native_commands.py
+
+Runs direct, bounded Live probes against installed Claude Code, OpenCode Server,
+Codex CLI, and Hermes ACP. The script creates an isolated temporary Skill,
+emits a sanitized JSON report, cleans up all started processes, and distinguishes
+product failures from credential or provider blocks.
+
+```bash
+python -m unittest scripts/test_verify_worker_native_commands.py -v
+python scripts/verify_worker_native_commands.py
+python scripts/verify_worker_native_commands.py --worker codex_cli --codex-model gpt-5.6-sol
+```
+
+Exit codes are `0` when every selected Worker passes, `1` for a protocol or
+assertion failure, and `2` when no failure occurs but an environment block is
+present.
 
 **What it validates:**
 
