@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 
-interface Command {
+export interface Command {
   key: string;
   label: string;
   description: string;
@@ -23,7 +23,7 @@ const SLASH_COMMANDS: Command[] = [
 
 interface CommandMenuProps {
   inputValue: string;
-  onSelect: (value: string) => void;
+  onSelect: (command: Command) => void;
   isOpen: boolean;
   onClose: () => void;
   skills?: SkillEntry[];
@@ -83,7 +83,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
         requestAnimationFrame(scrollToSelected);
       } else if (e.key === "Enter" && filtered.length > 0) {
         e.preventDefault();
-        onSelect(filtered[selectedIndex].key);
+        onSelect(filtered[selectedIndex]);
       } else if (e.key === "Escape") {
         onClose();
       }
@@ -116,7 +116,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
                 ? "bg-[var(--bg-hover)] translate-x-1"
                 : "hover:bg-[rgba(255,255,255,0.02)]"
             }`}
-            onClick={() => onSelect(cmd.key)}
+            onClick={() => onSelect(cmd)}
             onMouseEnter={() => setSelectedIndex(i)}
           >
             <div className="flex items-center gap-2">

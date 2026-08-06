@@ -8,7 +8,7 @@ import {
 } from "@assistant-ui/react";
 import { useAui, useAuiState } from "@assistant-ui/store";
 import { AnimatePresence, motion } from "framer-motion";
-import { CommandMenu } from "./CommandMenu";
+import { CommandMenu, type Command } from "./CommandMenu";
 import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 import type { ConnectionState } from "@/lib/config";
 import { AssistantMessage } from "./AssistantMessage";
@@ -238,9 +238,12 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     if (!composingRef.current) aui.composer().setText(val);
   }, [aui]);
 
-  const handleSelectCommand = useCallback((cmd: string) => {
-    setLocalText(cmd);
-    aui.composer().setText(cmd);
+  const handleSelectCommand = useCallback((cmd: Command) => {
+    // Skills take a trailing space so the user can start typing args right away;
+    // built-in slash commands are inserted as-is.
+    const value = cmd.type === "skill" ? `${cmd.key} ` : cmd.key;
+    setLocalText(value);
+    aui.composer().setText(value);
     setMenuOpen(false);
   }, [aui]);
 
