@@ -23,11 +23,11 @@ type SkillInvocation struct {
 }
 
 // InputReplay is the durable shape of the most recent primary input used by
-// crash recovery. Skill carries the native invocation when the Worker did not
-// receive the input through the ordinary text path.
+// crash recovery. Skill carries the native command invocation when the Worker
+// did not receive the input through the ordinary text path.
 type InputReplay struct {
 	Content string
-	Skill   *SkillInvocation
+	Skill   *NativeCommandInvocation
 }
 
 // InputReplayRecoverer is optional. It extends InputRecoverer for Workers

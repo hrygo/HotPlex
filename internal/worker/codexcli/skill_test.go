@@ -70,7 +70,7 @@ func TestAppConnSkillReplayRetainsNativeInvocation(t *testing.T) {
 	t.Parallel()
 
 	conn := &appConn{}
-	want := worker.SkillInvocation{
+	want := worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
 		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
@@ -86,7 +86,7 @@ func TestAppConnTextReplayReplacesSkillReplay(t *testing.T) {
 	t.Parallel()
 
 	conn := &appConn{}
-	conn.setSkillReplay(worker.SkillInvocation{
+	conn.setSkillReplay(worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
 		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",

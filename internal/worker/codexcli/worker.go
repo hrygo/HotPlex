@@ -167,7 +167,7 @@ func (c *appConn) LastInputReplay() worker.InputReplay {
 	}
 	return replay
 }
-func (c *appConn) setSkillReplay(invocation worker.SkillInvocation) {
+func (c *appConn) setSkillReplay(invocation worker.NativeCommandInvocation) {
 	c.mu.Lock()
 	c.lastReplay = worker.InputReplay{Content: "/" + invocation.Name, Skill: &invocation}
 	if invocation.Args != "" {
@@ -306,7 +306,7 @@ func (w *AppServerWorker) InvokeSkill(ctx context.Context, invocation worker.Ski
 	conn := w.conn
 	w.mu.Unlock()
 	if conn != nil {
-		conn.setSkillReplay(invocation)
+		conn.setSkillReplay(worker.NativeInvocationFromSkill(invocation))
 	}
 	return w.startTurn(ctx, []TurnInputItem{
 		{Type: "skill", Name: invocation.Name, Path: invocation.Path},

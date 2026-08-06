@@ -57,12 +57,13 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ worker.Worker              = (*Worker)(nil)
-	_ worker.SessionConn         = (*conn)(nil)
-	_ worker.ControlRequester    = (*Worker)(nil)
-	_ worker.WorkerCommander     = (*Worker)(nil)
-	_ worker.SkillInvoker        = (*Worker)(nil)
-	_ worker.SystemPromptUpdater = (*Worker)(nil)
+	_ worker.Worker               = (*Worker)(nil)
+	_ worker.SessionConn          = (*conn)(nil)
+	_ worker.ControlRequester     = (*Worker)(nil)
+	_ worker.WorkerCommander      = (*Worker)(nil)
+	_ worker.SkillInvoker         = (*Worker)(nil)
+	_ worker.SkillCatalogProvider = (*Worker)(nil)
+	_ worker.SystemPromptUpdater  = (*Worker)(nil)
 )
 
 // Env blocklist for OpenCode Server worker.
@@ -329,7 +330,7 @@ func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocat
 	wasStopped := w.IsStopped()
 	w.BeginTurn()
 	if conn != nil {
-		conn.setSkillReplay(invocation)
+		conn.setSkillReplay(worker.NativeInvocationFromSkill(invocation))
 	}
 	if err := commander.InvokeSkill(ctx, invocation); err != nil {
 		if wasStopped {
@@ -339,6 +340,20 @@ func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocat
 	}
 	w.SetLastIO(time.Now())
 	return nil
+}
+
+// ListInvokableSkills delegates the OpenCode command catalog query to the
+// ServerCommander. The commander is snapshotted under w.Mu like InvokeSkill; a
+// nil commander means the worker is not started and no catalog can be
+// confirmed.
+func (w *Worker) ListInvokableSkills(ctx context.Context, workDir string) ([]worker.SkillDescriptor, error) {
+	w.Mu.Lock()
+	commander := w.cmd
+	w.Mu.Unlock()
+	if commander == nil {
+		return nil, fmt.Errorf("opencodeserver: worker not started")
+	}
+	return commander.ListInvokableSkills(ctx, workDir)
 }
 
 func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, _ string) error {
@@ -1317,7 +1332,7 @@ func (c *conn) LastInputReplay() worker.InputReplay {
 	return replay
 }
 
-func (c *conn) setSkillReplay(invocation worker.SkillInvocation) {
+func (c *conn) setSkillReplay(invocation worker.NativeCommandInvocation) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastReplay = worker.InputReplay{Content: "/" + invocation.Name, Skill: &invocation}
