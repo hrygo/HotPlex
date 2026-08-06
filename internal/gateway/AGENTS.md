@@ -23,6 +23,9 @@ testutil/       # WebSocket mock helpers for tests
 | Input idempotency | `handler.go` + `internal/execution` | Durable accept → `input.ack` → Worker delivery outcome; duplicate IDs never redeliver |
 | Passthrough feedback | `handler.go` | `handlePassthroughCommand`: sends message AEP after WorkerCommander ops; rejects /effort, /commit |
 | Fast reconnect | `conn.go:377` | Skips Transition when session already running with live worker |
+| writeCh buffering | `conn.go:123` | Buffer 256; do not reduce without safe background-tab client batching |
+| Seq hydration | `conn.go:566` | Never fall back to 1 on DB error — duplicate would roll back an entire collector batch |
+| Terminal event ordering | `bridge_forward.go:544` | No terminal runtime event when durable write failed |
 | Session lifecycle | `bridge.go` | Bridge: StartSession, ResumeSession, forwardEvents, InputRecoverer |
 | LLM auto-retry | `llm_retry.go` | LLMRetryController: retryable patterns, per-session backoff |
 | HTTP session API | `api.go` | GatewayAPI: ListSessions, GetSession, TerminateSession, CreateSession |
@@ -87,3 +90,8 @@ testutil/       # WebSocket mock helpers for tests
 - ❌ Handle input after session terminated without mutex
 - ❌ Allow init after 30s timeout
 - ❌ Skip panic recovery in bridge forwardEvents
+- ❌ Use `sendBroadcast` for droppable events (`hub.go:411`) — full channel blocks Hub.Run and cascades backpressure; use `trySendBroadcast`
+- ❌ Reduce writeCh buffer below 256 (`conn.go:123`) without background-tab-safe client batching
+- ❌ Fall back to seq 1 on DB hydration error (`conn.go:566`) — duplicate seqs roll back collector batches
+- ❌ Call `Close()` while holding `c.mu` (`conn.go:1070`) — `sync.Mutex` is not reentrant, self-deadlock
+- ❌ Emit a terminal runtime event when the durable write failed (`bridge_forward.go:544`) — client must not see completion while the record is non-terminal

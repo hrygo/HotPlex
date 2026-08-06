@@ -8,7 +8,7 @@
 - **State**: assistant-ui ExternalStoreAdapter pattern (`@assistant-ui/react` + `@assistant-ui/store`)
 - **Transport**: WebSocket via AEP v1 (`BrowserHotPlexClient`)
 - **Fonts**: Self-hosted via `next/font/local` + `@fontsource`
-- **Testing**: Playwright E2E only (no unit tests)
+- **Testing**: Vitest 4 (pure-logic unit tests under `lib/`) + Playwright E2E
 
 ## Architecture
 
@@ -108,12 +108,14 @@ Mount → `listSessions` → auto-select most recent (or restore from localStora
 ## Testing
 
 ```bash
-pnpm build          # Type check + production build (must pass before commit)
-pnpm dev            # Dev server at localhost:3000
+pnpm test              # Vitest unit tests (lib/**/*.test.ts, node env — no jsdom)
+pnpm build             # Type check + production build (must pass before commit)
+pnpm dev               # Dev server at localhost:3000
 pnpm exec playwright test   # E2E tests (requires gateway running)
+pnpm test:e2e:matrix   # chromium-only platform-worker matrix spec (CI)
 ```
 
-No unit test framework — all testing is Playwright E2E or manual verification via `pnpm dev`.
+Two test runners coexist: Vitest 4 runs `lib/**/*.test.ts` in a node environment (`vitest.config.ts`); `lib/session-select.test.ts` is deliberately excluded because it runs via native `node --test --experimental-strip-types`. Playwright covers E2E (`e2e/`, chromium project, baseURL `127.0.0.1:3000` with `PLAYWRIGHT_PORT` / `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` overrides).
 
 ## Internationalization Standards
 

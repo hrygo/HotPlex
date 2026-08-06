@@ -1,6 +1,6 @@
 # HotPlex 项目知识库
 
-**最后更新**: 2026-07-29 · **分支**: main · **版本**: v1.38.1 · **提交**: 57907c3b
+**最后更新**: 2026-08-06 · **分支**: main · **版本**: v1.38.1 · **提交**: cce5784f
 
 ---
 
@@ -10,8 +10,8 @@
 
 - **Mutex**: 显式 `mu` 字段，不嵌入，不传指针
 - **错误**: `Err` 前缀（哨兵）、`Error` 后缀（自定义）、`fmt.Errorf("%w")` 包装
-- **日志**: `log/slog` JSON handler
-- **测试**: `testify/require`、table-driven、`t.Parallel()`、单模块 ≤5s（`-count=1 -race`）、禁止 `time.Sleep` 等待异步结果（改用 `require.Eventually` 或 channel 信号）
+- **日志**: `log/slog` JSON handler（key 一律 snake_case，`sloglint` 强制 `no-mixed-args`）
+- **测试**: `testify/require`、table-driven、`t.Parallel()`、单模块 ≤5s（`-count=1 -race -shuffle=on`）、禁止 `time.Sleep` 等待异步结果（改用 `require.Eventually` 或 channel 信号）
 - **Worker 注册**: `init()` + `worker.Register()` 模式
 - **Worker 接口变更**: 同步更新全部 adapter、测试 mock、`internal/worker/noop` 与 `registry_test`；新增能力须明确其在 CLI、单例和 RPC Worker 上的语义
 - **AEP wire contract**: 修改 `pkg/events` 的 Kind、Data 或 JSON tag 时，同步更新 Go SDK、三种示例 SDK、`docs/reference/{aep-protocol,events}.md` 与双向协议测试；新增字段必须向后兼容
@@ -103,7 +103,7 @@ configs/   - 配置文件
 
 **平台分离**：
 - 使用 `*_unix.go` / `*_windows.go` build tags
-- CI 必须通过 Linux + macOS + Windows 三平台测试
+- CI 仅跑 Linux（ubuntu-latest）；macOS/Windows 依赖 release 交叉编译 + build tag 隔离验证（见 `release.yml` 6 矩阵）
 
 ### 可靠性变更检查清单
 
