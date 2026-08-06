@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "mode": "direct-live",
+  "issue": "hrygo/hotplex#958",
+  "spec": "docs/superpowers/specs/2026-08-06-worker-native-command-dispatch-design.md",
+  "verified_at": "2026-08-06T15:04:07+00:00",
+  "summary": {
+    "pass": 2,
+    "blocked": 2,
+    "fail": 0
+  },
+  "workers": [
+    {
+      "command": "$hotplex-native-probe",
+      "duration_ms": 10613,
+      "evidence": {
+        "byte_count": 36,
+        "sha256_12": "6ff32792e9b8"
+      },
+      "facts": {
+        "authoritative_descriptor_path_used": true,
+        "catalog_advertised": true,
+        "model_marker_observed": true
+      },
+      "status": "PASS",
+      "transport": "app-server skills/list + structured turn/start",
+      "version": "codex-cli 0.146.1",
+      "worker": "codex_cli"
+    },
+    {
+      "command": "/context",
+      "duration_ms": 2292,
+      "evidence": {
+        "byte_count": 300,
+        "sha256_12": "5b134dceb771"
+      },
+      "facts": {
+        "advertised_command_count": 9,
+        "filesystem_probe_skill_advertised": false,
+        "selected_command_advertised": true,
+        "stop_reason": "end_turn"
+      },
+      "status": "PASS",
+      "transport": "ACP available_commands_update + session/prompt",
+      "version": "0.20.0",
+      "worker": "acp"
+    },
+    {
+      "command": "/hotplex-native-probe",
+      "duration_ms": 1531,
+      "error": "Not logged in · Please run /login Not logged in · Please run /login ",
+      "evidence": {
+        "byte_count": 69,
+        "sha256_12": "2388843b0aef"
+      },
+      "facts": {
+        "canonical_slash_syntax": true,
+        "model_marker_observed": false,
+        "process_exit_code": 1
+      },
+      "status": "BLOCKED",
+      "transport": "stream-json text_command",
+      "version": "2.1.223 (Claude Code)",
+      "worker": "claude_code"
+    },
+    {
+      "command": "hotplex-native-probe",
+      "duration_ms": 2244,
+      "error": "APIError 身份验证失败。",
+      "evidence": {
+        "byte_count": 30,
+        "sha256_12": "04755f0fb9bf"
+      },
+      "facts": {
+        "catalog_endpoint_status": 200,
+        "invoke_http_status": 200,
+        "model_marker_observed": false,
+        "probe_advertised": true
+      },
+      "status": "BLOCKED",
+      "transport": "HTTP POST /session/{id}/command",
+      "version": "1.18.14",
+      "worker": "opencode_server"
+    }
+  ]
+}
