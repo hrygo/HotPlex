@@ -514,6 +514,7 @@ Worker 请求人类介入的结构化交互事件。默认 5 分钟超时自动�
 | `RESUME_RETRY` | Session resume 失败，建议重试 |
 | `NOT_SUPPORTED` | 操作不支持 |
 | `TURN_TIMEOUT` | Turn 执行超时 |
+| `OPERATOR_ABANDONED` | fenced execution 被 operator 放弃 |
 
 ## 背压机制
 
