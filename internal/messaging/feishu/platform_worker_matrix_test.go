@@ -90,6 +90,12 @@ func TestPlatformWorkerContractMatrix_Feishu(t *testing.T) {
 			want := fixtureContent(combo.Worker)
 			require.Eventually(t, d.fake.sawCardWith(want), driverWaitTimeout, driverWaitPoll,
 				"feishu: no card containing %q reached the fake lark API (real FeishuConn stream)", want)
+
+			// Native-dispatch parity (issue #958 T13): the harness WorkerProbe
+			// cannot resolve native commands, so the platform-visible contract
+			// is that an explicit /worker command surfaces NOT_SUPPORTED through
+			// the real platform-facing path.
+			d.assertNativeUnsupported(t)
 		})
 	}
 }
@@ -580,6 +586,31 @@ func (d *feishuContractDriver) VisibleTerminals() int {
 }
 
 // ─── driver internals ─────────────────────────────────────────────────────────
+
+// assertNativeUnsupported drives an explicit /worker native command through the
+// real feishu ingress and asserts the NOT_SUPPORTED error reaches the
+// platform-facing stream. The harness WorkerProbe cannot resolve native
+// commands, so the platform-native contract is exactly the error surface.
+func (d *feishuContractDriver) assertNativeUnsupported(t *testing.T) {
+	t.Helper()
+	d.BeginScenario(t, "native")
+	defer d.EndScenario(t)
+
+	_ = d.send(context.Background(), "native-cmd-1", "/worker oracle-dba 10.0.0.1")
+
+	require.Eventually(t, func() bool {
+		for _, env := range d.rec.Events() {
+			if env.Event.Type != events.Error {
+				continue
+			}
+			ed, ok := env.Event.Data.(events.ErrorData)
+			if ok && ed.Code == events.ErrCodeNotSupported {
+				return true
+			}
+		}
+		return false
+	}, driverWaitTimeout, driverWaitPoll, "feishu: unsupported native command must surface NOT_SUPPORTED on the platform-facing stream")
+}
 
 // send enters the REAL raw ingress with a complete P2MessageReceiveV1 event.
 func (d *feishuContractDriver) send(ctx context.Context, msgID, content string) error {
