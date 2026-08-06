@@ -59,29 +59,6 @@ for (const combo of WEBCHAT_WORKERS) {
         page,
     }) => {
         await installMockGateway(page, combo.workerType);
-        // TEMP MUTATION: force the session list to codex_cli
-        await page.route(/\/api\/sessions(\?|$)/, async (route) => {
-            await route.fulfill({
-                status: 200,
-                contentType: "application/json",
-                body: JSON.stringify({
-                    sessions: [
-                        {
-                            id: "session-e2e",
-                            user_id: "user-e2e",
-                            worker_type: "codex_cli",
-                            state: "idle",
-                            title: "Queue E2E",
-                            work_dir: "/tmp/e2e",
-                            created_at: new Date(1).toISOString(),
-                            updated_at: new Date(2).toISOString(),
-                        },
-                    ],
-                    limit: 20,
-                    offset: 0,
-                }),
-            });
-        });
         await page.goto("/");
         await waitForChatReady(page);
 
