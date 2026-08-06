@@ -305,11 +305,24 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                 <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">{t('label.agent_skills')}</span>
                 <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
               </div>
-              {skills?.slice(0, 3).map(skill => (
-                <div key={skill.name} className="px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--text-muted)] whitespace-nowrap hover:border-[var(--text-faint)] transition-colors cursor-default">
-                  {skill.name}
-                </div>
-              ))}
+              {skills?.slice(0, 3).map(skill => {
+                const status = skill.status ?? "discoverable";
+                const statusClass =
+                  status === "callable"
+                    ? "bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-muted)]"
+                    : status === "unavailable"
+                      ? "bg-[var(--bg-elevated)]/50 border-[var(--border-subtle)]/60 text-[var(--text-faint)] line-through decoration-[var(--accent-coral)]/60"
+                      : "bg-[var(--bg-elevated)]/70 border-[var(--border-subtle)]/80 text-[var(--text-faint)]";
+                return (
+                  <div
+                    key={skill.name}
+                    title={t(`label.skill_status_${status}`)}
+                    className={`px-3 py-1.5 rounded-full border text-[10px] font-medium whitespace-nowrap transition-colors cursor-default ${statusClass}`}
+                  >
+                    {skill.name}
+                  </div>
+                );
+              })}
               {skills && skills.length > 3 && (
                 <div className="px-1 py-1 text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-tighter">
                   +{skills.length - 3}

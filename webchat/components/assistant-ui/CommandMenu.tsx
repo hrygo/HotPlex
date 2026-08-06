@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
+import type { SkillEntry, SkillStatus } from "@/lib/ai-sdk-transport/client/types";
 
 export interface Command {
   key: string;
   label: string;
   description: string;
   type: "slash" | "skill";
+  /** Invokability for skill entries; the menu disables unavailable ones (issue #957). */
+  status?: SkillStatus;
 }
 
 const SLASH_COMMANDS: Command[] = [
@@ -44,6 +46,7 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
       label: `/${s.name}`,
       description: s.description || `${s.name} skill`,
       type: "skill" as const,
+      status: s.status,
     })),
   ], [skills]);
 
@@ -83,7 +86,10 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
         requestAnimationFrame(scrollToSelected);
       } else if (e.key === "Enter" && filtered.length > 0) {
         e.preventDefault();
-        onSelect(filtered[selectedIndex]);
+        const selected = filtered[selectedIndex];
+        if (selected.type !== "skill" || selected.status !== "unavailable") {
+          onSelect(selected);
+        }
       } else if (e.key === "Escape") {
         onClose();
       }
@@ -107,24 +113,33 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
       </div>
 
       <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
-        {filtered.map((cmd, i) => (
+        {filtered.map((cmd, i) => {
+          const unavailable = cmd.type === "skill" && cmd.status === "unavailable";
+          return (
           <button
             key={cmd.key}
             ref={i === selectedIndex ? selectedRef : undefined}
+            disabled={unavailable}
             className={`w-full px-4 py-3 text-left flex flex-col gap-0.5 transition-all ${
-              i === selectedIndex
-                ? "bg-[var(--bg-hover)] translate-x-1"
-                : "hover:bg-[rgba(255,255,255,0.02)]"
+              unavailable
+                ? "opacity-45 cursor-not-allowed"
+                : i === selectedIndex
+                  ? "bg-[var(--bg-hover)] translate-x-1"
+                  : "hover:bg-[rgba(255,255,255,0.02)]"
             }`}
-            onClick={() => onSelect(cmd)}
+            onClick={() => !unavailable && onSelect(cmd)}
             onMouseEnter={() => setSelectedIndex(i)}
           >
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-bold ${i === selectedIndex ? "text-[var(--accent-gold)]" : "text-[var(--text-primary)]"}`}>
+              <span className={`text-xs font-bold ${unavailable ? "line-through decoration-[var(--accent-coral)]/60 text-[var(--text-faint)]" : i === selectedIndex ? "text-[var(--accent-gold)]" : "text-[var(--text-primary)]"}`}>
                 {cmd.label}
               </span>
               {cmd.type === "slash" ? (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(251,191,36,0.1)] text-[var(--accent-gold)] font-mono font-bold uppercase">CMD</span>
+              ) : cmd.status === "unavailable" ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(248,113,113,0.12)] text-[var(--accent-coral)] font-mono font-bold uppercase">UNAVAILABLE</span>
+              ) : cmd.status === "discoverable" ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(148,163,184,0.12)] text-[var(--text-faint)] font-mono font-bold uppercase">DISCOVERABLE</span>
               ) : (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--accent-emerald)] font-mono font-bold uppercase">SKILL</span>
               )}
@@ -133,7 +148,8 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
               {cmd.description}
             </p>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

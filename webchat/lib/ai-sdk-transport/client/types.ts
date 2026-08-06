@@ -262,10 +262,15 @@ export interface SkillsListData {
   filter?: string;
 }
 
+/** Invokability of a Skill for the current session worker (issue #957). */
+export type SkillStatus = "callable" | "discoverable" | "unavailable";
+
 export interface SkillEntry {
   name: string;
   description: string;
   source: string;
+  /** Absent → treated as "discoverable" (worker cannot confirm invocation). */
+  status?: SkillStatus;
 }
 
 // ============================================================================
