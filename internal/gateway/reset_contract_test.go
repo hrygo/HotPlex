@@ -29,10 +29,11 @@ func (w *connReplacingWorker) IncResetGeneration() int64  { return w.resetGen.Ad
 
 func (w *connReplacingWorker) ResetContext(context.Context) (worker.ResetResult, error) {
 	w.resetGen.Add(1)
-	// Swap to a fresh buffered conn so the new forwarder has its own channel.
-	w.conn = &fakeWorkerConn{ch: make(chan *events.Envelope, 8)}
 	res := worker.ResetResult{}
 	if w.replaced {
+		// Per-process workers rebuild their transport so the new forwarder has
+		// its own channel. In-place workers keep consuming the original conn.
+		w.conn = &fakeWorkerConn{ch: make(chan *events.Envelope, 8)}
 		res.ConnReplaced = true
 	}
 	return res, nil
@@ -151,5 +152,95 @@ func TestResetSession_InPlace_NoNewForwarder(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("in-place forwarder did not exit after conn closed")
+	}
+}
+
+func TestResetContract_AllWorkers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		workerType   worker.WorkerType
+		connReplaced bool
+	}{
+		{name: "W-C", workerType: worker.TypeClaudeCode, connReplaced: true},
+		{name: "W-O", workerType: worker.TypeOpenCodeSrv, connReplaced: false},
+		{name: "W-X", workerType: worker.TypeCodexCLI, connReplaced: true},
+		{name: "W-A", workerType: worker.TypeACP, connReplaced: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			hub := newTestHub(t)
+			conn, server := newTestWSConnPair(t)
+			t.Cleanup(func() {
+				_ = conn.Close()
+				_ = server.Close()
+			})
+			sessionID := "sess-reset-" + tc.name
+			c := newConn(hub, conn, sessionID, nil)
+			hub.JoinSession(sessionID, c)
+
+			oldConn := &fakeWorkerConn{ch: make(chan *events.Envelope, 8)}
+			w := &connReplacingWorker{replaced: tc.connReplaced}
+			w.workerType = tc.workerType
+			w.conn = oldConn
+			sm := new(mockBridgeSM)
+			sm.On("GetWorker", sessionID).Return(w)
+			sm.On("Get", sessionID).Return(&session.SessionInfo{ID: sessionID, Platform: "webchat"}, nil)
+			b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: sm})
+			b.workerRuns.Store(sessionID, workerRunBinding{worker: w, id: "run-" + tc.name})
+
+			oldForwarderDone := make(chan struct{})
+			go func() {
+				b.forwardEvents(forwarderBinding{worker: w, conn: oldConn}, sessionID, forwardOpts{ctx: context.Background()})
+				close(oldForwarderDone)
+			}()
+
+			require.NoError(t, b.ResetSession(context.Background(), sessionID))
+			if tc.connReplaced {
+				require.NotSame(t, oldConn, w.Conn(), "replacement worker must expose a new connection")
+				close(oldConn.ch)
+				select {
+				case <-oldForwarderDone:
+				case <-time.After(2 * time.Second):
+					t.Fatal("stale forwarder did not exit after the replaced connection closed")
+				}
+
+				newConn := w.Conn().(*fakeWorkerConn)
+				for _, txt := range []string{"replacement-1", "replacement-2"} {
+					newConn.ch <- events.NewEnvelope(aep.NewID(), sessionID, 0,
+						events.MessageDelta, events.MessageDeltaData{Content: txt, MessageID: "msg_new"})
+				}
+				// Read one slot beyond the expected replacement events. If the stale
+				// forwarder triggered crash recovery, an extra error/retry envelope
+				// would arrive in this same read window.
+				got := readN(t, server, 3, 2*time.Second)
+				require.Len(t, got, 2, "reset must deliver only the replacement events")
+				require.Contains(t, got[0], "replacement-1")
+				require.Contains(t, got[1], "replacement-2")
+				return
+			}
+
+			require.Same(t, oldConn, w.Conn(), "in-place worker must keep its connection")
+			for _, txt := range []string{"inplace-1", "inplace-2"} {
+				oldConn.ch <- events.NewEnvelope(aep.NewID(), sessionID, 0,
+					events.MessageDelta, events.MessageDeltaData{Content: txt, MessageID: "msg_same"})
+			}
+			got := readN(t, server, 2, 2*time.Second)
+			require.Len(t, got, 2)
+			require.Contains(t, got[0], "inplace-1")
+			require.Contains(t, got[1], "inplace-2")
+
+			close(oldConn.ch)
+			select {
+			case <-oldForwarderDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("in-place forwarder did not exit after conn closed")
+			}
+		})
 	}
 }
