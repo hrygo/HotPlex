@@ -281,6 +281,16 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return nil
 	}
 
+	// A new primary turn begins here. OCS's conn.Send blocks until the turn
+	// completes, so the marker cannot be cleared after the send returns — the
+	// next turn's Done (emitted by the converter when the server reaches idle)
+	// would race the clear and get suppressed. Instead capture the current
+	// stopped state, clear it before the send, and restore it if the send
+	// fails: a failed send means the new turn never started, so the previous
+	// turn's stopped marker must be preserved.
+	wasStopped := w.IsStopped()
+	w.BeginTurn()
+
 	msg := events.NewEnvelope(
 		aep.NewID(),
 		conn.getSessionID(),
@@ -293,6 +303,9 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	)
 
 	if err := conn.Send(ctx, msg); err != nil {
+		if wasStopped {
+			w.MarkStopped()
+		}
 		return fmt.Errorf("opencodeserver: send input: %w", err)
 	}
 
@@ -395,11 +408,40 @@ func (w *Worker) Terminate(_ context.Context) error {
 	return nil
 }
 
-// StopCurrentTurn stops the current turn by canceling the SSE stream and releasing the server reference.
+// StopCurrentTurn aborts the current turn on the OCS server in place while
+// retaining the httpConn, SSE subscription, singleton ref, and worker session ID
+// so the session stays resumable. The singleton ref is released exclusively by
+// Terminate/Kill/Wait — an in-place stop is not a termination.
 func (w *Worker) StopCurrentTurn(ctx context.Context) error {
-	w.Log.Info("opencodeserver: stopping current turn via release")
+	// Snapshot conn/addr/client/projectDir/sessionID under w.Mu only; never
+	// hold the lock during the network call.
+	w.Mu.Lock()
+	conn := w.httpConn
+	addr := w.httpAddr
+	client := w.client
+	var sessionID, projectDir string
+	if conn != nil {
+		sessionID = conn.getSessionID()
+		projectDir = conn.projectDir
+	}
+	w.Mu.Unlock()
+
 	w.MarkStopped()
-	w.release()
+	if conn == nil || sessionID == "" || client == nil {
+		return nil
+	}
+
+	// Bound the abort to 2s; WithTimeout preserves an earlier caller deadline.
+	abortCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := abortOCSSession(abortCtx, sessionID, addr, projectDir, client); err != nil {
+		// The abort never took effect — the turn is still running and the
+		// gateway rolls back its stop fence. Unmark so the turn's legitimate
+		// Done is not suppressed forever (the OCS server resumes/emits idle
+		// on its own and may publish a Done for the interrupted turn).
+		w.ClearStopped()
+		return err
+	}
 	return nil
 }
 
@@ -954,6 +996,21 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 				return
 			}
 
+			// While the user-stop marker is set (StopCurrentTurn admitted), the
+			// gateway's synthetic done(stopped_by_user) is the authoritative
+			// terminal for the stopped turn. The OCS server's abort always
+			// transitions the session to idle, and the converter emits its own
+			// Done (and possibly Error+Done with a fresh id) for that idle
+			// transition — a terminal the gateway's per-turn fence does not
+			// dedup. Suppress those worker-emitted terminal envelopes so exactly
+			// one terminal reaches the client per turn. BeginTurn (next primary
+			// input) clears the marker, so later turns' Dones flow normally.
+			if w.IsStopped() && (env.Event.Type == events.Done || env.Event.Type == events.Error) {
+				w.Log.Debug("opencodeserver: suppressing worker-emitted terminal event while stopped",
+					"event_type", env.Event.Type, "event_id", env.ID, "session_id", sessionID)
+				continue
+			}
+
 			if isDroppable(env.Event.Type) {
 				if !trySendEnvelope(recvCh, env, false, 0) {
 					w.Log.Warn("opencodeserver: recv channel full or closed, dropping droppable event",
@@ -1041,6 +1098,46 @@ func deleteOCSSession(ctx context.Context, sessionID, httpAddr string, client *h
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
 		return fmt.Errorf("opencodeserver: delete session %s: unexpected status %d", sessionID, resp.StatusCode)
+	}
+	return nil
+}
+
+// abortOCSSession sends the OCS official POST /session/{id}/abort request and
+// reports whether an active turn was aborted. OCS responds 200 with a JSON
+// boolean: both true (aborted) and false (no active turn) are success for the
+// caller's idempotent-abort intent. Non-200 responses only surface the first
+// 4096 body bytes so a misbehaving server cannot flood logs with a full body.
+func abortOCSSession(ctx context.Context, sessionID, httpAddr, projectDir string, client *http.Client) error {
+	if sessionID == "" || httpAddr == "" || client == nil {
+		return fmt.Errorf("opencodeserver: abort session: invalid arguments")
+	}
+
+	u := httpAddr + "/session/" + url.PathEscape(sessionID) + "/abort"
+	if projectDir != "" {
+		q := url.Values{}
+		q.Set("directory", projectDir)
+		u += "?" + q.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: abort session: build request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("opencodeserver: abort session %s: %w", sessionID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("opencodeserver: abort session %s: status %d, body: %s", sessionID, resp.StatusCode, string(body))
+	}
+
+	var aborted bool
+	if err := json.NewDecoder(resp.Body).Decode(&aborted); err != nil {
+		return fmt.Errorf("opencodeserver: abort session: decode response: %w", err)
 	}
 	return nil
 }

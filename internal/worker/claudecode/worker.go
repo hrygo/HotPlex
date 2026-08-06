@@ -559,6 +559,12 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		}
 	}
 
+	// A new primary turn began here: the write to the worker succeeded, so
+	// the new turn is running. Clear the user-stop marker AFTER the successful
+	// send — a failed send means the new turn never started, so the previous
+	// turn's stopped marker must be preserved (the bridge crash fallback must
+	// not re-run a stopped turn).
+	w.BeginTurn()
 	w.SetLastIO(time.Now())
 	return nil
 }
@@ -662,7 +668,14 @@ func (w *Worker) StopCurrentTurn(ctx context.Context) error {
 		w.cancel()
 	}
 	w.cleanupTempFiles()
-	return w.BaseWorker.Kill()
+	if err := w.BaseWorker.Kill(); err != nil {
+		// The process is still alive — the turn may keep running and the
+		// gateway rolls back its stop fence. Unmark so the turn's completion
+		// is not misread as a user-stop (crash fallback preserved correctly).
+		w.ClearStopped()
+		return err
+	}
+	return nil
 }
 
 func (w *Worker) Conn() worker.SessionConn {

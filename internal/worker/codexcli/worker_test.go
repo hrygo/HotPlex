@@ -3106,3 +3106,82 @@ func TestGetDeltaText_SequenceDeltaThenSnapshotWithDrift(t *testing.T) {
 	require.Equal(t, "Hola", gotSent)
 	require.Equal(t, int64(1), m.driftCount.Load())
 }
+
+// TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn verifies the user-stop
+// marker is scoped to the current turn: interaction-response metadata
+// (handled by DispatchMetadata) must NOT clear it, while the next primary
+// content (a real turn/start RPC frame) must clear it before the send.
+func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interaction response metadata keeps stopped", func(t *testing.T) {
+		t.Parallel()
+
+		w := newTestAppServerWorker(t)
+		reqID := "perm_stop_1"
+		w.manager.serverReqIDs.Store(reqID, int64(42))
+		w.manager.serverReqMethods.Store(reqID, "serverRequest/approval")
+		var buf strings.Builder
+		w.manager.stdin = struct {
+			io.Writer
+			io.Closer
+		}{
+			Writer: &buf,
+			Closer: io.NopCloser(nil),
+		}
+		w.MarkStopped()
+
+		md := map[string]any{
+			"permission_response": map[string]any{
+				"request_id": reqID,
+				"allowed":    true,
+			},
+		}
+		err := w.Input(context.Background(), "", md)
+		require.NoError(t, err)
+		require.Contains(t, buf.String(), `"decision":"approved"`)
+		require.True(t, w.IsStopped(), "handled metadata must not clear the stopped marker")
+	})
+
+	t.Run("next primary content clears stopped before send", func(t *testing.T) {
+		t.Parallel()
+
+		mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+			IdleDrainPeriod: time.Minute,
+			CallTimeout:     20 * time.Millisecond,
+		})
+		var buf strings.Builder
+		mgr.stdin = struct {
+			io.Writer
+			io.Closer
+		}{
+			Writer: &buf,
+			Closer: io.NopCloser(nil),
+		}
+		mgr.mu.Lock()
+		mgr.refs = 1
+		mgr.state = stateRunning
+		mgr.mu.Unlock()
+
+		wk := &AppServerWorker{
+			BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+			manager:    mgr,
+			threadID:   "thr_stop_1",
+		}
+		wk.MarkStopped()
+
+		err := wk.Input(context.Background(), "hello again", nil)
+		// Call times out (no real codex process responds); the error proves
+		// the RPC path was taken. The RPC FAILED — the new turn never started —
+		// so the previous turn's stopped marker must be preserved (the bridge
+		// crash fallback must not re-run a stopped turn).
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "codexcli: turn/start:")
+
+		require.True(t, wk.IsStopped(), "a failed send must restore the stopped marker")
+		// The protocol fake observed the primary send (turn/start frame).
+		written := buf.String()
+		require.Contains(t, written, `"method":"turn/start"`)
+		require.Contains(t, written, `"hello again"`)
+	})
+}

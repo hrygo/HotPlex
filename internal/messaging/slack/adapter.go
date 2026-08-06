@@ -438,14 +438,24 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		}
 	}
 
-	// Dedup
+	// Dedup with conditional commit: the entry is only kept when the message
+	// was actually consumed (delivered to the worker or handled as a command /
+	// interaction response). Rejected deliveries roll back so the platform's
+	// retry of the same ClientMsgID is not silently deduplicated.
 	platformMsgID := msgEvent.ClientMsgID
 	if platformMsgID == "" {
 		platformMsgID = msgEvent.TimeStamp
 	}
-	if !a.Dedup.TryRecord(platformMsgID) {
+	dedupHandle, recorded := a.Dedup.TryRecordWithHandle(platformMsgID)
+	if !recorded {
 		return
 	}
+	accepted := false
+	defer func() {
+		if !accepted {
+			a.Dedup.Rollback(dedupHandle)
+		}
+	}()
 
 	// Resolve user mentions: <@UID> → @DisplayName, remove bot self-mentions
 	text = a.userCache.ResolveMentions(ctx, text, a.botID)
@@ -518,6 +528,7 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		}
 		_, _, _ = a.client.PostMessageContext(ctx, channelID, opts...)
 		_ = a.ClearStatus(ctx, channelID, threadTS)
+		accepted = true
 		return
 	case messaging.CmdControl:
 		conn := a.GetOrCreateConn(channelID, threadTS)
@@ -527,6 +538,7 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
 		a.handleTextControlCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Control)
+		accepted = true
 		return
 	case messaging.CmdWorker:
 		conn := a.GetOrCreateConn(channelID, threadTS)
@@ -540,11 +552,13 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, handlerCmdTimeout)
 		defer cmdCancel()
 		a.handleTextWorkerCommand(cmdCtx, teamID, channelID, threadTS, userID, cmd.Worker)
+		accepted = true
 		return
 	}
 
 	// Check if text is a response to a pending interaction (text fallback for Block Kit failures).
 	if a.checkPendingInteraction(ctx, text, channelID, threadTS, userID) {
+		accepted = true
 		return
 	}
 
@@ -582,6 +596,10 @@ func (a *Adapter) handleMessageEvent(ctx context.Context, msgEvent *slackevents.
 			a.sendEphemeralOrPost(ctx, channelID, threadTS, userID,
 				"⚠️ Failed to process your message. Please try again or use /reset to restart the session.")
 		}
+		// Delivery failed: keep accepted=false so the dedup entry is rolled
+		// back and a platform retry of the same ClientMsgID can be delivered.
+	} else {
+		accepted = true
 	}
 }
 
@@ -594,8 +612,9 @@ func (a *Adapter) GetOrCreateConn(channelID, threadTS string) *SlackConn {
 
 func (a *Adapter) HandleTextMessage(ctx context.Context, platformMsgID, channelID, teamID, threadTS, userID, text string) error {
 	if a.Bridge() == nil {
-		a.Log.Warn("slack: bridge not configured, dropping message", "channel", channelID, "user", userID)
-		return nil
+		// Must error (not return nil) so handleMessageEvent rolls back the
+		// dedup entry: a message dropped without a bridge was never delivered.
+		return fmt.Errorf("slack: bridge not configured")
 	}
 
 	conn := a.GetOrCreateConn(channelID, threadTS)
@@ -635,7 +654,18 @@ func (a *Adapter) makeEnvelope(teamID, channelID, threadTS, userID, text, workDi
 
 // NewStreamingWriter creates a streaming writer for the given channel/thread.
 func (a *Adapter) NewStreamingWriter(ctx context.Context, channelID, threadTS string, onComplete func(string)) *NativeStreamingWriter {
-	w := NewNativeStreamingWriter(ctx, a.client, channelID, threadTS, a.teamID, a.rateLimiter, a.Log, func(ts string) {
+	if a.IsClosed() {
+		return nil
+	}
+	a.mu.RLock()
+	if a.IsClosed() || a.rateLimiter == nil {
+		a.mu.RUnlock()
+		return nil
+	}
+	client, teamID, rateLimiter, log := a.client, a.teamID, a.rateLimiter, a.Log
+	a.mu.RUnlock()
+
+	w := NewNativeStreamingWriter(ctx, client, channelID, threadTS, teamID, rateLimiter, log, func(ts string) {
 		if !a.IsClosed() {
 			a.mu.Lock()
 			delete(a.activeStreams, ts)
@@ -788,7 +818,19 @@ func (a *Adapter) handleTextControlCommand(ctx context.Context, teamID, channelI
 		// Abort any active streaming writer — GC/Reset kills the worker without a
 		// done event, so the writer would otherwise remain active until TTL expiry.
 		if conn := a.GetOrCreateConn(channelID, threadTS); conn != nil {
-			conn.closeStreamWriter()
+			// Give the stream close its own fixed budget independent of the
+			// (short) command ctx: a ctx-cancelled StopStream returns an error
+			// after closeStreamWriter already cleared the writer, stranding the
+			// old stream half-open — subsequent deltas would open a SECOND
+			// streaming message in the same thread.
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := conn.closeStreamWriter(closeCtx)
+			closeCancel()
+			if err != nil {
+				a.Log.Warn("slack: failed to close stream on control command",
+					"channel", channelID, "thread", threadTS, "err", err)
+				conn.recordTerminalFailure(closeCtx, terminalFailureResult(err))
+			}
 		}
 	}
 
@@ -842,7 +884,7 @@ type SlackConn struct {
 	messageTS string // anchor message for typing indicator cleanup
 
 	handlerMu      sync.Mutex // serializes control commands and message handling per thread
-	streamWriter   *NativeStreamingWriter
+	streamWriter   streamContentCloser
 	streamWriterMu sync.Mutex
 	mu             sync.RWMutex // protects workDir
 	workDir        string       // current workDir identity for session key derivation
@@ -950,12 +992,28 @@ func (c *SlackConn) writeWithStreaming(ctx context.Context, text string) error {
 	defer c.streamWriterMu.Unlock()
 
 	// TTL rotation: proactively replace expired streams before
-	// Slack's server-side streaming limit kicks in.
-	if c.streamWriter != nil && c.streamWriter.Expired() {
-		oldWriter := c.streamWriter
-		oldWriter.SetSkipFallback()
+	// Slack's server-side streaming limit kicks in. The old writer no longer
+	// sends a fallback itself; its stop failure is best-effort (the content
+	// continues streaming into the replacement writer). Expired is a
+	// NativeStreamingWriter-only capability, so the check type-asserts.
+	if oldWriter, ok := c.streamWriter.(*NativeStreamingWriter); ok && oldWriter.Expired() {
 		c.streamWriter = nil
-		go func() { _ = oldWriter.Close() }()
+		go func() {
+			// The rotated writer's Close flushes its buffered tail to a
+			// server-expired stream — a StreamTerminalError{ContentPresented:
+			// false} here means the tail was LOST. Surface it through the
+			// terminal failure accounting (fallback counter + structured
+			// failure result) instead of discarding it, so a visible content
+			// gap is never silent. Bound the close by its own deadline; the
+			// rotation must not block the streaming hot path.
+			closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := oldWriter.CloseContext(closeCtx); err != nil {
+				c.adapter.Log.Warn("slack: rotated stream close failed",
+					"channel", c.channelID, "err", err)
+				c.recordTerminalFailure(closeCtx, terminalFailureResult(err))
+			}
+		}()
 		c.adapter.Log.Info("slack: stream rotated",
 			"channel", c.channelID,
 			"old_msg_ts", oldWriter.messageTS)
@@ -1076,7 +1134,7 @@ func (a *Adapter) postFile(ctx context.Context, channelID, threadTS, filePath, t
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
-	if len(data) > mediaMaxSize {
+	if len(data) > uploadMaxSize {
 		return "", fmt.Errorf("file too large: %d bytes", len(data))
 	}
 
@@ -1141,31 +1199,43 @@ func (c *SlackConn) tryFileUpload(ctx context.Context, text string) bool {
 }
 
 // getStreamWriter returns the current stream writer (thread-safe).
-func (c *SlackConn) getStreamWriter() *NativeStreamingWriter {
+func (c *SlackConn) getStreamWriter() streamContentCloser {
 	c.streamWriterMu.Lock()
 	defer c.streamWriterMu.Unlock()
 	return c.streamWriter
 }
 
-// closeStreamWriter closes and clears the stream writer.
-// The lock is released before calling Close() to avoid a deadlock:
-// Close() → onComplete → writeWithStreaming's callback → Lock(streamWriterMu).
-func (c *SlackConn) closeStreamWriter() {
+// closeStreamWriter closes and clears the stream writer, returning the
+// terminal close error. CloseContext runs outside the lock — the lock is
+// released first to avoid a deadlock:
+// CloseContext() → onComplete → writeWithStreaming's callback → Lock(streamWriterMu).
+// A nil writer is a nil no-op; once cleared, the call stays idempotent.
+func (c *SlackConn) closeStreamWriter(ctx context.Context) error {
 	c.streamWriterMu.Lock()
 	w := c.streamWriter
 	c.streamWriter = nil
 	c.streamWriterMu.Unlock()
 
-	if w != nil {
-		_ = w.Close()
+	if w == nil {
+		return nil
 	}
+	return w.CloseContext(ctx)
 }
 
-// Close removes the conn from the adapter registry and cleans up the stream writer.
+// Close removes the conn from the adapter registry and cleans up the stream
+// writer. Close cannot propagate the stream error (PlatformConn.Close has no
+// error return), so it is surfaced as a structured Warn plus the terminal
+// failure counter.
 func (c *SlackConn) Close() error {
 	c.adapter.DeleteConn(c.channelID, c.threadTS)
 
-	c.closeStreamWriter()
+	closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.closeStreamWriter(closeCtx); err != nil {
+		c.adapter.Log.Warn("slack: close failed to finalize stream",
+			"channel", c.channelID, "thread", c.threadTS, "err", err)
+		c.recordTerminalFailure(closeCtx, terminalFailureResult(err))
+	}
 
 	c.clearStatus(context.Background())
 

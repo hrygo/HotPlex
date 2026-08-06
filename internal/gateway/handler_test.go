@@ -1566,6 +1566,123 @@ func TestHandleSupplementOnBusy_FallbackBuffer(t *testing.T) {
 	require.Equal(t, "追问", merged)
 }
 
+func TestMidTurnContract_AllWorkers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		workerType worker.WorkerType
+		native     bool
+		mode       string
+	}{
+		{name: "W-C", workerType: worker.TypeClaudeCode, native: true, mode: "injected"},
+		{name: "W-O", workerType: worker.TypeOpenCodeSrv, native: false, mode: "buffered"},
+		{name: "W-X", workerType: worker.TypeCodexCLI, native: true, mode: "injected"},
+		{name: "W-A", workerType: worker.TypeACP, native: false, mode: "buffered"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				w       worker.Worker
+				nativeW *mockMidTurnWorker
+			)
+			if tc.native {
+				nativeW = &mockMidTurnWorker{}
+				w = nativeW
+			} else {
+				w = new(mockWorkerForHandler)
+			}
+			h, _, hub, bridge := newBusyTestHandler(t, w)
+			sessionID := "mid-turn-" + tc.name
+			conn := &mockPlatformConn{}
+			hub.JoinPlatformSession(sessionID, conn)
+			env := newInputEnvelope(t, sessionID, "supplement-"+tc.name)
+			env.Event.Data.(map[string]any)["client_message_id"] = "client-" + tc.name
+
+			require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "supplement-"+tc.name))
+			require.Eventually(t, func() bool {
+				for _, got := range conn.envelopes() {
+					if got.Metadata == nil {
+						continue
+					}
+					if got.Metadata["supplement_mode"] == tc.mode {
+						return true
+					}
+				}
+				return false
+			}, time.Second, 10*time.Millisecond)
+
+			modeCount := 0
+			for _, got := range conn.envelopes() {
+				if got.Metadata != nil && got.Metadata["supplement_mode"] == tc.mode {
+					modeCount++
+				}
+			}
+			require.GreaterOrEqual(t, modeCount, 1, "the platform must observe the contract mode")
+
+			bridge.pending.mu.Lock()
+			bufferedCount := pendingCount(bridge.pending.items[sessionID])
+			bridge.pending.mu.Unlock()
+			if tc.native {
+				require.Equal(t, 1, nativeW.injectCount)
+				require.Equal(t, "supplement-"+tc.name, nativeW.injected)
+				require.Zero(t, bufferedCount, "Native workers must not enter the fallback buffer")
+			} else {
+				w.(*mockWorkerForHandler).AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+				require.Equal(t, 1, bufferedCount, "fallback workers buffer the current-turn supplement")
+			}
+		})
+	}
+}
+
+type recordingPendingReplayer struct {
+	mu        sync.Mutex
+	envelopes []*events.Envelope
+}
+
+func (r *recordingPendingReplayer) DeliverReplay(_ context.Context, env *events.Envelope) error {
+	r.mu.Lock()
+	r.envelopes = append(r.envelopes, events.Clone(env))
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *recordingPendingReplayer) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.envelopes)
+}
+
+func TestMidTurnFallback_ReplaysOnceAfterDuplicateTerminal(t *testing.T) {
+	t.Parallel()
+
+	w := new(mockWorkerForHandler)
+	h, _, _, bridge := newBusyTestHandler(t, w)
+	replayer := &recordingPendingReplayer{}
+	bridge.SetPendingReplayer(replayer)
+	sessionID := "mid-turn-replay"
+	env := newInputEnvelope(t, sessionID, "replay-once")
+	env.Event.Data.(map[string]any)["client_message_id"] = "replay-client"
+
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "replay-once"))
+	bridge.replayPending(sessionID)
+	// A duplicate terminal notification must not drain or deliver the same
+	// fallback supplement a second time.
+	bridge.replayPending(sessionID)
+	bridge.WaitPendingReplays(t.Context())
+
+	require.Equal(t, 1, replayer.count())
+	bridge.pending.mu.Lock()
+	bufferedCount := pendingCount(bridge.pending.items[sessionID])
+	bridge.pending.mu.Unlock()
+	require.Zero(t, bufferedCount)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+}
+
 func TestHandleSupplementOnBusy_FullBufferReturnsFailureWithoutAck(t *testing.T) {
 	t.Parallel()
 	w := new(mockWorkerForHandler)

@@ -462,6 +462,43 @@ func TestHandleCapabilityError_Degrades(t *testing.T) {
 	require.True(t, a.isAssistantCapable.Load(), "non-capability error should not degrade")
 }
 
+func TestNewStreamingWriter_ConcurrentWithClose(t *testing.T) {
+	a := newTestAdapter(t)
+	start := make(chan struct{})
+	var (
+		wg        sync.WaitGroup
+		writersMu sync.Mutex
+		writers   []*NativeStreamingWriter
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 1000; i++ {
+			writer := a.NewStreamingWriter(context.Background(), "C_TEST", "", nil)
+			if writer == nil {
+				continue
+			}
+			writersMu.Lock()
+			writers = append(writers, writer)
+			writersMu.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_ = a.Close(context.Background())
+	}()
+	close(start)
+	wg.Wait()
+
+	writersMu.Lock()
+	defer writersMu.Unlock()
+	for _, writer := range writers {
+		_ = writer.Close()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AC 4.1-6 — group_policy=allowlist rejects non-whitelisted user
 // ---------------------------------------------------------------------------
@@ -2099,4 +2136,33 @@ func TestHandlerMu_TimeoutDoesNotBlockSubsequentCalls(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("handlerMu still held after timeout cycle completed")
 	}
+}
+
+// TestHandleMessageEvent_BridgeNilRetryable pins the "bridge not configured"
+// contract: a message arriving without a bridge must be rolled back (not
+// silently dropped with the dedup entry kept), so the same ClientMsgID can be
+// delivered once the bridge is configured.
+func TestHandleMessageEvent_BridgeNilRetryable(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	a.client = &stubSlackClient{}
+
+	evt := makeDMEvent("U_ALICE", "bridge comes later")
+	msg := evt.InnerEvent.Data.(*slackevents.MessageEvent)
+
+	// No bridge → HandleTextMessage fails → the record must roll back.
+	a.handleMessageEvent(context.Background(), msg, "T_TEST")
+	require.Zero(t, dedupCount(a), "missing bridge must roll back the record")
+
+	// Same ClientMsgID becomes retryable once the bridge is configured.
+	handler := &captureHandler{}
+	bridge := messaging.NewBridge(
+		slog.Default(), messaging.PlatformSlack, nil, handler, nil,
+		"test_worker", "", "/tmp", "",
+	)
+	require.NoError(t, a.ConfigureWith(messaging.AdapterConfig{Bridge: bridge}))
+
+	a.handleMessageEvent(context.Background(), msg, "T_TEST")
+	require.Len(t, handler.calls, 1, "same ID must be retryable after the bridge is configured")
+	require.False(t, a.Dedup.TryRecord(msg.ClientMsgID), "successful delivery keeps the record")
 }

@@ -202,6 +202,83 @@ jobs:
           name: coverage${{ matrix.shard != '' && format('-{0}', matrix.shard) || '' }}
           path: coverage*.out
 
+  # ── Platform × Worker contract matrix ──────────────────────────────────
+  # Keep this deterministic gate independent from the affected-package shard.
+  contract-matrix:
+    needs: [large-file-guard]
+    name: Platform × Worker Contract Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-go-webchat
+        with:
+          build-webchat: 'false'
+
+      - name: Run deterministic 12-combination matrix
+        run: |
+          set -o pipefail
+          make test-contract-matrix | tee contract-matrix.log
+
+      - name: Publish matrix summary
+        if: always()
+        run: |
+          grep '^contract matrix:' contract-matrix.log >> "$GITHUB_STEP_SUMMARY" || true
+
+  # ── WebChat browser contract matrix ────────────────────────────────────
+  # This job owns the browser setup and stays independent from Go test shards.
+  webchat-e2e-matrix:
+    needs: [large-file-guard]
+    name: WebChat E2E Contract Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.4.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: webchat/pnpm-lock.yaml
+
+      - name: Install WebChat dependencies
+        run: pnpm --dir webchat install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --dir webchat exec playwright install --with-deps chromium
+
+      - name: Run WebChat unit tests
+        run: pnpm --dir webchat test
+
+      - name: Typecheck WebChat
+        run: pnpm --dir webchat exec tsc --noEmit
+
+      - name: Run WebChat browser baseline
+        run: pnpm --dir webchat exec playwright test e2e/chat.spec.ts --project=chromium
+
+      - name: Run WebChat platform-worker matrix
+        run: pnpm --dir webchat test:e2e:matrix
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webchat-playwright-report
+          path: |
+            webchat/playwright-report
+            webchat/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ── Coverage merge + threshold check (push-to-main only) ────────────────
   coverage-check:
     needs: [test]

@@ -91,6 +91,41 @@ func TestBaseWorker_Wait_NilProc(t *testing.T) {
 	require.Contains(t, err.Error(), "not started")
 }
 
+func TestBaseWorker_BeginTurnClearsStopped(t *testing.T) {
+	t.Parallel()
+
+	w := NewBaseWorker(slog.Default(), nil)
+
+	// Fresh worker: the marker starts false.
+	require.False(t, w.IsStopped(), "stopped marker must start false")
+
+	// StopCurrentTurn sets the marker.
+	w.MarkStopped()
+	require.True(t, w.IsStopped())
+
+	// A new primary turn clears it.
+	w.BeginTurn()
+	require.False(t, w.IsStopped(), "BeginTurn must clear the stopped marker for the next turn")
+}
+
+func TestBaseWorker_ClearStoppedUnmarks(t *testing.T) {
+	t.Parallel()
+
+	w := NewBaseWorker(slog.Default(), nil)
+
+	w.MarkStopped()
+	require.True(t, w.IsStopped())
+
+	// A failed stop attempt (abort/cancel/interrupt RPC error) unmarks the
+	// worker so the turn's legitimate terminal event flows normally.
+	w.ClearStopped()
+	require.False(t, w.IsStopped(), "ClearStopped must unmark a stopped worker")
+
+	// ClearStopped on a non-stopped worker is a no-op.
+	w.ClearStopped()
+	require.False(t, w.IsStopped())
+}
+
 func TestConn_UserID(t *testing.T) {
 	conn := NewConn(slog.Default(), nil, "test-user", "test-session")
 	require.Equal(t, "test-user", conn.UserID())

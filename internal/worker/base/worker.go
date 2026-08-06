@@ -209,3 +209,24 @@ func (w *BaseWorker) IsStopped() bool { return w.stopped.Load() }
 
 // MarkStopped marks the worker as stopped by user.
 func (w *BaseWorker) MarkStopped() { w.stopped.Store(true) }
+
+// ClearStopped unmarks a worker previously marked stopped. Used when a stop
+// attempt fails (OCS abort HTTP error, ACP cancel RPC failure, codex InterruptTurn
+// failure, claudecode kill failure): the gateway rolls back its stop fence and
+// sends an error, so the turn is still running and its legitimate terminal event
+// must flow normally rather than being suppressed or misread as a user-stop by
+// the crash fallback.
+func (w *BaseWorker) ClearStopped() { w.stopped.Store(false) }
+
+// BeginTurn clears the user-stop marker for a new primary turn. Called by each
+// adapter's Input once the input is confirmed as primary content (DispatchMetadata
+// returned handled=false). Adapters with fast sends (claudecode, codexcli) call
+// it after the protocol send succeeds; adapters with blocking sends that span
+// the whole turn (acp Prompt, OCS message POST) capture the prior stopped
+// state, clear it before the send, and restore it if the send fails. Either
+// way, a failed send leaves the marker set so the previous stop is preserved
+// (the bridge crash fallback must not re-run a stopped turn), and a successful
+// send leaves it cleared for the new turn. The marker is NOT cleared for
+// interaction-response metadata, metadata dispatch errors, or absent
+// connections, and NOT in InjectMidTurn.
+func (w *BaseWorker) BeginTurn() { w.stopped.Store(false) }

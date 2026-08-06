@@ -447,6 +447,36 @@ func (s *SQLStore) OpenBySession(ctx context.Context, sessionID string) (*Record
 	return r, nil
 }
 
+// LatestBySession returns the most recent execution record for the session
+// regardless of runtime status (pending/running/unknown/completed/failed), or
+// ErrNotFound if none exists. Used by the stop path to identify the turn an
+// in-flight stop belongs to: the stop's own FinishRuntime closes the runtime
+// BEFORE a duplicate stop arrives, so OpenBySession (open runtimes only) would
+// resolve to a different (or no) record and the single-stop fence would admit
+// the duplicate. The latest record is stable across a stopped turn's runtime
+// closure and changes only when a NEW turn accepts a new execution.
+func (s *SQLStore) LatestBySession(ctx context.Context, sessionID string) (*Record, error) {
+	if sessionID == "" {
+		return nil, errors.New("execution: session id is required")
+	}
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	row := s.db.QueryRowContext(ctx, s.rebind(`
+		SELECT `+executionColumns+`
+		FROM execution_inputs
+		WHERE session_id = ?
+		ORDER BY created_at DESC LIMIT 1`), sessionID)
+	r, err := s.scanRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("execution: latest by session: %w", err)
+	}
+	return r, nil
+}
+
 func (s *SQLStore) FenceBySession(ctx context.Context, sessionID string) (*Record, error) {
 	if sessionID == "" {
 		return nil, errors.New("execution: session id is required")

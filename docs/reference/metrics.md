@@ -266,7 +266,7 @@ rate(hotplex_cron_duration_sum[5m]) / rate(hotplex_cron_duration_count[5m])
 | `hotplex.streaming.card.rotations` | Counter | Streaming Card TTL 触发的旋转次数 |
 | `hotplex.streaming.card.rotation_failures` | Counter | 旋转失败数，label: `phase` |
 | `hotplex.streaming.card.flush_fallbacks` | Counter | CardKit 降级到 IM Patch 的次数 |
-| `hotplex.streaming.terminal_failures` | Counter | 终态 CardKit/IM Patch 或收尾装饰失败次数，每次终态失败只计一次，label: `fallback_result`（`sent` / `failed` / `skipped_body_presented`） |
+| `hotplex.streaming.terminal_failures` | Counter | 平台 streaming 终态失败次数（Feishu card / Slack stream），label: `platform`（`feishu` / `slack`）+ `fallback_result`（`pending` / `sent` / `failed` / `skipped_body_presented`） |
 
 ## ACP 指标
 
@@ -382,7 +382,7 @@ Turn-Integrity 子系统（Fix E）用于检测和量化空 success turn、stale
 | `hotplex.worker.empty_success_total` | Counter | 成功但未产出可显示内容和工具调用的 turn，label: `worker_type`, `platform` |
 | `hotplex.gateway.stale_forwarder_event_total` | Counter | `/reset` 替换 Conn 后仍被旧 forwarder 观察到的事件数 |
 | `hotplex.worker.assistant_snapshot_drift_total` | Counter | Full assistant snapshot 非前缀扩展被重新完整下发而非静默吞咽 |
-| `hotplex.messaging.platform_terminal_fallback_total` | Counter | 平台适配器因空内容发出的合成终态消息回退 |
+| `hotplex.messaging.platform_terminal_fallback_total` | Counter | 平台适配器发出的合成终态消息回退：空内容占位替换（Feishu），或 streaming 关闭失败且正文未展示时的固定短文本（Slack） |
 
 ### 常用查询
 
