@@ -569,6 +569,15 @@ func (d *webChatContractDriver) dialAndInit() (*websocket.Conn, string, error) {
 	initEnvelope := map[string]any{
 		"version": events.Version,
 		"id":      aep.NewID(),
+		// The top-level session_id is the client key DeriveSessionKey hashes:
+		// the server derives session identity from the TOP-LEVEL field, not the
+		// data-layer one. Without it every scenario of a combo resolved to the
+		// same key (same user+worker+empty clientKey), so the next scenario's
+		// init raced the previous scenario's owner-conn release on the SAME
+		// session — SESSION_ALREADY_CONNECTED under CI load (matrix C05 flake).
+		// Sending the per-scenario clientKey on the top level restores the
+		// "fresh session per scenario" contract the driver comment promises.
+		"session_id": d.clientKey,
 		"event": map[string]any{
 			"type": string(events.Init),
 			"data": map[string]any{
