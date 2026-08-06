@@ -382,8 +382,17 @@ func (d *feishuContractDriver) SendRawInput(ctx context.Context, id, content str
 	// delivery-outcome ack (sent after the worker accepted the input) so
 	// DeliveredInputs is settled when the runner asserts it.
 	var outcome error
-	var lastDiag string
+	lastCount := -1
 	require.Eventually(d.t, func() bool {
+		// Diagnostic for the CI-only flake: log on every change of the rec
+		// conn's event sequence so the timeout trace shows whether the input
+		// entered the handler (any envelope present) and which events arrived
+		// without the expected InputAck. (Variadic msg args are evaluated at
+		// call time, so the snapshot must be logged inside the condition.)
+		if evs := d.rec.Events(); len(evs) != lastCount {
+			lastCount = len(evs)
+			d.t.Logf("input %s diag: rec_events=%v session=%s", id, recEventTypes(evs), d.sessionID)
+		}
 		for _, env := range d.rec.Events() {
 			ack, ok := env.Event.Data.(events.InputAckData)
 			if !ok || ack.ClientMessageID != id {
@@ -398,12 +407,8 @@ func (d *feishuContractDriver) SendRawInput(ctx context.Context, id, content str
 				return true
 			}
 		}
-		// Diagnostic snapshot for the CI-only flake: captures whether the
-		// input ever reached the handler (any envelope present) and which
-		// events arrived without the expected InputAck.
-		lastDiag = fmt.Sprintf("rec_events=%v session=%s", recEventTypes(d.rec.Events()), d.sessionID)
 		return false
-	}, driverWaitTimeout, driverWaitPoll, "feishu driver: input %s never reached the worker; %s", id, lastDiag)
+	}, driverWaitTimeout, driverWaitPoll, "feishu driver: input %s never reached the worker", id)
 	return outcome
 }
 
