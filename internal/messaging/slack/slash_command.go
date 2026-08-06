@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -15,6 +16,7 @@ import (
 const (
 	CommandReset      = "/reset"
 	CommandDisconnect = "/dc"
+	CommandWorker     = "/worker"
 
 	slashCooldown      = 5 * time.Second
 	slashSweepInterval = 5 * time.Minute
@@ -102,9 +104,46 @@ func (a *Adapter) handleSlashCommandEvent(ctx context.Context, evt socketmode.Ev
 	case CommandDisconnect:
 		a.handleControlCommand(ctx, cmd, events.ControlActionTerminate,
 			"/dc", "👋 Disconnecting. Context preserved for next message.", "❌ Failed to disconnect. No active conversation.")
+	case CommandWorker:
+		a.handleWorkerCommand(ctx, cmd)
 	default:
 		a.sendEphemeralOrPost(ctx, cmd.ChannelID, "", cmd.UserID, fmt.Sprintf("Unknown command: %s", cmd.Command))
 	}
+}
+
+// handleWorkerCommand forwards the /worker slash command to the gateway as an
+// ordinary AEP input envelope. The content carries "/worker <name> [args]",
+// which the gateway's tryExplicitNativeCommand parses and dispatches with
+// NOT_SUPPORTED fallback semantics (spec §7.2).
+//
+// NOTE: This case only fires when the Slack App manifest registers the
+// /worker slash command. That registration is an external app configuration —
+// HotPlex performs no repo-side registration (spec §7.2).
+func (a *Adapter) handleWorkerCommand(ctx context.Context, cmd slack.SlashCommand) {
+	content := CommandWorker
+	if text := strings.TrimSpace(cmd.Text); text != "" {
+		content = CommandWorker + " " + text
+	}
+
+	conn := a.GetOrCreateConn(cmd.ChannelID, "")
+	if conn == nil {
+		a.Log.Warn("slack: adapter closed, dropping /worker command", "user", cmd.UserID)
+		return
+	}
+
+	env := a.makeEnvelope(cmd.TeamID, cmd.ChannelID, "", cmd.UserID, content, conn.WorkDir())
+	if env == nil {
+		a.Log.Warn("slack: failed to build envelope for /worker command", "user", cmd.UserID)
+		return
+	}
+
+	if err := a.Bridge().Handle(ctx, env, conn); err != nil {
+		a.Log.Error("slack: /worker command failed", "session_id", env.SessionID, "err", err)
+		a.sendEphemeralOrPost(ctx, cmd.ChannelID, "", cmd.UserID, "❌ Failed to dispatch /worker command.")
+		return
+	}
+
+	a.Log.Info("slack: /worker command forwarded", "session_id", env.SessionID, "user", cmd.UserID)
 }
 
 func (a *Adapter) handleControlCommand(ctx context.Context, cmd slack.SlashCommand, action events.ControlAction, logPrefix, successMsg, errorMsg string) {

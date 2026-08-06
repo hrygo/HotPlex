@@ -1,10 +1,15 @@
 package slack
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/slack-go/slack"
+	"github.com/slack-go/slack/socketmode"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 func TestSlashRateLimiter_Allow(t *testing.T) {
@@ -113,6 +118,97 @@ func TestExtractChannelThread(t *testing.T) {
 			ch, thread := ExtractChannelThread(tt.sessionID)
 			require.Equal(t, tt.wantCh, ch)
 			require.Equal(t, tt.wantThread, thread)
+		})
+	}
+}
+
+func TestHandleSlashCommandEventWorker(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		command  string
+		text     string
+		wantText string
+	}{
+		{"name and args", CommandWorker, "oracle-dba 10.0.0.1", "/worker oracle-dba 10.0.0.1"},
+		{"empty text", CommandWorker, "", "/worker"},
+		{"whitespace text", CommandWorker, "   ", "/worker"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			a, calls := newAdapterWithCapture(t)
+			a.socketMode = socketmode.New(slack.New("xoxb-test"))
+			a.client = &stubSlackClient{}
+
+			evt := socketmode.Event{
+				Type: socketmode.EventTypeSlashCommand,
+				Data: slack.SlashCommand{
+					TeamID:    "T1",
+					ChannelID: "C1",
+					UserID:    "U1",
+					Command:   tt.command,
+					Text:      tt.text,
+				},
+				Request: &socketmode.Request{EnvelopeID: "env-1"},
+			}
+
+			a.handleSlashCommandEvent(context.Background(), evt)
+
+			require.Len(t, *calls, 1, "one input envelope should reach the bridge")
+			call := (*calls)[0]
+			require.Equal(t, tt.wantText, call.Text, "content must carry name + args into the shared parser")
+			require.Equal(t, "U1", call.OwnerID)
+			require.Equal(t, "slack", call.Metadata["platform"])
+			require.Equal(t, "C1", call.Metadata["channel_id"])
+		})
+	}
+}
+
+func TestHandleSlashCommandEventControl(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+		action  events.ControlAction
+	}{
+		{"reset", CommandReset, events.ControlActionReset},
+		{"disconnect", CommandDisconnect, events.ControlActionTerminate},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			a, envelopes, _ := newAdapterWithControlCapture(t)
+			a.socketMode = socketmode.New(slack.New("xoxb-test"))
+			a.client = &stubSlackClient{}
+
+			evt := socketmode.Event{
+				Type: socketmode.EventTypeSlashCommand,
+				Data: slack.SlashCommand{
+					TeamID:    "T1",
+					ChannelID: "C1",
+					UserID:    "U1",
+					Command:   tt.command,
+				},
+				Request: &socketmode.Request{EnvelopeID: "env-1"},
+			}
+
+			a.handleSlashCommandEvent(context.Background(), evt)
+
+			select {
+			case env := <-envelopes:
+				require.Equal(t, events.Control, env.Event.Type)
+				cd, ok := env.Event.Data.(events.ControlData)
+				require.True(t, ok, "control envelope must carry ControlData")
+				require.Equal(t, tt.action, cd.Action)
+				require.Equal(t, "U1", env.OwnerID)
+			case <-time.After(2 * time.Second):
+				t.Fatal("expected control envelope to reach the bridge")
+			}
 		})
 	}
 }

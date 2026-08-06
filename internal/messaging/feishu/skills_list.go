@@ -30,9 +30,8 @@ func (c *FeishuConn) sendSkillsList(ctx context.Context, env *events.Envelope) e
 
 		for _, g := range page {
 			for _, s := range g.Entries {
-				desc := messaging.TruncateDesc(s.Description)
-				emoji := messaging.SourceEmoji(s.Source)
-				fmt.Fprintf(&sb, "%s *%s* — %s\n", emoji, s.Name, desc)
+				sb.WriteString(formatSkillLine(s))
+				sb.WriteByte('\n')
 			}
 		}
 
@@ -41,6 +40,38 @@ func (c *FeishuConn) sendSkillsList(ctx context.Context, env *events.Envelope) e
 		}
 	}
 	return nil
+}
+
+// formatSkillLine renders one skill entry as "{marker} *{name}* — {desc} ({suffixes})".
+// An empty/unknown status is treated as discoverable per pkg/events.SkillStatus wire semantics.
+func formatSkillLine(s events.SkillEntry) string {
+	marker, statusSuffix := "", ""
+	switch s.Status {
+	case events.SkillStatusCallable:
+		marker = "✅"
+	case events.SkillStatusDiscoverable:
+		marker, statusSuffix = "🔍", "仅可发现"
+	case events.SkillStatusUnavailable:
+		marker, statusSuffix = "🚫", "不可用"
+	default:
+		marker, statusSuffix = "🔍", "仅可发现"
+	}
+
+	desc := messaging.TruncateDesc(s.Description)
+
+	var suffixes []string
+	if statusSuffix != "" {
+		suffixes = append(suffixes, statusSuffix)
+	}
+	if s.Source == messaging.SourceProject || s.Source == messaging.SourceGlobal {
+		suffixes = append(suffixes, s.Source)
+	}
+
+	line := fmt.Sprintf("%s *%s* — %s", marker, s.Name, desc)
+	if len(suffixes) > 0 {
+		line += " (" + strings.Join(suffixes, ", ") + ")"
+	}
+	return line
 }
 
 func (c *FeishuConn) sendSkillsText(ctx context.Context, text string) error {
