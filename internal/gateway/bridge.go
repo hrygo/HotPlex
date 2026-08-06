@@ -703,7 +703,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 	if stateToNotify == events.StateTerminated || stateToNotify == events.StateIdle {
 		stateToNotify = events.StateRunning // We just transitioned it
 	}
-	stateEvt := events.NewEnvelope(aep.NewID(), id, b.hub.NextSeq(id), events.State, events.StateData{
+	stateEvt := events.NewEnvelope(aep.NewID(), id, 0, events.State, events.StateData{
 		State: stateToNotify,
 	})
 	if err := b.hub.SendToSession(ctx, stateEvt); err != nil {
@@ -1367,7 +1367,7 @@ func injectGatewayContext(env map[string]string, platform, botID, botName, userI
 }
 
 func (b *Bridge) sendError(sessionID string, code events.ErrorCode, format string, args ...any) {
-	env := events.NewEnvelope(aep.NewID(), sessionID, b.hub.NextSeq(sessionID), events.Error, events.ErrorData{
+	env := events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
 	})

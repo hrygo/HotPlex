@@ -488,7 +488,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 		h.cancelRetryIfNeeded(env.SessionID)
 		helpEnv := events.NewEnvelope(
 			aep.NewID(), env.SessionID,
-			h.hub.NextSeq(env.SessionID),
+			0,
 			events.Message, events.MessageData{Content: messaging.HelpText()},
 		)
 		return true, h.hub.SendToSession(ctx, helpEnv)
@@ -688,7 +688,7 @@ func (h *Handler) ackSupplement(ctx context.Context, source *events.Envelope, mo
 // Content is empty — conns substitute their own localized text (Task 10).
 // Best-effort: delivery failures are not surfaced to the user.
 func (h *Handler) notifySupplement(ctx context.Context, sessionID, mode string) {
-	env := events.NewEnvelope(aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+	env := events.NewEnvelope(aep.NewID(), sessionID, 0,
 		events.Message, events.MessageData{Content: ""})
 	env.Metadata = map[string]any{"supplement_mode": mode}
 	_ = h.hub.SendToSession(ctx, env)
@@ -1189,11 +1189,7 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 		}
 	}
 
-	seq := h.hub.NextSeq(sessionID)
-	if seq == 0 {
-		return
-	}
-	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, seq, eventKind, events.RuntimeExecutionData{
+	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, 0, eventKind, events.RuntimeExecutionData{
 		ExecutionID: rec.ExecutionID,
 		Status:      string(rtStatus),
 		ErrorCode:   events.ErrorCode(errorCode),
@@ -1403,7 +1399,7 @@ func (h *Handler) handleInteractionResponseEvent(ctx context.Context, env *event
 				reqID, _ = dataMap["request_id"].(string)
 			}
 		}
-		errEnv := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.Error, events.ErrorData{
+		errEnv := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.Error, events.ErrorData{
 			Code:    code,
 			Message: fmt.Sprintf("worker response failed: %v", err),
 		})
@@ -1430,7 +1426,7 @@ func (h *Handler) handleInteractionResponseEvent(ctx context.Context, env *event
 		ack := events.NewEnvelope(
 			aep.NewID(),
 			env.SessionID,
-			h.hub.NextSeq(env.SessionID),
+			0,
 			env.Event.Type,
 			env.Event.Data,
 		)

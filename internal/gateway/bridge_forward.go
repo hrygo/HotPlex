@@ -332,10 +332,27 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// When eventstore is disabled, only assign if the Worker left seq=0 (OCS
 	// pattern); a Worker-provided seq is used as-is to preserve ordering in
 	// non-durable deployments.
+	//
+	// Durable forwarding pre-allocates the seq (needed for eventstore capture)
+	// and holds the per-session publish-order lock across allocation → capture
+	// → enqueue, so a concurrent handler-allocated event (e.g. a stop's
+	// synthetic done) cannot interleave and deliver out-of-order seqs to the
+	// client (contract test C04-double-stop). Without the store, seq=0 events
+	// are allocated inside SendToSession under the same lock.
+	var releaseOrder func()
+	if b.collector != nil {
+		mu := b.hub.SeqOrderLock(sessionID)
+		mu.Lock()
+		releaseOrder = mu.Unlock
+	}
+	defer func() {
+		if releaseOrder != nil {
+			releaseOrder()
+		}
+	}()
+
 	if b.collector != nil {
 		env.Seq = b.hub.NextSeqHeld(sessionID)
-	} else if env.Seq == 0 {
-		env.Seq = b.hub.NextSeq(sessionID)
 	}
 
 	// Buffer error events for potential LLM retry.
@@ -546,15 +563,14 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 	}
 
 	var seq int64
-	if b.collector != nil {
+	preallocated := b.collector != nil
+	if preallocated {
 		// processForwardedEvent already holds the session's sequence lease.
 		// Re-entering BeginSeqOperation through SendToSession can self-deadlock
 		// when a ReleaseSeq writer is queued behind the outer read lock.
 		seq = b.hub.NextSeqHeld(sessionID)
-	} else {
-		seq = b.hub.NextSeq(sessionID)
 	}
-	if seq == 0 {
+	if preallocated && seq == 0 {
 		return
 	}
 	rtEnv := events.NewEnvelope(aep.NewID(), sessionID, seq, eventKind, events.RuntimeExecutionData{

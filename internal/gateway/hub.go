@@ -124,6 +124,13 @@ type Hub struct {
 	// Sequence generation per session
 	seqGen      *SeqGen
 	seqBarriers [seqBarrierShards]sync.RWMutex
+	// seqOrderMu serializes seq allocation + broadcast enqueue per session.
+	// Concurrent producers (forwarder goroutine vs handler goroutine) that
+	// allocate a seq and enqueue separately can deliver events to the client
+	// out of seq order, violating the AEP strictly-increasing contract
+	// (surfaced by contract test C04-double-stop). SendToSession allocates
+	// under this lock so allocation order == enqueue order.
+	seqOrderMu sync.Map // sessionID → *sync.Mutex
 	// seqSessionExists rejects late producers after durable session deletion.
 	// It is configured once at startup; nil keeps standalone/test hubs permissive.
 	seqSessionExists func(sessionID string) bool
@@ -473,7 +480,15 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 
 	// Assign sequence number before sending to broadcast queue or clients.
 	// We skip assignment if seq is already set (eg. by Handler for direct replies).
+	// When allocating, hold the per-session publish-order lock through enqueue
+	// (and any terminal ack wait) so allocation order matches the order clients
+	// observe. Without it, a forwarder goroutine that allocates early but sends
+	// late interleaves with a handler-allocated event, delivering out-of-order
+	// seqs (contract test C04-double-stop).
 	if env.Seq == 0 {
+		mu := h.SeqOrderLock(env.SessionID)
+		mu.Lock()
+		defer mu.Unlock()
 		env.Seq = h.NextSeq(env.SessionID)
 		if env.Seq == 0 {
 			return fmt.Errorf("gateway: session released: %s", env.SessionID)
@@ -912,10 +927,21 @@ func (h *Hub) NextSeqPeek(sessionID string) int64 {
 	return h.seqGen.Peek(sessionID)
 }
 
+// SeqOrderLock returns the per-session publish-order mutex. Producers that
+// allocate a seq themselves (durable forwarding, which must pin the seq for
+// eventstore capture) hold this lock across allocation → capture → enqueue so
+// their seq order matches the enqueue order observed by clients.
+func (h *Hub) SeqOrderLock(sessionID string) *sync.Mutex {
+	v, _ := h.seqOrderMu.LoadOrStore(sessionID, &sync.Mutex{})
+	mu, _ := v.(*sync.Mutex) // 唯一写入者是本方法,断言必然成功
+	return mu
+}
+
 // ForgetSeq releases sequence state after the session has been physically
 // deleted and pending collector writes have been flushed.
 func (h *Hub) ForgetSeq(sessionID string) {
 	_ = h.ReleaseSeq(sessionID, nil)
+	h.seqOrderMu.Delete(sessionID)
 }
 
 // ReleaseSeq waits for all durable sequence producers, runs drain, and only

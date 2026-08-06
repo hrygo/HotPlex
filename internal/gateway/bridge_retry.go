@@ -31,7 +31,7 @@ func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID strin
 	// Notify user if enabled.
 	if b.retryCtrl.ShouldNotify() {
 		msg := b.retryCtrl.NotifyMessage(attempt)
-		notifyEnv := buildNotifyEnvelope(sessionID, msg, b.hub.NextSeq(sessionID))
+		notifyEnv := buildNotifyEnvelope(sessionID, msg, 0)
 		_ = b.hub.SendToSession(ctx, notifyEnv)
 	}
 

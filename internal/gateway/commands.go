@@ -128,9 +128,12 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		// Finish the pending execution runtime immediately when stopped.
 		h.finishRuntimeOnStop(ctx, env.SessionID, workerRunID, env.OwnerID)
 
-		// Send done confirmation to the client.
+		// Send done confirmation to the client. Seq=0: SendToSession allocates
+		// under the per-session publish-order lock, so this synthetic terminal
+		// cannot interleave with worker events still being forwarded and
+		// deliver out-of-order seqs (contract test C04-double-stop).
 		doneEnv := events.NewEnvelope(
-			aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID),
+			aep.NewID(), env.SessionID, 0,
 			events.Done, events.DoneData{Reason: "stopped_by_user"},
 		)
 		return h.hub.SendToSession(ctx, doneEnv)
@@ -218,7 +221,7 @@ func (h *Handler) handleReset(ctx context.Context, env *events.Envelope) error {
 		}
 	}
 
-	stateEvt := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.State, events.StateData{
+	stateEvt := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.State, events.StateData{
 		State:   events.StateRunning,
 		Message: "context_reset",
 	})
@@ -266,7 +269,7 @@ func (h *Handler) handleGC(ctx context.Context, env *events.Envelope) error {
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "gc transition failed: %v", err)
 	}
 
-	stateEvt := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.State, events.StateData{
+	stateEvt := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.State, events.StateData{
 		State:   events.StateTerminated,
 		Message: "session_archived",
 	})
@@ -293,7 +296,7 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 		}
 		workDir := si.WorkDir
 		msgEnv := events.NewEnvelope(
-			aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID),
+			aep.NewID(), env.SessionID, 0,
 			events.Message, events.MessageData{Content: fmt.Sprintf("📂 当前工作目录: %s", workDir)},
 		)
 		return h.hub.SendToSession(ctx, msgEnv)
@@ -334,7 +337,7 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 		msg = fmt.Sprintf("📂 已切换到 %s（新会话，上下文已重置）", result.WorkDir)
 	}
 	msgEnv := events.NewEnvelope(
-		aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID),
+		aep.NewID(), env.SessionID, 0,
 		events.Message, events.MessageData{Content: msg},
 	)
 	if err := h.hub.SendToSession(ctx, msgEnv); err != nil {

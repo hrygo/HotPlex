@@ -12,7 +12,7 @@ import (
 )
 
 func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code events.ErrorCode, format string, args ...any) error {
-	err := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.Error, events.ErrorData{
+	err := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.Error, events.ErrorData{
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
 	})
