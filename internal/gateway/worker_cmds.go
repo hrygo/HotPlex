@@ -265,15 +265,12 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		allSkills = filtered
 	}
 
-	entries := make([]events.SkillEntry, len(allSkills))
-	for i, s := range allSkills {
-		entries[i] = events.SkillEntry{
-			Name:        s.Name,
-			Description: s.Description,
-			Source:      s.Source,
-			Managed:     s.Managed,
-		}
-	}
+	// Issue #957: annotate each Skill with the current session Worker's ability
+	// to invoke it natively. Only Workers exposing an authoritative catalog can
+	// make a callable/unavailable claim; everything else stays "discoverable"
+	// so the client never presents a Skill as runnable when it may not be.
+	status := h.skillStatusForWorker(ctx, env.SessionID, si.WorkDir)
+	entries := buildSkillEntries(allSkills, status)
 
 	data := events.SkillsListData{Skills: entries, Total: len(entries), Filter: filter}
 	respEnv := events.NewEnvelope(
@@ -282,4 +279,57 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		events.SkillsList, data,
 	)
 	return h.hub.SendToSession(ctx, respEnv)
+}
+
+// buildSkillEntries maps discovered Skills onto wire entries, applying the
+// session Worker's per-name invokability status.
+func buildSkillEntries(allSkills []skills.Skill, status func(string) events.SkillStatus) []events.SkillEntry {
+	entries := make([]events.SkillEntry, len(allSkills))
+	for i, s := range allSkills {
+		entries[i] = events.SkillEntry{
+			Name:        s.Name,
+			Description: s.Description,
+			Source:      s.Source,
+			Managed:     s.Managed,
+			Status:      status(s.Name),
+		}
+	}
+	return entries
+}
+
+// skillStatusForWorker builds a per-name status lookup backed by the session
+// Worker's authoritative Skill catalog, when one exists. Workers without a
+// catalog capability (or whose catalog query fails) fall back to
+// "discoverable" for every entry — the client must not assume invokability.
+func (h *Handler) skillStatusForWorker(ctx context.Context, sessionID, workDir string) func(string) events.SkillStatus {
+	discoverable := func(string) events.SkillStatus { return events.SkillStatusDiscoverable }
+
+	w := h.sm.GetWorker(sessionID)
+	if w == nil {
+		return discoverable
+	}
+	provider, ok := w.(worker.SkillCatalogProvider)
+	if !ok {
+		return discoverable
+	}
+
+	catalogCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	descriptors, err := provider.ListInvokableSkills(catalogCtx, workDir)
+	if err != nil {
+		h.log.Warn("skills list: worker catalog unavailable, marking skills discoverable",
+			"worker_type", w.Type(), "error", err)
+		return discoverable
+	}
+
+	advertised := make(map[string]struct{}, len(descriptors))
+	for _, d := range descriptors {
+		advertised[d.Name] = struct{}{}
+	}
+	return func(name string) events.SkillStatus {
+		if _, ok := advertised[name]; ok {
+			return events.SkillStatusCallable
+		}
+		return events.SkillStatusUnavailable
+	}
 }

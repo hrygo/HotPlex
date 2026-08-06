@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -88,4 +89,81 @@ func TestHandleInputKnownSkillRequiresWorkerAdvertisement(t *testing.T) {
 	require.Empty(t, w.invocation)
 	require.Empty(t, w.Calls)
 	sm.AssertExpectations(t)
+}
+
+type failingCatalogWorker struct {
+	mockWorkerForHandler
+}
+
+func (w *failingCatalogWorker) ListInvokableSkills(context.Context, string) ([]worker.SkillDescriptor, error) {
+	return nil, errors.New("catalog unavailable")
+}
+
+func TestSkillsListStatusForWorker(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		worker     worker.Worker
+		wantStatus events.SkillStatus
+	}{
+		{
+			name:       "advertised catalog marks callable",
+			worker:     &advertisedSkillWorker{descriptors: []worker.SkillDescriptor{{Name: "oracle-dba"}}},
+			wantStatus: events.SkillStatusCallable,
+		},
+		{
+			name:       "catalog without skill marks unavailable",
+			worker:     &advertisedSkillWorker{descriptors: []worker.SkillDescriptor{{Name: "other"}}},
+			wantStatus: events.SkillStatusUnavailable,
+		},
+		{
+			name:       "worker without catalog capability stays discoverable",
+			worker:     &recordedSkillWorker{},
+			wantStatus: events.SkillStatusDiscoverable,
+		},
+		{
+			name:       "catalog query failure degrades to discoverable",
+			worker:     &failingCatalogWorker{},
+			wantStatus: events.SkillStatusDiscoverable,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			sm := new(mockInputSM)
+			sm.On("GetWorker", "s1").Return(tt.worker)
+
+			h := newInputHandler(t, sm)
+			status := h.skillStatusForWorker(context.Background(), "s1", "/workspace")
+			require.Equal(t, tt.wantStatus, status("oracle-dba"))
+			sm.AssertExpectations(t)
+		})
+	}
+}
+
+func TestBuildSkillEntriesAppliesStatusLookup(t *testing.T) {
+	t.Parallel()
+
+	allSkills := []skills.Skill{
+		{Name: "oracle-dba", Source: skills.SourceProject, Description: "DBA helper"},
+		{Name: "build", Source: skills.SourceGlobal, Description: "Build helper"},
+	}
+	status := func(name string) events.SkillStatus {
+		if name == "oracle-dba" {
+			return events.SkillStatusCallable
+		}
+		return events.SkillStatusUnavailable
+	}
+
+	entries := buildSkillEntries(allSkills, status)
+	require.Len(t, entries, 2)
+	require.Equal(t, events.SkillStatusCallable, entries[0].Status)
+	require.Equal(t, events.SkillStatusUnavailable, entries[1].Status)
+	require.Equal(t, "oracle-dba", entries[0].Name)
+	require.Equal(t, skills.SourceProject, entries[0].Source)
+	require.Equal(t, "DBA helper", entries[0].Description)
 }

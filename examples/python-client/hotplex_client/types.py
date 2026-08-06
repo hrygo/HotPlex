@@ -352,6 +352,8 @@ class SkillEntry:
     name: str
     description: str
     source: str
+    # Invokability for the current session worker (callable/discoverable/unavailable).
+    status: str | None = None
 
 
 @dataclass

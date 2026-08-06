@@ -86,6 +86,7 @@ var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
 var _ worker.SkillInvoker = (*AppServerWorker)(nil)
+var _ worker.SkillCatalogProvider = (*AppServerWorker)(nil)
 var _ worker.SystemPromptUpdater = (*AppServerWorker)(nil)
 var _ worker.PermissionCeilingReporter = (*AppServerWorker)(nil)
 var _ worker.MidTurnInjector = (*AppServerWorker)(nil)
@@ -289,6 +290,45 @@ func (w *AppServerWorker) InvokeSkill(ctx context.Context, invocation worker.Ski
 		{Type: "skill", Name: invocation.Name, Path: invocation.Path},
 		{Type: "text", Text: args},
 	})
+}
+
+// ListInvokableSkills returns the authoritative Skill catalog for workDir via
+// the app-server `skills/list` endpoint. Paths come from Codex itself, never
+// guessed from the HotPlex filesystem layout. The manager must be running;
+// callers treat a failure as "cannot confirm invokability".
+func (w *AppServerWorker) ListInvokableSkills(ctx context.Context, workDir string) ([]worker.SkillDescriptor, error) {
+	w.mu.Lock()
+	mgr := w.manager
+	w.mu.Unlock()
+	if mgr == nil || !mgr.IsRunning() {
+		return nil, fmt.Errorf("codexcli: app-server not running")
+	}
+
+	params := SkillsListParams{Cwds: []string{workDir}}
+	resp, err := mgr.Call(ctx, "skills/list", params)
+	if err != nil {
+		return nil, fmt.Errorf("codexcli: skills/list: %w", err)
+	}
+
+	var result SkillsListResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("codexcli: parse skills/list: %w", err)
+	}
+
+	descriptors := make([]worker.SkillDescriptor, 0)
+	for _, entry := range result.Data {
+		for _, meta := range entry.Skills {
+			if !meta.Enabled {
+				continue
+			}
+			descriptors = append(descriptors, worker.SkillDescriptor{
+				Name:        meta.Name,
+				Description: meta.Description,
+				Path:        meta.Path,
+			})
+		}
+	}
+	return descriptors, nil
 }
 
 func (w *AppServerWorker) startTurn(ctx context.Context, input []TurnInputItem) error {
