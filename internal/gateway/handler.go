@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -53,6 +54,13 @@ type Handler struct {
 	ownerInstanceID string
 	stopFence       turnStopFence
 
+	// catalogStore is the session-scoped merged command catalog (spec §5.2).
+	// catalogGen tracks the per-session generation bumped on /reset, /cd, and
+	// every Worker attach; catalogGenMu guards the map.
+	catalogStore *sessionCatalogStore
+	catalogGenMu sync.Mutex
+	catalogGen   map[string]uint64
+
 	homeDirOnce sync.Once
 	homeDir     string
 	homeDirErr  error
@@ -76,8 +84,33 @@ func NewHandler(deps HandlerDeps) *Handler {
 		executionStore:  deps.ExecutionStore,
 		repairer:        deps.Repairer,
 		ownerInstanceID: deps.OwnerInstanceID,
+		catalogStore:    newSessionCatalogStore(deps.Log, deps.SkillsLocator),
+		catalogGen:      make(map[string]uint64),
 		// stopFence stays zero-valued: the turn stop fence is ready to use.
 	}
+}
+
+// InvalidateCatalog drops the session's cached command catalog and bumps its
+// generation so the next catalog assembly is forced (spec §5.2, §8.7). Called
+// by the Handler on /reset and /cd, and by the Bridge on every Worker attach;
+// the worker-instance comparison in sessionCatalogStore.Lookup is the
+// belt-and-suspenders guarantee (spec §8.7). Safe to call on a zero-value
+// Handler (nil store is a no-op).
+func (h *Handler) InvalidateCatalog(sessionID string) {
+	if h.catalogStore == nil {
+		return
+	}
+	h.catalogGenMu.Lock()
+	h.catalogGen[sessionID]++
+	h.catalogGenMu.Unlock()
+	h.catalogStore.Invalidate(sessionID)
+}
+
+// catalogGeneration returns the current catalog generation for a session.
+func (h *Handler) catalogGeneration(sessionID string) uint64 {
+	h.catalogGenMu.Lock()
+	defer h.catalogGenMu.Unlock()
+	return h.catalogGen[sessionID]
 }
 
 // SetAuditCollector injects the audit collector for message event recording.
@@ -391,6 +424,13 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		}
 		return err
 	}
+	// Explicit /worker <name> [args] entry (spec §5.3): runs after the
+	// fixed-command branch so /reset-style safety commands always win, and
+	// before Skill resolution so a filesystem Skill named "worker" cannot
+	// shadow the reserved explicit entry.
+	if handled, err := h.tryExplicitNativeCommand(ctx, env, content); handled {
+		return err
+	}
 	if invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content); err != nil {
 		if errors.Is(err, skills.ErrAmbiguousInvocation) {
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
@@ -403,15 +443,140 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 	return h.deliverToWorker(ctx, env, content)
 }
 
-func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content string) (worker.SkillInvocation, bool, error) {
+// workerCommandInputRe matches the explicit "/worker <name> [args]" entry
+// (spec §5.3). The "/worker" prefix is case-sensitive; the regexp enforces
+// that a name (or a bare prefix) is present — "/workername" without a space is
+// NOT a /worker input.
+var workerCommandInputRe = regexp.MustCompile(`^/worker\s+(\S+)(?:\s+(.*))?$`)
+
+// tryExplicitNativeCommand implements the reserved /worker <name> [args]
+// entry (spec §5.3, §5.4). It runs after tryCommandDispatch so Gateway fixed
+// commands always win, and before Skill resolution so the reserved prefix is
+// never shadowed. A matched input is handled here and never falls through to
+// the ordinary text path: unknown, unavailable, ambiguous, and stale-catalog
+// names all resolve to NOT_SUPPORTED.
+func (h *Handler) tryExplicitNativeCommand(ctx context.Context, env *events.Envelope, content string) (handled bool, err error) {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "/worker") {
+		return false, nil
+	}
+	// "/worker" is only a /worker input when the reserved prefix is followed
+	// by whitespace (or ends the input). "/workername" falls through to the
+	// Skill/ordinary path so a Skill literally named "workername" keeps its
+	// short syntax.
+	if trimmed != "/worker" && !strings.HasPrefix(trimmed, "/worker ") && !strings.HasPrefix(trimmed, "/worker\t") {
+		return false, nil
+	}
+	startedAt := time.Now()
+
+	matches := workerCommandInputRe.FindStringSubmatch(trimmed)
+	if matches == nil {
+		return true, h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+			"native command requires a name: /worker <name> [args]")
+	}
+	name, args := matches[1], matches[2]
+
+	status := "ok"
+	errorClass := ""
+	workerType := ""
+	defer func() {
+		h.log.Info("gateway: native command dispatched",
+			"session_id", env.SessionID,
+			"worker_type", workerType,
+			"command", name,
+			"status", status,
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"error_class", errorClass,
+		)
+	}()
+
+	fail := func(format string, args ...any) (bool, error) {
+		status = "error"
+		errorClass = string(events.ErrCodeNotSupported)
+		return true, h.sendErrorf(ctx, env, events.ErrCodeNotSupported, format, args...)
+	}
+
+	if h.catalogStore == nil {
+		return fail("native command catalog unavailable")
+	}
+	si, err := h.sm.Get(ctx, env.SessionID)
+	if err != nil {
+		return fail("native command catalog unavailable")
+	}
+	w := h.sm.GetWorker(env.SessionID)
+	if w == nil {
+		return fail("native command catalog unavailable")
+	}
+	workerType = string(w.Type())
+
+	descriptors, lookupErr := h.catalogStore.Lookup(ctx, env.SessionID, si.WorkDir, w, h.catalogGeneration(env.SessionID))
+	if lookupErr != nil {
+		return fail("native command catalog unavailable: %v", lookupErr)
+	}
+
+	var descriptor *worker.NativeCommandDescriptor
+	for i := range descriptors {
+		if descriptors[i].Name == name {
+			descriptor = &descriptors[i]
+			break
+		}
+	}
+	if descriptor == nil {
+		ambiguous := 0
+		for _, d := range descriptors {
+			if strings.EqualFold(d.Name, name) {
+				ambiguous++
+			}
+		}
+		if ambiguous > 0 {
+			return fail("native command %q is ambiguous in the worker catalog", name)
+		}
+		return fail("worker %s does not support native command %q", w.Type(), name)
+	}
+
+	invoker, ok := worker.AsNativeInvoker(w)
+	if !ok {
+		return fail("worker %s cannot invoke native command %q", w.Type(), name)
+	}
+
+	invocation := worker.NativeCommandInvocation{
+		Name: name,
+		Args: args,
+		Path: descriptor.Path,
+		Mode: descriptor.Mode,
+	}
+
+	if descriptor.StartsTurn {
+		stashInvocation(env, invocation, content)
+		dispatchErr := h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, true)
+		if dispatchErr != nil {
+			status = "error"
+			errorClass = string(classifyWorkerError(dispatchErr))
+		}
+		return true, dispatchErr
+	}
+
+	// StartsTurn=false: bounded control request through the native invoker,
+	// settled with a synthetic ACK and no execution record (spec §5.4).
+	if invokeErr := invoker.InvokeNativeCommand(ctx, invocation); invokeErr != nil {
+		status = "error"
+		errorClass = string(classifyWorkerError(invokeErr))
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, name)
+		return true, h.sendErrorf(ctx, env, classifyWorkerError(invokeErr), "native command %q failed: %v", name, invokeErr)
+	}
+	h.ackControlCommand(ctx, env)
+	return true, nil
+}
+
+func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content string) (worker.NativeCommandInvocation, bool, error) {
 	if h.skillsLocator == nil {
-		return worker.SkillInvocation{}, false, nil
+		return worker.NativeCommandInvocation{}, false, nil
 	}
 	// Only slash-prefixed input can be a Skill invocation. Gating here keeps
 	// the ordinary-message hot path free of session lookups and filesystem
 	// catalog scans.
 	if !strings.HasPrefix(strings.TrimSpace(content), "/") {
-		return worker.SkillInvocation{}, false, nil
+		return worker.NativeCommandInvocation{}, false, nil
 	}
 	si, err := h.sm.Get(ctx, sessionID)
 	if err != nil {
@@ -419,15 +584,15 @@ func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content
 		// session and reports the canonical session-not-found error. Skill
 		// resolution must not mask a concurrent delete/GC with a generic
 		// internal error here.
-		return worker.SkillInvocation{}, false, nil
+		return worker.NativeCommandInvocation{}, false, nil
 	}
 	homeDir, err := h.userHomeDir()
 	if err != nil {
-		return worker.SkillInvocation{}, false, err
+		return worker.NativeCommandInvocation{}, false, err
 	}
 	catalog, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
 	if err != nil {
-		return worker.SkillInvocation{}, false, err
+		return worker.NativeCommandInvocation{}, false, err
 	}
 	return resolveSkillInvocation(content, catalog)
 }
@@ -611,7 +776,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 //     fall through to the buffer.
 //  3. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
 //  4. Otherwise → legacy sendErrorf SESSION_BUSY.
-func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string, invocation *worker.SkillInvocation) error {
+func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation) error {
 	if h.bridge == nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
 	}
@@ -808,11 +973,11 @@ func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, con
 	return h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, true)
 }
 
-func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope, content string, invocation worker.SkillInvocation) error {
+func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope, content string, invocation worker.NativeCommandInvocation) error {
 	return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, true)
 }
 
-func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.SkillInvocation, handleBusy bool) error {
+func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation, handleBusy bool) error {
 	inputReceivedAt := time.Now()
 	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
@@ -1037,10 +1202,10 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	var inputErr error
 	if invocation != nil {
 		resolvedInvocation := *invocation
-		resolvedInvocation.Mode = skillInvocationMode(w.Type())
+		resolvedInvocation.Mode = worker.NativeModeForType(w.Type())
 		invocation = &resolvedInvocation
-		if provider, ok := w.(worker.SkillCatalogProvider); ok {
-			descriptors, catalogErr := provider.ListInvokableSkills(ctx, si.WorkDir)
+		if provider, ok := worker.AsNativeCatalogProvider(w); ok {
+			descriptors, catalogErr := provider.ListNativeCommands(ctx, si.WorkDir)
 			if catalogErr != nil {
 				if h.bridge != nil {
 					h.bridge.ClearTurnStart(env.SessionID)
@@ -1075,7 +1240,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 					"worker %s does not advertise Skill %q", w.Type(), invocation.Name)
 			}
 		}
-		invoker, ok := w.(worker.SkillInvoker)
+		invoker, ok := worker.AsNativeInvoker(w)
 		if !ok {
 			if h.bridge != nil {
 				h.bridge.ClearTurnStart(env.SessionID)
@@ -1085,7 +1250,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
 				"worker %s does not support native Skill invocation", w.Type())
 		}
-		inputErr = invoker.InvokeSkill(ctx, *invocation)
+		inputErr = invoker.InvokeNativeCommand(ctx, *invocation)
 	} else {
 		inputErr = w.Input(ctx, content, nil)
 	}
@@ -1136,21 +1301,6 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		h.bridge.CaptureInbound(ctx, env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
 	}
 	return nil
-}
-
-func skillInvocationMode(workerType worker.WorkerType) worker.SkillInvocationMode {
-	switch workerType {
-	case worker.TypeClaudeCode:
-		return worker.SkillModeTextCommand
-	case worker.TypeOpenCodeSrv:
-		return worker.SkillModeRPCCommand
-	case worker.TypeCodexCLI:
-		return worker.SkillModeStructuredSkill
-	case worker.TypeACP:
-		return worker.SkillModeAdvertisedCommand
-	default:
-		return ""
-	}
 }
 
 func (h *Handler) acceptInputExecution(ctx context.Context, env *events.Envelope) (*execution.Record, bool, error) {

@@ -109,6 +109,12 @@ type Bridge struct {
 	repairer       *execution.Repairer // terminal-state repair retry; nil-safe
 	workerRuns     sync.Map            // sessionID -> workerRunBinding; updated on each successful attach
 	turnTTFT       *turnTTFTTracker
+
+	// catalogInvalidate is invoked on every Worker attach so the session's
+	// command catalog is refreshed (spec §5.2, §8.7). Late-injected via
+	// SetCatalogInvalidator because the Handler (which owns the catalog
+	// generation map) is built after the Bridge. Nil disables invalidation.
+	catalogInvalidate func(sessionID string)
 }
 
 type workerRunBinding struct {
@@ -251,6 +257,15 @@ type PendingReplayer interface {
 // SetPendingReplayer late-injects the replay target (Handler). Optional: nil
 // leaves done-time replay disabled (supplements buffered but not replayed).
 func (b *Bridge) SetPendingReplayer(r PendingReplayer) { b.replayer = r }
+
+// SetCatalogInvalidator registers the callback invoked on every Worker attach
+// (StartSession / ResumeSession / StartFreshWorker / crash-recovery fresh
+// start), so the session-scoped command catalog is invalidated and its
+// generation bumped (spec §5.2, §8.7). The Handler is built after the Bridge
+// and injects itself here during gateway init; nil disables invalidation.
+func (b *Bridge) SetCatalogInvalidator(fn func(sessionID string)) {
+	b.catalogInvalidate = fn
+}
 
 // BufferPending appends a busy-supplement for the fallback path (worker lacks
 // mid-turn support). Called from Handler's SESSION_BUSY branch.
@@ -1185,10 +1200,10 @@ func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay
 		}
 		return w.Input(ctx, replay.Content, nil)
 	}
-	if invoker, ok := w.(worker.SkillInvoker); ok {
-		return invoker.InvokeSkill(ctx, *replay.Skill)
+	if invoker, ok := worker.AsNativeInvoker(w); ok {
+		return invoker.InvokeNativeCommand(ctx, *replay.Skill)
 	}
-	// The replacement Worker lacks a native Skill path — typically because
+	// The replacement Worker lacks a native command path — typically because
 	// worker_type changed between the crash and recovery. Dropping the input
 	// would silently lose the user's last message, so fall back to the
 	// reconstructed slash text. This is a recovery-only degradation (the
@@ -1198,7 +1213,7 @@ func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay
 	if replay.Content == "" {
 		return fmt.Errorf("%w: worker %s cannot replay native Skill %q", worker.ErrSkillNotSupported, w.Type(), replay.Skill.Name)
 	}
-	b.log.Warn("bridge: replaying native Skill as text, replacement worker lacks SkillInvoker",
+	b.log.Warn("bridge: replaying native Skill as text, replacement worker lacks native command invoker",
 		"worker_type", w.Type(), "skill", replay.Skill.Name)
 	return w.Input(ctx, replay.Content, nil)
 }

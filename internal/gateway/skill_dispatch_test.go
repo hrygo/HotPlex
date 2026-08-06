@@ -17,7 +17,7 @@ func TestResolveSkillInvocationUsesCatalogPath(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, matched)
-	require.Equal(t, worker.SkillInvocation{
+	require.Equal(t, worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
 		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
@@ -30,5 +30,5 @@ func TestResolveSkillInvocationLeavesUnknownTextOrdinary(t *testing.T) {
 	invocation, matched, err := resolveSkillInvocation("/unknown-do-not-run", []skills.Skill{{Name: "oracle-dba"}})
 	require.NoError(t, err)
 	require.False(t, matched)
-	require.Equal(t, worker.SkillInvocation{}, invocation)
+	require.Equal(t, worker.NativeCommandInvocation{}, invocation)
 }

@@ -221,6 +221,11 @@ func (h *Handler) handleReset(ctx context.Context, env *events.Envelope) error {
 		}
 	}
 
+	// The reset established a new conversation context (ACP re-advertises its
+	// session commands, OCS resets its command set): invalidate the session's
+	// cached command catalog and bump its generation (spec §5.2).
+	h.InvalidateCatalog(env.SessionID)
+
 	stateEvt := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.State, events.StateData{
 		State:   events.StateRunning,
 		Message: "context_reset",
@@ -325,6 +330,16 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 			return h.sendErrorf(ctx, env, events.ErrCodeConfigInvalid, "当前会话绑定到工作区，work_dir 不可变；请切换或新建工作区")
 		}
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "切换失败：%v", err)
+	}
+
+	// A workdir switch parked the old session and created/resumed a new one
+	// under a different session ID: invalidate the old session's cached
+	// command catalog and bump its generation (spec §5.2). The new session's
+	// catalog is invalidated by the Bridge's worker-attach hook when it
+	// starts; invalidating it here too keeps the refresh explicit.
+	h.InvalidateCatalog(env.SessionID)
+	if result.NewSessionID != "" {
+		h.InvalidateCatalog(result.NewSessionID)
 	}
 
 	// Send notification on the OLD session ID so the platform conn (still

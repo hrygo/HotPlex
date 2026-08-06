@@ -219,14 +219,14 @@ func TestResolveWorkspacePermissionMode(t *testing.T) {
 	})
 }
 
-// replayInvokerWorker records InvokeSkill calls; mockWorkerForHandler alone
-// does NOT implement worker.SkillInvoker.
-type replayInvokerWorker struct {
+// replayNativeWorker records InvokeNativeCommand calls; mockWorkerForHandler
+// alone does NOT implement worker.NativeCommandInvoker.
+type replayNativeWorker struct {
 	mockWorkerForHandler
-	invoked worker.SkillInvocation
+	invoked worker.NativeCommandInvocation
 }
 
-func (w *replayInvokerWorker) InvokeSkill(_ context.Context, invocation worker.SkillInvocation) error {
+func (w *replayNativeWorker) InvokeNativeCommand(_ context.Context, invocation worker.NativeCommandInvocation) error {
 	w.invoked = invocation
 	return nil
 }
@@ -235,10 +235,10 @@ func TestDeliverInputReplayUsesNativeInvokerWhenAvailable(t *testing.T) {
 	t.Parallel()
 
 	b := &Bridge{log: testLogger(t)}
-	w := &replayInvokerWorker{}
+	w := &replayNativeWorker{}
 	replay := worker.InputReplay{
 		Content: "/oracle-dba 10.102.78.1",
-		Skill:   &worker.SkillInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
+		Skill:   &worker.NativeCommandInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
 	}
 
 	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
@@ -257,7 +257,7 @@ func TestDeliverInputReplayFallsBackToTextWithoutSkillInvoker(t *testing.T) {
 	w.On("Input", mock.Anything, "/oracle-dba 10.102.78.1", mock.Anything).Return(nil).Once()
 	replay := worker.InputReplay{
 		Content: "/oracle-dba 10.102.78.1",
-		Skill:   &worker.SkillInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
+		Skill:   &worker.NativeCommandInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
 	}
 
 	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
@@ -270,7 +270,7 @@ func TestDeliverInputReplayErrorsWhenNoInvokerAndNoText(t *testing.T) {
 	b := &Bridge{log: testLogger(t)}
 	w := new(mockWorkerForHandler)
 	replay := worker.InputReplay{
-		Skill: &worker.SkillInvocation{Name: "oracle-dba"},
+		Skill: &worker.NativeCommandInvocation{Name: "oracle-dba"},
 	}
 
 	err := b.deliverInputReplay(t.Context(), w, replay)

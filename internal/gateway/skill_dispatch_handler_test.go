@@ -3,7 +3,10 @@ package gateway
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,20 +30,20 @@ func (fixedSkillsLocator) Close() {}
 
 type recordedSkillWorker struct {
 	mockWorkerForHandler
-	invocation worker.SkillInvocation
+	invocation worker.NativeCommandInvocation
 }
 
-func (w *recordedSkillWorker) InvokeSkill(_ context.Context, invocation worker.SkillInvocation) error {
+func (w *recordedSkillWorker) InvokeNativeCommand(_ context.Context, invocation worker.NativeCommandInvocation) error {
 	w.invocation = invocation
 	return nil
 }
 
 type advertisedSkillWorker struct {
 	recordedSkillWorker
-	descriptors []worker.SkillDescriptor
+	descriptors []worker.NativeCommandDescriptor
 }
 
-func (w *advertisedSkillWorker) ListInvokableSkills(context.Context, string) ([]worker.SkillDescriptor, error) {
+func (w *advertisedSkillWorker) ListNativeCommands(context.Context, string) ([]worker.NativeCommandDescriptor, error) {
 	return w.descriptors, nil
 }
 
@@ -61,7 +64,7 @@ func TestHandleInputKnownSkillUsesWorkerInvoker(t *testing.T) {
 
 	err := h.handleInput(context.Background(), inputEnvelopeWithMetadata("s1", "/oracle-dba 10.102.78.1", nil))
 	require.NoError(t, err)
-	require.Equal(t, worker.SkillInvocation{
+	require.Equal(t, worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
 		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
@@ -74,7 +77,7 @@ func TestHandleInputKnownSkillRequiresWorkerAdvertisement(t *testing.T) {
 	t.Parallel()
 
 	sm := new(mockInputSM)
-	w := &advertisedSkillWorker{descriptors: []worker.SkillDescriptor{{Name: "other"}}}
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{Name: "other", Kind: worker.NativeCommandKindSkill}}}
 	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
 	sm.On("Get", "s1").Return(si, nil).Times(3)
 	sm.On("GetWorker", "s1").Return(w).Once()
@@ -144,9 +147,10 @@ func TestHandleInputKnownSkillPrefersWorkerAuthoritativePath(t *testing.T) {
 	// queried; a divergent canonical path (symlinks, /private/var aliases)
 	// would leave the native Skill item unresolvable by the Worker.
 	sm := new(mockInputSM)
-	w := &advertisedSkillWorker{descriptors: []worker.SkillDescriptor{{
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{
 		Name: "oracle-dba",
 		Path: "/private/workspace/.agents/skills/oracle-dba/SKILL.md",
+		Kind: worker.NativeCommandKindSkill,
 	}}}
 	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
 	sm.On("Get", "s1").Return(si, nil).Times(3)
@@ -184,7 +188,7 @@ func TestHandleSupplementOnBusy_SkillNeverInjectedAsText(t *testing.T) {
 	const content = "/oracle-dba 10.102.78.1"
 	env := newInputEnvelope(t, "s", content)
 	env.Seq = 5
-	inv := &worker.SkillInvocation{
+	inv := &worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
 		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
@@ -219,7 +223,7 @@ func TestDeliverReplay_SkillStashSurvivesCatalogRemoval(t *testing.T) {
 
 	const content = "/oracle-dba 10.102.78.1"
 	env := inputEnvelopeWithMetadata("s", content, nil)
-	stashInvocation(env, worker.SkillInvocation{
+	stashInvocation(env, worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
 		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
@@ -246,7 +250,7 @@ func TestDeliverReplay_StashIgnoredWhenContentDiverged(t *testing.T) {
 	h := newInputHandler(t, sm)
 
 	env := inputEnvelopeWithMetadata("s", "merged list", nil)
-	stashInvocation(env, worker.SkillInvocation{Name: "oracle-dba"}, "/oracle-dba 10.102.78.1")
+	stashInvocation(env, worker.NativeCommandInvocation{Name: "oracle-dba"}, "/oracle-dba 10.102.78.1")
 
 	require.NoError(t, h.DeliverReplay(t.Context(), env))
 	w.AssertExpectations(t)
@@ -257,75 +261,347 @@ type failingCatalogWorker struct {
 	mockWorkerForHandler
 }
 
-func (w *failingCatalogWorker) ListInvokableSkills(context.Context, string) ([]worker.SkillDescriptor, error) {
+func (w *failingCatalogWorker) ListNativeCommands(context.Context, string) ([]worker.NativeCommandDescriptor, error) {
 	return nil, errors.New("catalog unavailable")
 }
 
-func TestSkillsListStatusForWorker(t *testing.T) {
+func TestSkillsListEntriesClassifyMergedCatalog(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name       string
-		worker     worker.Worker
-		wantStatus events.SkillStatus
-	}{
-		{
-			name:       "advertised catalog marks callable",
-			worker:     &advertisedSkillWorker{descriptors: []worker.SkillDescriptor{{Name: "oracle-dba"}}},
-			wantStatus: events.SkillStatusCallable,
-		},
-		{
-			name:       "catalog without skill marks unavailable",
-			worker:     &advertisedSkillWorker{descriptors: []worker.SkillDescriptor{{Name: "other"}}},
-			wantStatus: events.SkillStatusUnavailable,
-		},
-		{
-			name:       "worker without catalog capability stays discoverable",
-			worker:     &recordedSkillWorker{},
-			wantStatus: events.SkillStatusDiscoverable,
-		},
-		{
-			name:       "catalog query failure degrades to discoverable",
-			worker:     &failingCatalogWorker{},
-			wantStatus: events.SkillStatusDiscoverable,
-		},
+	// The merged catalog resolves fixed Gateway commands > Worker authoritative
+	// catalog > filesystem skills by case-sensitive name (spec §5.2). This test
+	// feeds a representative merged snapshot through the entry builder and
+	// asserts each tier's Source/Status semantics.
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{
+		Name: "oracle-dba", Description: "DBA helper", Kind: worker.NativeCommandKindSkill,
+		Mode: worker.SkillModeTextCommand, StartsTurn: true, AcceptsArgs: true, Path: "/worker/oracle-dba",
+	}}}
+	fsSkills := []skills.Skill{
+		{Name: "oracle-dba", Description: "DBA helper", Source: skills.SourceProject, Managed: true, FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md"},
+		{Name: "build", Description: "Build helper", Source: skills.SourceGlobal, Managed: false, FilePath: "/home/.claude/skills/build/SKILL.md"},
+	}
+	merged := []worker.NativeCommandDescriptor{
+		// Tier 1 — fixed Gateway control command (always-on).
+		{Name: "reset", Description: "重置上下文（全新开始）", Kind: worker.NativeCommandKindControl},
+		// Tier 2 — Worker authoritative skill claiming a filesystem name.
+		{Name: "oracle-dba", Description: "DBA helper", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeTextCommand, StartsTurn: true, AcceptsArgs: true, Path: "/worker/oracle-dba"},
+		// Tier 2 — Worker-only command with no filesystem counterpart.
+		{Name: "queue", Description: "queue status", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeAdvertisedCommand, StartsTurn: true},
+		// Tier 2 — Worker-advertised control command (e.g. ACP available_commands_update).
+		{Name: "tools", Description: "tool usage", Kind: worker.NativeCommandKindControl, Mode: worker.SkillModeAdvertisedCommand},
+		// Tier 3 — filesystem-only skill (filesystem-tier descriptor shape).
+		{Name: "build", Description: "Build helper", Kind: worker.NativeCommandKindSkill, Mode: worker.NativeModeForType(worker.TypeClaudeCode), StartsTurn: true, AcceptsArgs: true, Path: "/home/.claude/skills/build/SKILL.md"},
 	}
 
+	entries := buildSkillEntriesFromCatalog(merged, fsSkills, w, true)
+	byName := make(map[string]events.SkillEntry, len(entries))
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+
+	t.Run("fixed gateway command is gateway callable", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "gateway", byName["reset"].Source)
+		require.Equal(t, events.SkillStatusCallable, byName["reset"].Status)
+	})
+
+	t.Run("filesystem skill confirmed by authoritative is callable", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, skills.SourceProject, byName["oracle-dba"].Source)
+		require.True(t, byName["oracle-dba"].Managed)
+		require.Equal(t, events.SkillStatusCallable, byName["oracle-dba"].Status)
+	})
+
+	t.Run("worker-only command is worker callable", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "worker", byName["queue"].Source)
+		require.Equal(t, events.SkillStatusCallable, byName["queue"].Status)
+	})
+
+	t.Run("worker-advertised control is worker callable", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "worker", byName["tools"].Source)
+		require.Equal(t, events.SkillStatusCallable, byName["tools"].Status)
+	})
+
+	t.Run("filesystem-only skill is discoverable", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, skills.SourceGlobal, byName["build"].Source)
+		require.False(t, byName["build"].Managed)
+		require.Equal(t, events.SkillStatusDiscoverable, byName["build"].Status)
+	})
+}
+
+func TestSkillsListEntriesCapabilityGatedFixedCommand(t *testing.T) {
+	t.Parallel()
+
+	// /context is a ControlRequester-gated fixed command. A plain worker that
+	// lacks the surface must not surface it as a Gateway command even if a
+	// worker descriptor shares the name.
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{
+		Name: "context", Description: "worker context", Kind: worker.NativeCommandKindControl,
+	}}}
+	merged := []worker.NativeCommandDescriptor{
+		{Name: "context", Description: "worker context", Kind: worker.NativeCommandKindControl},
+	}
+
+	entries := buildSkillEntriesFromCatalog(merged, nil, w, true)
+	require.Len(t, entries, 1)
+	require.Equal(t, "worker", entries[0].Source, "plain worker cannot expose the ControlRequester-gated /context as a gateway command")
+	require.Equal(t, events.SkillStatusCallable, entries[0].Status)
+
+	// A ControlRequester worker enables the same name as a fixed Gateway command.
+	ctrl := &advertisedControlSkillWorker{advertisedSkillWorker: advertisedSkillWorker{descriptors: w.descriptors}}
+	entries = buildSkillEntriesFromCatalog(merged, nil, ctrl, true)
+	require.Len(t, entries, 1)
+	require.Equal(t, "gateway", entries[0].Source)
+	require.Equal(t, events.SkillStatusCallable, entries[0].Status)
+}
+
+func TestSkillsListEntriesFetchFailureNoCallable(t *testing.T) {
+	t.Parallel()
+
+	// authoritativeOK=false simulates sessionCatalogStore.Lookup returning an
+	// error (spec §8.5: catalog fetch failure means "cannot confirm"). No entry
+	// may be presented as callable except the fixed Gateway tier.
+	w := &advertisedSkillWorker{}
+	fsSkills := []skills.Skill{
+		{Name: "build", Source: skills.SourceGlobal, FilePath: "/home/.claude/skills/build/SKILL.md"},
+	}
+	merged := []worker.NativeCommandDescriptor{
+		{Name: "reset", Kind: worker.NativeCommandKindControl},
+		{Name: "build", Kind: worker.NativeCommandKindSkill, Mode: worker.NativeModeForType(worker.TypeClaudeCode), StartsTurn: true, AcceptsArgs: true, Path: "/home/.claude/skills/build/SKILL.md"},
+		// Defensive: even a worker-only descriptor must not be callable when the
+		// authoritative tier could not be fetched.
+		{Name: "queue", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeAdvertisedCommand, StartsTurn: true},
+	}
+
+	entries := buildSkillEntriesFromCatalog(merged, fsSkills, w, false)
+	byName := make(map[string]events.SkillEntry, len(entries))
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+
+	require.Equal(t, "gateway", byName["reset"].Source)
+	require.Equal(t, events.SkillStatusCallable, byName["reset"].Status, "fixed gateway commands stay callable on fetch failure")
+	require.Equal(t, events.SkillStatusDiscoverable, byName["build"].Status, "filesystem skill cannot be confirmed callable")
+	require.Equal(t, events.SkillStatusDiscoverable, byName["queue"].Status, "worker-only command cannot be confirmed callable")
+}
+
+func TestFilterCatalogDescriptors(t *testing.T) {
+	t.Parallel()
+
+	descriptors := []worker.NativeCommandDescriptor{
+		{Name: "oracle-dba", Description: "DBA helper"},
+		{Name: "reset", Description: "重置上下文（全新开始）"},
+		{Name: "build", Description: "Build helper"},
+	}
+	tests := []struct {
+		name   string
+		filter string
+		want   []string
+	}{
+		{"empty filter keeps all", "", []string{"oracle-dba", "reset", "build"}},
+		{"name substring", "oracle", []string{"oracle-dba"}},
+		{"description substring", "helper", []string{"oracle-dba", "build"}},
+		{"case-insensitive", "ORACLE", []string{"oracle-dba"}},
+		{"no match", "zzz", []string{}},
+	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			sm := new(mockInputSM)
-			sm.On("GetWorker", "s1").Return(tt.worker)
-
-			h := newInputHandler(t, sm)
-			status := h.skillStatusForWorker(context.Background(), "s1", "/workspace")
-			require.Equal(t, tt.wantStatus, status("oracle-dba"))
-			sm.AssertExpectations(t)
+			got := filterCatalogDescriptors(descriptors, tt.filter)
+			names := make([]string, 0, len(got))
+			for _, d := range got {
+				names = append(names, d.Name)
+			}
+			require.Equal(t, tt.want, names)
 		})
 	}
 }
 
-func TestBuildSkillEntriesAppliesStatusLookup(t *testing.T) {
+func TestHandleSkillsListUsesMergedCatalog(t *testing.T) {
 	t.Parallel()
 
-	allSkills := []skills.Skill{
-		{Name: "oracle-dba", Source: skills.SourceProject, Description: "DBA helper"},
-		{Name: "build", Source: skills.SourceGlobal, Description: "Build helper"},
-	}
-	status := func(name string) events.SkillStatus {
-		if name == "oracle-dba" {
-			return events.SkillStatusCallable
-		}
-		return events.SkillStatusUnavailable
+	sm := new(mockInputSM)
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{
+		{Name: "oracle-dba", Description: "DBA helper", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeTextCommand, StartsTurn: true, AcceptsArgs: true, Path: "/worker/oracle-dba"},
+		{Name: "queue", Description: "queue status", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeAdvertisedCommand, StartsTurn: true},
+	}}
+	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+
+	hub := newTestHub(t)
+	go hub.Run()
+	capture := &recordingSessionWriter{}
+	hub.mu.Lock()
+	hub.sessions["s1"] = map[SessionWriter]bool{capture: true}
+	hub.everHadConn["s1"] = true
+	hub.mu.Unlock()
+
+	locator := fixedSkillsLocator{items: []skills.Skill{
+		{Name: "oracle-dba", Source: skills.SourceProject, Managed: true, FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md"},
+		{Name: "build", Description: "Build helper", Source: skills.SourceGlobal, FilePath: "/home/.claude/skills/build/SKILL.md"},
+	}}
+	h := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hub, SM: sm, SkillsLocator: locator})
+
+	require.NoError(t, h.handleSkillsList(t.Context(), &events.Envelope{SessionID: "s1"}, w, ""))
+
+	skillsEnv := capture.waitFor(t, "s1", events.SkillsList)
+	data, ok := skillsEnv.Event.Data.(events.SkillsListData)
+	require.True(t, ok, "SkillsList envelope must carry typed SkillsListData")
+	byName := make(map[string]events.SkillEntry, len(data.Skills))
+	for _, e := range data.Skills {
+		byName[e.Name] = e
 	}
 
-	entries := buildSkillEntries(allSkills, status)
-	require.Len(t, entries, 2)
-	require.Equal(t, events.SkillStatusCallable, entries[0].Status)
-	require.Equal(t, events.SkillStatusUnavailable, entries[1].Status)
-	require.Equal(t, "oracle-dba", entries[0].Name)
-	require.Equal(t, skills.SourceProject, entries[0].Source)
-	require.Equal(t, "DBA helper", entries[0].Description)
+	require.Equal(t, "gateway", byName["reset"].Source)
+	require.Equal(t, events.SkillStatusCallable, byName["reset"].Status)
+	require.Equal(t, "worker", byName["queue"].Source)
+	require.Equal(t, events.SkillStatusCallable, byName["queue"].Status)
+	require.Equal(t, skills.SourceProject, byName["oracle-dba"].Source)
+	require.Equal(t, events.SkillStatusCallable, byName["oracle-dba"].Status)
+	require.Equal(t, skills.SourceGlobal, byName["build"].Source)
+	require.Equal(t, events.SkillStatusDiscoverable, byName["build"].Status)
 }
+
+func TestHandleSkillsListLookupErrorNoCallable(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &failingCatalogWorker{}
+	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+
+	hub := newTestHub(t)
+	go hub.Run()
+	capture := &recordingSessionWriter{}
+	hub.mu.Lock()
+	hub.sessions["s1"] = map[SessionWriter]bool{capture: true}
+	hub.everHadConn["s1"] = true
+	hub.mu.Unlock()
+
+	locator := fixedSkillsLocator{items: []skills.Skill{
+		{Name: "build", Source: skills.SourceGlobal, FilePath: "/home/.claude/skills/build/SKILL.md"},
+	}}
+	h := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hub, SM: sm, SkillsLocator: locator})
+
+	require.NoError(t, h.handleSkillsList(t.Context(), &events.Envelope{SessionID: "s1"}, w, ""))
+
+	skillsEnv := capture.waitFor(t, "s1", events.SkillsList)
+	data, ok := skillsEnv.Event.Data.(events.SkillsListData)
+	require.True(t, ok)
+	byName := make(map[string]events.SkillEntry, len(data.Skills))
+	for _, e := range data.Skills {
+		byName[e.Name] = e
+	}
+
+	require.Equal(t, "gateway", byName["reset"].Source)
+	require.Equal(t, events.SkillStatusCallable, byName["reset"].Status, "fixed gateway commands stay callable on fetch failure")
+	require.Equal(t, events.SkillStatusDiscoverable, byName["build"].Status, "filesystem skill cannot be confirmed callable on fetch failure")
+	for name, e := range byName {
+		if e.Source == "gateway" {
+			require.Equal(t, events.SkillStatusCallable, e.Status, "gateway entry %q", name)
+			continue
+		}
+		require.NotEqual(t, events.SkillStatusCallable, e.Status, "entry %q must not be callable on fetch failure", name)
+	}
+}
+
+func TestHandleSkillsListFilterStillApplies(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{
+		{Name: "queue", Description: "queue status", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeAdvertisedCommand, StartsTurn: true},
+	}}
+	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+
+	hub := newTestHub(t)
+	go hub.Run()
+	capture := &recordingSessionWriter{}
+	hub.mu.Lock()
+	hub.sessions["s1"] = map[SessionWriter]bool{capture: true}
+	hub.everHadConn["s1"] = true
+	hub.mu.Unlock()
+
+	locator := fixedSkillsLocator{items: []skills.Skill{
+		{Name: "build", Description: "Build helper", Source: skills.SourceGlobal, FilePath: "/home/.claude/skills/build/SKILL.md"},
+	}}
+	h := NewHandler(HandlerDeps{Log: slog.Default(), Hub: hub, SM: sm, SkillsLocator: locator})
+
+	// "reset" and "queue" match the filter; "build" and the other fixed
+	// commands do not.
+	require.NoError(t, h.handleSkillsList(t.Context(), &events.Envelope{SessionID: "s1"}, w, "queue"))
+
+	skillsEnv := capture.waitFor(t, "s1", events.SkillsList)
+	data, ok := skillsEnv.Event.Data.(events.SkillsListData)
+	require.True(t, ok)
+	require.Equal(t, "queue", data.Filter, "SkillsListData must echo the applied filter")
+	names := make([]string, 0, len(data.Skills))
+	for _, e := range data.Skills {
+		names = append(names, e.Name)
+	}
+	require.ElementsMatch(t, []string{"queue"}, names, "filter must narrow the merged catalog")
+	require.Equal(t, len(data.Skills), data.Total)
+}
+
+// recordingSessionWriter captures envelopes routed to a session for hub-level
+// assertions without a real WebSocket connection.
+type recordingSessionWriter struct {
+	mu   sync.Mutex
+	envs []*events.Envelope
+}
+
+func (w *recordingSessionWriter) WriteCtx(_ context.Context, env *events.Envelope) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.envs = append(w.envs, env)
+	return nil
+}
+
+func (w *recordingSessionWriter) RouteWrite(_ context.Context, env *events.Envelope) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.envs = append(w.envs, env)
+	return nil
+}
+
+func (w *recordingSessionWriter) RouteWriteData([]byte, events.Kind) error { return nil }
+func (w *recordingSessionWriter) Close() error                             { return nil }
+func (w *recordingSessionWriter) PreferEnvelope() bool                     { return true }
+
+func (w *recordingSessionWriter) waitFor(t *testing.T, sessionID string, kind events.Kind) *events.Envelope {
+	t.Helper()
+	var env *events.Envelope
+	require.Eventually(t, func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		for _, e := range w.envs {
+			if e.SessionID == sessionID && e.Event.Type == kind {
+				env = e
+				return true
+			}
+		}
+		return false
+	}, time.Second, 5*time.Millisecond)
+	require.NotNil(t, env, "expected a %s envelope for session %s", kind, sessionID)
+	return env
+}
+
+// advertisedControlSkillWorker adds the ControlRequester capability surface to
+// the scripted-catalog worker so capability-gated fixed commands surface.
+type advertisedControlSkillWorker struct {
+	advertisedSkillWorker
+}
+
+func (w *advertisedControlSkillWorker) SendControlRequest(context.Context, string, map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+var _ worker.ControlRequester = (*advertisedControlSkillWorker)(nil)

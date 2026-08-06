@@ -103,6 +103,15 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	}
 	b.bindWorkerRun(sid, w, params.forwardOpts.workerRunID)
 
+	// A new Worker (or a resumed/replaced one) is now the session's command
+	// authority: drop the session's cached catalog so the next assembly picks
+	// up the fresh Worker's command set (spec §5.2, §8.7). This single
+	// chokepoint covers StartSession, ResumeSession, StartFreshWorker, and
+	// crash-recovery fresh starts.
+	if b.catalogInvalidate != nil {
+		b.catalogInvalidate(sid)
+	}
+
 	// Best-effort async persist so WorkerSessionID survives gateway restart
 	// even if no turn events arrive (SIGTERM before first Prompt). The
 	// correctness guarantee comes from forwardEvents' first-event safety-net.
