@@ -654,7 +654,18 @@ func (a *Adapter) makeEnvelope(teamID, channelID, threadTS, userID, text, workDi
 
 // NewStreamingWriter creates a streaming writer for the given channel/thread.
 func (a *Adapter) NewStreamingWriter(ctx context.Context, channelID, threadTS string, onComplete func(string)) *NativeStreamingWriter {
-	w := NewNativeStreamingWriter(ctx, a.client, channelID, threadTS, a.teamID, a.rateLimiter, a.Log, func(ts string) {
+	if a.IsClosed() {
+		return nil
+	}
+	a.mu.RLock()
+	if a.IsClosed() || a.rateLimiter == nil {
+		a.mu.RUnlock()
+		return nil
+	}
+	client, teamID, rateLimiter, log := a.client, a.teamID, a.rateLimiter, a.Log
+	a.mu.RUnlock()
+
+	w := NewNativeStreamingWriter(ctx, client, channelID, threadTS, teamID, rateLimiter, log, func(ts string) {
 		if !a.IsClosed() {
 			a.mu.Lock()
 			delete(a.activeStreams, ts)

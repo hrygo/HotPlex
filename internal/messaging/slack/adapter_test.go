@@ -462,6 +462,43 @@ func TestHandleCapabilityError_Degrades(t *testing.T) {
 	require.True(t, a.isAssistantCapable.Load(), "non-capability error should not degrade")
 }
 
+func TestNewStreamingWriter_ConcurrentWithClose(t *testing.T) {
+	a := newTestAdapter(t)
+	start := make(chan struct{})
+	var (
+		wg        sync.WaitGroup
+		writersMu sync.Mutex
+		writers   []*NativeStreamingWriter
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 1000; i++ {
+			writer := a.NewStreamingWriter(context.Background(), "C_TEST", "", nil)
+			if writer == nil {
+				continue
+			}
+			writersMu.Lock()
+			writers = append(writers, writer)
+			writersMu.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_ = a.Close(context.Background())
+	}()
+	close(start)
+	wg.Wait()
+
+	writersMu.Lock()
+	defer writersMu.Unlock()
+	for _, writer := range writers {
+		_ = writer.Close()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AC 4.1-6 — group_policy=allowlist rejects non-whitelisted user
 // ---------------------------------------------------------------------------
