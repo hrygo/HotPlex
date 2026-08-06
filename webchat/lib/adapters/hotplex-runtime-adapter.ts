@@ -46,6 +46,7 @@ import { TODO_TOOLS } from "@/lib/tool-categories";
 import { useMetrics } from "@/lib/hooks/useMetrics";
 import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
+import { mapErrorToMessage } from "@/lib/adapters/error-mapping";
 import { logger } from "@/lib/logger";
 import i18n from "@/lib/i18n/config";
 import type {
@@ -1296,54 +1297,11 @@ export function useHotPlexRuntime({
                 queueMicrotask(() => scheduleQueueDrainRef.current());
             }
 
-            let errorMessage = data?.message;
-            const msgLower = (errorMessage || "").toLowerCase();
-
             // User-friendly mapping for specific terminal errors
-            switch (data?.code as string) {
-                case "TURN_TIMEOUT":
-                    errorMessage =
-                        "Session timeout: The agent took too long to respond (limit: 15m). You may want to break your request into smaller steps.";
-                    break;
-                case "WORKER_CRASH":
-                    errorMessage =
-                        "The coding agent crashed unexpectedly. Please try again or reset the session.";
-                    break;
-                case "SESSION_EXPIRED":
-                    errorMessage =
-                        "This session has expired due to inactivity. Please start a new session.";
-                    break;
-                case "RATE_LIMITED":
-                    errorMessage =
-                        "You've reached the rate limit. Please wait a moment before sending more messages.";
-                    break;
-                case "UNAUTHORIZED":
-                    errorMessage =
-                        "Authentication failed: 401 — Check your API key configuration or consult the documentation.";
-                    break;
-                case "WORKER_OUTPUT_LIMIT":
-                    errorMessage =
-                        "The agent produced too much output and was terminated. Try to narrow down your request.";
-                    break;
-                case "RESUME_RETRY":
-                    errorMessage = `🔄 ${data?.message || "Recovering session after unexpected crash..."}`;
-                    break;
-                default:
-                    if (
-                        msgLower.includes("429") ||
-                        msgLower.includes("too many requests") ||
-                        msgLower.includes("rate limit")
-                    ) {
-                        errorMessage =
-                            "Rate limit exceeded (429): The upstream AI provider is rate-limiting requests or quota is exhausted. Please try again later or check your API key/quota limits.";
-                    } else {
-                        errorMessage =
-                            errorMessage ||
-                            (data?.code
-                                ? `Error: ${data.code}`
-                                : "An unexpected error occurred.");
-                    }
-            }
+            const errorMessage = mapErrorToMessage(
+                data?.code,
+                data?.message,
+            );
 
             // Add error message to thread
             setMessages((prev) => [
