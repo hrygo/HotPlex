@@ -139,6 +139,64 @@ class NativeCommandVerifierContractTest(unittest.TestCase):
     def test_environment_block_recognizes_localized_authentication_error(self):
         self.assertTrue(self.verifier.is_environment_block("APIError 身份验证失败。"))
 
+    def test_opencode_serve_env_isolates_host_provider_pollution(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workdir = pathlib.Path(tmpdir) / "probe"
+            workdir.mkdir()
+
+            old_environ = dict(self.verifier.os.environ)
+            try:
+                self.verifier.os.environ.clear()
+                self.verifier.os.environ.update(
+                    {
+                        "HOME": "/real/home",
+                        "PATH": "/usr/bin",
+                        "BIGMODEL_API_KEY": "sk-secret",
+                        "AI_PROVIDER_NAME": "provider-auth-big",
+                        "OPENCODE_PID": "1234",
+                        "OPENCODE": "1",
+                        "AGENT": "Sisyphus - ultraworker",
+                        "XDG_CONFIG_HOME": "/real/xdg",
+                        "KEEP_ME": "value",
+                    }
+                )
+                env = self.verifier.opencode_serve_env(workdir)
+            finally:
+                self.verifier.os.environ.clear()
+                self.verifier.os.environ.update(old_environ)
+
+            self.assertEqual(str(workdir / ".probe-home"), env["HOME"])
+            for key in (
+                "BIGMODEL_API_KEY",
+                "AI_PROVIDER_NAME",
+                "OPENCODE_PID",
+                "OPENCODE",
+                "AGENT",
+                "XDG_CONFIG_HOME",
+            ):
+                self.assertNotIn(key, env, f"{key} must be stripped")
+            self.assertEqual("value", env["KEEP_ME"])
+
+            fake_auth = (
+                workdir
+                / ".probe-home"
+                / ".local"
+                / "share"
+                / "opencode"
+                / "auth.json"
+            )
+            real_auth = (
+                pathlib.Path("/real/home")
+                / ".local"
+                / "share"
+                / "opencode"
+                / "auth.json"
+            )
+            if real_auth.is_file():
+                self.assertTrue(fake_auth.is_file(), "auth.json must be copied")
+
 
 if __name__ == "__main__":
     unittest.main()

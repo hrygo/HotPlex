@@ -3,19 +3,19 @@
   "mode": "direct-live",
   "issue": "hrygo/hotplex#958",
   "spec": "docs/superpowers/specs/2026-08-06-worker-native-command-dispatch-design.md",
-  "verified_at": "2026-08-06T15:04:07+00:00",
+  "verified_at": "2026-08-06T16:05:00+00:00",
   "summary": {
-    "pass": 2,
-    "blocked": 2,
+    "pass": 4,
+    "blocked": 0,
     "fail": 0
   },
   "workers": [
     {
       "command": "$hotplex-native-probe",
-      "duration_ms": 10613,
+      "duration_ms": 11699,
       "evidence": {
         "byte_count": 36,
-        "sha256_12": "6ff32792e9b8"
+        "sha256_12": "b12f4322e8b9"
       },
       "facts": {
         "authoritative_descriptor_path_used": true,
@@ -29,7 +29,7 @@
     },
     {
       "command": "/context",
-      "duration_ms": 2292,
+      "duration_ms": 3347,
       "evidence": {
         "byte_count": 300,
         "sha256_12": "5b134dceb771"
@@ -47,37 +47,35 @@
     },
     {
       "command": "/hotplex-native-probe",
-      "duration_ms": 1531,
-      "error": "Not logged in · Please run /login Not logged in · Please run /login ",
+      "duration_ms": 5594,
       "evidence": {
-        "byte_count": 69,
-        "sha256_12": "2388843b0aef"
+        "byte_count": 36,
+        "sha256_12": "b2a8fa4e2531"
       },
       "facts": {
         "canonical_slash_syntax": true,
-        "model_marker_observed": false,
+        "model_marker_observed": true,
         "process_exit_code": 1
       },
-      "status": "BLOCKED",
+      "status": "PASS",
       "transport": "stream-json text_command",
       "version": "2.1.223 (Claude Code)",
       "worker": "claude_code"
     },
     {
       "command": "hotplex-native-probe",
-      "duration_ms": 2244,
-      "error": "APIError 身份验证失败。",
+      "duration_ms": 16813,
       "evidence": {
-        "byte_count": 30,
-        "sha256_12": "04755f0fb9bf"
+        "byte_count": 36,
+        "sha256_12": "b0313a7b881b"
       },
       "facts": {
         "catalog_endpoint_status": 200,
         "invoke_http_status": 200,
-        "model_marker_observed": false,
+        "model_marker_observed": true,
         "probe_advertised": true
       },
-      "status": "BLOCKED",
+      "status": "PASS",
       "transport": "HTTP POST /session/{id}/command",
       "version": "1.18.14",
       "worker": "opencode_server"

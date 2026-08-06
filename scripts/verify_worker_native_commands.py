@@ -17,6 +17,7 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+import os
 import pathlib
 import queue
 import re
@@ -228,8 +229,6 @@ def probe_claude(timeout: float, budget_usd: float) -> ProbeResult:
             "stream-json",
             "--input-format",
             "stream-json",
-            "--setting-sources",
-            "project,local",
             "--tools",
             "",
             "--max-turns",
@@ -339,6 +338,54 @@ def terminate_process(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=3)
 
 
+# Injected host-session provider credentials (e.g. BIGMODEL_API_KEY registered
+# as provider-auth-big by an embedding opencode instance). `serve` inherits
+# them and may pick that provider over auth.json, failing 401 while the user's
+# CLI works. Stripped so the probe measures the user's real environment.
+_OPENCODE_HOST_POLLUTION_ENV = {
+    "BIGMODEL_API_KEY",
+    "AI_PROVIDER_NAME",
+    "OPENCODE_PID",
+    "OPENCODE",
+    "AGENT",
+    "SISYPHUS",
+}
+
+
+def opencode_serve_env(workdir: pathlib.Path) -> dict[str, str]:
+    """Clean env for `opencode serve`.
+
+    serve resolves the default agent/model from the embedding opencode session
+    and inherits injected provider credentials, failing 401 even when the
+    user's CLI works. Isolate: fresh HOME with only the user's auth.json, no
+    injected provider variables, no XDG overrides.
+    """
+    fake_home = workdir / ".probe-home"
+    fake_data = fake_home / ".local" / "share" / "opencode"
+    fake_data.mkdir(parents=True, exist_ok=True)
+    auth = pathlib.Path.home() / ".local" / "share" / "opencode" / "auth.json"
+    if auth.is_file():
+        shutil.copy2(auth, fake_data / "auth.json")
+
+    env = {
+        "HOME": str(fake_home),
+        "PATH": os.environ.get("PATH", ""),
+        "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+        "TERM": os.environ.get("TERM", "dumb"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "USER": os.environ.get("USER", ""),
+        "LOGNAME": os.environ.get("LOGNAME", ""),
+    }
+    for key in list(os.environ):
+        if key in _OPENCODE_HOST_POLLUTION_ENV or key.startswith(
+            ("OPENCODE_", "XDG_CONFIG_HOME", "XDG_DATA_HOME")
+        ):
+            continue
+        if key not in env:
+            env[key] = os.environ[key]
+    return env
+
+
 def opencode_catalog_names(catalog: Any) -> set[str]:
     items = catalog if isinstance(catalog, list) else []
     return {
@@ -407,6 +454,7 @@ def probe_opencode(timeout: float) -> ProbeResult:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=opencode_serve_env(workdir),
             )
             if not wait_for_http(base_url + "/health", min(timeout, 15)):
                 return ProbeResult(
@@ -483,7 +531,7 @@ def probe_opencode(timeout: float) -> ProbeResult:
         except (OSError, urllib.error.URLError, TimeoutError) as exc:
             return ProbeResult(
                 worker="opencode_server",
-                status=BLOCKED if is_environment_block(exc) else FAIL,
+                status=BLOCKED if is_environment_block(safe_error(exc)) else FAIL,
                 version=version,
                 transport="HTTP POST /session/{id}/command",
                 error=safe_error(exc),
