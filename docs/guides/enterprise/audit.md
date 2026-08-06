@@ -266,6 +266,10 @@ Worker 每次执行工具调用时触发 `tool.call`。根据工具敏感性采�
 | 配置回滚 | `admin.config.rollback` |
 | 创建身份链接 | `admin.audit.identity_link.create` |
 | 删除身份链接 | `admin.audit.identity_link.delete` |
+| 决策 Fence（resolve，#877） | `admin.runtime.fence.resolve` |
+| 决策 Fence（abandon，#877） | `admin.runtime.fence.abandon` |
+
+> Fence 决策同时写入 **slog admin_audit 管道**（decision 无关的 `runtime.fence.action` 一行）与 **user_activity 表**（按决策区分的 `admin.runtime.fence.resolve` / `admin.runtime.fence.abandon`，含 reason 与 evidence_ref）。详见 `reference/admin-api.md` Runtime Operations 章节。
 
 ### 4.7 系统事件
 
