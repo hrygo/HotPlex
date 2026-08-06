@@ -382,6 +382,7 @@ func (d *feishuContractDriver) SendRawInput(ctx context.Context, id, content str
 	// delivery-outcome ack (sent after the worker accepted the input) so
 	// DeliveredInputs is settled when the runner asserts it.
 	var outcome error
+	var lastDiag string
 	require.Eventually(d.t, func() bool {
 		for _, env := range d.rec.Events() {
 			ack, ok := env.Event.Data.(events.InputAckData)
@@ -397,9 +398,23 @@ func (d *feishuContractDriver) SendRawInput(ctx context.Context, id, content str
 				return true
 			}
 		}
+		// Diagnostic snapshot for the CI-only flake: captures whether the
+		// input ever reached the handler (any envelope present) and which
+		// events arrived without the expected InputAck.
+		lastDiag = fmt.Sprintf("rec_events=%v session=%s", recEventTypes(d.rec.Events()), d.sessionID)
 		return false
-	}, driverWaitTimeout, driverWaitPoll, "feishu driver: input %s never reached the worker", id)
+	}, driverWaitTimeout, driverWaitPoll, "feishu driver: input %s never reached the worker; %s", id, lastDiag)
 	return outcome
+}
+
+// recEventTypes returns the event-type sequence observed on a recording conn,
+// for the CI-only flake diagnostics in SendRawInput.
+func recEventTypes(envs []*events.Envelope) []string {
+	out := make([]string, 0, len(envs))
+	for _, env := range envs {
+		out = append(out, string(env.Event.Type))
+	}
+	return out
 }
 
 func (d *feishuContractDriver) SendRawDuplicate(ctx context.Context, id, content string) error {
