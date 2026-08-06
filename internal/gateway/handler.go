@@ -532,7 +532,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 			Version:   events.Version,
 			ID:        aep.NewID(),
 			SessionID: env.SessionID,
-			Seq:       h.hub.NextSeq(env.SessionID),
+			Seq:       0,
 			Event: events.Event{
 				Type: events.Control,
 				Data: data,
@@ -548,7 +548,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 			Version:   events.Version,
 			ID:        aep.NewID(),
 			SessionID: env.SessionID,
-			Seq:       h.hub.NextSeq(env.SessionID),
+			Seq:       0,
 			Event: events.Event{
 				Type: events.WorkerCmd,
 				Data: events.WorkerCommandData{
@@ -692,7 +692,7 @@ func (h *Handler) ackSupplement(ctx context.Context, source *events.Envelope, mo
 		return
 	}
 	clientID := clientMessageID(source)
-	ack := events.NewEnvelope(aep.NewID(), source.SessionID, h.hub.NextSeq(source.SessionID), events.InputAck, events.InputAckData{
+	ack := events.NewEnvelope(aep.NewID(), source.SessionID, 0, events.InputAck, events.InputAckData{
 		ClientMessageID: clientID,
 		ExecutionID:     "supplement-" + clientID,
 		Status:          events.ExecutionStatusDelivered,
@@ -1203,7 +1203,7 @@ func (h *Handler) ackControlCommand(ctx context.Context, env *events.Envelope) {
 	if h.hub == nil {
 		return
 	}
-	ack := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.InputAck, events.InputAckData{
+	ack := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.InputAck, events.InputAckData{
 		ClientMessageID: clientMessageID(env),
 		ExecutionID:     "cmd-" + env.ID,
 		Status:          events.ExecutionStatusDelivered,
@@ -1306,7 +1306,7 @@ func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, rec
 	if h.hub == nil || record == nil {
 		return
 	}
-	ack := events.NewEnvelope(aep.NewID(), source.SessionID, h.hub.NextSeq(source.SessionID), events.InputAck, events.InputAckData{
+	ack := events.NewEnvelope(aep.NewID(), source.SessionID, 0, events.InputAck, events.InputAckData{
 		ClientMessageID: record.ClientMessageID,
 		ExecutionID:     record.ExecutionID,
 		Status:          events.ExecutionStatus(record.Status),

@@ -49,7 +49,7 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 		// signal — send a synthetic done so the frontend clears isRunning.
 		doneEnv := events.NewEnvelope(
 			aep.NewID(), env.SessionID,
-			h.hub.NextSeq(env.SessionID),
+			0,
 			events.Done, events.DoneData{Success: cmdErr == nil},
 		)
 		_ = h.hub.SendToSession(ctx, doneEnv)
@@ -98,7 +98,7 @@ func (h *Handler) handleContextUsage(ctx context.Context, env *events.Envelope, 
 	}
 	respEnv := events.NewEnvelope(
 		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
+		0,
 		events.ContextUsage, events.MapContextUsageResponse(resp),
 	)
 	return h.hub.SendToSession(ctx, respEnv)
@@ -111,7 +111,7 @@ func (h *Handler) handleMCPStatus(ctx context.Context, env *events.Envelope, cr 
 	}
 	respEnv := events.NewEnvelope(
 		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
+		0,
 		events.MCPStatus, events.MapMCPStatusResponse(resp),
 	)
 	return h.hub.SendToSession(ctx, respEnv)
@@ -217,7 +217,7 @@ func (h *Handler) reconcileAfterClear(ctx context.Context, sessionID, ownerID st
 	h.finishRuntimeOnStop(ctx, sessionID, workerRunID, ownerID)
 
 	doneEnv := events.NewEnvelope(
-		aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+		aep.NewID(), sessionID, 0,
 		events.Done, events.DoneData{Reason: "cleared_by_user"},
 	)
 	if err := h.hub.SendToSession(ctx, doneEnv); err != nil {
@@ -227,7 +227,7 @@ func (h *Handler) reconcileAfterClear(ctx context.Context, sessionID, ownerID st
 
 func (h *Handler) sendCommandFeedback(ctx context.Context, sessionID, msg string) {
 	env := events.NewEnvelope(
-		aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+		aep.NewID(), sessionID, 0,
 		events.Message, events.MessageData{Content: msg},
 	)
 	_ = h.hub.SendToSession(ctx, env)
@@ -278,7 +278,7 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 	data := events.SkillsListData{Skills: entries, Total: len(entries), Filter: filter}
 	respEnv := events.NewEnvelope(
 		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
+		0,
 		events.SkillsList, data,
 	)
 	return h.hub.SendToSession(ctx, respEnv)

@@ -155,7 +155,7 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 // SendControlToSession sends a server-originated control message to the client.
 // Used for reconnect, session_invalid, and throttle notifications.
 func (h *Handler) SendControlToSession(ctx context.Context, sessionID string, action events.ControlAction, reason string, details map[string]any) error {
-	env := events.NewEnvelope(aep.NewID(), sessionID, h.hub.NextSeq(sessionID), events.Control, events.ControlData{
+	env := events.NewEnvelope(aep.NewID(), sessionID, 0, events.Control, events.ControlData{
 		Action:  action,
 		Reason:  reason,
 		Details: details,
