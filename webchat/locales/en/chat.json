@@ -116,6 +116,9 @@
     "workspace_recovery_description": "None of the available workspaces passed connection validation. Check permissions or service status, then retry.",
     "workspace_recovery_retry": "Try again"
   },
+  "command": {
+    "executed": "✅ Executed {{command}}"
+  },
   "worker": {
     "name": {
       "claude_code": "Claude Code",

@@ -94,21 +94,36 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
         e.preventDefault();
         setSelectedIndex(prev => (prev - 1 + filtered.length) % filtered.length);
         requestAnimationFrame(scrollToSelected);
-      } else if (e.key === "Enter" && filtered.length > 0) {
-        e.preventDefault();
+      } else if (e.key === "Enter" && !e.isComposing && filtered.length > 0) {
         const selected = filtered[selectedIndex];
         if (selected.type !== "skill" || selected.status !== "unavailable") {
+          // The composer already holds the exact command — let the Enter pass
+          // through so it submits immediately instead of re-selecting.
+          const exactMatch =
+            inputValue.trim().toLowerCase() === selected.key.toLowerCase();
+          if (exactMatch) return;
+          e.preventDefault();
+          // Capture phase: stop propagation so the composer's own Enter submit
+          // never fires with the partial filter text before the selection
+          // lands (window bubble listeners run after React's keydown).
+          e.stopPropagation();
           onSelect(selected);
+          return;
         }
+        // Unavailable skill: swallow Enter so it is not submitted as text.
+        e.preventDefault();
+        e.stopPropagation();
       } else if (e.key === "Escape") {
         onClose();
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // Capture phase — must run BEFORE the composer's React keydown handler so
+    // preventDefault/stopPropagation can stop the premature submit.
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scrollToSelected is a stable DOM helper
-  }, [isOpen, filtered, selectedIndex, onSelect, onClose]);
+  }, [isOpen, filtered, selectedIndex, onSelect, onClose, inputValue]);
 
   if (!isOpen || filtered.length === 0) return null;
 

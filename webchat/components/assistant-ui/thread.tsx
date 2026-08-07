@@ -265,22 +265,34 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
   }, [aui, followUpQueue, localText, t]);
 
   const queueing = isRunning || !!isStoppingProp;
+  // A bare "/" is the command-menu trigger, never a message: block it from
+  // every submit path (Enter, Send button, queue button).
+  const isBareSlash = localText.trim() === "/";
   // Gateway fixed commands (Source=gateway) are commands, not skills — keep
   // them out of the "Agent Skills" chips since they already surface as slash
   // commands in the composer menu.
   const skillChips = (skills ?? []).filter(s => s.source !== "gateway");
   const handleComposerKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
-      !queueing ||
       event.key !== "Enter" ||
       event.shiftKey ||
       event.nativeEvent.isComposing
     ) {
       return;
     }
+    if (isBareSlash) {
+      // Runs before assistant-ui's handleKeyPress (composeEventHandlers skips
+      // it once defaultPrevented), so the bare "/" can never reach
+      // requestSubmit — even when the menu's capture listener has not
+      // attached yet. Keep the menu open so the user can pick a command.
+      event.preventDefault();
+      setMenuOpen(true);
+      return;
+    }
+    if (!queueing) return;
     event.preventDefault();
     handleQueueSubmit();
-  }, [handleQueueSubmit, queueing]);
+  }, [handleQueueSubmit, queueing, isBareSlash]);
 
   return (
     <div className="composer-container relative max-w-3xl mx-auto">
@@ -392,13 +404,13 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   type="button"
                   onClick={handleQueueSubmit}
                   className="btn-icon btn-primary"
-                  disabled={disabled || !followUpQueue || !localText.trim()}
+                  disabled={disabled || !followUpQueue || !localText.trim() || isBareSlash}
                   aria-label={t('follow_up.aria.enqueue')}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
               ) : (
-                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled || isBareSlash} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
               )}
             </div>
           </div>

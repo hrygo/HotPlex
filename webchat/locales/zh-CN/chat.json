@@ -116,6 +116,9 @@
     "workspace_recovery_description": "所有可用工作区均未能完成连接验证。请检查权限或服务状态后重试。",
     "workspace_recovery_retry": "重新尝试"
   },
+  "command": {
+    "executed": "✅ {{command}} 已执行"
+  },
   "worker": {
     "name": {
       "claude_code": "Claude Code",
