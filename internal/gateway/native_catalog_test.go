@@ -225,6 +225,34 @@ func TestNativeCatalogCacheInvalidation(t *testing.T) {
 	require.Equal(t, int32(3), w2.calls.Load(), "invalidating s1 must not evict s2")
 }
 
+func TestHandlerReleaseSessionPrunesCatalogState(t *testing.T) {
+	t.Parallel()
+
+	store := newTestCatalogStore(t, &nativeCatalogTestLocator{})
+	w := &nativeCatalogTestWorker{fakeWorker: &fakeWorker{}}
+	h := &Handler{catalogStore: store, catalogGen: make(map[string]uint64)}
+
+	ctx := context.Background()
+	_, err := store.Lookup(ctx, "s1", "/work", w, 1)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), w.calls.Load(), "first lookup assembles fresh")
+
+	h.InvalidateCatalog("s1")
+	require.Equal(t, uint64(1), h.catalogGeneration("s1"))
+
+	h.ReleaseSession("s1")
+	require.Equal(t, uint64(0), h.catalogGeneration("s1"), "generation must be pruned on release")
+
+	// The dropped cache forces a fresh assembly on the next lookup.
+	_, err = store.Lookup(ctx, "s1", "/work", w, 1)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), w.calls.Load(), "released session cache must be refetched")
+
+	// Release is session-scoped: an untouched session keeps its state.
+	h.InvalidateCatalog("s2")
+	require.Equal(t, uint64(1), h.catalogGeneration("s2"), "releasing s1 must not prune s2")
+}
+
 func TestNativeCatalogQueryIsBounded(t *testing.T) {
 	t.Parallel()
 

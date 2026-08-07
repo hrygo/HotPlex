@@ -113,6 +113,21 @@ func (h *Handler) catalogGeneration(sessionID string) uint64 {
 	return h.catalogGen[sessionID]
 }
 
+// ReleaseSession drops the session's per-session catalog state (generation
+// counter and cached merged catalog) when the session is released at runtime.
+// Mirrors the hub's ReleaseSeq/ForgetSeq cleanup so long-lived gateways with
+// session churn do not accumulate one entry per deleted session. Safe to call
+// on a zero-value Handler (nil store is a no-op).
+func (h *Handler) ReleaseSession(sessionID string) {
+	if h.catalogStore == nil {
+		return
+	}
+	h.catalogGenMu.Lock()
+	delete(h.catalogGen, sessionID)
+	h.catalogGenMu.Unlock()
+	h.catalogStore.Invalidate(sessionID)
+}
+
 // SetAuditCollector injects the audit collector for message event recording.
 func (h *Handler) SetAuditCollector(ac *audit.Collector) {
 	h.auditCollector = ac
@@ -534,6 +549,17 @@ func (h *Handler) tryExplicitNativeCommand(ctx context.Context, env *events.Enve
 		return fail("worker %s does not support native command %q", w.Type(), name)
 	}
 
+	// Gateway fixed commands are gateway-handled (spec §5.2) — the merged
+	// catalog's fixed tier always shadows same-named Worker commands, so an
+	// explicit /worker <fixed-name> must never be dispatched through the
+	// Worker's native invoker. Dispatching it would inject the slash text into
+	// a running turn (claudecode), surface an internal error from the empty
+	// fixed Path (codexcli), or race the single-prompt invariant (ACP) —
+	// while bypassing the busy gate, cancelRetry and the execution record.
+	if _, fixed := fixedCommandNamesFor(w)[name]; fixed {
+		return fail("native command %q is a Gateway fixed command; use /%s instead", name, name)
+	}
+
 	invoker, ok := worker.AsNativeInvoker(w)
 	if !ok {
 		return fail("worker %s cannot invoke native command %q", w.Type(), name)
@@ -940,23 +966,25 @@ func (h *Handler) notifySupplement(ctx context.Context, sessionID, mode string) 
 func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error {
 	data, _ := env.Event.Data.(map[string]any)
 	content, _ := data["content"].(string)
+
+	// The stash records the resolution made at buffer time against the merged
+	// catalog — including explicit /worker <name> entries, which the filesystem
+	// re-resolution below must never hijack (a Skill literally named "worker"
+	// would compact-match). invocationFromMetadata is content-keyed, so the
+	// stash only applies while the replayed content is unchanged and a merged
+	// multi-entry replay never replays only its Skill half. The delivery path
+	// still re-validates against the Worker's authoritative catalog and fails
+	// loudly when the Skill is no longer supported.
+	if stashed, ok := invocationFromMetadata(env.Metadata, content); ok {
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &stashed, false)
+	}
+
 	invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content)
 	if err != nil {
 		if errors.Is(err, skills.ErrAmbiguousInvocation) {
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
 		}
 		return err
-	}
-	if !matched {
-		// The Skill may have been removed or renamed from the filesystem
-		// catalog while the input was buffered. Fall back to the invocation
-		// resolved at buffer time instead of silently degrading the replay to
-		// raw slash text (which would leak the command to the model). The
-		// delivery path still validates the Worker's authoritative catalog
-		// and fails loudly when the Skill is no longer supported.
-		if stashed, ok := invocationFromMetadata(env.Metadata, content); ok {
-			invocation, matched = stashed, true
-		}
 	}
 	if matched {
 		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, false)
@@ -1205,7 +1233,17 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		resolvedInvocation.Mode = worker.NativeModeForType(w.Type())
 		invocation = &resolvedInvocation
 		if provider, ok := worker.AsNativeCatalogProvider(w); ok {
-			descriptors, catalogErr := provider.ListNativeCommands(ctx, si.WorkDir)
+			// Bound the authoritative re-validation with the same "cannot
+			// confirm" timeout as catalog assembly (spec §8.2, §8.5): the
+			// turn is already accepted and marked running, and a hung
+			// catalog endpoint must not stall it beyond the bound.
+			queryTimeout := nativeCatalogQueryTimeout
+			if h.catalogStore != nil {
+				queryTimeout = h.catalogStore.queryTimeout
+			}
+			catalogCtx, cancel := context.WithTimeout(ctx, queryTimeout)
+			descriptors, catalogErr := provider.ListNativeCommands(catalogCtx, si.WorkDir)
+			cancel()
 			if catalogErr != nil {
 				if h.bridge != nil {
 					h.bridge.ClearTurnStart(env.SessionID)

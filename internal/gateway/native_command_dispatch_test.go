@@ -268,6 +268,31 @@ func TestWorkerCommandResetViaWorkerNamespaceNotSupported(t *testing.T) {
 	sm.AssertExpectations(t)
 }
 
+// TestWorkerCommandFixedCommandRejectedEvenWithInvoker guards the reserved
+// /worker entry against Gateway fixed commands: even a worker WITH a native
+// invoker must never receive a fixed command (reset/stop/compact/clear/...)
+// through it — dispatching would inject slash text into a running turn
+// (claudecode), surface an internal error from the empty fixed Path
+// (codexcli), or bypass the busy gate/execution record entirely (spec §5.2).
+func TestWorkerCommandFixedCommandRejectedEvenWithInvoker(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &advertisedSkillWorker{descriptors: oracleDBASkill()} // implements the native invoker
+	sm.On("Get", "s1").Return(sessionWithWorkDir("s1"), nil).Once()
+	sm.On("GetWorker", "s1").Return(w).Once()
+
+	h := newInputHandler(t, sm)
+	h.catalogStore = newSessionCatalogStore(slog.Default(), nil)
+
+	err := h.handleInput(context.Background(), inputEnvelopeWithMetadata("s1", "/worker reset", nil))
+	require.Error(t, err)
+	require.ErrorContains(t, err, string(events.ErrCodeNotSupported))
+	require.Empty(t, w.invocation, "/worker reset must not reach the native invoker")
+	require.Empty(t, w.Calls, "/worker reset must not trigger any worker invocation")
+	sm.AssertExpectations(t)
+}
+
 // TestWorkerCommandStartsTurnDurableDispatch covers the full durable path for
 // a StartsTurn=true entry: accept → ACK → active gate → InvokeNativeCommand
 // with the resolved invocation, all through the shared delivery pipeline.

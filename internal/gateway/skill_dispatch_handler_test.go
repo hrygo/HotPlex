@@ -257,12 +257,79 @@ func TestDeliverReplay_StashIgnoredWhenContentDiverged(t *testing.T) {
 	w.AssertNotCalled(t, "InvokeSkill", mock.Anything, mock.Anything)
 }
 
+// TestDeliverReplay_PrefersStashOverFilesystemHijack guards the replay path
+// against the /worker namespace: a filesystem Skill literally named "worker"
+// must never hijack a buffered explicit "/worker oracle-dba ..." entry at
+// replay time. The content-keyed stash records the buffer-time resolution
+// against the merged catalog and wins over filesystem re-resolution.
+func TestDeliverReplay_PrefersStashOverFilesystemHijack(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &recordedSkillWorker{}
+	sm.On("Get", "s").Return(&session.SessionInfo{ID: "s", State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
+	sm.On("GetWorker", "s").Return(w).Maybe()
+
+	h := newInputHandler(t, sm)
+	h.skillsLocator = fixedSkillsLocator{items: []skills.Skill{{
+		Name:     "worker",
+		FilePath: "/workspace/.agents/skills/worker/SKILL.md",
+	}}}
+
+	const content = "/worker oracle-dba 10.102.78.1"
+	env := inputEnvelopeWithMetadata("s", content, nil)
+	stashInvocation(env, worker.NativeCommandInvocation{
+		Name: "oracle-dba",
+		Args: "10.102.78.1",
+	}, content)
+
+	require.NoError(t, h.DeliverReplay(t.Context(), env))
+	require.Equal(t, "oracle-dba", w.invocation.Name, "stashed oracle-dba must win over the filesystem \"worker\" skill")
+	require.Equal(t, "10.102.78.1", w.invocation.Args)
+}
+
 type failingCatalogWorker struct {
 	mockWorkerForHandler
 }
 
 func (w *failingCatalogWorker) ListNativeCommands(context.Context, string) ([]worker.NativeCommandDescriptor, error) {
 	return nil, errors.New("catalog unavailable")
+}
+
+// TestDeliverToWorkerAuthoritativeQueryIsBounded verifies the delivery-path
+// authoritative catalog re-validation honors the same "cannot confirm" bound
+// as catalog assembly (spec §8.2, §8.5): a hung provider must not stall an
+// already-accepted turn beyond the injected timeout.
+func TestDeliverToWorkerAuthoritativeQueryIsBounded(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &nativeCatalogTestWorker{fakeWorker: &fakeWorker{}, blockCtx: true}
+	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+
+	hub := newTestHub(t)
+	conn := &mockPlatformConn{}
+	hub.JoinPlatformSession("s1", conn)
+	h := &Handler{
+		log:            slog.Default(),
+		hub:            hub,
+		sm:             sm,
+		catalogStore:   newTestCatalogStore(t, nil), // 50ms "cannot confirm" bound
+		executionStore: &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)},
+	}
+	h.skillsLocator = fixedSkillsLocator{items: []skills.Skill{{
+		Name:     "oracle-dba",
+		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	}}}
+
+	start := time.Now()
+	err := h.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", "/oracle-dba 10.102.78.1", nil))
+	require.Error(t, err)
+	require.ErrorContains(t, err, string(events.ErrCodeInternalError))
+	require.Less(t, time.Since(start), 2*time.Second, "delivery-path catalog query must honor the injected bound")
+	sm.AssertExpectations(t)
 }
 
 func TestSkillsListEntriesClassifyMergedCatalog(t *testing.T) {

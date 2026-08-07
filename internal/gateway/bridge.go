@@ -1203,19 +1203,16 @@ func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay
 	if invoker, ok := worker.AsNativeInvoker(w); ok {
 		return invoker.InvokeNativeCommand(ctx, *replay.Skill)
 	}
-	// The replacement Worker lacks a native command path — typically because
-	// worker_type changed between the crash and recovery. Dropping the input
-	// would silently lose the user's last message, so fall back to the
-	// reconstructed slash text. This is a recovery-only degradation (the
-	// in-session dispatch path still refuses to retry a Skill as text) and
-	// matches the pre-change crash-recovery semantics of re-delivering the
-	// last input as text.
-	if replay.Content == "" {
-		return fmt.Errorf("%w: worker %s cannot replay native Skill %q", worker.ErrSkillNotSupported, w.Type(), replay.Skill.Name)
-	}
-	b.log.Warn("bridge: replaying native Skill as text, replacement worker lacks native command invoker",
+	// The replacement Worker lacks any native command path — typically
+	// because worker_type changed between the crash and recovery. The
+	// invocation must NOT be replayed as an ordinary prompt: that would turn
+	// "execute the Skill" into "let the model guess the Skill" (plan
+	// constraint #7; NativeCommandInvoker contract: "Workers that cannot
+	// execute a native command must not receive the invocation as an ordinary
+	// prompt"). Fail loudly instead of silently degrading the semantics.
+	b.log.Warn("bridge: native Skill replay rejected, replacement worker lacks native command invoker",
 		"worker_type", w.Type(), "skill", replay.Skill.Name)
-	return w.Input(ctx, replay.Content, nil)
+	return fmt.Errorf("%w: worker %s cannot replay native Skill %q as text", worker.ErrSkillNotSupported, w.Type(), replay.Skill.Name)
 }
 
 // firstNonEmpty returns the first non-empty string from the given values.

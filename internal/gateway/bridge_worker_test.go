@@ -246,22 +246,23 @@ func TestDeliverInputReplayUsesNativeInvokerWhenAvailable(t *testing.T) {
 	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
 }
 
-func TestDeliverInputReplayFallsBackToTextWithoutSkillInvoker(t *testing.T) {
+func TestDeliverInputReplayRejectsSkillWithoutInvoker(t *testing.T) {
 	t.Parallel()
 
-	// Regression: a replacement worker without SkillInvoker (e.g. worker_type
-	// changed during recovery) used to drop the pending Skill input entirely.
-	// It must degrade to the reconstructed slash text instead.
+	// A replacement worker without a native invoker (e.g. worker_type changed
+	// during recovery) must NOT receive the Skill invocation as an ordinary
+	// prompt: that would turn "execute the Skill" into "let the model guess
+	// the Skill" (plan constraint #7). The replay fails loudly instead.
 	b := &Bridge{log: testLogger(t)}
 	w := new(mockWorkerForHandler)
-	w.On("Input", mock.Anything, "/oracle-dba 10.102.78.1", mock.Anything).Return(nil).Once()
 	replay := worker.InputReplay{
 		Content: "/oracle-dba 10.102.78.1",
 		Skill:   &worker.NativeCommandInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
 	}
 
-	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
-	w.AssertExpectations(t)
+	err := b.deliverInputReplay(t.Context(), w, replay)
+	require.ErrorIs(t, err, worker.ErrSkillNotSupported)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestDeliverInputReplayErrorsWhenNoInvokerAndNoText(t *testing.T) {

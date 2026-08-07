@@ -391,7 +391,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	if stores.collector != nil {
 		hub.SetSeqFlusher(stores.collector)
 	}
+	var handler *gateway.Handler // set later in DI; prunes session catalog state on release
+
 	sm.OnRuntimeRelease = func(ctx context.Context, sessionID string) {
+		// Prune per-session command-catalog state so deleted sessions do not
+		// accumulate one catalogGen/entries entry for the gateway lifetime
+		// (mirrors hub.ReleaseSeq below).
+		if handler != nil {
+			handler.ReleaseSession(sessionID)
+		}
 		err := hub.ReleaseSeq(sessionID, func() error {
 			// A zero value means no durable sequence was allocated; remove a
 			// possible hydrated-empty entry without forcing a collector flush.
@@ -558,7 +566,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
 
-	handler := gateway.NewHandler(gateway.HandlerDeps{
+	handler = gateway.NewHandler(gateway.HandlerDeps{
 		Log:             log,
 		Hub:             hub,
 		SM:              sm,
