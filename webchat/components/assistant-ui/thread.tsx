@@ -265,6 +265,10 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
   }, [aui, followUpQueue, localText, t]);
 
   const queueing = isRunning || !!isStoppingProp;
+  // Gateway fixed commands (Source=gateway) are commands, not skills — keep
+  // them out of the "Agent Skills" chips since they already surface as slash
+  // commands in the composer menu.
+  const skillChips = (skills ?? []).filter(s => s.source !== "gateway");
   const handleComposerKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       !queueing ||
@@ -305,7 +309,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                 <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">{t('label.agent_skills')}</span>
                 <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
               </div>
-              {skills?.slice(0, 3).map(skill => {
+              {skillChips.slice(0, 3).map(skill => {
                 const status = skill.status ?? "discoverable";
                 const statusClass =
                   status === "callable"
@@ -323,9 +327,9 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   </div>
                 );
               })}
-              {skills && skills.length > 3 && (
+              {skillChips.length > 3 && (
                 <div className="px-1 py-1 text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-tighter">
-                  +{skills.length - 3}
+                  +{skillChips.length - 3}
                 </div>
               )}
             </div>

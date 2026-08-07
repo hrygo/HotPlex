@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import type { SkillEntry, SkillStatus } from "@/lib/ai-sdk-transport/client/types";
 
 export interface Command {
@@ -31,6 +32,7 @@ interface CommandMenuProps {
 }
 
 export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: CommandMenuProps) {
+  const { t } = useTranslation('chat');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedRef = useRef<HTMLButtonElement>(null);
 
@@ -38,16 +40,25 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
     selectedRef.current?.scrollIntoView({ block: "nearest" });
   }, []);
 
-  const allCommands: Command[] = useMemo(() => [
-    ...SLASH_COMMANDS,
-    ...(skills ?? []).map(s => ({
-      key: `/${s.name}`,
-      label: `/${s.name}`,
-      description: s.description || `${s.name} skill`,
-      type: "skill" as const,
-      status: s.status,
-    })),
-  ], [skills]);
+  const allCommands: Command[] = useMemo(() => {
+    // Gateway fixed commands (e.g. /gc, /reset, /skills) are surfaced both as
+    // built-in slash commands AND as skill entries (Source=gateway) from the
+    // skills_list event. Slash entries win — otherwise the same key renders
+    // twice and React warns about duplicate children keys.
+    const slashKeys = new Set(SLASH_COMMANDS.map(c => c.key));
+    return [
+      ...SLASH_COMMANDS,
+      ...(skills ?? [])
+        .filter(s => !slashKeys.has(`/${s.name}`))
+        .map(s => ({
+          key: `/${s.name}`,
+          label: `/${s.name}`,
+          description: s.description || `${s.name} skill`,
+          type: "skill" as const,
+          status: s.status,
+        })),
+    ];
+  }, [skills]);
 
   // Filter commands — "/" mode shows both slash commands and skills
   const isSlash = inputValue.startsWith("/");
@@ -136,9 +147,9 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
               {cmd.type === "slash" ? (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(251,191,36,0.1)] text-[var(--accent-gold)] font-mono font-bold uppercase">CMD</span>
               ) : cmd.status === "unavailable" ? (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(248,113,113,0.12)] text-[var(--accent-coral)] font-mono font-bold uppercase">UNAVAILABLE</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(248,113,113,0.12)] text-[var(--accent-coral)] font-mono font-bold uppercase">{t('label.skill_status_unavailable')}</span>
               ) : cmd.status === "discoverable" ? (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(148,163,184,0.12)] text-[var(--text-faint)] font-mono font-bold uppercase">DISCOVERABLE</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(148,163,184,0.12)] text-[var(--text-faint)] font-mono font-bold uppercase">{t('label.skill_status_discoverable')}</span>
               ) : (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--accent-emerald)] font-mono font-bold uppercase">SKILL</span>
               )}
