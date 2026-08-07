@@ -1,7 +1,7 @@
 // Package main is the entry point for the HotPlex Worker Gateway.
 //
 //	@title          HotPlex API
-//	@version        1.39.0
+//	@version        1.40.0
 //	@description    HotPlex Worker Gateway — unified access layer for AI Coding Agent sessions.
 //	@contact.name   HotPlex
 //	@contact.url    https://github.com/hrygo/hotplex/issues

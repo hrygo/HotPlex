@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.39.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.40.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,7 +133,7 @@ HotPlex 把“用户在哪里对话”和“哪个 Agent 执行任务”分离�
 
 Worker 可以按 Bot 或平台指定，其余场景继承部署级共享默认值。
 
-## ✨ 最新版本：v1.39.0
+## ✨ 最新版本：v1.40.0
 
 - **Agent 忙碌时也可以继续说。** Claude Code 和 Codex CLI 会把补充输入注入当前 Turn；ACP 和 OpenCode Server 则暂存输入，并在当前 Turn 完成后自动重投。
 - **所有 SDK 共用一份协议契约。** AEP v1 canonical schema 和 38 个 golden envelope 在 CI 中同时校验 Go、TypeScript、Python 和 Java 客户端。
