@@ -1136,8 +1136,11 @@ func (m *CodexAppServerManager) AddEnvironment(environmentID, execServerURL stri
 // ─── MCP ───────────────────────────────────────────────────────────────────
 
 // ListMCPServerStatus returns the status of all configured MCP servers.
+// Upstream ListMcpServerStatusParams (v2/mcp.rs:36) has no serde(default),
+// so the params field must be present — send an empty object, not nil,
+// or codex-app-server rejects the request with "missing field params".
 func (m *CodexAppServerManager) ListMCPServerStatus() (json.RawMessage, error) {
-	resp, err := m.Call(context.Background(), "mcpServerStatus/list", nil)
+	resp, err := m.Call(context.Background(), "mcpServerStatus/list", map[string]any{})
 	if err != nil {
 		return nil, fmt.Errorf("codex-app-server: mcpServerStatus/list: %w", err)
 	}

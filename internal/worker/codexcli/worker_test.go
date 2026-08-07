@@ -1,6 +1,7 @@
 package codexcli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -2505,6 +2506,53 @@ func TestServerCommanderMCPOAuthMissingName(t *testing.T) {
 	_, err := sc.SendControlRequest(context.Background(), "mcp_oauth", map[string]any{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing server_name")
+}
+
+func TestListMCPServerStatusSendsEmptyParams(t *testing.T) {
+	t.Parallel()
+
+	// codex-app-server's ListMcpServerStatusParams has no serde(default),
+	// so a request without a params field is rejected with "missing field
+	// params". The frame must carry an empty object, not omit it.
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{
+		IdleDrainPeriod: time.Minute,
+		CallTimeout:     20 * time.Millisecond,
+	})
+	r, w := io.Pipe()
+	mgr.stdin = w
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+
+	frames := make(chan []byte, 1)
+	go func() {
+		defer close(frames)
+		scanner := bufio.NewScanner(r)
+		if scanner.Scan() {
+			frames <- append([]byte(nil), scanner.Bytes()...)
+		}
+	}()
+	t.Cleanup(func() { _ = w.Close() })
+
+	// No real codex process responds, so the call times out — the written
+	// frame is what we assert on.
+	_, err := mgr.ListMCPServerStatus()
+	require.Error(t, err)
+
+	var frame map[string]any
+	select {
+	case raw := <-frames:
+		require.NoError(t, json.Unmarshal(raw, &frame))
+	case <-time.After(time.Second):
+		t.Fatal("no request frame written to stdin")
+	}
+
+	require.Equal(t, "mcpServerStatus/list", frame["method"])
+	params, ok := frame["params"]
+	require.True(t, ok, "params must be present: codex-app-server rejects requests missing it")
+	require.NotNil(t, params, "params must be an object, not null")
+	require.Equal(t, map[string]any{}, params)
 }
 
 func TestIntegrationKillImmediatelyTerminatesIdleProcess(t *testing.T) {
