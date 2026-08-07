@@ -93,3 +93,92 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 		require.Equal(t, "hello again", w.conn.LastInput())
 	})
 }
+
+// TestWorker_StopCurrentTurn_CancelMethodNotFoundDegradesToKill verifies that a
+// JSON-RPC -32601 (Method not found) response to session/cancel — an ACP agent
+// that does not implement the mandatory cancel method — degrades to a
+// process-level stop instead of surfacing a perpetual INTERNAL_ERROR to the
+// client: StopCurrentTurn returns nil and the stopped marker stays set so the
+// bridge never misreads the process exit as a crash and re-delivers the input.
+func TestWorker_StopCurrentTurn_CancelMethodNotFoundDegradesToKill(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	// Agent goroutine: answer session/cancel with -32601 Method not found.
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		if scanner.Scan() {
+			var req struct {
+				ID json.RawMessage `json:"id"`
+			}
+			_ = json.Unmarshal(scanner.Bytes(), &req)
+			resp := &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &JSONRPCError{Code: -32601, Message: "Method not found"},
+			}
+			_ = WriteMessage(agentStdoutW, resp)
+		}
+	}()
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
+	w.client = client
+	w.SetWorkerSessionID("sess_123")
+
+	err := w.StopCurrentTurn(ctx)
+	require.NoError(t, err, "agent without session/cancel must degrade to process kill, not fail the stop")
+	require.True(t, w.IsStopped(), "stopped marker must stay set after the degraded stop")
+}
+
+// TestWorker_StopCurrentTurn_CancelErrorStillFails verifies that non -32601
+// cancel failures keep the original failed-stop semantics: the error is
+// returned and the stopped marker is cleared so the gateway can roll back its
+// stop fence and let the user retry.
+func TestWorker_StopCurrentTurn_CancelErrorStillFails(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	// Agent goroutine: answer session/cancel with a non -32601 error.
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		if scanner.Scan() {
+			var req struct {
+				ID json.RawMessage `json:"id"`
+			}
+			_ = json.Unmarshal(scanner.Bytes(), &req)
+			resp := &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &JSONRPCError{Code: -32602, Message: "Invalid params"},
+			}
+			_ = WriteMessage(agentStdoutW, resp)
+		}
+	}()
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil)}
+	w.client = client
+	w.SetWorkerSessionID("sess_123")
+
+	err := w.StopCurrentTurn(ctx)
+	require.Error(t, err, "non -32601 cancel failures must keep the failed-stop semantics")
+	require.Contains(t, err.Error(), "acp cancel")
+	require.False(t, w.IsStopped(), "stopped marker must clear so the gateway can roll back its stop fence")
+}

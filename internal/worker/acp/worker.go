@@ -745,6 +745,12 @@ func (w *Worker) Terminate(ctx context.Context) error {
 	return w.BaseWorker.Terminate(ctx)
 }
 
+// jsonRPCErrCodeMethodNotFound is the JSON-RPC 2.0 standard error code for
+// "Method not found". An ACP agent that does not implement session/cancel
+// responds with -32601 — despite the ACP v1 spec requiring it (MUST), some
+// agents (e.g. hermes acp) omit it.
+const jsonRPCErrCodeMethodNotFound = -32601
+
 // StopCurrentTurn stops the current turn by calling client.Cancel RPC on the ACP agent.
 func (w *Worker) StopCurrentTurn(ctx context.Context) error {
 	w.Log.Info("acp: stopping current turn")
@@ -758,7 +764,38 @@ func (w *Worker) StopCurrentTurn(ctx context.Context) error {
 	cancelCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if err := client.Cancel(cancelCtx, w.GetWorkerSessionID()); err != nil {
-		// The cancel never took effect — the turn is still running and the
+		// JSON-RPC -32601 (Method not found): the agent does not implement
+		// session/cancel, so a retry can never succeed. Degrade to the
+		// process-level stop used by the claudecode adapter — the turn really
+		// halts and the gateway completes the stop handshake instead of
+		// surfacing a perpetual INTERNAL_ERROR to the client. MarkStopped
+		// stays set, so the bridge never misreads the process exit as a crash
+		// and re-delivers the last input.
+		var rpcErr *JSONRPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == jsonRPCErrCodeMethodNotFound {
+			w.Log.Warn("acp: agent does not support session/cancel, terminating process to stop turn", "err", err)
+			return w.stopTurnByProcessKill()
+		}
+		// Any other failure: the cancel never took effect — the turn is still
+		// running and the gateway rolls back its stop fence. Unmark so the
+		// turn's completion is not misread as a user-stop (crash fallback
+		// preserved correctly).
+		w.ClearStopped()
+		return err
+	}
+	return nil
+}
+
+// stopTurnByProcessKill stops the current turn by terminating the agent
+// process (same semantic as the claudecode adapter's StopCurrentTurn). The
+// caller must have already set the stopped marker; a Kill failure clears it
+// so the gateway can roll back its stop fence.
+func (w *Worker) stopTurnByProcessKill() error {
+	if w.cancel != nil {
+		w.cancel()
+	}
+	if err := w.Kill(); err != nil {
+		// The process is still alive — the turn may keep running and the
 		// gateway rolls back its stop fence. Unmark so the turn's completion
 		// is not misread as a user-stop (crash fallback preserved correctly).
 		w.ClearStopped()
