@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -44,12 +43,12 @@ func (h *Handler) handleWorkerCommand(ctx context.Context, env *events.Envelope)
 	var cmdErr error
 	switch cmd {
 	case events.StdioSkills:
-		cmdErr = h.handleSkillsList(ctx, env, args)
+		cmdErr = h.handleSkillsList(ctx, env, w, args)
 		// SkillsList is the only server-handled command without its own response
 		// signal — send a synthetic done so the frontend clears isRunning.
 		doneEnv := events.NewEnvelope(
 			aep.NewID(), env.SessionID,
-			h.hub.NextSeq(env.SessionID),
+			0,
 			events.Done, events.DoneData{Success: cmdErr == nil},
 		)
 		_ = h.hub.SendToSession(ctx, doneEnv)
@@ -98,7 +97,7 @@ func (h *Handler) handleContextUsage(ctx context.Context, env *events.Envelope, 
 	}
 	respEnv := events.NewEnvelope(
 		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
+		0,
 		events.ContextUsage, events.MapContextUsageResponse(resp),
 	)
 	return h.hub.SendToSession(ctx, respEnv)
@@ -111,7 +110,7 @@ func (h *Handler) handleMCPStatus(ctx context.Context, env *events.Envelope, cr 
 	}
 	respEnv := events.NewEnvelope(
 		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
+		0,
 		events.MCPStatus, events.MapMCPStatusResponse(resp),
 	)
 	return h.hub.SendToSession(ctx, respEnv)
@@ -217,7 +216,7 @@ func (h *Handler) reconcileAfterClear(ctx context.Context, sessionID, ownerID st
 	h.finishRuntimeOnStop(ctx, sessionID, workerRunID, ownerID)
 
 	doneEnv := events.NewEnvelope(
-		aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+		aep.NewID(), sessionID, 0,
 		events.Done, events.DoneData{Reason: "cleared_by_user"},
 	)
 	if err := h.hub.SendToSession(ctx, doneEnv); err != nil {
@@ -227,15 +226,18 @@ func (h *Handler) reconcileAfterClear(ctx context.Context, sessionID, ownerID st
 
 func (h *Handler) sendCommandFeedback(ctx context.Context, sessionID, msg string) {
 	env := events.NewEnvelope(
-		aep.NewID(), sessionID, h.hub.NextSeq(sessionID),
+		aep.NewID(), sessionID, 0,
 		events.Message, events.MessageData{Content: msg},
 	)
 	_ = h.hub.SendToSession(ctx, env)
 }
 
-func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, filter string) error {
-	if h.skillsLocator == nil {
+func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, w worker.Worker, filter string) error {
+	if h.skillsLocator == nil || h.catalogStore == nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeNotSupported, "skills listing not available")
+	}
+	if w == nil {
+		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "no worker attached")
 	}
 
 	si, err := h.sm.Get(ctx, env.SessionID)
@@ -243,7 +245,7 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found")
 	}
 
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := h.userHomeDir()
 	if err != nil {
 		h.log.Warn("skills list: failed to resolve home directory, global skills may be incomplete", "err", err)
 	}
@@ -252,34 +254,131 @@ func (h *Handler) handleSkillsList(ctx context.Context, env *events.Envelope, fi
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skills: %v", err)
 	}
 
-	filter = strings.TrimSpace(filter)
-	if filter != "" {
-		filtered := make([]skills.Skill, 0, len(allSkills))
-		lower := strings.ToLower(filter)
-		for _, s := range allSkills {
-			if strings.Contains(strings.ToLower(s.Name), lower) ||
-				strings.Contains(strings.ToLower(s.Description), lower) {
-				filtered = append(filtered, s)
-			}
-		}
-		allSkills = filtered
-	}
+	// The merged session catalog (spec §5.2) resolves fixed Gateway commands >
+	// Worker authoritative catalog > filesystem skills. A non-nil lookup error
+	// means the authoritative tier could not be fetched — no entry may be
+	// presented as callable (spec §8.5: "cannot confirm" is never a green light).
+	merged, lookupErr := h.catalogStore.Lookup(ctx, env.SessionID, si.WorkDir, w, h.catalogGeneration(env.SessionID))
 
-	entries := make([]events.SkillEntry, len(allSkills))
-	for i, s := range allSkills {
-		entries[i] = events.SkillEntry{
-			Name:        s.Name,
-			Description: s.Description,
-			Source:      s.Source,
-			Managed:     s.Managed,
-		}
-	}
+	filter = strings.TrimSpace(filter)
+	merged = filterCatalogDescriptors(merged, filter)
+
+	entries := buildSkillEntriesFromCatalog(merged, allSkills, w, lookupErr == nil)
 
 	data := events.SkillsListData{Skills: entries, Total: len(entries), Filter: filter}
 	respEnv := events.NewEnvelope(
 		aep.NewID(), env.SessionID,
-		h.hub.NextSeq(env.SessionID),
+		0,
 		events.SkillsList, data,
 	)
 	return h.hub.SendToSession(ctx, respEnv)
+}
+
+// buildSkillEntriesFromCatalog maps the session's merged command catalog onto
+// wire SkillEntries, classifying each descriptor by its merge origin (spec
+// §5.2, §7):
+//   - control from the Gateway fixed table → Source "gateway", callable;
+//     Lookup already applied the per-command capability conditions, so any
+//     fixed entry returned IS callable.
+//   - control advertised by the Worker (e.g. ACP available_commands_update) →
+//     Source "worker", callable.
+//   - skill matching a filesystem Skill that the authoritative catalog also
+//     claimed → callable with the filesystem's global/project source.
+//   - skill contributed only by the filesystem tier → discoverable with the
+//     filesystem's global/project source.
+//   - skill with no filesystem counterpart → Source "worker".
+//
+// authoritativeOK reports whether the Worker's authoritative catalog tier was
+// fetched. When false no skill-kind entry may be callable: a fetch failure is
+// "cannot confirm", and every skill degrades to discoverable (spec §8.5).
+func buildSkillEntriesFromCatalog(merged []worker.NativeCommandDescriptor, fsSkills []skills.Skill, w worker.Worker, authoritativeOK bool) []events.SkillEntry {
+	fsByName := make(map[string]skills.Skill, len(fsSkills))
+	for _, s := range fsSkills {
+		fsByName[s.Name] = s
+	}
+	fixed := fixedCommandNamesFor(w)
+
+	entries := make([]events.SkillEntry, 0, len(merged))
+	for _, d := range merged {
+		e := events.SkillEntry{Name: d.Name, Description: d.Description}
+		switch d.Kind {
+		case worker.NativeCommandKindControl:
+			if _, ok := fixed[d.Name]; ok {
+				e.Source = "gateway"
+				e.Status = events.SkillStatusCallable
+			} else {
+				e.Source = "worker"
+				e.Status = events.SkillStatusCallable
+			}
+		case worker.NativeCommandKindSkill:
+			if fs, ok := fsByName[d.Name]; ok {
+				e.Source = fs.Source
+				e.Managed = fs.Managed
+				if authoritativeOK && !isFilesystemTierDescriptor(d, fs, w) {
+					e.Status = events.SkillStatusCallable
+				} else {
+					e.Status = events.SkillStatusDiscoverable
+				}
+			} else {
+				e.Source = "worker"
+				if authoritativeOK {
+					e.Status = events.SkillStatusCallable
+				} else {
+					e.Status = events.SkillStatusDiscoverable
+				}
+			}
+		default:
+			e.Status = events.SkillStatusDiscoverable
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// filterCatalogDescriptors narrows merged catalog descriptors by
+// case-insensitive name/description substring, preserving the /skills filter
+// semantics.
+func filterCatalogDescriptors(descriptors []worker.NativeCommandDescriptor, filter string) []worker.NativeCommandDescriptor {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return descriptors
+	}
+	lower := strings.ToLower(filter)
+	filtered := make([]worker.NativeCommandDescriptor, 0, len(descriptors))
+	for _, d := range descriptors {
+		if strings.Contains(strings.ToLower(d.Name), lower) ||
+			strings.Contains(strings.ToLower(d.Description), lower) {
+			filtered = append(filtered, d)
+		}
+	}
+	return filtered
+}
+
+// fixedCommandNamesFor returns the Gateway fixed command names whose capability
+// conditions the Worker satisfies — exactly the set sessionCatalogStore.Lookup
+// places in the merged catalog's fixed tier (spec §5.2). A Worker-advertised
+// command sharing a gated name is therefore never mislabeled as Gateway.
+func fixedCommandNamesFor(w worker.Worker) map[string]struct{} {
+	names := make(map[string]struct{}, len(nativeFixedCommands))
+	for _, fc := range nativeFixedCommands {
+		if fc.requires != nil && !fc.requires(w) {
+			continue
+		}
+		names[fc.desc.Name] = struct{}{}
+	}
+	return names
+}
+
+// isFilesystemTierDescriptor reports whether the merged descriptor is exactly
+// the filesystem-tier entry sessionCatalogStore.assemble builds for the given
+// Skill — the shape only a name the authoritative catalog did NOT claim
+// receives. Any deviation (authoritative path, mode, or turn flags) means the
+// Worker's authoritative tier contributed the entry and it is natively
+// invokable. Conservative by design: an authoritative descriptor that happens
+// to coincide is downgraded to discoverable, never the reverse.
+func isFilesystemTierDescriptor(d worker.NativeCommandDescriptor, fs skills.Skill, w worker.Worker) bool {
+	return d.Path == fs.FilePath &&
+		d.Mode == worker.NativeModeForType(w.Type()) &&
+		d.StartsTurn &&
+		d.AcceptsArgs
 }

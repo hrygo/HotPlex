@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +53,17 @@ type Handler struct {
 	repairer        *execution.Repairer
 	ownerInstanceID string
 	stopFence       turnStopFence
+
+	// catalogStore is the session-scoped merged command catalog (spec §5.2).
+	// catalogGen tracks the per-session generation bumped on /reset, /cd, and
+	// every Worker attach; catalogGenMu guards the map.
+	catalogStore *sessionCatalogStore
+	catalogGenMu sync.Mutex
+	catalogGen   map[string]uint64
+
+	homeDirOnce sync.Once
+	homeDir     string
+	homeDirErr  error
 }
 
 // SkillsLocator discovers skills from the filesystem.
@@ -70,8 +84,48 @@ func NewHandler(deps HandlerDeps) *Handler {
 		executionStore:  deps.ExecutionStore,
 		repairer:        deps.Repairer,
 		ownerInstanceID: deps.OwnerInstanceID,
+		catalogStore:    newSessionCatalogStore(deps.Log, deps.SkillsLocator),
+		catalogGen:      make(map[string]uint64),
 		// stopFence stays zero-valued: the turn stop fence is ready to use.
 	}
+}
+
+// InvalidateCatalog drops the session's cached command catalog and bumps its
+// generation so the next catalog assembly is forced (spec §5.2, §8.7). Called
+// by the Handler on /reset and /cd, and by the Bridge on every Worker attach;
+// the worker-instance comparison in sessionCatalogStore.Lookup is the
+// belt-and-suspenders guarantee (spec §8.7). Safe to call on a zero-value
+// Handler (nil store is a no-op).
+func (h *Handler) InvalidateCatalog(sessionID string) {
+	if h.catalogStore == nil {
+		return
+	}
+	h.catalogGenMu.Lock()
+	h.catalogGen[sessionID]++
+	h.catalogGenMu.Unlock()
+	h.catalogStore.Invalidate(sessionID)
+}
+
+// catalogGeneration returns the current catalog generation for a session.
+func (h *Handler) catalogGeneration(sessionID string) uint64 {
+	h.catalogGenMu.Lock()
+	defer h.catalogGenMu.Unlock()
+	return h.catalogGen[sessionID]
+}
+
+// ReleaseSession drops the session's per-session catalog state (generation
+// counter and cached merged catalog) when the session is released at runtime.
+// Mirrors the hub's ReleaseSeq/ForgetSeq cleanup so long-lived gateways with
+// session churn do not accumulate one entry per deleted session. Safe to call
+// on a zero-value Handler (nil store is a no-op).
+func (h *Handler) ReleaseSession(sessionID string) {
+	if h.catalogStore == nil {
+		return
+	}
+	h.catalogGenMu.Lock()
+	delete(h.catalogGen, sessionID)
+	h.catalogGenMu.Unlock()
+	h.catalogStore.Invalidate(sessionID)
 }
 
 // SetAuditCollector injects the audit collector for message event recording.
@@ -385,8 +439,198 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		}
 		return err
 	}
+	// Explicit /worker <name> [args] entry (spec §5.3): runs after the
+	// fixed-command branch so /reset-style safety commands always win, and
+	// before Skill resolution so a filesystem Skill named "worker" cannot
+	// shadow the reserved explicit entry.
+	if handled, err := h.tryExplicitNativeCommand(ctx, env, content); handled {
+		return err
+	}
+	if invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content); err != nil {
+		if errors.Is(err, skills.ErrAmbiguousInvocation) {
+			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
+		}
+		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skill resolution failed: %v", err)
+	} else if matched {
+		return h.deliverSkillToWorker(ctx, env, content, invocation)
+	}
 
 	return h.deliverToWorker(ctx, env, content)
+}
+
+// workerCommandInputRe matches the explicit "/worker <name> [args]" entry
+// (spec §5.3). The "/worker" prefix is case-sensitive; the regexp enforces
+// that a name (or a bare prefix) is present — "/workername" without a space is
+// NOT a /worker input.
+var workerCommandInputRe = regexp.MustCompile(`^/worker\s+(\S+)(?:\s+(.*))?$`)
+
+// tryExplicitNativeCommand implements the reserved /worker <name> [args]
+// entry (spec §5.3, §5.4). It runs after tryCommandDispatch so Gateway fixed
+// commands always win, and before Skill resolution so the reserved prefix is
+// never shadowed. A matched input is handled here and never falls through to
+// the ordinary text path: unknown, unavailable, ambiguous, and stale-catalog
+// names all resolve to NOT_SUPPORTED.
+func (h *Handler) tryExplicitNativeCommand(ctx context.Context, env *events.Envelope, content string) (handled bool, err error) {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "/worker") {
+		return false, nil
+	}
+	// "/worker" is only a /worker input when the reserved prefix is followed
+	// by whitespace (or ends the input). "/workername" falls through to the
+	// Skill/ordinary path so a Skill literally named "workername" keeps its
+	// short syntax.
+	if trimmed != "/worker" && !strings.HasPrefix(trimmed, "/worker ") && !strings.HasPrefix(trimmed, "/worker\t") {
+		return false, nil
+	}
+	startedAt := time.Now()
+
+	matches := workerCommandInputRe.FindStringSubmatch(trimmed)
+	if matches == nil {
+		return true, h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+			"native command requires a name: /worker <name> [args]")
+	}
+	name, args := matches[1], matches[2]
+
+	status := "ok"
+	errorClass := ""
+	workerType := ""
+	defer func() {
+		h.log.Info("gateway: native command dispatched",
+			"session_id", env.SessionID,
+			"worker_type", workerType,
+			"command", name,
+			"status", status,
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"error_class", errorClass,
+		)
+	}()
+
+	fail := func(format string, args ...any) (bool, error) {
+		status = "error"
+		errorClass = string(events.ErrCodeNotSupported)
+		return true, h.sendErrorf(ctx, env, events.ErrCodeNotSupported, format, args...)
+	}
+
+	if h.catalogStore == nil {
+		return fail("native command catalog unavailable")
+	}
+	si, err := h.sm.Get(ctx, env.SessionID)
+	if err != nil {
+		return fail("native command catalog unavailable")
+	}
+	w := h.sm.GetWorker(env.SessionID)
+	if w == nil {
+		return fail("native command catalog unavailable")
+	}
+	workerType = string(w.Type())
+
+	descriptors, lookupErr := h.catalogStore.Lookup(ctx, env.SessionID, si.WorkDir, w, h.catalogGeneration(env.SessionID))
+	if lookupErr != nil {
+		return fail("native command catalog unavailable: %v", lookupErr)
+	}
+
+	var descriptor *worker.NativeCommandDescriptor
+	for i := range descriptors {
+		if descriptors[i].Name == name {
+			descriptor = &descriptors[i]
+			break
+		}
+	}
+	if descriptor == nil {
+		ambiguous := 0
+		for _, d := range descriptors {
+			if strings.EqualFold(d.Name, name) {
+				ambiguous++
+			}
+		}
+		if ambiguous > 0 {
+			return fail("native command %q is ambiguous in the worker catalog", name)
+		}
+		return fail("worker %s does not support native command %q", w.Type(), name)
+	}
+
+	// Gateway fixed commands are gateway-handled (spec §5.2) — the merged
+	// catalog's fixed tier always shadows same-named Worker commands, so an
+	// explicit /worker <fixed-name> must never be dispatched through the
+	// Worker's native invoker. Dispatching it would inject the slash text into
+	// a running turn (claudecode), surface an internal error from the empty
+	// fixed Path (codexcli), or race the single-prompt invariant (ACP) —
+	// while bypassing the busy gate, cancelRetry and the execution record.
+	if _, fixed := fixedCommandNamesFor(w)[name]; fixed {
+		return fail("native command %q is a Gateway fixed command; use /%s instead", name, name)
+	}
+
+	invoker, ok := worker.AsNativeInvoker(w)
+	if !ok {
+		return fail("worker %s cannot invoke native command %q", w.Type(), name)
+	}
+
+	invocation := worker.NativeCommandInvocation{
+		Name: name,
+		Args: args,
+		Path: descriptor.Path,
+		Mode: descriptor.Mode,
+	}
+
+	if descriptor.StartsTurn {
+		stashInvocation(env, invocation, content)
+		dispatchErr := h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, true)
+		if dispatchErr != nil {
+			status = "error"
+			errorClass = string(classifyWorkerError(dispatchErr))
+		}
+		return true, dispatchErr
+	}
+
+	// StartsTurn=false: bounded control request through the native invoker,
+	// settled with a synthetic ACK and no execution record (spec §5.4).
+	if invokeErr := invoker.InvokeNativeCommand(ctx, invocation); invokeErr != nil {
+		status = "error"
+		errorClass = string(classifyWorkerError(invokeErr))
+		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, name)
+		return true, h.sendErrorf(ctx, env, classifyWorkerError(invokeErr), "native command %q failed: %v", name, invokeErr)
+	}
+	h.ackControlCommand(ctx, env)
+	return true, nil
+}
+
+func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content string) (worker.NativeCommandInvocation, bool, error) {
+	if h.skillsLocator == nil {
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	// Only slash-prefixed input can be a Skill invocation. Gating here keeps
+	// the ordinary-message hot path free of session lookups and filesystem
+	// catalog scans.
+	if !strings.HasPrefix(strings.TrimSpace(content), "/") {
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	si, err := h.sm.Get(ctx, sessionID)
+	if err != nil {
+		// Fall through to the normal delivery path, which re-checks the
+		// session and reports the canonical session-not-found error. Skill
+		// resolution must not mask a concurrent delete/GC with a generic
+		// internal error here.
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	homeDir, err := h.userHomeDir()
+	if err != nil {
+		return worker.NativeCommandInvocation{}, false, err
+	}
+	catalog, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
+	if err != nil {
+		return worker.NativeCommandInvocation{}, false, err
+	}
+	return resolveSkillInvocation(content, catalog)
+}
+
+// userHomeDir caches os.UserHomeDir for the process lifetime: it is consulted
+// on every slash-prefixed input and /skills listing, and the home directory
+// does not change mid-process.
+func (h *Handler) userHomeDir() (string, error) {
+	h.homeDirOnce.Do(func() {
+		h.homeDir, h.homeDirErr = os.UserHomeDir()
+	})
+	return h.homeDir, h.homeDirErr
 }
 
 func (h *Handler) cancelRetryIfNeeded(sessionID string) {
@@ -504,7 +748,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 			Version:   events.Version,
 			ID:        aep.NewID(),
 			SessionID: env.SessionID,
-			Seq:       h.hub.NextSeq(env.SessionID),
+			Seq:       0,
 			Event: events.Event{
 				Type: events.Control,
 				Data: data,
@@ -520,7 +764,7 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 			Version:   events.Version,
 			ID:        aep.NewID(),
 			SessionID: env.SessionID,
-			Seq:       h.hub.NextSeq(env.SessionID),
+			Seq:       0,
 			Event: events.Event{
 				Type: events.WorkerCmd,
 				Data: events.WorkerCommandData{
@@ -542,14 +786,23 @@ func (h *Handler) tryCommandDispatch(ctx context.Context, env *events.Envelope, 
 // the fallback pending buffer. Falls back to the legacy SESSION_BUSY error
 // only when bridge buffering is unavailable.
 //
+// invocation carries the resolved native Skill invocation when the busy input
+// is a Skill; nil for ordinary text. Skill inputs never take the mid-turn
+// text-injection path — injecting the raw slash text would silently degrade
+// the native invocation. They are delivered as a fresh turn when the gate is
+// already released, or buffered otherwise; both paths preserve Skill semantics
+// (the buffer path stashes the invocation for DeliverReplay).
+//
 // Decision order:
-//  1. Worker implements MidTurnInjector AND !IsStopped → InjectMidTurn.
+//  1. invocation != nil → deliver as a new turn if the gate is released,
+//     otherwise fall through to the buffer.
+//  2. Worker implements MidTurnInjector AND !IsStopped → InjectMidTurn.
 //     Success → metric + capture + "injected" notify + return nil.
 //     Failure → re-check the gate; deliver as a new turn if released, otherwise
 //     fall through to the buffer.
-//  2. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
-//  3. Otherwise → legacy sendErrorf SESSION_BUSY.
-func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string) error {
+//  3. bridge != nil → BufferPending + metric + "buffered" notify + return nil.
+//  4. Otherwise → legacy sendErrorf SESSION_BUSY.
+func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation) error {
 	if h.bridge == nil {
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "session has an active execution")
 	}
@@ -582,7 +835,7 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 	case supplementNormal:
 		unlockSession()
 		sessionLocked = false
-		return h.deliverToWorker(ctx, env, content)
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, invocation, true)
 	}
 	committed := false
 	defer func() {
@@ -591,7 +844,7 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 		}
 	}()
 	deliverAsNewTurn := func() (bool, error) {
-		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, false)
+		err := h.deliverToWorkerWithBusyHandling(ctx, env, content, invocation, false)
 		if errors.Is(err, execution.ErrSessionBusy) {
 			return false, nil
 		}
@@ -601,7 +854,16 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 		}
 		return true, err
 	}
-	if w := h.sm.GetWorker(env.SessionID); w != nil {
+	if invocation != nil {
+		// A resolved Skill must keep its native semantics: mid-turn text
+		// injection would degrade it to an ordinary prompt. Deliver it as a
+		// fresh turn when the gate was released between busy-detection and
+		// now; otherwise fall through to the pending buffer, whose replay
+		// re-dispatches through the Skill path (stashInvocation below).
+		if handled, deliverErr := deliverAsNewTurn(); handled {
+			return deliverErr
+		}
+	} else if w := h.sm.GetWorker(env.SessionID); w != nil {
 		if inj, ok := w.(worker.MidTurnInjector); ok && !w.IsStopped() {
 			// Re-check the active gate immediately before injecting. A race
 			// window exists between the SESSION_BUSY detection (in
@@ -645,6 +907,9 @@ func (h *Handler) handleSupplementOnBusy(ctx context.Context, env *events.Envelo
 			}
 		}
 	}
+	if invocation != nil {
+		stashInvocation(env, *invocation, content)
+	}
 	if !h.bridge.BufferPending(env.SessionID, env, content) {
 		return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "supplement buffer is full")
 	}
@@ -664,7 +929,7 @@ func (h *Handler) ackSupplement(ctx context.Context, source *events.Envelope, mo
 		return
 	}
 	clientID := clientMessageID(source)
-	ack := events.NewEnvelope(aep.NewID(), source.SessionID, h.hub.NextSeq(source.SessionID), events.InputAck, events.InputAckData{
+	ack := events.NewEnvelope(aep.NewID(), source.SessionID, 0, events.InputAck, events.InputAckData{
 		ClientMessageID: clientID,
 		ExecutionID:     "supplement-" + clientID,
 		Status:          events.ExecutionStatusDelivered,
@@ -701,19 +966,46 @@ func (h *Handler) notifySupplement(ctx context.Context, sessionID, mode string) 
 func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error {
 	data, _ := env.Event.Data.(map[string]any)
 	content, _ := data["content"].(string)
+
+	// The stash records the resolution made at buffer time against the merged
+	// catalog — including explicit /worker <name> entries, which the filesystem
+	// re-resolution below must never hijack (a Skill literally named "worker"
+	// would compact-match). invocationFromMetadata is content-keyed, so the
+	// stash only applies while the replayed content is unchanged and a merged
+	// multi-entry replay never replays only its Skill half. The delivery path
+	// still re-validates against the Worker's authoritative catalog and fails
+	// loudly when the Skill is no longer supported.
+	if stashed, ok := invocationFromMetadata(env.Metadata, content); ok {
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &stashed, false)
+	}
+
+	invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content)
+	if err != nil {
+		if errors.Is(err, skills.ErrAmbiguousInvocation) {
+			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
+		}
+		return err
+	}
+	if matched {
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, false)
+	}
 	// The Bridge already holds the session replay read fence. Returning a raw
 	// busy result lets replayPending requeue without recursively entering the
 	// supplement handler and acquiring the same RWMutex behind a queued writer.
-	return h.deliverToWorkerWithBusyHandling(ctx, env, content, false)
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, false)
 }
 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
 // and delivers user input to the worker process.
 func (h *Handler) deliverToWorker(ctx context.Context, env *events.Envelope, content string) error {
-	return h.deliverToWorkerWithBusyHandling(ctx, env, content, true)
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, true)
 }
 
-func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, handleBusy bool) error {
+func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope, content string, invocation worker.NativeCommandInvocation) error {
+	return h.deliverToWorkerWithBusyHandling(ctx, env, content, &invocation, true)
+}
+
+func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation, handleBusy bool) error {
 	inputReceivedAt := time.Now()
 	_, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
@@ -736,7 +1028,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			if !handleBusy {
 				return execution.ErrSessionBusy
 			}
-			return h.handleSupplementOnBusy(ctx, env, content)
+			return h.handleSupplementOnBusy(ctx, env, content, invocation)
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
 		// A genuine new input failed to durably register; cancel any in-flight
@@ -935,20 +1227,85 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	}
 	h.stopFence.BeginTurn(env.SessionID, workerRunID, execID)
 
-	if err := w.Input(ctx, content, nil); err != nil {
+	var inputErr error
+	if invocation != nil {
+		resolvedInvocation := *invocation
+		resolvedInvocation.Mode = worker.NativeModeForType(w.Type())
+		invocation = &resolvedInvocation
+		if provider, ok := worker.AsNativeCatalogProvider(w); ok {
+			// Bound the authoritative re-validation with the same "cannot
+			// confirm" timeout as catalog assembly (spec §8.2, §8.5): the
+			// turn is already accepted and marked running, and a hung
+			// catalog endpoint must not stall it beyond the bound.
+			queryTimeout := nativeCatalogQueryTimeout
+			if h.catalogStore != nil {
+				queryTimeout = h.catalogStore.queryTimeout
+			}
+			catalogCtx, cancel := context.WithTimeout(ctx, queryTimeout)
+			descriptors, catalogErr := provider.ListNativeCommands(catalogCtx, si.WorkDir)
+			cancel()
+			if catalogErr != nil {
+				if h.bridge != nil {
+					h.bridge.ClearTurnStart(env.SessionID)
+				}
+				finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError,
+					"worker %s Skill catalog failed: %v", w.Type(), catalogErr)
+			}
+			advertised := false
+			for _, descriptor := range descriptors {
+				if descriptor.Name == invocation.Name {
+					advertised = true
+					// The Worker's catalog is authoritative for resolution.
+					// Prefer its path over the HotPlex filesystem scan, which
+					// may diverge (symlink resolution, /private/var aliases,
+					// different scan roots) and leave the native Skill item
+					// pointing at a path the Worker cannot resolve.
+					if descriptor.Path != "" {
+						resolvedInvocation.Path = descriptor.Path
+					}
+					break
+				}
+			}
+			if !advertised {
+				if h.bridge != nil {
+					h.bridge.ClearTurnStart(env.SessionID)
+				}
+				finishOutcome(execution.StatusFailed, events.ErrCodeNotSupported)
+				h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+				return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+					"worker %s does not advertise Skill %q", w.Type(), invocation.Name)
+			}
+		}
+		invoker, ok := worker.AsNativeInvoker(w)
+		if !ok {
+			if h.bridge != nil {
+				h.bridge.ClearTurnStart(env.SessionID)
+			}
+			finishOutcome(execution.StatusFailed, events.ErrCodeNotSupported)
+			h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
+			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+				"worker %s does not support native Skill invocation", w.Type())
+		}
+		inputErr = invoker.InvokeNativeCommand(ctx, *invocation)
+	} else {
+		inputErr = w.Input(ctx, content, nil)
+	}
+	if inputErr != nil {
 		var we *worker.WorkerError
-		if errors.As(err, &we) && we.Kind == worker.ErrKindTimeout {
+		if errors.As(inputErr, &we) && we.Kind == worker.ErrKindTimeout {
 			h.log.Info("gateway: worker input delivery timed out (worker still processing)", "session_id", env.SessionID)
 			finishOutcome(execution.StatusUnknown, events.ErrCodeExecutionTimeout)
 			return nil
 		}
-		h.log.Warn("gateway: worker input", "err", err, "session_id", env.SessionID)
+		h.log.Warn("gateway: worker input", "err", inputErr, "session_id", env.SessionID)
 		// Input never reached the worker: clear the turn start so a later Done
 		// (or crash-cleanup) cannot bill idle time to a turn that never ran.
 		if h.bridge != nil {
 			h.bridge.ClearTurnStart(env.SessionID)
 		}
-		code := classifyWorkerError(err)
+		code := classifyWorkerError(inputErr)
 		finishOutcome(execution.StatusFailed, code)
 		// ErrKindUnavailable (e.g. ACP session lost) means the worker's
 		// internal session is dead but the process may still be alive.
@@ -958,7 +1315,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			h.bridge.cleanupCrashedWorker(env.SessionID, w)
 		}
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
-		return h.sendErrorf(ctx, env, code, "worker input failed: %v", err)
+		return h.sendErrorf(ctx, env, code, "worker input failed: %v", inputErr)
 	}
 	if h.bridge != nil && execRecord != nil {
 		h.bridge.markTurnWorkerAccepted(env.SessionID, execRecord.ExecutionID)
@@ -1099,7 +1456,7 @@ func (h *Handler) ackControlCommand(ctx context.Context, env *events.Envelope) {
 	if h.hub == nil {
 		return
 	}
-	ack := events.NewEnvelope(aep.NewID(), env.SessionID, h.hub.NextSeq(env.SessionID), events.InputAck, events.InputAckData{
+	ack := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.InputAck, events.InputAckData{
 		ClientMessageID: clientMessageID(env),
 		ExecutionID:     "cmd-" + env.ID,
 		Status:          events.ExecutionStatusDelivered,
@@ -1202,7 +1559,7 @@ func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, rec
 	if h.hub == nil || record == nil {
 		return
 	}
-	ack := events.NewEnvelope(aep.NewID(), source.SessionID, h.hub.NextSeq(source.SessionID), events.InputAck, events.InputAckData{
+	ack := events.NewEnvelope(aep.NewID(), source.SessionID, 0, events.InputAck, events.InputAckData{
 		ClientMessageID: record.ClientMessageID,
 		ExecutionID:     record.ExecutionID,
 		Status:          events.ExecutionStatus(record.Status),

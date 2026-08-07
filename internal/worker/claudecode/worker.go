@@ -29,6 +29,7 @@ import (
 // Compile-time interface compliance checks.
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
+var _ worker.SkillInvoker = (*Worker)(nil)
 var _ worker.PermissionCeilingReporter = (*Worker)(nil)
 var _ worker.MidTurnInjector = (*Worker)(nil)
 var _ base.MetadataHandler = (*Worker)(nil)
@@ -567,6 +568,24 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	w.BeginTurn()
 	w.SetLastIO(time.Now())
 	return nil
+}
+
+func skillCommandText(invocation worker.SkillInvocation) string {
+	name := strings.TrimSpace(invocation.Name)
+	args := strings.TrimSpace(invocation.Args)
+	if args == "" {
+		return "/" + name
+	}
+	return "/" + name + " " + args
+}
+
+// InvokeSkill uses Claude Code's native slash Skill syntax while retaining
+// the worker's existing stream-json transport and turn bookkeeping.
+func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	if strings.TrimSpace(invocation.Name) == "" {
+		return fmt.Errorf("claudecode: skill name required")
+	}
+	return w.Input(ctx, skillCommandText(invocation), nil)
 }
 
 // InjectMidTurn delivers a user message into the active turn by writing the

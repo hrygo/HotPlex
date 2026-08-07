@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -218,6 +219,96 @@ func TestFeishuConn_SendSkillsList_WithReplyToMsgID(t *testing.T) {
 	err := conn.sendSkillsList(context.Background(), env)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lark client not initialized")
+}
+
+func TestFormatSkillLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   events.SkillEntry
+		want string
+	}{
+		{
+			name: "callable with project source",
+			in: events.SkillEntry{
+				Name: "commit", Description: "Create a git commit",
+				Source: "project", Status: events.SkillStatusCallable,
+			},
+			want: "✅ *commit* — Create a git commit (project)",
+		},
+		{
+			name: "callable with global source",
+			in: events.SkillEntry{
+				Name: "commit", Description: "Create a git commit",
+				Source: "global", Status: events.SkillStatusCallable,
+			},
+			want: "✅ *commit* — Create a git commit (global)",
+		},
+		{
+			name: "callable without source suffix",
+			in: events.SkillEntry{
+				Name: "commit", Description: "Create a git commit",
+				Source: "user", Status: events.SkillStatusCallable,
+			},
+			want: "✅ *commit* — Create a git commit",
+		},
+		{
+			name: "discoverable with global source",
+			in: events.SkillEntry{
+				Name: "review", Description: "Review code changes",
+				Source: "global", Status: events.SkillStatusDiscoverable,
+			},
+			want: "🔍 *review* — Review code changes (仅可发现, global)",
+		},
+		{
+			name: "unavailable with project source",
+			in: events.SkillEntry{
+				Name: "deploy", Description: "Deploy to production",
+				Source: "project", Status: events.SkillStatusUnavailable,
+			},
+			want: "🚫 *deploy* — Deploy to production (不可用, project)",
+		},
+		{
+			name: "empty description",
+			in: events.SkillEntry{
+				Name: "cleanup", Description: "",
+				Source: "project", Status: events.SkillStatusCallable,
+			},
+			want: "✅ *cleanup* —  (project)",
+		},
+		{
+			name: "long description truncated",
+			in: events.SkillEntry{
+				Name: "long-skill", Description: strings.Repeat("x", 200),
+				Source: "project", Status: events.SkillStatusCallable,
+			},
+			want: "✅ *long-skill* — " + strings.Repeat("x", 77) + "... (project)",
+		},
+		{
+			name: "description exactly at limit not truncated",
+			in: events.SkillEntry{
+				Name: "edge-skill", Description: strings.Repeat("y", 80),
+				Source: "project", Status: events.SkillStatusCallable,
+			},
+			want: "✅ *edge-skill* — " + strings.Repeat("y", 80) + " (project)",
+		},
+		{
+			name: "empty status treated as discoverable",
+			in: events.SkillEntry{
+				Name: "orphan", Description: "No status on the wire",
+				Source: "project",
+			},
+			want: "🔍 *orphan* — No status on the wire (仅可发现, project)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := formatSkillLine(tt.in)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestFeishuConn_SendSkillsList_WriteCtxIntegration(t *testing.T) {

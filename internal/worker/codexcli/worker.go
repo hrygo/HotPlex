@@ -85,6 +85,8 @@ func resolveConfig() Config {
 var _ worker.Worker = (*AppServerWorker)(nil)
 var _ worker.WorkerCommander = (*AppServerWorker)(nil)
 var _ worker.ControlRequester = (*AppServerWorker)(nil)
+var _ worker.SkillInvoker = (*AppServerWorker)(nil)
+var _ worker.SkillCatalogProvider = (*AppServerWorker)(nil)
 var _ worker.SystemPromptUpdater = (*AppServerWorker)(nil)
 var _ worker.PermissionCeilingReporter = (*AppServerWorker)(nil)
 var _ worker.MidTurnInjector = (*AppServerWorker)(nil)
@@ -135,19 +137,55 @@ var (
 
 // appConn implements worker.SessionConn for the app-server mode.
 type appConn struct {
-	userID    string
-	sessionID string
-	recvCh    chan *events.Envelope
-	mu        sync.Mutex
-	closed    bool
-	manager   *CodexAppServerManager
+	userID     string
+	sessionID  string
+	recvCh     chan *events.Envelope
+	mu         sync.Mutex
+	closed     bool
+	manager    *CodexAppServerManager
+	lastReplay worker.InputReplay
 }
+
+var _ worker.InputReplayRecoverer = (*appConn)(nil)
 
 // Send returns ErrNotImplemented because in app-server mode the manager
 // handles all communication via JSON-RPC. Writing AEP envelopes directly
 // to stdin would bypass the JSON-RPC protocol and break the codex process.
 func (c *appConn) Send(ctx context.Context, msg *events.Envelope) error {
 	return worker.ErrNotImplemented
+}
+func (c *appConn) LastInputReplay() worker.InputReplay {
+	if c == nil {
+		return worker.InputReplay{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	replay := c.lastReplay
+	if replay.Skill != nil {
+		invocation := *replay.Skill
+		replay.Skill = &invocation
+	}
+	return replay
+}
+func (c *appConn) setSkillReplay(invocation worker.NativeCommandInvocation) {
+	c.mu.Lock()
+	c.lastReplay = worker.InputReplay{Content: "/" + invocation.Name, Skill: &invocation}
+	if invocation.Args != "" {
+		c.lastReplay.Content += " " + invocation.Args
+	}
+	c.mu.Unlock()
+}
+
+// setTextReplay records an ordinary text input as the crash-recovery replay,
+// replacing any earlier native Skill invocation. Without this update a crash
+// after a plain-text turn would re-invoke the previous, now stale Skill.
+func (c *appConn) setTextReplay(content string) {
+	if content == "" {
+		return
+	}
+	c.mu.Lock()
+	c.lastReplay = worker.InputReplay{Content: content}
+	c.mu.Unlock()
 }
 func (c *appConn) Recv() <-chan *events.Envelope { return c.recvCh }
 func (c *appConn) TrySend(env *events.Envelope) bool {
@@ -238,7 +276,84 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 		return nil
 	}
 
+	w.mu.Lock()
+	conn := w.conn
+	w.mu.Unlock()
+	if conn != nil {
+		// The ordinary text path must refresh the crash-recovery replay just
+		// like InvokeSkill does; otherwise recovery after a plain-text turn
+		// would re-invoke the previous stale Skill.
+		conn.setTextReplay(content)
+	}
+
 	content = w.injectHistoryPrefix(content)
+	return w.startTurn(ctx, []TurnInputItem{{Type: "text", Text: content}})
+}
+
+// InvokeSkill uses Codex app-server's structured Skill input item. The
+// explicit item lets Codex resolve the Skill by path instead of making the
+// model discover it from a marker; the accompanying text carries arguments.
+func (w *AppServerWorker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	if invocation.Name == "" || invocation.Path == "" {
+		return fmt.Errorf("codexcli: skill name and path are required")
+	}
+	args := "$" + invocation.Name
+	if invocation.Args != "" {
+		args += " " + invocation.Args
+	}
+	args = w.injectHistoryPrefix(args)
+	w.mu.Lock()
+	conn := w.conn
+	w.mu.Unlock()
+	if conn != nil {
+		conn.setSkillReplay(worker.NativeInvocationFromSkill(invocation))
+	}
+	return w.startTurn(ctx, []TurnInputItem{
+		{Type: "skill", Name: invocation.Name, Path: invocation.Path},
+		{Type: "text", Text: args},
+	})
+}
+
+// ListInvokableSkills returns the authoritative Skill catalog for workDir via
+// the app-server `skills/list` endpoint. Paths come from Codex itself, never
+// guessed from the HotPlex filesystem layout. The manager must be running;
+// callers treat a failure as "cannot confirm invokability".
+func (w *AppServerWorker) ListInvokableSkills(ctx context.Context, workDir string) ([]worker.SkillDescriptor, error) {
+	w.mu.Lock()
+	mgr := w.manager
+	w.mu.Unlock()
+	if mgr == nil || !mgr.IsRunning() {
+		return nil, fmt.Errorf("codexcli: app-server not running")
+	}
+
+	params := SkillsListParams{Cwds: []string{workDir}}
+	resp, err := mgr.Call(ctx, "skills/list", params)
+	if err != nil {
+		return nil, fmt.Errorf("codexcli: skills/list: %w", err)
+	}
+
+	var result SkillsListResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("codexcli: parse skills/list: %w", err)
+	}
+
+	descriptors := make([]worker.SkillDescriptor, 0)
+	for _, entry := range result.Data {
+		for _, meta := range entry.Skills {
+			if !meta.Enabled {
+				continue
+			}
+			descriptors = append(descriptors, worker.SkillDescriptor{
+				Name:        meta.Name,
+				Description: meta.Description,
+				Path:        meta.Path,
+			})
+		}
+	}
+	return descriptors, nil
+}
+
+func (w *AppServerWorker) startTurn(ctx context.Context, input []TurnInputItem) error {
 
 	w.mu.Lock()
 	tid := w.threadID
@@ -249,9 +364,7 @@ func (w *AppServerWorker) Input(ctx context.Context, content string, metadata ma
 
 	params := TurnStartParams{
 		ThreadID: tid,
-		Input: []TurnInputItem{
-			{Type: "text", Text: content},
-		},
+		Input:    input,
 	}
 
 	resp, err := w.manager.Call(ctx, "turn/start", params)

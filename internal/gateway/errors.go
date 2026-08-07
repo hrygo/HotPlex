@@ -16,7 +16,9 @@ func (h *Handler) sendErrorf(ctx context.Context, env *events.Envelope, code eve
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
 	})
-	_ = h.hub.SendToSession(ctx, err) // best-effort; always return the error
+	if h.hub != nil {
+		_ = h.hub.SendToSession(ctx, err) // best-effort; always return the error
+	}
 	return fmt.Errorf("%s: %s", code, fmt.Sprintf(format, args...))
 }
 
@@ -35,6 +37,9 @@ func classifyWorkerError(err error) events.ErrorCode {
 		return events.ErrCodeInvalidMessage
 	}
 	if errors.Is(err, worker.ErrNotImplemented) {
+		return events.ErrCodeNotSupported
+	}
+	if errors.Is(err, worker.ErrSkillNotSupported) {
 		return events.ErrCodeNotSupported
 	}
 	we, ok := errors.AsType[*worker.WorkerError](err)

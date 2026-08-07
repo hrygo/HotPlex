@@ -38,6 +38,9 @@
     "thought_process": "THOUGHT PROCESS",
     "agent_skills": "Agent Skills",
     "latest_messages": "Latest Messages",
+    "skill_status_callable": "Callable",
+    "skill_status_discoverable": "Discoverable",
+    "skill_status_unavailable": "Unavailable",
     "code": "code",
     "input_tokens": "Input Tokens",
     "output_tokens": "Output Tokens",
@@ -112,6 +115,9 @@
     "workspace_recovery_title": "Unable to connect to a workspace",
     "workspace_recovery_description": "None of the available workspaces passed connection validation. Check permissions or service status, then retry.",
     "workspace_recovery_retry": "Try again"
+  },
+  "command": {
+    "executed": "✅ Executed {{command}}"
   },
   "worker": {
     "name": {

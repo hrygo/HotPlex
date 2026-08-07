@@ -1482,7 +1482,7 @@ func TestHandleSupplementOnBusy_Passthrough(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问", nil))
 	require.Equal(t, "追问", mw.injected, "InjectMidTurn must receive the supplement")
 	require.Equal(t, 1, mw.injectCount, "InjectMidTurn must be called exactly once")
 
@@ -1501,8 +1501,8 @@ func TestHandleSupplementOnBusy_AcknowledgesAndDeduplicates(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问", nil))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问", nil))
 	require.Equal(t, 1, mw.injectCount, "same client_message_id must not be injected twice")
 
 	require.Eventually(t, func() bool {
@@ -1531,10 +1531,10 @@ func TestHandleSupplementOnBusy_RejectsSameIDWithDifferentPayload(t *testing.T) 
 	hub.JoinPlatformSession("s", conn)
 
 	first := newInputEnvelope(t, "s", "first")
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), first, "first"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), first, "first", nil))
 	conflict := events.Clone(first)
 	conflict.Event.Data.(map[string]any)["content"] = "different"
-	err := h.handleSupplementOnBusy(t.Context(), conflict, "different")
+	err := h.handleSupplementOnBusy(t.Context(), conflict, "different", nil)
 	require.Error(t, err)
 	require.Equal(t, 1, mw.injectCount, "payload conflict must not be injected")
 
@@ -1559,7 +1559,7 @@ func TestHandleSupplementOnBusy_FallbackBuffer(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问", nil))
 
 	merged, _, ok := bridge.pending.DrainAndMerge("s")
 	require.True(t, ok, "fallback path must buffer the supplement")
@@ -1603,7 +1603,7 @@ func TestMidTurnContract_AllWorkers(t *testing.T) {
 			env := newInputEnvelope(t, sessionID, "supplement-"+tc.name)
 			env.Event.Data.(map[string]any)["client_message_id"] = "client-" + tc.name
 
-			require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "supplement-"+tc.name))
+			require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "supplement-"+tc.name, nil))
 			require.Eventually(t, func() bool {
 				for _, got := range conn.envelopes() {
 					if got.Metadata == nil {
@@ -1668,7 +1668,7 @@ func TestMidTurnFallback_ReplaysOnceAfterDuplicateTerminal(t *testing.T) {
 	env := newInputEnvelope(t, sessionID, "replay-once")
 	env.Event.Data.(map[string]any)["client_message_id"] = "replay-client"
 
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "replay-once"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "replay-once", nil))
 	bridge.replayPending(sessionID)
 	// A duplicate terminal notification must not drain or deliver the same
 	// fallback supplement a second time.
@@ -1696,7 +1696,7 @@ func TestHandleSupplementOnBusy_FullBufferReturnsFailureWithoutAck(t *testing.T)
 
 	overflow := newInputEnvelope(t, "s", "overflow")
 	overflow.Event.Data.(map[string]any)["client_message_id"] = "overflow-id"
-	err := h.handleSupplementOnBusy(t.Context(), overflow, "overflow")
+	err := h.handleSupplementOnBusy(t.Context(), overflow, "overflow", nil)
 	require.Error(t, err)
 
 	require.Eventually(t, func() bool {
@@ -1723,7 +1723,7 @@ func TestHandleSupplementOnBusy_InjectFailureFallsBack(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问", nil))
 	require.Equal(t, 1, mw.injectCount, "InjectMidTurn must be attempted")
 
 	merged, _, ok := bridge.pending.DrainAndMerge("s")
@@ -1743,7 +1743,7 @@ func TestHandleSupplementOnBusy_RaceGateStillHeld(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问"))
+	require.NoError(t, h.handleSupplementOnBusy(t.Context(), env, "追问", nil))
 	require.Equal(t, 1, mw.injectCount, "gate held → InjectMidTurn must run")
 	require.Equal(t, "追问", mw.injected)
 
@@ -1773,7 +1773,7 @@ func TestHandleSupplementOnBusy_GateReleasedBeforeInject(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	err := h.handleSupplementOnBusy(t.Context(), env, "追问")
+	err := h.handleSupplementOnBusy(t.Context(), env, "追问", nil)
 	require.Error(t, err, "released gate must route to deliverToWorker")
 	require.Equal(t, 0, mw.injectCount, "must NOT inject once the active gate is released")
 }
@@ -1791,7 +1791,7 @@ func TestHandleSupplementOnBusy_GateReleasedDuringInject(t *testing.T) {
 	env := newInputEnvelope(t, "s", "追问")
 	env.Seq = 5
 
-	err := h.handleSupplementOnBusy(t.Context(), env, "追问")
+	err := h.handleSupplementOnBusy(t.Context(), env, "追问", nil)
 	require.Error(t, err, "gate released during inject must route through normal delivery")
 	require.Equal(t, 1, mw.injectCount)
 	_, _, ok := bridge.pending.DrainAndMerge("s")

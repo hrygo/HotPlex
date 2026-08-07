@@ -237,8 +237,7 @@ func (c *HistoryCompressor) notifyProgress(sessionID string, compressCount, tota
 		return
 	}
 	msg := fmt.Sprintf("正在压缩对话历史（%d 条 → 摘要，共 %d 字符）...", compressCount, totalChars)
-	seq := c.hub.NextSeq(sessionID)
-	env := buildNotifyEnvelope(sessionID, msg, seq)
+	env := buildNotifyEnvelope(sessionID, msg, 0)
 	// Best-effort send with short timeout; failure is non-critical.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

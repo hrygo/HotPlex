@@ -35,6 +35,47 @@ type ServerCommander struct {
 	permissionCeilingAllowedTools []string
 }
 
+// InvokeSkill implements the OpenCode Server native slash-command endpoint.
+// The server resolves and loads the Skill; HotPlex only sends its canonical
+// name and user arguments.
+func (c *ServerCommander) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	body := map[string]any{
+		"command":   invocation.Name,
+		"arguments": invocation.Args,
+	}
+	if err := c.doPost(ctx, "/session/"+url.PathEscape(c.getSessionID())+"/command", body, nil); err != nil {
+		return fmt.Errorf("opencode skill %q: %w", invocation.Name, err)
+	}
+	return nil
+}
+
+// ListInvokableSkills implements worker.SkillCatalogProvider by querying the
+// OpenCode Server command catalog via GET /command. Each catalog entry may
+// carry a `name` key (modern servers) or a legacy `command` key; `description`
+// is optional. Only catalog names are surfaced — server-internal fields such
+// as paths, methods, or permission rules are never extracted into descriptors.
+// An HTTP 4xx/5xx (e.g. auth failure) is propagated, never treated as an empty
+// catalog, so the Gateway cannot confirm invokability on a failed query.
+func (c *ServerCommander) ListInvokableSkills(ctx context.Context, workDir string) ([]worker.SkillDescriptor, error) {
+	var raw []map[string]any
+	if err := c.doGet(ctx, "/command", &raw); err != nil {
+		return nil, fmt.Errorf("opencode command catalog: %w", err)
+	}
+	descriptors := make([]worker.SkillDescriptor, 0, len(raw))
+	for _, entry := range raw {
+		name, _ := entry["name"].(string)
+		if name == "" {
+			name, _ = entry["command"].(string)
+		}
+		if name == "" {
+			continue
+		}
+		description, _ := entry["description"].(string)
+		descriptors = append(descriptors, worker.SkillDescriptor{Name: name, Description: description})
+	}
+	return descriptors, nil
+}
+
 // ModelRef stores model selection for subsequent message requests.
 type ModelRef struct {
 	ProviderID string
@@ -455,8 +496,10 @@ func (c *ServerCommander) lastAssistantMessageID(ctx context.Context) string {
 
 // Compile-time interface checks.
 var (
-	_ worker.ControlRequester = (*ServerCommander)(nil)
-	_ worker.WorkerCommander  = (*ServerCommander)(nil)
+	_ worker.ControlRequester     = (*ServerCommander)(nil)
+	_ worker.WorkerCommander      = (*ServerCommander)(nil)
+	_ worker.SkillInvoker         = (*ServerCommander)(nil)
+	_ worker.SkillCatalogProvider = (*ServerCommander)(nil)
 )
 
 type openCodeMessage struct {

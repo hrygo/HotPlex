@@ -158,6 +158,27 @@ const CONTENT_SIG_PREFIX = 300;
 const DEFAULT_SUGGESTIONS: readonly ThreadSuggestion[] = [];
 
 // ============================================================================
+// Gateway command ack detection
+// ============================================================================
+
+/**
+ * Gateway-handled slash commands (help/control/worker commands intercepted by
+ * `tryCommandDispatch`) are acknowledged with a synthetic `delivered` ack whose
+ * execution id carries the "cmd-" prefix (internal/gateway/handler.go
+ * ackControlCommand). The gateway deliberately never emits `done` for these
+ * turns ("no InputAck or Done is ever sent"), so the delivered ack IS the
+ * terminal event. Real worker turns never use the prefix — their acks are
+ * always followed by streaming events and a `done`.
+ */
+export function isGatewayCommandAck(
+    data: Pick<InputAckData, "execution_id" | "status">,
+): boolean {
+    return (
+        data.status === "delivered" && data.execution_id.startsWith("cmd-")
+    );
+}
+
+// ============================================================================
 // Message Converter
 // ============================================================================
 
@@ -335,6 +356,11 @@ export function useHotPlexRuntime({
     const pendingAssistantIdRef = useRef<string | null>(null);
     const activeAssistantIdRef = useRef<string | null>(null);
     const activeInputMessageIdRef = useRef<string | null>(null);
+    // Text of the currently dispatched input. Used to (a) render the
+    // command-executed confirmation for gateway-handled commands and (b) tell
+    // reconcile which persisted user record belongs to this turn — command
+    // turns are never persisted, so a mismatch means "do not reconcile".
+    const activeTurnInputRef = useRef<string | null>(null);
     const historyLoadingRef = useRef(false);
     const sessionIdRef = useRef(sessionId);
     const sessionAlreadyConnectedRef = useRef(false);
@@ -370,6 +396,7 @@ export function useHotPlexRuntime({
         pendingAssistantIdRef.current = null;
         activeAssistantIdRef.current = null;
         activeInputMessageIdRef.current = null;
+        activeTurnInputRef.current = null;
         setIsRunning(false);
         setMessages((previous) =>
             previous.filter(
@@ -817,6 +844,9 @@ export function useHotPlexRuntime({
                 queuedDispatch?.assistantMessageId ??
                 pendingAssistantID ??
                 activeAssistantIdRef.current;
+            // Kept for the cmd- ack handler (command confirmation) and for the
+            // reconcile input-match guard below; cleared by handleInputAck.
+            const inputContent = activeTurnInputRef.current;
             pendingAssistantIdRef.current = null;
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
@@ -928,6 +958,7 @@ export function useHotPlexRuntime({
             void reconcileTurnContent({
                 targetAssistantId: reconciliationTargetID,
                 terminalSeq: env.seq,
+                inputContent: inputContent ?? undefined,
             });
         };
 
@@ -957,6 +988,12 @@ export function useHotPlexRuntime({
                 if (terminalSeq !== undefined) {
                     return selectAuthoritativeAssistantContent(res.records, {
                         terminalSeq,
+                        // The input-match guard only works when the caller
+                        // threads the input through. Gateway-handled command
+                        // turns (e.g. /skills) are never persisted, so without
+                        // this the guard sees undefined and reconciles the
+                        // PREVIOUS turn's answer into the command turn.
+                        inputContent: inputContent ?? undefined,
                     });
                 }
                 return selectAuthoritativeAssistantContent(res.records, {
@@ -1136,6 +1173,7 @@ export function useHotPlexRuntime({
                 pendingAssistantIdRef.current = null;
                 activeAssistantIdRef.current = null;
                 activeInputMessageIdRef.current = null;
+                activeTurnInputRef.current = null;
                 setMessages((prev) => {
                     const withoutPending = removePendingAssistant(
                         prev,
@@ -1252,6 +1290,7 @@ export function useHotPlexRuntime({
                 pendingAssistantIdRef.current = null;
                 activeAssistantIdRef.current = null;
                 activeInputMessageIdRef.current = null;
+                activeTurnInputRef.current = null;
 
                 setMessages((prev) => {
                     const withoutPending = removePendingAssistant(
@@ -1337,6 +1376,7 @@ export function useHotPlexRuntime({
             pendingAssistantIdRef.current = null;
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
+            activeTurnInputRef.current = null;
             setMessages((prev) => {
                 const withoutPending = removePendingAssistant(
                     prev,
@@ -1380,6 +1420,7 @@ export function useHotPlexRuntime({
             pendingAssistantIdRef.current = null;
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
+            activeTurnInputRef.current = null;
             setMessages((prev) => {
                 const withoutPending = removePendingAssistant(
                     prev,
@@ -1453,12 +1494,20 @@ export function useHotPlexRuntime({
             const queuedDispatch = activeQueueDispatchRef.current;
             const matchesQueuedDispatch =
                 queuedDispatch?.clientMessageId === data.client_message_id;
+            // Gateway-handled command acks arrive AFTER the synthetic done
+            // (event order: skills_list → done → ack, ack sent by
+            // ackControlCommand after handleWorkerCommand returns). handleDone
+            // clears activeInputMessageIdRef, so the ordinary correlation
+            // below would drop the cmd- ack and the command confirmation never
+            // renders. The cmd- prefix is gateway-owned and unique per input,
+            // so it is safe to admit these acks regardless of correlation.
             if (
                 !matchesActiveInput(
                     activeInputMessageIdRef.current,
                     data.client_message_id,
                 ) &&
-                !matchesQueuedDispatch
+                !matchesQueuedDispatch &&
+                !isGatewayCommandAck(data)
             ) {
                 return;
             }
@@ -1492,6 +1541,72 @@ export function useHotPlexRuntime({
                 }
             }
             if (data.status === "accepted" || data.status === "delivered") {
+                if (isGatewayCommandAck(data)) {
+                    // Gateway-handled command turn: the gateway sends no done
+                    // for these, so this delivered ack terminates the turn.
+                    // Without the reset turnActiveRef/isRunning wedge forever
+                    // and every later input is routed to the follow-up queue,
+                    // which can never drain (drainQueue guards on turnActive).
+                    turnActiveRef.current = false;
+                    activeQueueDispatchRef.current = null;
+                    setIsRunning(false);
+                    const pendingAssistantID = pendingAssistantIdRef.current;
+                    const activeAssistantID = activeAssistantIdRef.current;
+                    const commandText = activeTurnInputRef.current;
+                    pendingAssistantIdRef.current = null;
+                    activeAssistantIdRef.current = null;
+                    activeInputMessageIdRef.current = null;
+                    activeTurnInputRef.current = null;
+                    const confirmation: MessagePart = {
+                        type: "text",
+                        text: i18n.t("chat:command.executed", {
+                            command: commandText ?? "",
+                        }),
+                    };
+                    setMessages((prev) => {
+                        // Pending placeholder still streaming (no reply event
+                        // arrived yet) → replace it with the confirmation so
+                        // the turn has visible feedback instead of reverting
+                        // to the previous answer on screen.
+                        if (pendingAssistantID) {
+                            const pendingIndex = prev.findIndex(
+                                (message) =>
+                                    message.id === pendingAssistantID &&
+                                    message.role === "assistant" &&
+                                    message.status === "streaming",
+                            );
+                            if (pendingIndex !== -1) {
+                                const next = [...prev];
+                                next[pendingIndex] = {
+                                    ...next[pendingIndex],
+                                    progress: undefined,
+                                    parts: [confirmation],
+                                    status: "complete",
+                                };
+                                return next;
+                            }
+                        }
+                        // Placeholder already holds content (a reply message
+                        // beat the ack) → leave it untouched.
+                        if (activeAssistantID) {
+                            return prev;
+                        }
+                        // Done beat the ack and removed the placeholder →
+                        // append the confirmation so the turn is still visible.
+                        return [
+                            ...prev,
+                            {
+                                id: `assistant-cmd-${Date.now()}`,
+                                role: "assistant" as const,
+                                parts: [confirmation],
+                                createdAt: new Date(),
+                                status: "complete",
+                            },
+                        ];
+                    });
+                    queueMicrotask(() => scheduleQueueDrainRef.current());
+                    return;
+                }
                 setMessages((prev) =>
                     updatePendingAssistant(
                         prev,
@@ -1513,6 +1628,7 @@ export function useHotPlexRuntime({
             pendingAssistantIdRef.current = null;
             activeAssistantIdRef.current = null;
             activeInputMessageIdRef.current = null;
+            activeTurnInputRef.current = null;
             setMessages((prev) => {
                 const pending = updatePendingAssistant(
                     prev,
@@ -1559,6 +1675,7 @@ export function useHotPlexRuntime({
                 pendingAssistantIdRef.current = null;
                 activeAssistantIdRef.current = null;
                 activeInputMessageIdRef.current = null;
+                activeTurnInputRef.current = null;
                 setMessages((previous) => {
                     const completedPending = completeStreamingAssistant(
                         previous,
@@ -1928,6 +2045,7 @@ export function useHotPlexRuntime({
                 pendingAssistantIdRef.current = null;
                 activeAssistantIdRef.current = null;
                 activeInputMessageIdRef.current = null;
+                activeTurnInputRef.current = null;
                 turnActiveRef.current = false;
                 setIsRunning(false);
                 setMessages((prev) =>
@@ -1944,6 +2062,7 @@ export function useHotPlexRuntime({
             pendingAssistantIdRef.current = assistantID;
             activeAssistantIdRef.current = assistantID;
             activeInputMessageIdRef.current = null;
+            activeTurnInputRef.current = textContent;
             turnActiveRef.current = true;
             if (queueItemId && sessionIdRef.current) {
                 activeQueueDispatchRef.current = {
@@ -2145,6 +2264,7 @@ export function useHotPlexRuntime({
                 activeAssistantIdRef.current = null;
             }
             activeInputMessageIdRef.current = null;
+            activeTurnInputRef.current = null;
             setMessages((previous) =>
                 previous.filter(
                     (message) =>
@@ -2251,6 +2371,13 @@ export function useHotPlexRuntime({
                       .join("")
                 : "";
             if (!textContent.trim()) return;
+            if (textContent.trim() === "/") {
+                // Bare "/" is the composer's command-menu trigger, never a
+                // message. Last-resort guard for submit paths that bypass
+                // the composer guard (programmatic submit, future UI).
+                logger.debug("RuntimeAdapter", "Ignoring bare slash input");
+                return;
+            }
             if (turnActiveRef.current || stoppingRef.current) {
                 const result = enqueueFollowUp(textContent);
                 if (!result.ok && result.reason === "limit") {

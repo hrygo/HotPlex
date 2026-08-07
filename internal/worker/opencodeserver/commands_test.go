@@ -711,6 +711,29 @@ func TestServerCommanderUpdateSessionID(t *testing.T) {
 	require.Equal(t, "new-session-id", c.SessionID())
 }
 
+func TestServerCommanderInvokeSkill(t *testing.T) {
+	t.Parallel()
+
+	var gotBody map[string]any
+	var gotPath string
+	c, _ := newTestCommander(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		require.Equal(t, http.MethodPost, r.Method)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "msg-1"})
+	})
+
+	err := c.InvokeSkill(context.Background(), worker.SkillInvocation{
+		Name: "oracle-dba",
+		Args: "10.102.78.1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "/session/sess-test-123/command", gotPath)
+	require.Equal(t, "oracle-dba", gotBody["command"])
+	require.Equal(t, "10.102.78.1", gotBody["arguments"])
+}
+
 func TestServerCommanderMCPStatus(t *testing.T) {
 	t.Parallel()
 

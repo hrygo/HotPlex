@@ -246,7 +246,9 @@ type TurnStartParams struct {
 
 type TurnInputItem struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
+	Name string `json:"name,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 type ThreadUnsubscribeParams struct {
@@ -255,4 +257,39 @@ type ThreadUnsubscribeParams struct {
 
 type ThreadUnsubscribeResult struct {
 	Status string `json:"status"`
+}
+
+// SkillsListParams is the app-server `skills/list` request. When Cwds is empty
+// the server defaults to the current session working directory.
+type SkillsListParams struct {
+	Cwds        []string `json:"cwds,omitempty"`
+	ForceReload bool     `json:"forceReload,omitempty"`
+}
+
+// SkillsListResponse is the app-server `skills/list` response, one entry per
+// requested cwd.
+type SkillsListResponse struct {
+	Data []SkillsListEntry `json:"data"`
+}
+
+// SkillsListEntry groups the skills discovered under a single cwd.
+type SkillsListEntry struct {
+	Cwd    string           `json:"cwd"`
+	Errors []SkillErrorInfo `json:"errors"`
+	Skills []SkillMetadata  `json:"skills"`
+}
+
+// SkillErrorInfo reports a per-cwd scan failure without aborting the list.
+type SkillErrorInfo struct {
+	Message string `json:"message,omitempty"`
+}
+
+// SkillMetadata is the authoritative description of a skill as resolved by
+// Codex for a given cwd (SKILL.md / SKILL.json).
+type SkillMetadata struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	Path        string `json:"path"`
+	Scope       string `json:"scope"`
 }

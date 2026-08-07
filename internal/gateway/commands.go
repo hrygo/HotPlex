@@ -155,7 +155,7 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 // SendControlToSession sends a server-originated control message to the client.
 // Used for reconnect, session_invalid, and throttle notifications.
 func (h *Handler) SendControlToSession(ctx context.Context, sessionID string, action events.ControlAction, reason string, details map[string]any) error {
-	env := events.NewEnvelope(aep.NewID(), sessionID, h.hub.NextSeq(sessionID), events.Control, events.ControlData{
+	env := events.NewEnvelope(aep.NewID(), sessionID, 0, events.Control, events.ControlData{
 		Action:  action,
 		Reason:  reason,
 		Details: details,
@@ -220,6 +220,11 @@ func (h *Handler) handleReset(ctx context.Context, env *events.Envelope) error {
 			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "reset transition failed: %v", err)
 		}
 	}
+
+	// The reset established a new conversation context (ACP re-advertises its
+	// session commands, OCS resets its command set): invalidate the session's
+	// cached command catalog and bump its generation (spec §5.2).
+	h.InvalidateCatalog(env.SessionID)
 
 	stateEvt := events.NewEnvelope(aep.NewID(), env.SessionID, 0, events.State, events.StateData{
 		State:   events.StateRunning,
@@ -325,6 +330,16 @@ func (h *Handler) handleCD(ctx context.Context, env *events.Envelope) error {
 			return h.sendErrorf(ctx, env, events.ErrCodeConfigInvalid, "当前会话绑定到工作区，work_dir 不可变；请切换或新建工作区")
 		}
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "切换失败：%v", err)
+	}
+
+	// A workdir switch parked the old session and created/resumed a new one
+	// under a different session ID: invalidate the old session's cached
+	// command catalog and bump its generation (spec §5.2). The new session's
+	// catalog is invalidated by the Bridge's worker-attach hook when it
+	// starts; invalidating it here too keeps the refresh explicit.
+	h.InvalidateCatalog(env.SessionID)
+	if result.NewSessionID != "" {
+		h.InvalidateCatalog(result.NewSessionID)
 	}
 
 	// Send notification on the OLD session ID so the platform conn (still

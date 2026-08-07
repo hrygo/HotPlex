@@ -4,7 +4,7 @@ import type { HotPlexMessage } from "@/lib/types/message";
 import type { MessagePart } from "@/lib/types/message-parts";
 
 export type TurnReconcileCriteria =
-    | { terminalSeq: number; inputContent?: never }
+    | { terminalSeq: number; inputContent?: string }
     | { terminalSeq?: never; inputContent: string };
 
 export function selectAuthoritativeAssistantContent(
@@ -21,6 +21,16 @@ export function selectAuthoritativeAssistantContent(
             )
             .sort((left, right) => right.seq - left.seq)[0];
         if (userRecord) {
+            if (
+                criteria.inputContent !== undefined &&
+                userRecord.content !== criteria.inputContent
+            ) {
+                // Gateway-handled command turns are never persisted (they
+                // bypass the execution ledger), so the most recent user
+                // record is the PREVIOUS turn. Reconciling against it would
+                // patch the previous turn's answer into the command turn.
+                return null;
+            }
             targetRecord = records
                 .filter(
                     (record) =>

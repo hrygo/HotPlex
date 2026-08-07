@@ -452,11 +452,17 @@ type SkillsListData struct {
 }
 
 type SkillEntry struct {
-    Name        string `json:"name"`
-    Description string `json:"description"`
-    Source      string `json:"source"`            // "global"（home）或 "project"（workspace/workDir）
-    Managed     bool   `json:"managed,omitempty"` // issue #910：true = 在 .agents/skills（UI 可管理/可写）
+    Name        string      `json:"name"`
+    Description string      `json:"description"`
+    Source      string      `json:"source"`            // "global"（home）或 "project"（workspace/workDir）
+    Managed     bool        `json:"managed,omitempty"` // issue #910：true = 在 .agents/skills（UI 可管理/可写）
+    Status      SkillStatus `json:"status,omitempty"`  // issue #957：当前会话 Worker 的可调用状态
 }
+
+// SkillStatus 取值
+//   - callable：Worker 权威目录包含该 Skill，可原生执行
+//   - discoverable：磁盘存在但 Worker 无法确认可调用（无 catalog 能力，线上缺省）
+//   - unavailable：Worker 权威目录明确不包含该 Skill
 ```
 
 #### `worker_command` — Worker stdio 命令触发

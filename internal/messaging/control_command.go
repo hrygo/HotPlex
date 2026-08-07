@@ -271,7 +271,6 @@ func HelpText() string {
 				Entries: []helpEntry{
 					{Commands: []string{"/model"}, Args: "<名称>", Desc: "切换 AI 模型"},
 					{Commands: []string{"/perm"}, Args: "<模式>", Desc: "设置权限模式"},
-					{Commands: []string{"/effort"}, Args: "<级别>", Desc: "设置推理力度"},
 				},
 			},
 			{
@@ -280,7 +279,6 @@ func HelpText() string {
 					{Commands: []string{"/compact"}, Desc: "压缩对话历史"},
 					{Commands: []string{"/clear"}, Desc: "清空对话"},
 					{Commands: []string{"/rewind"}, Desc: "撤销上一轮对话"},
-					{Commands: []string{"/commit"}, Desc: "创建 Git 提交"},
 				},
 			},
 			{

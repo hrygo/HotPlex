@@ -191,6 +191,14 @@ func TestParseWorkerCommand_NotACommand(t *testing.T) {
 	}
 }
 
+func TestHelpText_NoUnsupportedCommandClaims(t *testing.T) {
+	t.Parallel()
+	// Gateway rejects /effort & /commit with ErrCodeNotSupported — help must not advertise them.
+	help := HelpText()
+	require.NotContains(t, help, "/effort")
+	require.NotContains(t, help, "/commit")
+}
+
 func TestParseControlCommand_NotACommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

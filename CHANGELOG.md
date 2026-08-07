@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.40.0] - 2026-08-07
+
+### Summary
+
+v1.40.0 是一次 minor 版本更新，核心主题是 **Native Skill Dispatch（issue #957）**——让已知 skills 走各 Worker 的原生协议直接分发，而非退回普通文本。四大主线：① **原生命令模型**——claude_code / opencode_server / codex_cli / ACP 四类 Worker 统一 command descriptor，协议级 invoke 取代文本回退；② **Session 级命令目录**——/skills 条目标注 per-worker 可调用性（callable/discoverable/unavailable）、/worker 固定命令分发与 replay 语义收紧；③ **全通道覆盖**——webchat 与消息平台统一消费命令目录，command menu 交互完善（技能可调用性、尾随空格、幽灵条目清理）；④ **可靠性修复**——ACP stop 降级、codex MCP status 空 params、事件 seq 串行化等。WebChat 用户现可直接从命令菜单触发技能分发。
+
+### Added
+
+- **Worker**: Native command dispatch — known skills route through each worker's native protocol（claude_code stream-json user frame、opencode_server session command、codex_cli structured invocation、ACP available_commands）instead of plain-text fallback, with a shared command descriptor model and compat adapters for all four workers. (#957)
+- **Gateway Core**: Session-scoped command catalog — merged /skills entries annotated with per-worker invokability（callable/discoverable/unavailable），/worker dispatch with fixed-command rejection（gateway-handled commands never bypass the busy gate），catalog state pruned on session release.
+- **Messaging**: Platform surfaces（Feishu/Slack/webchat）consume the unified command catalog — bot replies reflect worker capability annotations.
+- **WebChat UI**: Command menu surfaces skill invokability — unavailable skills render disabled, selection inserts a trailing space, and gateway-handled command turns complete a full turn loop with an "executed" confirmation.
+
+### Fixed
+
+- **Worker**: ACP stop degrades to process-level kill when the agent lacks the protocol-mandated session/cancel（JSON-RPC -32601）— the turn really halts instead of surfacing a perpetual INTERNAL_ERROR while the turn keeps running.
+- **Worker**: codex mcpServerStatus/list sends an empty params object — eliminates "missing field params (code -32600)" MCP status errors in webchat.
+- **Gateway Core**: Serialize gateway event sequence publication — concurrent producers can no longer reorder seq and violate the AEP strict-monotonic contract.
+- **WebChat UI**: Dedupe gateway fixed commands（/gc、/reset、/skills）from command menu and skill chips；remove the phantom /status entry；preserve native skill dispatch during replay.
+
 ## [1.39.0] - 2026-08-06
 
 ### Summary

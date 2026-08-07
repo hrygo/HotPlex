@@ -236,7 +236,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	// re-delivers the correct turn input and never observes a replacement/reset
 	// connection. In the defensive nil-frozen-Conn path this also preserves the
 	// input from the live fallback that actually supplied the event stream.
-	lastInput := snapshotLastInput(recvSource)
+	lastReplay := snapshotInputReplay(recvSource)
 	if !fc.doneReceived {
 		b.finishTurnTTFT(sessionID, "worker_exit")
 	}
@@ -274,17 +274,31 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		sessPlatform:   fc.sessPlatform,
 		sessOwner:      fc.sessOwner,
 		resetGen:       myResetGen,
-		lastInput:      lastInput,
+		lastInput:      lastReplay.Content,
+		lastReplay:     lastReplay,
 		flog:           flog,
 	})
 }
 
 func snapshotLastInput(conn worker.SessionConn) string {
+	return snapshotInputReplay(conn).Content
+}
+
+func snapshotInputReplay(conn worker.SessionConn) worker.InputReplay {
+	if replayer, ok := conn.(worker.InputReplayRecoverer); ok {
+		replay := replayer.LastInputReplay()
+		replay.Content = sanitizeLastInput(replay.Content)
+		if replay.Skill != nil {
+			invocation := *replay.Skill
+			replay.Skill = &invocation
+		}
+		return replay
+	}
 	ir, ok := conn.(worker.InputRecoverer)
 	if !ok {
-		return ""
+		return worker.InputReplay{}
 	}
-	return sanitizeLastInput(ir.LastInput())
+	return worker.InputReplay{Content: sanitizeLastInput(ir.LastInput())}
 }
 
 // processForwardedEvent handles a single worker event in the forwarding loop.
@@ -834,9 +848,10 @@ type workerExitParams struct {
 	// flog carries trace_id from the originating forwardEvents span so exit-path
 	// logs stay correlatable with the run that produced them.
 	flog *slog.Logger
-	// lastInput was captured from the frozen forwarder connection before Wait()
+	// lastReplay was captured from the frozen forwarder connection before Wait()
 	// releases the worker's mutable live connection.
-	lastInput string
+	lastInput  string
+	lastReplay worker.InputReplay
 }
 
 // rawExitCodeFields extracts the raw OS exit code from workers that implement
@@ -934,9 +949,9 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		p.opts.retryDepth = 1
 	}
 	if fallbackAttempted {
-		lastInput := p.lastInput
-		if lastInput == "" {
-			lastInput = p.opts.lastInput
+		lastReplay := p.lastReplay
+		if lastReplay.Content == "" && lastReplay.Skill == nil {
+			lastReplay = p.opts.lastReplay
 		}
 		acc := b.getOrInitAccum(p.sessionID, "", p.startTime)
 		if b.attemptResumeFallback(fallbackParams{
@@ -945,7 +960,8 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 			exitCode:      exitCode,
 			retryDepth:    p.opts.retryDepth,
 			workerType:    workerType,
-			lastInput:     lastInput,
+			lastInput:     lastReplay.Content,
+			lastReplay:    lastReplay,
 			crashedWorker: w,
 			sessPlatform:  p.sessPlatform,
 			sessOwner:     p.sessOwner,

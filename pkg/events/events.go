@@ -572,11 +572,29 @@ type SkillsListData struct {
 
 // SkillEntry describes a single skill with name, description and source.
 type SkillEntry struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Source      string `json:"source"`            // "global" (home) or "project" (workspace/workDir)
-	Managed     bool   `json:"managed,omitempty"` // issue #910: true = in .agents/skills (UI-manageable)
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Source      string      `json:"source"`            // "global" (home) or "project" (workspace/workDir)
+	Managed     bool        `json:"managed,omitempty"` // issue #910: true = in .agents/skills (UI-manageable)
+	Status      SkillStatus `json:"status,omitempty"`  // issue #957: invokability for the current session Worker
 }
+
+// SkillStatus reports whether the current session Worker can natively invoke a
+// discovered Skill. Absent on the wire (omitempty) means the Worker cannot
+// confirm invokability, which clients should treat as "discoverable".
+type SkillStatus string
+
+const (
+	// SkillStatusCallable means the Worker's authoritative catalog contains the
+	// Skill and is ready to run it natively.
+	SkillStatusCallable SkillStatus = "callable"
+	// SkillStatusDiscoverable means the Skill exists on disk but the Worker
+	// cannot confirm native invocation (e.g. no catalog capability).
+	SkillStatusDiscoverable SkillStatus = "discoverable"
+	// SkillStatusUnavailable means the Worker's authoritative catalog explicitly
+	// does not include the Skill.
+	SkillStatusUnavailable SkillStatus = "unavailable"
+)
 
 // SessionState represents the state of a session.
 type SessionState string

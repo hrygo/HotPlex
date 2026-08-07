@@ -8,7 +8,7 @@ import {
 } from "@assistant-ui/react";
 import { useAui, useAuiState } from "@assistant-ui/store";
 import { AnimatePresence, motion } from "framer-motion";
-import { CommandMenu } from "./CommandMenu";
+import { CommandMenu, type Command } from "./CommandMenu";
 import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
 import type { ConnectionState } from "@/lib/config";
 import { AssistantMessage } from "./AssistantMessage";
@@ -238,9 +238,12 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     if (!composingRef.current) aui.composer().setText(val);
   }, [aui]);
 
-  const handleSelectCommand = useCallback((cmd: string) => {
-    setLocalText(cmd);
-    aui.composer().setText(cmd);
+  const handleSelectCommand = useCallback((cmd: Command) => {
+    // Skills take a trailing space so the user can start typing args right away;
+    // built-in slash commands are inserted as-is.
+    const value = cmd.type === "skill" ? `${cmd.key} ` : cmd.key;
+    setLocalText(value);
+    aui.composer().setText(value);
     setMenuOpen(false);
   }, [aui]);
 
@@ -262,18 +265,34 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
   }, [aui, followUpQueue, localText, t]);
 
   const queueing = isRunning || !!isStoppingProp;
+  // A bare "/" is the command-menu trigger, never a message: block it from
+  // every submit path (Enter, Send button, queue button).
+  const isBareSlash = localText.trim() === "/";
+  // Gateway fixed commands (Source=gateway) are commands, not skills — keep
+  // them out of the "Agent Skills" chips since they already surface as slash
+  // commands in the composer menu.
+  const skillChips = (skills ?? []).filter(s => s.source !== "gateway");
   const handleComposerKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
-      !queueing ||
       event.key !== "Enter" ||
       event.shiftKey ||
       event.nativeEvent.isComposing
     ) {
       return;
     }
+    if (isBareSlash) {
+      // Runs before assistant-ui's handleKeyPress (composeEventHandlers skips
+      // it once defaultPrevented), so the bare "/" can never reach
+      // requestSubmit — even when the menu's capture listener has not
+      // attached yet. Keep the menu open so the user can pick a command.
+      event.preventDefault();
+      setMenuOpen(true);
+      return;
+    }
+    if (!queueing) return;
     event.preventDefault();
     handleQueueSubmit();
-  }, [handleQueueSubmit, queueing]);
+  }, [handleQueueSubmit, queueing, isBareSlash]);
 
   return (
     <div className="composer-container relative max-w-3xl mx-auto">
@@ -302,14 +321,27 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                 <span className="text-[9px] font-display font-black text-[var(--accent-gold)] uppercase tracking-[0.05em]">{t('label.agent_skills')}</span>
                 <div className="w-1 h-1 rounded-full bg-[var(--accent-gold)] animate-pulse" />
               </div>
-              {skills?.slice(0, 3).map(skill => (
-                <div key={skill.name} className="px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--text-muted)] whitespace-nowrap hover:border-[var(--text-faint)] transition-colors cursor-default">
-                  {skill.name}
-                </div>
-              ))}
-              {skills && skills.length > 3 && (
+              {skillChips.slice(0, 3).map(skill => {
+                const status = skill.status ?? "discoverable";
+                const statusClass =
+                  status === "callable"
+                    ? "bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-muted)]"
+                    : status === "unavailable"
+                      ? "bg-[var(--bg-elevated)]/50 border-[var(--border-subtle)]/60 text-[var(--text-faint)] line-through decoration-[var(--accent-coral)]/60"
+                      : "bg-[var(--bg-elevated)]/70 border-[var(--border-subtle)]/80 text-[var(--text-faint)]";
+                return (
+                  <div
+                    key={skill.name}
+                    title={t(`label.skill_status_${status}`)}
+                    className={`px-3 py-1.5 rounded-full border text-[10px] font-medium whitespace-nowrap transition-colors cursor-default ${statusClass}`}
+                  >
+                    {skill.name}
+                  </div>
+                );
+              })}
+              {skillChips.length > 3 && (
                 <div className="px-1 py-1 text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-tighter">
-                  +{skills.length - 3}
+                  +{skillChips.length - 3}
                 </div>
               )}
             </div>
@@ -372,13 +404,13 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   type="button"
                   onClick={handleQueueSubmit}
                   className="btn-icon btn-primary"
-                  disabled={disabled || !followUpQueue || !localText.trim()}
+                  disabled={disabled || !followUpQueue || !localText.trim() || isBareSlash}
                   aria-label={t('follow_up.aria.enqueue')}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
               ) : (
-                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled || isBareSlash} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
               )}
             </div>
           </div>

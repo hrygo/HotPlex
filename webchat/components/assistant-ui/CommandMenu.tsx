@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import type { SkillEntry } from "@/lib/ai-sdk-transport/client/types";
+import { useTranslation } from "react-i18next";
+import type { SkillEntry, SkillStatus } from "@/lib/ai-sdk-transport/client/types";
 
-interface Command {
+export interface Command {
   key: string;
   label: string;
   description: string;
   type: "slash" | "skill";
+  /** Invokability for skill entries; the menu disables unavailable ones (issue #957). */
+  status?: SkillStatus;
 }
 
 const SLASH_COMMANDS: Command[] = [
@@ -15,7 +18,6 @@ const SLASH_COMMANDS: Command[] = [
   { key: "/reset", label: "/reset", description: "Reset current session and clear history", type: "slash" },
   { key: "/park", label: "/park", description: "Park the current session to save resources", type: "slash" },
   { key: "/new", label: "/new", description: "Create a fresh new session", type: "slash" },
-  { key: "/status", label: "/status", description: "Show current session and worker status", type: "slash" },
   { key: "/cd", label: "/cd", description: "Switch working directory and create new session", type: "slash" },
   { key: "/skills", label: "/skills", description: "List currently loaded skills and their usage", type: "slash" },
   { key: "/help", label: "/help", description: "Show available commands and documentation", type: "slash" },
@@ -23,13 +25,14 @@ const SLASH_COMMANDS: Command[] = [
 
 interface CommandMenuProps {
   inputValue: string;
-  onSelect: (value: string) => void;
+  onSelect: (command: Command) => void;
   isOpen: boolean;
   onClose: () => void;
   skills?: SkillEntry[];
 }
 
 export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: CommandMenuProps) {
+  const { t } = useTranslation('chat');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedRef = useRef<HTMLButtonElement>(null);
 
@@ -37,15 +40,25 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
     selectedRef.current?.scrollIntoView({ block: "nearest" });
   }, []);
 
-  const allCommands: Command[] = useMemo(() => [
-    ...SLASH_COMMANDS,
-    ...(skills ?? []).map(s => ({
-      key: `/${s.name}`,
-      label: `/${s.name}`,
-      description: s.description || `${s.name} skill`,
-      type: "skill" as const,
-    })),
-  ], [skills]);
+  const allCommands: Command[] = useMemo(() => {
+    // Gateway fixed commands (e.g. /gc, /reset, /skills) are surfaced both as
+    // built-in slash commands AND as skill entries (Source=gateway) from the
+    // skills_list event. Slash entries win — otherwise the same key renders
+    // twice and React warns about duplicate children keys.
+    const slashKeys = new Set(SLASH_COMMANDS.map(c => c.key));
+    return [
+      ...SLASH_COMMANDS,
+      ...(skills ?? [])
+        .filter(s => !slashKeys.has(`/${s.name}`))
+        .map(s => ({
+          key: `/${s.name}`,
+          label: `/${s.name}`,
+          description: s.description || `${s.name} skill`,
+          type: "skill" as const,
+          status: s.status,
+        })),
+    ];
+  }, [skills]);
 
   // Filter commands — "/" mode shows both slash commands and skills
   const isSlash = inputValue.startsWith("/");
@@ -81,18 +94,36 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
         e.preventDefault();
         setSelectedIndex(prev => (prev - 1 + filtered.length) % filtered.length);
         requestAnimationFrame(scrollToSelected);
-      } else if (e.key === "Enter" && filtered.length > 0) {
+      } else if (e.key === "Enter" && !e.isComposing && filtered.length > 0) {
+        const selected = filtered[selectedIndex];
+        if (selected.type !== "skill" || selected.status !== "unavailable") {
+          // The composer already holds the exact command — let the Enter pass
+          // through so it submits immediately instead of re-selecting.
+          const exactMatch =
+            inputValue.trim().toLowerCase() === selected.key.toLowerCase();
+          if (exactMatch) return;
+          e.preventDefault();
+          // Capture phase: stop propagation so the composer's own Enter submit
+          // never fires with the partial filter text before the selection
+          // lands (window bubble listeners run after React's keydown).
+          e.stopPropagation();
+          onSelect(selected);
+          return;
+        }
+        // Unavailable skill: swallow Enter so it is not submitted as text.
         e.preventDefault();
-        onSelect(filtered[selectedIndex].key);
+        e.stopPropagation();
       } else if (e.key === "Escape") {
         onClose();
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // Capture phase — must run BEFORE the composer's React keydown handler so
+    // preventDefault/stopPropagation can stop the premature submit.
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scrollToSelected is a stable DOM helper
-  }, [isOpen, filtered, selectedIndex, onSelect, onClose]);
+  }, [isOpen, filtered, selectedIndex, onSelect, onClose, inputValue]);
 
   if (!isOpen || filtered.length === 0) return null;
 
@@ -107,24 +138,33 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
       </div>
 
       <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
-        {filtered.map((cmd, i) => (
+        {filtered.map((cmd, i) => {
+          const unavailable = cmd.type === "skill" && cmd.status === "unavailable";
+          return (
           <button
             key={cmd.key}
             ref={i === selectedIndex ? selectedRef : undefined}
+            disabled={unavailable}
             className={`w-full px-4 py-3 text-left flex flex-col gap-0.5 transition-all ${
-              i === selectedIndex
-                ? "bg-[var(--bg-hover)] translate-x-1"
-                : "hover:bg-[rgba(255,255,255,0.02)]"
+              unavailable
+                ? "opacity-45 cursor-not-allowed"
+                : i === selectedIndex
+                  ? "bg-[var(--bg-hover)] translate-x-1"
+                  : "hover:bg-[rgba(255,255,255,0.02)]"
             }`}
-            onClick={() => onSelect(cmd.key)}
+            onClick={() => !unavailable && onSelect(cmd)}
             onMouseEnter={() => setSelectedIndex(i)}
           >
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-bold ${i === selectedIndex ? "text-[var(--accent-gold)]" : "text-[var(--text-primary)]"}`}>
+              <span className={`text-xs font-bold ${unavailable ? "line-through decoration-[var(--accent-coral)]/60 text-[var(--text-faint)]" : i === selectedIndex ? "text-[var(--accent-gold)]" : "text-[var(--text-primary)]"}`}>
                 {cmd.label}
               </span>
               {cmd.type === "slash" ? (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(251,191,36,0.1)] text-[var(--accent-gold)] font-mono font-bold uppercase">CMD</span>
+              ) : cmd.status === "unavailable" ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(248,113,113,0.12)] text-[var(--accent-coral)] font-mono font-bold uppercase">{t('label.skill_status_unavailable')}</span>
+              ) : cmd.status === "discoverable" ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(148,163,184,0.12)] text-[var(--text-faint)] font-mono font-bold uppercase">{t('label.skill_status_discoverable')}</span>
               ) : (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--accent-emerald)] font-mono font-bold uppercase">SKILL</span>
               )}
@@ -133,7 +173,8 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
               {cmd.description}
             </p>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

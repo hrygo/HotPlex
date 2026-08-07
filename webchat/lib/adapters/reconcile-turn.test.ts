@@ -75,6 +75,27 @@ describe("turn reconciliation", () => {
         ).toBe("first answer");
     });
 
+    it("refuses to reconcile a command turn against the previous turn", () => {
+        // Command turns (e.g. /skills) are never persisted: the most recent
+        // user record is the PREVIOUS turn, so an input-matched guard must
+        // return null instead of patching the previous answer in.
+        expect(
+            selectAuthoritativeAssistantContent(records, {
+                terminalSeq: 25,
+                inputContent: "/skills",
+            }),
+        ).toBeNull();
+    });
+
+    it("reconciles a persisted turn when the input matches history", () => {
+        expect(
+            selectAuthoritativeAssistantContent(records, {
+                terminalSeq: 25,
+                inputContent: "second",
+            }),
+        ).toBe("second answer");
+    });
+
     it("patches the captured assistant without touching the next pending turn", () => {
         const messages: HotPlexMessage[] = [
             {

@@ -57,11 +57,13 @@ import (
 
 // Compile-time interface compliance checks.
 var (
-	_ worker.Worker              = (*Worker)(nil)
-	_ worker.SessionConn         = (*conn)(nil)
-	_ worker.ControlRequester    = (*Worker)(nil)
-	_ worker.WorkerCommander     = (*Worker)(nil)
-	_ worker.SystemPromptUpdater = (*Worker)(nil)
+	_ worker.Worker               = (*Worker)(nil)
+	_ worker.SessionConn          = (*conn)(nil)
+	_ worker.ControlRequester     = (*Worker)(nil)
+	_ worker.WorkerCommander      = (*Worker)(nil)
+	_ worker.SkillInvoker         = (*Worker)(nil)
+	_ worker.SkillCatalogProvider = (*Worker)(nil)
+	_ worker.SystemPromptUpdater  = (*Worker)(nil)
 )
 
 // Env blocklist for OpenCode Server worker.
@@ -311,6 +313,47 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 
 	w.SetLastIO(time.Now())
 	return nil
+}
+
+// InvokeSkill sends a resolved Skill through OpenCode's native command API.
+// It intentionally does not route through conn.Send, whose contract is the
+// ordinary /message input path.
+func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	w.Mu.Lock()
+	commander := w.cmd
+	conn := w.httpConn
+	w.Mu.Unlock()
+	if commander == nil {
+		return fmt.Errorf("opencodeserver: worker not started")
+	}
+
+	wasStopped := w.IsStopped()
+	w.BeginTurn()
+	if conn != nil {
+		conn.setSkillReplay(worker.NativeInvocationFromSkill(invocation))
+	}
+	if err := commander.InvokeSkill(ctx, invocation); err != nil {
+		if wasStopped {
+			w.MarkStopped()
+		}
+		return err
+	}
+	w.SetLastIO(time.Now())
+	return nil
+}
+
+// ListInvokableSkills delegates the OpenCode command catalog query to the
+// ServerCommander. The commander is snapshotted under w.Mu like InvokeSkill; a
+// nil commander means the worker is not started and no catalog can be
+// confirmed.
+func (w *Worker) ListInvokableSkills(ctx context.Context, workDir string) ([]worker.SkillDescriptor, error) {
+	w.Mu.Lock()
+	commander := w.cmd
+	w.Mu.Unlock()
+	if commander == nil {
+		return nil, fmt.Errorf("opencodeserver: worker not started")
+	}
+	return commander.ListInvokableSkills(ctx, workDir)
 }
 
 func (w *Worker) HandlePermissionResponse(ctx context.Context, reqID string, allowed bool, _ string) error {
@@ -1249,10 +1292,11 @@ type conn struct {
 	jsonSchema   map[string]any // parsed from SessionInfo.JSONSchema
 	variant      string         // reasoning effort variant (e.g. "high", "low")
 
-	mu        sync.Mutex
-	closed    bool
-	closeOnce sync.Once
-	lastInput string // cached for crash recovery re-delivery
+	mu         sync.Mutex
+	closed     bool
+	closeOnce  sync.Once
+	lastInput  string // cached for crash recovery re-delivery
+	lastReplay worker.InputReplay
 }
 
 type ocsModelRef struct {
@@ -1260,7 +1304,10 @@ type ocsModelRef struct {
 	ModelID    string `json:"modelID"`
 }
 
-var _ worker.InputRecoverer = (*conn)(nil)
+var (
+	_ worker.InputRecoverer       = (*conn)(nil)
+	_ worker.InputReplayRecoverer = (*conn)(nil)
+)
 
 func (c *conn) LastInput() string {
 	if c == nil {
@@ -1269,6 +1316,29 @@ func (c *conn) LastInput() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastInput
+}
+
+func (c *conn) LastInputReplay() worker.InputReplay {
+	if c == nil {
+		return worker.InputReplay{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	replay := c.lastReplay
+	if replay.Skill != nil {
+		invocation := *replay.Skill
+		replay.Skill = &invocation
+	}
+	return replay
+}
+
+func (c *conn) setSkillReplay(invocation worker.NativeCommandInvocation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastReplay = worker.InputReplay{Content: "/" + invocation.Name, Skill: &invocation}
+	if invocation.Args != "" {
+		c.lastReplay.Content += " " + invocation.Args
+	}
 }
 
 func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
@@ -1295,6 +1365,7 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 	if content != "" {
 		c.mu.Lock()
 		c.lastInput = content
+		c.lastReplay = worker.InputReplay{Content: content}
 		c.mu.Unlock()
 	}
 

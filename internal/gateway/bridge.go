@@ -109,6 +109,12 @@ type Bridge struct {
 	repairer       *execution.Repairer // terminal-state repair retry; nil-safe
 	workerRuns     sync.Map            // sessionID -> workerRunBinding; updated on each successful attach
 	turnTTFT       *turnTTFTTracker
+
+	// catalogInvalidate is invoked on every Worker attach so the session's
+	// command catalog is refreshed (spec §5.2, §8.7). Late-injected via
+	// SetCatalogInvalidator because the Handler (which owns the catalog
+	// generation map) is built after the Bridge. Nil disables invalidation.
+	catalogInvalidate func(sessionID string)
 }
 
 type workerRunBinding struct {
@@ -251,6 +257,15 @@ type PendingReplayer interface {
 // SetPendingReplayer late-injects the replay target (Handler). Optional: nil
 // leaves done-time replay disabled (supplements buffered but not replayed).
 func (b *Bridge) SetPendingReplayer(r PendingReplayer) { b.replayer = r }
+
+// SetCatalogInvalidator registers the callback invoked on every Worker attach
+// (StartSession / ResumeSession / StartFreshWorker / crash-recovery fresh
+// start), so the session-scoped command catalog is invalidated and its
+// generation bumped (spec §5.2, §8.7). The Handler is built after the Bridge
+// and injects itself here during gateway init; nil disables invalidation.
+func (b *Bridge) SetCatalogInvalidator(fn func(sessionID string)) {
+	b.catalogInvalidate = fn
+}
 
 // BufferPending appends a busy-supplement for the fallback path (worker lacks
 // mid-turn support). Called from Handler's SESSION_BUSY branch.
@@ -601,11 +616,9 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 	// Capture pending input before terminating so it can be re-delivered to the new worker.
 	// This prevents input loss when ResumeSession is called concurrently (e.g., a
 	// second user message arrives while attemptResumeFallback is starting a fresh worker).
-	var pendingInput string
+	var pendingReplay worker.InputReplay
 	if existing := b.sm.GetWorker(id); existing != nil {
-		if ir, ok := existing.(worker.InputRecoverer); ok {
-			pendingInput = ir.LastInput()
-		}
+		pendingReplay = snapshotInputReplay(existing.Conn())
 		_ = existing.Terminate(context.Background())
 		b.sm.DetachWorker(id)
 		b.clearWorkerRun(id, existing, "")
@@ -689,10 +702,11 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 	// This covers the case where a concurrent message triggered ResumeSession while
 	// attemptResumeFallback was starting a fresh worker — the fresh worker's buffered
 	// input would otherwise be lost when the old worker is terminated here.
-	if pendingInput != "" {
+	if pendingReplay.Content != "" || pendingReplay.Skill != nil {
 		b.log.Info("bridge: re-delivering pending input to resumed worker",
-			"session_id", id, "content_len", len(pendingInput))
-		if err := w.Input(ctx, pendingInput, nil); err != nil {
+			"session_id", id, "content_len", len(pendingReplay.Content),
+			"skill", pendingReplay.Skill != nil)
+		if err := b.deliverInputReplay(ctx, w, pendingReplay); err != nil {
 			b.log.Warn("bridge: pending input re-delivery failed",
 				"session_id", id, "err", err)
 		}
@@ -1177,6 +1191,28 @@ func sanitizeLastInput(input string) string {
 		return ""
 	}
 	return strings.Join(filtered, "\n")
+}
+
+func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay worker.InputReplay) error {
+	if replay.Skill == nil {
+		if replay.Content == "" {
+			return nil
+		}
+		return w.Input(ctx, replay.Content, nil)
+	}
+	if invoker, ok := worker.AsNativeInvoker(w); ok {
+		return invoker.InvokeNativeCommand(ctx, *replay.Skill)
+	}
+	// The replacement Worker lacks any native command path — typically
+	// because worker_type changed between the crash and recovery. The
+	// invocation must NOT be replayed as an ordinary prompt: that would turn
+	// "execute the Skill" into "let the model guess the Skill" (plan
+	// constraint #7; NativeCommandInvoker contract: "Workers that cannot
+	// execute a native command must not receive the invocation as an ordinary
+	// prompt"). Fail loudly instead of silently degrading the semantics.
+	b.log.Warn("bridge: native Skill replay rejected, replacement worker lacks native command invoker",
+		"worker_type", w.Type(), "skill", replay.Skill.Name)
+	return fmt.Errorf("%w: worker %s cannot replay native Skill %q as text", worker.ErrSkillNotSupported, w.Type(), replay.Skill.Name)
 }
 
 // firstNonEmpty returns the first non-empty string from the given values.

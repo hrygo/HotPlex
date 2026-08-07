@@ -225,7 +225,11 @@ export interface SkillEntry {
   name: string;
   description: string;
   source: string;
+  /** Invokability for the current session worker: "callable" | "discoverable" | "unavailable". */
+  status?: string;
 }
+
+export type SkillStatus = "callable" | "discoverable" | "unavailable";
 
 export interface MCPStatusData {
   servers: MCPServerInfo[];

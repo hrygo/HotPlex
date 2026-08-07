@@ -51,6 +51,20 @@ func (c *SlackConn) sendSkillsList(ctx context.Context, env *events.Envelope) er
 	return c.postSkillsMessage(ctx, fallback, blocks)
 }
 
+// skillStatusText maps a SkillStatus to a human-readable status marker.
+// An empty status (absent on the wire) means the Worker could not confirm
+// invokability and must be treated as "discoverable" per the AEP contract.
+func skillStatusText(s events.SkillStatus) string {
+	switch s {
+	case events.SkillStatusCallable:
+		return "✅ callable"
+	case events.SkillStatusUnavailable:
+		return "🚫 unavailable"
+	default:
+		return "🔎 discoverable"
+	}
+}
+
 // buildSkillGroupTable creates a DataTableBlock for a single skill group.
 func buildSkillGroupTable(g messaging.SkillGroup, blockID string) *slack.DataTableBlock {
 	emoji := messaging.SourceEmoji(g.Source)
@@ -59,16 +73,25 @@ func buildSkillGroupTable(g messaging.SkillGroup, blockID string) *slack.DataTab
 	table := slack.NewDataTableBlock(caption, slack.DataTableBlockOptionBlockID(blockID))
 
 	// Header row.
-	table.AddRow(dataTableCell("Name"), dataTableCell("Description"))
+	table.AddRow(dataTableCell("Name"), dataTableCell("Description"), dataTableCell("Status"))
 
-	// Data rows. Cap at maxDataTableRows-1 (excluding header) to prevent Slack rejection.
+	// Data rows. Cap at maxDataTableRows-1 (excluding header) to prevent Slack
+	// rejection; when overflowing, reserve the last slot for the truncation
+	// notice so header + rows stay within maxDataTableRows (validator.go:24).
 	maxRows := maxDataTableRows - 1
+	if len(g.Entries) > maxRows {
+		maxRows--
+	}
 	for i, s := range g.Entries {
 		if i >= maxRows {
-			table.AddRow(dataTableCell("..."), dataTableCell(fmt.Sprintf("and %d more", len(g.Entries)-maxRows)))
+			table.AddRow(dataTableCell("..."),
+				dataTableCell(fmt.Sprintf("and %d more", len(g.Entries)-maxRows)),
+				dataTableCell(""))
 			break
 		}
-		table.AddRow(dataTableCell(s.Name), dataTableCell(messaging.TruncateDesc(s.Description)))
+		table.AddRow(dataTableCell(s.Name),
+			dataTableCell(messaging.TruncateDesc(s.Description)),
+			dataTableCell(skillStatusText(s.Status)))
 	}
 
 	return table
@@ -116,7 +139,7 @@ func formatSkillsPlainText(page []messaging.SkillGroup) string {
 		fmt.Fprintf(&sb, "\n*%s %s (%d)*\n", emoji, g.Source, len(g.Entries))
 		for _, s := range g.Entries {
 			desc := messaging.TruncateDesc(s.Description)
-			fmt.Fprintf(&sb, "• %s — %s\n", s.Name, desc)
+			fmt.Fprintf(&sb, "• %s — %s — %s\n", s.Name, desc, skillStatusText(s.Status))
 		}
 	}
 	return sb.String()

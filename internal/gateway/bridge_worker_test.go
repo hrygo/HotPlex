@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/session"
@@ -216,4 +217,64 @@ func TestResolveWorkspacePermissionMode(t *testing.T) {
 		require.Equal(t, 2, strings.Count(buf.String(), "level=WARN"),
 			"expected warn re-armed after success, got: %s", buf.String())
 	})
+}
+
+// replayNativeWorker records InvokeNativeCommand calls; mockWorkerForHandler
+// alone does NOT implement worker.NativeCommandInvoker.
+type replayNativeWorker struct {
+	mockWorkerForHandler
+	invoked worker.NativeCommandInvocation
+}
+
+func (w *replayNativeWorker) InvokeNativeCommand(_ context.Context, invocation worker.NativeCommandInvocation) error {
+	w.invoked = invocation
+	return nil
+}
+
+func TestDeliverInputReplayUsesNativeInvokerWhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	b := &Bridge{log: testLogger(t)}
+	w := &replayNativeWorker{}
+	replay := worker.InputReplay{
+		Content: "/oracle-dba 10.102.78.1",
+		Skill:   &worker.NativeCommandInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
+	}
+
+	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
+	require.Equal(t, *replay.Skill, w.invoked)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestDeliverInputReplayRejectsSkillWithoutInvoker(t *testing.T) {
+	t.Parallel()
+
+	// A replacement worker without a native invoker (e.g. worker_type changed
+	// during recovery) must NOT receive the Skill invocation as an ordinary
+	// prompt: that would turn "execute the Skill" into "let the model guess
+	// the Skill" (plan constraint #7). The replay fails loudly instead.
+	b := &Bridge{log: testLogger(t)}
+	w := new(mockWorkerForHandler)
+	replay := worker.InputReplay{
+		Content: "/oracle-dba 10.102.78.1",
+		Skill:   &worker.NativeCommandInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
+	}
+
+	err := b.deliverInputReplay(t.Context(), w, replay)
+	require.ErrorIs(t, err, worker.ErrSkillNotSupported)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestDeliverInputReplayErrorsWhenNoInvokerAndNoText(t *testing.T) {
+	t.Parallel()
+
+	b := &Bridge{log: testLogger(t)}
+	w := new(mockWorkerForHandler)
+	replay := worker.InputReplay{
+		Skill: &worker.NativeCommandInvocation{Name: "oracle-dba"},
+	}
+
+	err := b.deliverInputReplay(t.Context(), w, replay)
+	require.ErrorIs(t, err, worker.ErrSkillNotSupported)
+	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
 }

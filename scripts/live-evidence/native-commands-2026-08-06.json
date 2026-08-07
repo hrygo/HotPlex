@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "mode": "direct-live",
+  "issue": "hrygo/hotplex#958",
+  "spec": "docs/superpowers/specs/2026-08-06-worker-native-command-dispatch-design.md",
+  "verified_at": "2026-08-06T16:05:00+00:00",
+  "summary": {
+    "pass": 4,
+    "blocked": 0,
+    "fail": 0
+  },
+  "workers": [
+    {
+      "command": "$hotplex-native-probe",
+      "duration_ms": 11699,
+      "evidence": {
+        "byte_count": 36,
+        "sha256_12": "b12f4322e8b9"
+      },
+      "facts": {
+        "authoritative_descriptor_path_used": true,
+        "catalog_advertised": true,
+        "model_marker_observed": true
+      },
+      "status": "PASS",
+      "transport": "app-server skills/list + structured turn/start",
+      "version": "codex-cli 0.146.1",
+      "worker": "codex_cli"
+    },
+    {
+      "command": "/context",
+      "duration_ms": 3347,
+      "evidence": {
+        "byte_count": 300,
+        "sha256_12": "5b134dceb771"
+      },
+      "facts": {
+        "advertised_command_count": 9,
+        "filesystem_probe_skill_advertised": false,
+        "selected_command_advertised": true,
+        "stop_reason": "end_turn"
+      },
+      "status": "PASS",
+      "transport": "ACP available_commands_update + session/prompt",
+      "version": "0.20.0",
+      "worker": "acp"
+    },
+    {
+      "command": "/hotplex-native-probe",
+      "duration_ms": 5594,
+      "evidence": {
+        "byte_count": 36,
+        "sha256_12": "b2a8fa4e2531"
+      },
+      "facts": {
+        "canonical_slash_syntax": true,
+        "model_marker_observed": true,
+        "process_exit_code": 1
+      },
+      "status": "PASS",
+      "transport": "stream-json text_command",
+      "version": "2.1.223 (Claude Code)",
+      "worker": "claude_code"
+    },
+    {
+      "command": "hotplex-native-probe",
+      "duration_ms": 16813,
+      "evidence": {
+        "byte_count": 36,
+        "sha256_12": "b0313a7b881b"
+      },
+      "facts": {
+        "catalog_endpoint_status": 200,
+        "invoke_http_status": 200,
+        "model_marker_observed": true,
+        "probe_advertised": true
+      },
+      "status": "PASS",
+      "transport": "HTTP POST /session/{id}/command",
+      "version": "1.18.14",
+      "worker": "opencode_server"
+    }
+  ]
+}
