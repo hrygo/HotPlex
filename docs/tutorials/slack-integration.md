@@ -58,7 +58,8 @@ description: 从零配置 HotPlex Gateway 的 Slack 接入，5 分钟完成双�
       { "command": "/compact", "description": "Compact conversation history", "should_escape": false },
       { "command": "/clear", "description": "Clear conversation", "should_escape": false },
       { "command": "/rewind", "description": "Undo last conversation turn", "should_escape": false },
-      { "command": "/commit", "description": "Create a Git commit", "should_escape": false }
+      { "command": "/commit", "description": "Create a Git commit", "should_escape": false },
+      { "command": "/worker", "description": "Invoke a skill by name on the active Worker", "usage_hint": "/worker <skill-name> [args]", "should_escape": false }
     ]
   },
   "oauth_config": {
@@ -264,12 +265,13 @@ HOTPLEX_MESSAGING_STT_PROVIDER=local
 <details>
 <summary>斜杠命令与状态指示</summary>
 
-Bot 注册了两个斜杠命令：
+Bot 注册了三个斜杠命令：
 
 | 命令 | 功能 |
 |------|------|
 | `/reset` | 清空上下文，重新开始对话 |
 | `/dc` | 断开会话，保留上下文供下次继续 |
+| `/worker <名称> [参数]` | 显式按名调用当前 Worker 已加载的技能 |
 
 状态指示：
 - **Typing indicator**：Agent 思考时自动显示
