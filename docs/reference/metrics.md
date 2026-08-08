@@ -266,7 +266,7 @@ rate(hotplex_cron_duration_sum[5m]) / rate(hotplex_cron_duration_count[5m])
 | `hotplex.streaming.card.rotations` | Counter | Streaming Card TTL 触发的旋转次数 |
 | `hotplex.streaming.card.rotation_failures` | Counter | 旋转失败数，label: `phase` |
 | `hotplex.streaming.card.flush_fallbacks` | Counter | CardKit 降级到 IM Patch 的次数 |
-| `hotplex.streaming.terminal_failures` | Counter | 平台 streaming 终态失败次数（Feishu card / Slack stream），label: `platform`（`feishu` / `slack`）+ `fallback_result`（`pending` / `sent` / `failed` / `skipped_body_presented`） |
+| `hotplex.streaming.terminal_failures` | Counter | 平台 streaming 终态失败次数（Feishu card / Slack stream），label: `platform`（当前仅 Slack 路径携带，值为 `slack`；Feishu 路径不携带该 label）+ `fallback_result`（`sent` / `failed` / `skipped_body_presented`） |
 
 ## ACP 指标
 

@@ -90,6 +90,21 @@ Envelope 通过 `Clone()` 方法实现深拷贝（递归复制嵌套 map/slice�
 
 ---
 
+## F
+
+### Fence (执行围栏)
+
+Worker 运行结局不明（runtime 状态为 unknown）的 execution 触发围栏，阻塞同一 session 的新输入，直至 operator 通过 Admin API 决策（issue #877）。围栏的写入路径包括 FinishRuntime 收敛为 unknown、lease 过期恢复与 owner lease 终止。
+
+围栏决策采用**条件更新**机制：execution 记录携带单调递增的 `fence_version`（migration 031，SQLite 与 PostgreSQL 成对），决策请求必须携带 inspect 时读到的版本，条件更新匹配 0 行时返回 `409 FENCE_CONFLICT`——并发 gateway 或重启竞态下**不会**自动重试，须重新 inspect 后审慎决策。决策动作：
+
+- **resolve**：清除围栏，runtime 保持 unknown，晚到的 Done 事件可收敛为 completed
+- **abandon**：清除围栏，runtime 置为 failed 并补发 `runtime.execution.failed`（`OPERATOR_ABANDONED`），终态不可回退
+
+operator 决策是审计过的 Admin 动作（`admin.runtime.fence.resolve` / `admin.runtime.fence.abandon`，含 reason 与 evidence_ref，不进入 execution store）。运维入口：`hotplex runtime fences list/resolve/abandon`（Admin API over HTTP）；`doctor runtime.fenced_executions` 只读检查。
+
+---
+
 ## G
 
 ### GC (Garbage Collection)

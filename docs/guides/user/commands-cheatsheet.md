@@ -28,6 +28,7 @@ description: "HotPlex 聊天命令快速参考卡片，涵盖飞书 / Slack / We
 |:-----|:-----|
 | `/context` | 查看上下文窗口使用量 |
 | `/skills [关键词]` | 列出 / 搜索已加载的 Skills |
+| `/worker <名称> [参数]` | 显式按名调用当前 Worker 已加载的技能（#959） |
 | `/mcp` | 查看 MCP 服务器连接状态 |
 
 ### 配置调整
