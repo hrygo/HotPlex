@@ -341,6 +341,32 @@ OpenAI Codex CLI Worker，使用 app-server 单例持久进程模式，通过 JS
 | `config_profile` | string | `""` | — | Codex 配置 profile（传递 `--profile`） |
 | `bypass_hook_trust` | bool | `false` | — | 绕过 hook 信任检查（传递 `--dangerously-bypass-hook-trust`） |
 
+##### 常见问题：`rmcp::transport::worker` fatal / `Transport channel closed`
+
+**症状**：Gateway 日志（DEBUG 级 `proc: stderr`）出现类似：
+
+```
+worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest(
+"http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
+```
+
+**根因**：codex（ChatGPT 登录态）在启动时拉取 ChatGPT 账号配置的 MCP 服务器列表（`https://chatgpt.com/backend-api/ps/mcp`）。该 HTTPS 请求由 codex 进程自身发起，若出口网络无法访问 chatgpt.com（典型场景：国内代理节点出口 IP 被 OpenAI 封禁，OpenAI 边缘节点直接返回 HTTP 451），rmcp 传输层判定失败并 fatal 退出该 MCP 线程。此错误只影响 ChatGPT 账号 MCP/连接器工具，不影响 app-server 主体进程。
+
+**排查**（在运行 Gateway 的机器上）：
+
+```bash
+# 1. 直连探测（结果 451 / 超时 / 连接被拒 均为不可达）
+curl -s -o /dev/null -w "%{http_code}\n" -m 8 https://chatgpt.com/backend-api/ps/mcp
+
+# 2. 经代理探测（把 <port> 换成你的代理端口；Google 能通但 chatgpt.com 返回 451 = 出口节点被封）
+curl -s -x http://127.0.0.1:<port> -o /dev/null -w "%{http_code}\n" -m 8 https://www.google.com
+curl -s -x http://127.0.0.1:<port> -o /dev/null -w "%{http_code}\n" -m 8 https://chatgpt.com/backend-api/ps/mcp
+```
+
+**修复**：在代理客户端中把 chatgpt.com 的出口节点切换到 OpenAI 支持的地区（美/日/新加坡等；香港、澳门及机房/WARP IP 通常被 451 封禁）。切换后重新执行上面的探测命令，返回非 451（正常为 401/403 等）即恢复；codex 下次会话启动时会自动重试拉取 MCP。
+
+> 提示：codex 进程继承 Gateway 进程的 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 环境变量（不受 `env_blocklist` 拦截），但 `worker.environment:` 配置目前不会注入 codex 单例进程；如需给 codex 注入代理，请在启动 Gateway 的 shell / `.env` 中设置 `HTTPS_PROXY` 等变量。
+
 #### 3.7.6 acp — ACP 通用 Worker
 
 ACP (Agent Communication Protocol) 通用 Worker，通过 JSON-RPC 2.0 over stdio 连接任何 ACP 兼容的 AI Agent（如 Hermes Agent）。支持流式响应、工具调用、权限请求和 Session 恢复。

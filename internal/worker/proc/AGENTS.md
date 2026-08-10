@@ -10,6 +10,7 @@ proc/
   pidfile.go                  # Tracker: PID 文件原子写（tmp+rename），orphan 扫描+清理
   pid_helpers.go              # TrackPID/UntrackPID 包级 helper（全局 tracker 透明代理）
   stderr_handler.go           # StderrHandler 接口 + DefaultStderrHandler（[LEVEL] 前缀解析）
+  ansi.go                     # StripANSI() — stderr 行入库前剥离 ANSI 转义序列（drainStderr 统一调用）
   signal_unix.go              # POSIX: Setpgid/SIGTERM/SIGKILL/-pgid 信号原语
   signal_windows.go           # Win32: CREATE_NEW_PROCESS_GROUP/GenerateConsoleCtrlEvent
   tree_kill_unix.go           # ForceKillTree + findDescendants（递归扫逃逸 PGID 的孤儿）
@@ -82,6 +83,7 @@ proc/
 - `StderrHandler` 接口：`Handle(line) (level, msg)`，空 msg = 抑制整行
 - `StderrHandlerFactory` 每 session 新建实例（支持多行折叠状态）
 - `DefaultStderrHandler` 解析 `[ERROR]/[WARN]/[DEBUG]/[INFO]` 前缀，`[INFO]` 降级 Debug
+- **ANSI 剥离前置**：`drainStderr` 在调用 handler 前统一执行 `StripANSI(line)`，避免彩色输出（如 codex rmcp 的 `\x1b[31m`）污染日志；剥离后再做 `[LEVEL]` 解析，ANSI 包裹的 marker 仍能识别
 
 ## ANTI-PATTERNS
 - ❌ 跳过 `Setpgid:true` / `CREATE_NEW_PROCESS_GROUP` — 子进程清理全靠组隔离

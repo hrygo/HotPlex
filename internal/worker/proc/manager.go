@@ -491,7 +491,7 @@ func (m *Manager) drainStderr(stderr io.ReadCloser) {
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, scannerInitSize), scannerMaxSize)
 	for scanner.Scan() {
-		level, msg := handler.Handle(scanner.Text())
+		level, msg := handler.Handle(StripANSI(scanner.Text()))
 		if msg == "" {
 			continue
 		}
