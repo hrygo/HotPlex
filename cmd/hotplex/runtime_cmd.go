@@ -75,11 +75,14 @@ type fenceAdminClient struct {
 // The token can be overridden with HOTPLEX_ADMIN_TOKEN for split-admin
 // deployments.
 func newFenceAdminClient(configPath string) (*fenceAdminClient, error) {
-	// Empty string means "not specified": fall back to the running gateway's
-	// actual config path from the PID file when available.
+	// Empty string means "not specified": prefer the running gateway's actual
+	// config path from the PID file, falling back to the default workspace
+	// config when no gateway is running.
 	if configPath == "" {
 		if state, stateErr := readGatewayState(); stateErr == nil && state.ConfigPath != "" {
 			configPath = state.ConfigPath
+		} else {
+			configPath = config.DefaultConfigPath()
 		}
 	}
 	absPath, err := config.ExpandAndAbs(configPath)

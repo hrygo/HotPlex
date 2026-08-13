@@ -279,11 +279,14 @@ func CheckMaxJobs(ctx context.Context, store cron.Store, configPath string) erro
 
 // TriggerViaAdmin calls the gateway admin API to trigger a job run.
 func TriggerViaAdmin(ctx context.Context, configPath, jobID string) error {
-	// If the user didn't specify --config, try reading the gateway's actual
-	// config path from the PID file to avoid loading a different .env.
+	// If the user didn't specify --config, prefer the running gateway's actual
+	// config path from the PID file to avoid loading a different .env, falling
+	// back to the default workspace config when no gateway is running.
 	if configPath == "" {
 		if gwCfg := gatewayConfigPath(); gwCfg != "" {
 			configPath = gwCfg
+		} else {
+			configPath = config.DefaultConfigPath()
 		}
 	}
 
