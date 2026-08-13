@@ -75,6 +75,10 @@ func (s *fakeExecutionStore) FinishRuntime(_ context.Context, _ string, runID st
 	s.finishStatus = status
 	return s.finishErr
 }
+
+func (s *fakeExecutionStore) ConvergeDeliveryFailed(_ context.Context, _ string, _ string) error {
+	return nil
+}
 func (s *fakeExecutionStore) ActiveBySession(context.Context, string) (*execution.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

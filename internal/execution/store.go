@@ -165,6 +165,11 @@ type Store interface {
 	// events with matching workerRunID can refine unknown → completed/failed.
 	FinishRuntime(ctx context.Context, executionID, workerRunID string, status RuntimeStatus, errorCode string) error
 
+	// ConvergeDeliveryFailed rewrites a failed delivery to unknown when the
+	// runtime completed for the same worker run (single explicit exception to
+	// terminal-never-regresses; unknown never triggers redelivery).
+	ConvergeDeliveryFailed(ctx context.Context, executionID, workerRunID string) error
+
 	// ActiveBySession returns the current pending/running execution for the
 	// session, or ErrNotFound if none exists. Used by the active gate check.
 	ActiveBySession(ctx context.Context, sessionID string) (*Record, error)

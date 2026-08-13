@@ -149,6 +149,61 @@ func TestSQLStore_SetStatusIsIdempotentAndTerminal(t *testing.T) {
 	require.Equal(t, first.DeliveredAt, stored.DeliveredAt)
 }
 
+func TestSQLStore_ConvergeDeliveryFailedConverges(t *testing.T) {
+	t.Parallel()
+	store, _ := newTestSQLStore(t)
+	ctx := context.Background()
+
+	record, _, err := store.Accept(ctx, testAcceptReq("session-1", "converge-1", "hash"))
+	require.NoError(t, err)
+	require.NoError(t, store.MarkRunning(ctx, record.ExecutionID, testOwner, testRun))
+	require.NoError(t, store.SetDelivery(ctx, record.ExecutionID, testOwner, StatusFailed, "INTERNAL_ERROR"))
+	require.NoError(t, store.FinishRuntime(ctx, record.ExecutionID, testRun, RuntimeCompleted, ""))
+
+	require.NoError(t, store.ConvergeDeliveryFailed(ctx, record.ExecutionID, testRun))
+	stored, err := store.getByClientMessage(ctx, "session-1", "converge-1")
+	require.NoError(t, err)
+	require.Equal(t, StatusUnknown, stored.Status)
+	require.Equal(t, "INTERNAL_ERROR", stored.ErrorCode, "diagnostic error code is retained")
+
+	require.NoError(t, store.ConvergeDeliveryFailed(ctx, record.ExecutionID, testRun), "repeat is a no-op")
+	stored, err = store.getByClientMessage(ctx, "session-1", "converge-1")
+	require.NoError(t, err)
+	require.Equal(t, StatusUnknown, stored.Status)
+
+	require.NoError(t, store.ConvergeDeliveryFailed(ctx, record.ExecutionID, "run-other"), "wrong run is a no-op")
+}
+
+func TestSQLStore_ConvergeDeliveryFailedGuards(t *testing.T) {
+	t.Parallel()
+
+	t.Run("runtime not completed", func(t *testing.T) {
+		store, _ := newTestSQLStore(t)
+		record, _, err := store.Accept(context.Background(), testAcceptReq("session-1", "converge-2", "hash"))
+		require.NoError(t, err)
+		require.NoError(t, store.MarkRunning(context.Background(), record.ExecutionID, testOwner, testRun))
+		require.NoError(t, store.SetDelivery(context.Background(), record.ExecutionID, testOwner, StatusFailed, "INTERNAL_ERROR"))
+		require.NoError(t, store.ConvergeDeliveryFailed(context.Background(), record.ExecutionID, testRun))
+		stored, err := store.getByClientMessage(context.Background(), "session-1", "converge-2")
+		require.NoError(t, err)
+		require.Equal(t, StatusFailed, stored.Status, "failed delivery must survive until runtime completes")
+	})
+
+	t.Run("delivery not failed", func(t *testing.T) {
+		store, _ := newTestSQLStore(t)
+		record, _, err := store.Accept(context.Background(), testAcceptReq("session-1", "converge-3", "hash"))
+		require.NoError(t, err)
+		require.NoError(t, store.MarkRunning(context.Background(), record.ExecutionID, testOwner, testRun))
+		require.NoError(t, store.SetDelivery(context.Background(), record.ExecutionID, testOwner, StatusUnknown, "EXECUTION_TIMEOUT"))
+		require.NoError(t, store.FinishRuntime(context.Background(), record.ExecutionID, testRun, RuntimeCompleted, ""))
+		require.NoError(t, store.ConvergeDeliveryFailed(context.Background(), record.ExecutionID, testRun))
+		stored, err := store.getByClientMessage(context.Background(), "session-1", "converge-3")
+		require.NoError(t, err)
+		require.Equal(t, StatusUnknown, stored.Status)
+		require.Equal(t, "EXECUTION_TIMEOUT", stored.ErrorCode, "unknown delivery keeps its error code")
+	})
+}
+
 func TestSQLStore_RecoverExpiredLeases(t *testing.T) {
 	t.Parallel()
 	store, _ := newTestSQLStore(t)

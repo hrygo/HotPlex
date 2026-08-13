@@ -44,6 +44,16 @@ func (c *ServerCommander) InvokeSkill(ctx context.Context, invocation worker.Ski
 		"arguments": invocation.Args,
 	}
 	if err := c.doPost(ctx, "/session/"+url.PathEscape(c.getSessionID())+"/command", body, nil); err != nil {
+		// The OCS command endpoint blocks until the command's turn completes,
+		// so a client-side timeout does not mean the skill was not executed —
+		// the server keeps processing the already-delivered request. Classify
+		// timeouts as ErrKindTimeout (mirroring conn.Send) so the gateway's
+		// graceful branch applies: no error event, execution converges via the
+		// late Done instead of recording a spurious failure.
+		if isTimeoutError(err) {
+			return &worker.WorkerError{Kind: worker.ErrKindTimeout,
+				Message: fmt.Sprintf("opencode skill %q: input delivery timed out", invocation.Name), Cause: err}
+		}
 		return fmt.Errorf("opencode skill %q: %w", invocation.Name, err)
 	}
 	return nil
