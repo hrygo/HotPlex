@@ -150,7 +150,7 @@ func WorkspaceSandboxRoot(username string) string {
 | 机器用户（I3） | `apikey:<user_id>` | `apikey-<seg(user_id)>` | `apikey:` 前缀 + user_id 逐字符 sanitize |
 | OAuth 用户（I2） | `provider:subject` | `oauth-<seg(provider:subject)>` | 显式 `oauth-` 前缀 + 分段 sanitize |
 
-**段注入性（G1b，v3 评审 F1 修订）**：`seg` 为 sanitize 恒等**且全小写且非空**时原样返回（可读性保留）；否则追加**完整 SHA-256 十六进制摘要**（64 字符；评审第二轮否决 4-byte 截断——32 位前缀生日碰撞可被暴力构造），保证**同空间内**不同身份映射到不同目录段（`github:user/1` 与 `github:user-1` 不再碰撞；`Alice` 与 `alice` 在大小写不敏感文件系统上不再碰撞；空输入退化为纯摘要段）。
+**段注入性（G1b，v3 评审 F1/R6 修订）**：`seg` 为 sanitize 恒等**且全小写且非空且非 digest 输出形态**时原样返回（可读性保留）；否则追加**完整 SHA-256 十六进制摘要**（64 字符；评审第二轮否决 4-byte 截断——32 位前缀生日碰撞可被暴力构造），保证**同空间内**不同身份映射到不同目录段（`github:user/1` 与 `github:user-1` 不再碰撞；`Alice` 与 `alice` 在大小写不敏感文件系统上不再碰撞；空输入退化为纯摘要段）。**跨分支碰撞（R6）**：digest 分支输出形态本身是合法恒等输入（`"Abc"` → `"abc-<h>"` 与恒等输入 `"abc-<h>"`；空 base 变体 `"!!!"` → `"<h>"` 与恒等输入 `"<h>"`），恒等分支排除 digest 形态（`-[0-9a-f]{64}$` 后缀 / 纯 64-hex）后，digest 输出集合与恒等输出集合不相交，映射恢复注入。
 
 ```go
 // sandboxDirSegment 将 username 映射为沙箱目录段（四空间隔离 + 空间内注入，filesystem-safe）：
@@ -176,11 +176,18 @@ func sandboxDirSegment(username string) string {
 func sanitizePathSegment(s string) string { ... }
 
 // lossySafeSegment 返回 filesystem-safe 且注入（无碰撞）的目录段：
-// sanitize 恒等且全小写且非空 → 原样；否则追加完整 SHA-256 十六进制摘要
-// （64 字符，碰撞等价于 SHA-256 碰撞；空段/空输入退化为纯摘要段）。
+// sanitize 恒等且全小写且非空且非 digest 输出形态 → 原样；否则追加完整
+// SHA-256 十六进制摘要（64 字符，碰撞等价于 SHA-256 碰撞；空段/空输入
+// 退化为纯摘要段）。恒等分支排除 digest 形态输入（R6 跨分支碰撞）。
+var (
+	digestSuffixRe = regexp.MustCompile(`-[0-9a-f]{64}$`)
+	pureDigestRe   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
 func lossySafeSegment(s string) string {
 	seg := sanitizePathSegment(s)
-	if seg == s && seg == strings.ToLower(s) && s != "" {
+	if seg == s && seg == strings.ToLower(s) && s != "" &&
+		!digestSuffixRe.MatchString(s) && !pureDigestRe.MatchString(s) {
 		return seg
 	}
 	sum := sha256.Sum256([]byte(s))
@@ -337,7 +344,7 @@ ChatContainer 初始化
 | 场景 | 行为 |
 |------|------|
 | `HOTPLEX_HOME` 未设置 | 沙箱根 = `~/.hotplex/workspaces/<segment>`；**段名从 UUID 变为 username 派生是有意变更**（G1a），文件位置/可用性语义一致 |
-| **存量 UUID 根（P3）** | DB 存绝对路径，不重新校验，继续可用（grandfather）；该 workspace 的 work_dir **不可再改**（按新 base 校验 403），name/overrides 等字段不受影响；前端按 §5.2.4 F5 显示只读 |
+| **存量 UUID 根（P3）** | DB 存绝对路径，不重新校验，继续可用（grandfather）；该 workspace 的 work_dir **不可再改**（按新 base 校验 403），name/overrides 等字段不受影响（评审 R5：Update 将未变更 work_dir 视为 no-op，跳过沙箱重校验——前端 general-tab 保存时总是携带未变 work_dir，若不跳过则存量 workspace 的一切保存都会 403）；前端按 §5.2.4 F5 显示只读 |
 | **存量 `apikey-*`/`oauth-*` 密码用户** | username 原样作目录段（grandfather）；碰撞需预知机器 user_id（128-bit 随机），风险可接受；新注册已封锁 |
 | 设置后新建 workspace | 落于 `$HOTPLEX_HOME/workspaces/<segment>/<seg>` |
 | 设置 → 取消 `HOTPLEX_HOME` | 历史 workspace 仍指向旧绝对路径，正常 |
@@ -375,7 +382,7 @@ ChatContainer 初始化
 | 用例 | 内容 |
 |------|------|
 | `TestWorkspaceSandboxRoot`（新增） | ① `t.Setenv("HOTPLEX_HOME", "/x")` → `/x/workspaces/alice`；② 未设置 → `$HOME/.hotplex/workspaces/alice`；③ `HOTPLEX_HOME` 相对值（`t.Setenv("HOTPLEX_HOME", "rel")`）→ 返回绝对路径（Abs 兜底）；④ `apikey:<id>` → `/…/workspaces/apikey-<sanitized id>`；⑤ `github:user` → `/…/workspaces/oauth-github-user-<64-hex SHA-256>`（有损 → 完整摘要后缀） |
-| `TestSandboxDirSegment`（新增，四空间表驱动 + 注入性） | 密码 `alice`/`alice-smith` 原样；系统 `anonymous`/`api_user` 原样；机器 `apikey:abc` → `apikey-abc`、`apikey:a/b` → `apikey-a-b-c14cddc0…`（有损 + 完整摘要）、`apikey:..` → `apikey-5ec1f7e7…`（逃逸段退化为纯摘要）、空输入 → 纯摘要段；OAuth `github:user` → `oauth-github-user-e14ec476…`、`github:user/1` → `oauth-github-user-1-b2c25428…`；`TestSandboxDirSegment_Injectivity`：`apikey:a/b` vs `apikey:a-b`、`github:user/1` vs `github:user-1`、`Alice` vs `alice` 等碰撞对必须映射不同段（G1b） |
+| `TestSandboxDirSegment`（新增，四空间表驱动 + 注入性） | 密码 `alice`/`alice-smith` 原样；系统 `anonymous`/`api_user` 原样；机器 `apikey:abc` → `apikey-abc`、`apikey:a/b` → `apikey-a-b-c14cddc0…`（有损 + 完整摘要）、`apikey:..` → `apikey-5ec1f7e7…`（逃逸段退化为纯摘要）、空输入 → 纯摘要段；OAuth `github:user` → `oauth-github-user-e14ec476…`、`github:user/1` → `oauth-github-user-1-b2c25428…`；`TestSandboxDirSegment_Injectivity`：`apikey:a/b` vs `apikey:a-b`、`github:user/1` vs `github:user-1`、`Alice` vs `alice` 等碰撞对必须映射不同段（G1b）；**R6 跨分支碰撞对**：`apikey:Abc` vs `apikey:abc-<sha256(Abc)>`、`!!!` vs `<sha256(!!!)>`（digest 输出形态的恒等输入回放） |
 | `TestValidateWorkspaceWorkDir`（重构） | 新签名（sandboxRoot）：root 本身/`root/sub`/`root/a/b` 通过；`root/../other`、`/tmp/x`、其他用户 root 拒绝；`HOTPLEX_HOME` 注入用例：dir 在 `tmp/workspaces/<segment>` 通过、在 `$HOME/.hotplex/workspaces/<segment>` 拒绝（**证明沙箱不再锚定真实 home**） |
 | `TestValidateUsername_NamespaceReserved`（新增，P1） | `apikey-<x>`、`oauth-<x>` 前缀拒绝；字面量 `anonymous`、`api_user` 拒绝；`apikey:<x>` 拒绝（既有）；`alice`/`alice-smith` 通过；回归 `identity_provider_test.go` 既有表驱动用例 |
 | `TestOAuthProviderNameReserved`（新增，P1） | OAuth provider 配置校验：`apikey`、`oauth` 拒绝，`github` 通过（校验函数所在包测试） |
@@ -388,6 +395,7 @@ ChatContainer 初始化
 - 新增 `TestWorkspace_List_ReturnsWorkspaceRoot`：`HOTPLEX_HOME` 注入 → List 响应 `workspace_root` == `tmp/workspaces/<segment>`。
 - 新增 `TestWorkspace_Create_SystemIdentityFallback`：dev 模式（idp nil，uid=`anonymous`）创建 workspace → 成功，work_dir 落 `workspaces/anonymous/` 下（**P4 回归，v2 会 403**）。
 - 新增 `TestWorkspace_Update_AdminEditsOtherOwner`：admin 代改他人 workspace 的 work_dir → 按 **owner** 的段校验（owner 段内通过，owner 段外 403）。
+- 新增 `TestWorkspace_Update_LegacyUidRoot_UnchangedWorkDirNoop`（R5）：存量 uid-keyed 根 workspace，PATCH 携带未变 legacy work_dir + name 变更 → 200（name 生效、work_dir 原样）；显式修改 legacy work_dir → 403 `WORK_DIR_OUTSIDE_SANDBOX`（P3 不可再改）。
 - 既有 `InsideSandbox_Accepted` / `OutsideSandbox_Rejected`：断言消息改为动态匹配或仅断言 code；helper 同步段名化。
 
 ### 6.3 前端
@@ -462,3 +470,5 @@ ChatContainer 初始化
 | 3.5 | 实现后评审（第二轮） | **R2（P2）**：空 username 经 `lossySafeSegment("")` 返回空段，`WorkspaceSandboxRoot("")` 落到 `workspaces/` 根 | 恒等判定增加 `s != ""`，空输入退化为纯摘要段；`TestSandboxDirSegment` 补空输入用例 |
 | 3.5 | 实现后评审（第二轮） | **R3（P2）**：`uid-system` 重试的第二次唯一冲突被吞掉，FK 仍失败 | 确定性后缀循环（`uid-system-N`，16 次穷尽后显式报错） |
 | 3.5 | 实现后评审（第二轮） | **R4（P2）**：spec §6.1 `TestWorkspaceSandboxRoot` 第⑤行仍写无摘要段名，与实现/§6.1 其他行不一致 | 该行同步为"有损 → 完整 SHA-256 摘要后缀" |
+| 4 | PR #963 code-review | **R5（P1）**：Update 无条件重校验 work_dir——前端 general-tab 保存总是携带未变 work_dir，存量 UUID 根 workspace 的 name/overrides 等一切保存都 403，违背 P3"其他字段不受影响" | Update 将未变更 work_dir 视为 no-op（跳过沙箱重校验），校验只在值真正变化时生效；`TestWorkspace_Update_LegacyUidRoot_UnchangedWorkDirNoop`（§6.1） |
+| 4 | PR #963 code-review | **R6（P1）**：`lossySafeSegment` 跨分支碰撞——digest 输出形态本身是合法恒等输入（`apikey:Abc` → `apikey-abc-<h>` vs 恒等输入 `apikey:abc-<h>`；空 base 变体 `!!!` → `<h>` vs 恒等输入 `<h>`），违反 G1b 注入性 | 恒等分支排除 digest 形态（`-[0-9a-f]{64}$` 后缀 / 纯 64-hex）；`TestSandboxDirSegment_Injectivity` 补两组跨分支碰撞对（§5.1.2/§6.1 同步） |
