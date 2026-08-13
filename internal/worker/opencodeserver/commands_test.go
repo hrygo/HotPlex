@@ -3,12 +3,14 @@ package opencodeserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -732,6 +734,31 @@ func TestServerCommanderInvokeSkill(t *testing.T) {
 	require.Equal(t, "/session/sess-test-123/command", gotPath)
 	require.Equal(t, "oracle-dba", gotBody["command"])
 	require.Equal(t, "10.102.78.1", gotBody["arguments"])
+}
+
+func TestServerCommanderInvokeSkillTimeoutClassified(t *testing.T) {
+	t.Parallel()
+
+	// The OCS POST /session/{id}/command endpoint blocks until the command's
+	// turn completes. Simulate a slow server: respond only when the client
+	// disconnects (request context cancelled).
+	c, _ := newTestCommander(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(200 * time.Millisecond):
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := c.InvokeSkill(ctx, worker.SkillInvocation{Name: "oracle-dba", Args: ""})
+	require.Error(t, err)
+
+	var we *worker.WorkerError
+	require.True(t, errors.As(err, &we), "expected *worker.WorkerError, got %T: %v", err, err)
+	require.Equal(t, worker.ErrKindTimeout, we.Kind)
+	require.ErrorIs(t, we.Cause, context.DeadlineExceeded)
 }
 
 func TestServerCommanderMCPStatus(t *testing.T) {

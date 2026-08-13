@@ -826,6 +826,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 
 | 变量 | 对应配置 | 默认值 |
 |------|----------|--------|
+| `HOTPLEX_HOME` | workspace 根目录（含默认配置文件 `$HOTPLEX_HOME/config.yaml`、数据、日志、PID 等全部状态） | `~/.hotplex` |
 | `HOTPLEX_LOG_LEVEL` | `log.level` | `info` |
 | `HOTPLEX_LOG_FORMAT` | `log.format` | `json` |
 | `HOTPLEX_DB_PATH` | `db.path` | `~/.hotplex/data/hotplex.db` |

@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.40.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.41.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,12 +133,11 @@ HotPlex separates the place where a user talks from the agent that performs the 
 
 Worker choice can be set per bot or platform, with shared defaults for the rest of the deployment.
 
-## ✨ Latest release: v1.40.0
+## ✨ Latest release: v1.41.0
 
-- **Keep talking while an agent is busy.** Follow-up input is injected into the current Claude Code or Codex CLI turn; ACP and OpenCode Server supplements are buffered and replayed after completion.
-- **One protocol contract across every SDK.** A canonical AEP v1 schema and 38 golden envelopes are checked against Go, TypeScript, Python, and Java clients in CI.
-- **Operate from a complete admin experience.** The v1.38 line includes dashboards for sessions, bots, cron jobs, users, API keys, skills, and activity.
-- **Resume with stronger reliability.** Session sequence hydration and ACP resume fixes prevent history loss and event-sequence collisions across reconnects.
+- **One env var relocates the whole workspace.** `HOTPLEX_HOME` moves the default config, data, logs, PID, agent-configs, skills, worker work dirs, and the WebChat sandbox together — no more split-brain between config and state.
+- **Deliveries converge after late completions.** Worker runs that finish after a failed-delivery marker now converge the execution to its terminal state instead of leaking it.
+- **Cleaner, quieter logs.** ANSI escape sequences are stripped from worker stderr, and repetitive codexcli MCP status updates are deduplicated.
 
 See the [changelog](CHANGELOG.md) for the complete release history.
 

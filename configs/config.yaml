@@ -236,7 +236,11 @@ worker:
     idle_drain_period: 30m
     ready_timeout: 10s
     ready_poll_interval: 200ms
-    http_timeout: 30s
+    # OCS /session/{id}/command and /message block until the turn completes, so
+    # the HTTP timeout must tolerate long-running turns (native skill dispatch
+    # calls the blocking command endpoint). 5m mirrors the claudecode input
+    # delivery timeout.
+    http_timeout: 5m
     # Fallback context window size (tokens). OCS HTTP API does not expose the
     # real model context window, so this configurable value feeds context_pct.
     # Default 200000; set 0 to leave context_pct unset. (spec §5 O1)

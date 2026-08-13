@@ -111,10 +111,43 @@ func TestNewFenceAdminClient_UsesRunningConfigPath(t *testing.T) {
 	writeGatewayState(runningConfigPath, false)
 	t.Cleanup(removeGatewayState)
 
-	client, err := newFenceAdminClient(config.DefaultConfigPath)
+	client, err := newFenceAdminClient("")
 	require.NoError(t, err)
 	require.Equal(t, "http://localhost:19999", client.baseURL)
 	require.Equal(t, "running-token", client.token)
+}
+
+func TestNewFenceAdminClient_DefaultFallbackUnsetHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOTPLEX_HOME", "")
+
+	runningConfigPath := filepath.Join(t.TempDir(), "running.yaml")
+	writeFenceClientConfig(t, runningConfigPath, "localhost:8888", "localhost:19997", "running-token")
+	writeGatewayState(runningConfigPath, false)
+	t.Cleanup(removeGatewayState)
+
+	client, err := newFenceAdminClient("")
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:19997", client.baseURL)
+	require.Equal(t, "running-token", client.token)
+}
+
+func TestNewFenceAdminClient_ExplicitDefaultPathNotReplaced(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOTPLEX_HOME", filepath.Join(t.TempDir(), "hotplex"))
+
+	runningConfigPath := filepath.Join(t.TempDir(), "running.yaml")
+	explicitPath := config.DefaultConfigPath() // exactly the current default absolute path
+	require.NoError(t, os.MkdirAll(filepath.Dir(explicitPath), 0o755))
+	writeFenceClientConfig(t, runningConfigPath, "localhost:8888", "localhost:19996", "running-token")
+	writeFenceClientConfig(t, explicitPath, "localhost:8888", "localhost:29996", "explicit-token")
+	writeGatewayState(runningConfigPath, false)
+	t.Cleanup(removeGatewayState)
+
+	client, err := newFenceAdminClient(explicitPath)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:29996", client.baseURL)
+	require.Equal(t, "explicit-token", client.token)
 }
 
 func TestNewFenceAdminClient_ExplicitConfigPathWins(t *testing.T) {
@@ -132,6 +165,21 @@ func TestNewFenceAdminClient_ExplicitConfigPathWins(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "http://localhost:29999", client.baseURL)
 	require.Equal(t, "explicit-token", client.token)
+}
+
+func TestNewFenceAdminClient_NoStateFallsBackToDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOTPLEX_HOME", filepath.Join(t.TempDir(), "hotplex"))
+
+	defaultPath := config.DefaultConfigPath()
+	require.NoError(t, os.MkdirAll(filepath.Dir(defaultPath), 0o755))
+	writeFenceClientConfig(t, defaultPath, "localhost:8888", "localhost:19995", "default-token")
+	removeGatewayState() // ensure no running-gateway state interferes
+
+	client, err := newFenceAdminClient("")
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:19995", client.baseURL)
+	require.Equal(t, "default-token", client.token)
 }
 
 func writeFenceClientConfig(t *testing.T, path, gatewayAddr, adminAddr, token string) {

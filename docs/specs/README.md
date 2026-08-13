@@ -29,6 +29,8 @@
 | [Scope-Aware-Capability-Inventory-Spec.md](./Scope-Aware-Capability-Inventory-Spec.md) | Scope-aware capability inventory、precedence、safe materialization 与 enforcement contract | approved | 2026-08-04 | 设计已冻结 |
 | [WebChat-Multitenancy-Foundation-Design-Spec.md](./WebChat-Multitenancy-Foundation-Design-Spec.md) | WebChat 多租户地基（spec ①） — 身份/workspace/隔离/配额后端地基设计 | draft | 2026-06-15 | 0% |
 | [WebChat-Multitenancy-Roadmap-Spec.md](./WebChat-Multitenancy-Roadmap-Spec.md) | WebChat 多租户路线图 — 后续 spec ②-⑥ 阶段规划与依赖编排 | proposed | 2026-06-15 | 0% |
+| [WebChat-Workspace-Create-WorkDir-Prefix-Spec.md](./WebChat-Workspace-Create-WorkDir-Prefix-Spec.md) | WebChat Workspace 新建入口 + work_dir 沙箱前缀约束 — 沙箱定义已由 Root-HotplexHome spec 修订 | 设计已认可 | 2026-06-24 | 待实现 |
+| [WebChat-Workspace-Root-HotplexHome-Spec.md](./WebChat-Workspace-Root-HotplexHome-Spec.md) | WebChat Workspace 沙箱根跟随 HOTPLEX_HOME — 沙箱 base 收敛 + username 目录段（P1 防碰撞/P2 不可变/P3 grandfather）+ workspace_root API + 前端动态根 | draft | 2026-08-13 | 0% |
 
 ### Worker 与 Session
 

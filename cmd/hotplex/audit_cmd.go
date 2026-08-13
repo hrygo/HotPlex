@@ -141,7 +141,7 @@ Exits non-zero when the chain is broken (CI/cron gate).`,
 				len(result.BrokenRows), result.RowsChecked)
 		},
 	}
-	cmd.PersistentFlags().String("config", config.DefaultConfigPath, "配置文件路径（默认 ~/.hotplex/config.yaml）")
+	cmd.PersistentFlags().String("config", config.DefaultConfigPath(), "配置文件路径（默认 $HOTPLEX_HOME/config.yaml，未设置时为 ~/.hotplex/config.yaml）")
 	return cmd
 }
 
@@ -227,6 +227,6 @@ one checkpoint row and is irreversible: re-run with --confirm to apply.`,
 	if err := cmd.MarkFlagRequired("next-id"); err != nil {
 		panic(err)
 	}
-	cmd.PersistentFlags().String("config", config.DefaultConfigPath, "配置文件路径（默认 ~/.hotplex/config.yaml）")
+	cmd.PersistentFlags().String("config", config.DefaultConfigPath(), "配置文件路径（默认 $HOTPLEX_HOME/config.yaml，未设置时为 ~/.hotplex/config.yaml）")
 	return cmd
 }

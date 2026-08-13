@@ -158,7 +158,51 @@ worker:
 
 ---
 
-## 7. 多环境策略
+## 7. 工作区根目录（HOTPLEX_HOME）
+
+`HOTPLEX_HOME` 是**唯一一个**控制 HotPlex 全部状态目录的环境变量（v1.41.0+）。设置后，默认配置文件、数据、日志、PID、Agent 人格、skills/phrases、Worker 默认工作目录与 WebChat 工作区沙箱**整体迁移**，避免"配置在 A、数据在 B"的分离。
+
+| 目录 | 默认 | `HOTPLEX_HOME=/data/hotplex` 时 |
+|------|------|--------------------------------|
+| 默认配置 | `~/.hotplex/config.yaml` | `/data/hotplex/config.yaml` |
+| 数据 / 日志 / PID | `~/.hotplex/{data,logs,.pids}/` | `/data/hotplex/{data,logs,.pids}/` |
+| Agent 人格 | `~/.hotplex/agent-configs/` | `/data/hotplex/agent-configs/` |
+| skills / phrases | `~/.hotplex/{skills,phrases}/` | `/data/hotplex/{skills,phrases}/` |
+| Worker 默认工作目录 | `~/.hotplex/workspace` | `/data/hotplex/workspace` |
+| WebChat 工作区沙箱 | `~/.hotplex/workspaces/` | `/data/hotplex/workspaces/` |
+
+**优先级关系**：`--config <path>` > `$HOTPLEX_HOME/config.yaml` > `~/.hotplex/config.yaml`。显式传入的 `--config` 始终优先，`HOTPLEX_HOME` 只决定"未指定 `--config` 时的默认配置位置"与其余状态目录。
+
+**生产迁移 SOP**：
+
+```bash
+# 1. 停机
+hotplex service stop
+
+# 2. 整体迁移（不要遗漏任何子目录）
+mv ~/.hotplex /data/hotplex
+
+# 3. 注入环境变量（systemd 用户级服务示例）
+systemctl --user edit hotplex
+#   [Service]
+#   Environment=HOTPLEX_HOME=/data/hotplex
+
+# 4. 启动并验证
+hotplex service start
+hotplex doctor          # 所有检查 PASS，配置与数据目录一致
+curl localhost:8888/health
+```
+
+**注意事项**：
+
+- `HOTPLEX_HOME` 不自动搬运旧数据——必须先手动迁移再启动，否则新目录为空、旧数据被忽略（重新 onboard 或从空状态开始）。
+- 未设置时行为与旧版完全一致（回退 `~/.hotplex`）。
+- 属于"静态"设置：运行中修改不生效，需重启 gateway。
+- Docker/K8s 场景可将 `HOTPLEX_HOME` 挂载到持久卷路径（如 `-e HOTPLEX_HOME=/data` + volume 挂载 `/data`）。
+
+---
+
+## 8. 多环境策略
 
 ### 目录结构
 
@@ -203,7 +247,7 @@ export HOTPLEX_SECURITY_TLS_ENABLED=true
 
 ---
 
-## 8. 配置变更 SOP
+## 9. 配置变更 SOP
 
 1. 在非生产环境验证配置变更
 2. 通过热重载应用动态字段变更

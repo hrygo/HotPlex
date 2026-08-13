@@ -47,7 +47,7 @@ Callers import only `croncli`; the parent `internal/cron` stays the single sourc
 - `NotifyGateway` — SIGHUP reload after create/update/delete; CLI calls both as needed.
 
 **Config path reconciliation**
-- When `--config` is unset or equals `config.DefaultConfigPath`, `TriggerViaAdmin`/`gatewayConfigPath` consult the PID file to load the SAME `.env` the running gateway uses — avoids picking up a stale dev config.
+- When `--config` is unset, `TriggerViaAdmin`/`gatewayConfigPath` consult the PID file to load the SAME `.env` the running gateway uses — avoids picking up a stale dev config. Callers translate "flag not passed" (`cmd.Flags().Changed("config") == false`) to an empty string; an explicitly passed path is never replaced.
 
 **Safe env loading**
 - `loadEnvFile` mirrors the slack package: skip protected keys, never overwrite existing env.

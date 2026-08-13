@@ -251,8 +251,7 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 
 			// Per-bot phrases loading with cascade-append.
 			// Must happen AFTER adapter.Start() so BotID is resolved from the platform.
-			homeDir, _ := os.UserHomeDir()
-			phrasesDir := filepath.Join(homeDir, ".hotplex", "phrases")
+			phrasesDir := filepath.Join(config.HotplexHome(), "phrases")
 			phr, phrasesErr := phrases.Load(phrasesDir, string(entry.Platform), entry.Name)
 			if phrasesErr != nil {
 				log.Warn("phrases: load failed, using defaults", "err", phrasesErr)

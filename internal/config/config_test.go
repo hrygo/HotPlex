@@ -1254,3 +1254,27 @@ func TestResolveInjectExclude(t *testing.T) {
 		})
 	}
 }
+
+// TestDefaultConfigPath verifies DefaultConfigPath follows HOTPLEX_HOME and
+// falls back to ~/.hotplex/config.yaml when it is unset. Serial on purpose:
+// t.Setenv mutates process-wide environment variables.
+func TestDefaultConfigPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		hotplexHome string
+		home        string
+		want        string
+	}{
+		{"follows HOTPLEX_HOME", "/opt/hotplex", "/users/x", "/opt/hotplex/config.yaml"},
+		{"falls back to user home", "", "/users/x", "/users/x/.hotplex/config.yaml"},
+		{"falls back to temp base without home", "", "", filepath.Join(TempBaseDir(), "config.yaml")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOTPLEX_HOME", tt.hotplexHome)
+			t.Setenv("HOME", tt.home)
+			require.Equal(t, tt.want, DefaultConfigPath())
+		})
+	}
+}

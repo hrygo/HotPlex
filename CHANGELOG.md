@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.41.0] - 2026-08-13
+
+### Summary
+
+v1.41.0 是一次 minor 版本更新，核心主题是 **可配置工作区根目录（issue #964）**——一个 `HOTPLEX_HOME` 环境变量统一控制全部状态：默认配置文件路径、WebChat 工作区沙箱、skills/phrases 目录、Worker 默认工作目录全部跟随解析，替代硬编码 `~/.hotplex`；未设置时完整回退旧行为，设置后整个 workspace（配置 + 数据 + 日志 + PID + 沙箱）整体迁移。同时修复了投递收敛泄漏（晚到 `Done` 收敛 `failed` 投递）与一批稳定性问题（workspace 更新误 403、worker stderr ANSI 污染、codex MCP 日志洪泛）。
+
+### Added
+
+- **Configuration**: `HOTPLEX_HOME` workspace root — the default config path (`DefaultConfigPath()`), WebChat workspace sandbox root, skills/phrases directories, and worker default work dir all resolve from `HOTPLEX_HOME`, replacing hardcoded `~/.hotplex`; unset falls back to legacy behavior. One env var relocates the entire workspace (config + data + logs + PID + sandbox) with injective four-identity-space sandbox segments. (#964)
+- **WebChat UI**: Sandbox-aware workspace paths — a `workspace-path` utility builds server-consistent sandbox paths, so workspace creation and general-tab saves keep working after `HOTPLEX_HOME` is set.
+
+### Fixed
+
+- **Gateway Core**: Late `Done` events converge `failed` deliveries — a worker run completing after its delivery was marked failed no longer leaves the execution stranded in a stale state.
+- **Gateway Core**: Unchanged `work_dir` is a no-op in workspace Update — saving name/overrides of a legacy UUID-root workspace no longer 403s from spurious sandbox re-validation.
+- **Worker**: ANSI escape sequences are stripped from worker stderr logs, keeping JSON logs clean of raw terminal control codes.
+- **Worker**: codexcli repetitive mcpServer/startupStatus updates are deduplicated, suppressing log flooding on status transitions.
+
 ## [1.40.0] - 2026-08-07
 
 ### Summary

@@ -72,6 +72,37 @@ func TestOAuthConfig_Validate_MissingIssuer(t *testing.T) {
 	require.Contains(t, err.Error(), "issuer is required")
 }
 
+// TestOAuthConfig_Validate_ReservedProviderName: P1 — OAuth provider 名禁止
+// apikey/oauth，封闭 OAuth 入口对机器/系统沙箱空间的侵入（spec §5.1.2 P1）。
+func TestOAuthConfig_Validate_ReservedProviderName(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"apikey", "oauth"} {
+		name := name
+		t.Run("reserved "+name, func(t *testing.T) {
+			t.Parallel()
+			cfg := OAuthConfig{
+				Providers: []OAuthProviderConfig{
+					{Name: name, Issuer: "https://sso.example.com", ClientID: "id", ClientSecret: "secret"},
+				},
+			}
+			err := cfg.Validate()
+			require.Error(t, err, "provider name %q must be rejected", name)
+			require.Contains(t, err.Error(), "reserved")
+		})
+	}
+
+	// github 等普通 provider 名不受影响。
+	t.Run("ordinary name accepted", func(t *testing.T) {
+		t.Parallel()
+		cfg := OAuthConfig{
+			Providers: []OAuthProviderConfig{
+				{Name: "github", Issuer: "https://github.com", ClientID: "id", ClientSecret: "secret"},
+			},
+		}
+		require.NoError(t, cfg.Validate())
+	})
+}
+
 func TestOAuthProviderConfig_DefaultScopes(t *testing.T) {
 	t.Parallel()
 	p := OAuthProviderConfig{Scopes: nil}

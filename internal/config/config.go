@@ -154,10 +154,14 @@ func (c *Config) Warnings() []string {
 	return warns
 }
 
-// DefaultConfigPath is the default configuration file path used by the CLI
-// and the gateway. Defined here as the single source of truth to avoid
-// duplication across packages.
-const DefaultConfigPath = "~/.hotplex/config.yaml"
+// DefaultConfigPath returns the default configuration file path used by the
+// CLI and the gateway. Defined here as the single source of truth to avoid
+// duplication across packages. It follows HOTPLEX_HOME so the whole workspace
+// (config + data + logs + PID) moves with the environment variable; falls back
+// to ~/.hotplex/config.yaml when HOTPLEX_HOME is unset.
+func DefaultConfigPath() string {
+	return filepath.Join(HotplexHome(), "config.yaml")
+}
 
 // HotplexHome returns the base directory for all HotPlex state (~/.hotplex).
 // It does not create the directory — callers should use ensureDir or rely on

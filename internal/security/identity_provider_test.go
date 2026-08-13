@@ -55,3 +55,41 @@ func stringOfChar(c rune, n int) string {
 	}
 	return string(b)
 }
+
+// TestValidateUsername_NamespaceReserved: P1 — 密码注册入口封锁机器（apikey-）
+// 与 OAuth（oauth-）空间前缀及系统身份字面量（anonymous/api_user），
+// 四身份空间静态不相交（spec §5.1.2 P1）。
+func TestValidateUsername_NamespaceReserved(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		wantErr  bool
+	}{
+		// 保留前缀（机器/OAuth 空间）。
+		{"apikey prefix with dash rejected", "apikey-svc1", true},
+		{"apikey prefix exact rejected", "apikey-", true},
+		{"oauth prefix rejected", "oauth-github", true},
+		{"oauth prefix exact rejected", "oauth-", true},
+		// 系统身份字面量。
+		{"literal anonymous rejected", "anonymous", true},
+		{"literal api_user rejected", "api_user", true},
+		// 普通用户名不受影响。
+		{"ordinary username ok", "alice", false},
+		{"ordinary with separators ok", "alice-smith.dev", false},
+		{"apikey-containing middle ok", "myapikey-service", false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateUsername(tt.username)
+			if tt.wantErr {
+				require.ErrorIs(t, err, ErrInvalidUsername, "username=%q", tt.username)
+			} else {
+				require.NoError(t, err, "username=%q", tt.username)
+			}
+		})
+	}
+}

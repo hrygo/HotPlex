@@ -6,7 +6,8 @@ import { ApiError } from '@/lib/api/errors';
 import { TabPanel } from './tab-panel';
 import {
   resolveSandboxAnchor,
-  sanitizeWorkspaceDir,
+  sanitizeWorkspaceDirMulti,
+  rejoinWorkDir,
 } from '@/lib/utils/workspace-path';
 import { useTranslation } from 'react-i18next';
 
@@ -31,18 +32,25 @@ const PERMISSION_MODE_OPTIONS: { value: string; label: string }[] = [
 
 interface GeneralTabProps {
   workspace: Workspace;
+  // 服务端 workspace 沙箱根（List 响应 workspace_root），用于判断 work_dir 是否
+  // 属于当前 root（UUID grandfather 根不在其下 → 只读，spec Root-HotplexHome §5.2.4 F5）。
+  workspaceRoot: string;
   isAdmin: boolean;
   onUpdated?: (ws: Workspace) => void;
 }
 
-export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
+export function GeneralTab({ workspace, workspaceRoot, isAdmin, onUpdated }: GeneralTabProps) {
   const { t } = useTranslation(['chat', 'common']);
-  // Anchor the sandbox by owner_id rather than a hard-coded ~/ prefix: backend
-  // ExpandAndAbs stores work_dir as an absolute $HOME path, so the on-disk form
-  // differs from the ~/ form used by the create flow. resolveSandboxAnchor reads
-  // the real prefix straight off work_dir, so both forms resolve correctly.
-  const anchor = resolveSandboxAnchor(workspace.work_dir, workspace.owner_user_id);
-  const segEditable = anchor !== null;
+  // Anchor the sandbox by extracting workspaces/<segment>/ straight off work_dir
+  // (v3: no identity param — compatible with both UUID grandfather roots and
+  // username roots). Editability additionally requires the work_dir to live under
+  // the CURRENT server workspace_root, so a grandfather root becomes read-only.
+  const anchor = resolveSandboxAnchor(workspace.work_dir);
+  const rootBase = workspaceRoot.replace(/\/+$/, '');
+  const underCurrentRoot =
+    rootBase.length > 0 &&
+    (workspace.work_dir === rootBase || workspace.work_dir.startsWith(rootBase + '/'));
+  const segEditable = anchor !== null && underCurrentRoot;
   const prefix = anchor?.prefix ?? '';
   const segBaseline = anchor?.seg ?? '';
 
@@ -63,11 +71,11 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
     setName(workspace.name);
     setWorker(workspace.worker_preference || '');
     setPermMode(workspace.permission_mode || 'workspace');
-    const a = resolveSandboxAnchor(workspace.work_dir, workspace.owner_user_id);
+    const a = resolveSandboxAnchor(workspace.work_dir);
     setSeg(a?.seg ?? workspace.work_dir);
     setError(null);
     setSuccess(false);
-  }, [workspace.id, workspace.name, workspace.worker_preference, workspace.permission_mode, workspace.work_dir, workspace.owner_user_id, workspace.updated_at]);
+  }, [workspace.id, workspace.name, workspace.worker_preference, workspace.permission_mode, workspace.work_dir, workspace.updated_at]);
 
   useEffect(() => () => {
     if (successTimer.current) clearTimeout(successTimer.current);
@@ -79,10 +87,10 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
     permMode !== (workspace.permission_mode || 'workspace') ||
     (segEditable && seg.trim() !== segBaseline);
 
-  const previewSeg = segEditable ? sanitizeWorkspaceDir(seg) : '';
+  const previewSeg = segEditable && seg.trim() ? sanitizeWorkspaceDirMulti(seg) : '';
   const previewPath = segEditable
     ? previewSeg
-      ? `${prefix}${previewSeg}`
+      ? `${prefix.replace(/\/+$/, '')}/${previewSeg}`
       : prefix.replace(/\/$/, '')
     : workspace.work_dir;
 
@@ -91,10 +99,10 @@ export function GeneralTab({ workspace, isAdmin, onUpdated }: GeneralTabProps) {
     setError(null);
     setSuccess(false);
     try {
-      // seg is only editable when it resolves inside the sandbox prefix, so
-      // rejoining prefix + sanitized seg always yields a sandbox-conformant
-      // work_dir (backend ValidateWorkspaceWorkDir accepts it).
-      const workDir = segEditable ? `${prefix}${sanitizeWorkspaceDir(seg)}` : workspace.work_dir;
+      // seg 仅当锚点解析成功且 work_dir 在当前 workspace_root 下时可编辑；重拼路径
+      // 经 rejoinWorkDir：空段（沙箱根本身）返回根、多级段原样保留（评审 F3/F4 修复），
+      // 后端 ValidateWorkspaceWorkDir 接受。
+      const workDir = segEditable ? rejoinWorkDir(prefix, seg) : workspace.work_dir;
       const updated = await updateWorkspace(workspace.id, {
         name: name.trim(),
         workerPreference: worker,

@@ -170,9 +170,58 @@ hotplex cron create \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
 ```
 
+### 自定义工作区根目录（HOTPLEX_HOME）
+
+默认情况下，HotPlex 的所有状态都存放在 `~/.hotplex/`。设置 **`HOTPLEX_HOME`** 环境变量即可把整个工作区迁移到任意目录（如独立数据盘 `/data/hotplex`）——**一个环境变量控制全部状态**，不再出现"配置在 A、数据在 B"的分离。
+
+| 内容 | 默认位置 | 设置 `HOTPLEX_HOME=/data/hotplex` 后 |
+|------|---------|--------------------------------------|
+| 默认配置文件 | `~/.hotplex/config.yaml` | `/data/hotplex/config.yaml` |
+| 数据 / 日志 / PID | `~/.hotplex/data|logs|.pids/` | `/data/hotplex/data|logs|.pids/` |
+| Agent 人格 | `~/.hotplex/agent-configs/` | `/data/hotplex/agent-configs/` |
+| skills / phrases | `~/.hotplex/skills|phrases/` | `/data/hotplex/skills|phrases/` |
+| Worker 默认工作目录 | `~/.hotplex/workspace` | `/data/hotplex/workspace` |
+| WebChat 工作区沙箱 | `~/.hotplex/workspaces/` | `/data/hotplex/workspaces/` |
+
+**配置方法**（shell 配置文件、systemd 或开发模式 `.env` 均可）：
+
+```bash
+# 方式一：shell 环境变量（当前会话生效）
+export HOTPLEX_HOME=/data/hotplex
+hotplex gateway start
+
+# 方式二：写入 shell 配置文件（每次登录自动生效）
+echo 'export HOTPLEX_HOME=/data/hotplex' >> ~/.zshrc
+source ~/.zshrc
+
+# 方式三：systemd 用户级服务
+systemctl --user edit hotplex
+#   添加两行：
+#     [Service]
+#     Environment=HOTPLEX_HOME=/data/hotplex
+```
+
+> 开发模式（`make dev`）下也可写入项目 `.env`（`HOTPLEX_HOME=/data/hotplex`），由 dev.sh 自动加载；**安装的二进制不会自动读取 `.env`**，请使用 shell 配置文件或 systemd 注入。
+
+**迁移已有数据**：`HOTPLEX_HOME` 不会自动搬运旧数据，请手动迁移：
+
+```bash
+hotplex service stop
+mv ~/.hotplex /data/hotplex
+export HOTPLEX_HOME=/data/hotplex
+hotplex service start
+hotplex doctor        # 确认配置与数据目录一致、所有检查 PASS
+```
+
+**注意事项**：
+
+- 未设置 `HOTPLEX_HOME` 时行为与旧版完全一致（回退 `~/.hotplex`）。
+- 显式 `--config <path>` 始终优先于 `$HOTPLEX_HOME/config.yaml`。
+- 请勿只设置变量而不迁移数据：设置后 gateway 会从新目录读取配置与数据，旧目录将被忽略。
+
 ### Agent 人格配置
 
-通过 Markdown 文件定制 Agent 行为：
+通过 Markdown 文件定制 Agent 行为（目录为 `$HOTPLEX_HOME/agent-configs/`，未设置 `HOTPLEX_HOME` 时为 `~/.hotplex/agent-configs/`）：
 
 ```
 ~/.hotplex/agent-configs/

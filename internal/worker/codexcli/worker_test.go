@@ -2,6 +2,7 @@ package codexcli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -2716,6 +2717,45 @@ func TestInjectHistoryPrefixPreservesSentinelContent(t *testing.T) {
 }
 
 // ─── Per-Thread Converter Isolation Tests (#813) ─────────────────────────
+
+// TestManager_DispatchNotification_SkipsHighFrequencyLogs verifies the
+// high-frequency notification log filter, including mcpServer/startupStatus/updated
+// which burst ~25 times in 1s at session start (dev logs) — the dispatch itself
+// still reaches subscribers; only the DEBUG log line is suppressed.
+func TestManager_DispatchNotification_SkipsHighFrequencyLogs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mgr := NewCodexAppServerManager(logger, config.CodexCLIConfig{IdleDrainPeriod: time.Minute})
+
+	for _, method := range []string{
+		"mcpServer/startupStatus/updated",
+		"thread/tokenUsage/updated",
+		"item/agentMessage/delta",
+	} {
+		mgr.dispatchNotification(&JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  method,
+			Params:  json.RawMessage(`{"threadId":"thread-x"}`),
+		})
+	}
+	// Lifecycle methods must still log.
+	mgr.dispatchNotification(&JSONRPCNotification{
+		JSONRPC: "2.0",
+		Method:  "turn/started",
+		Params:  json.RawMessage(`{"threadId":"thread-x","turn":{"id":"turn-x"}}`),
+	})
+
+	out := buf.String()
+	require.Contains(t, out, "method=turn/started")
+	for _, method := range []string{
+		"mcpServer/startupStatus/updated",
+		"thread/tokenUsage/updated",
+		"item/agentMessage/delta",
+	} {
+		require.NotContains(t, out, method)
+	}
+}
 
 func TestManager_PerThreadConverterIsolation(t *testing.T) {
 	cfg := config.CodexCLIConfig{IdleDrainPeriod: time.Minute}

@@ -11,7 +11,12 @@ Gateway owns AEP acknowledgements and Worker dispatch.
 - `(session_id, client_message_id)` is unique.
 - Only a SHA-256 payload fingerprint is stored, never the input body.
 - `accepted` may advance once to `delivered`, `unknown`, or `failed`.
-- Terminal states never regress.
+- Terminal states never regress. **Single explicit exception**:
+  `ConvergeDeliveryFailed` rewrites `failed` → `unknown` only when the runtime
+  already reached `completed` for the same `worker_run_id` — a late Done proves
+  the input was actually executed, so the failed delivery was a
+  misclassification (e.g. native skill invoke client timeout while the server
+  kept processing). `unknown` never triggers automatic redelivery.
 - Records left `accepted` across gateway restart become `unknown`; they are not
   automatically redelivered because the Worker may already have accepted them.
 - SQLite writes use the shared `sqlutil.WriteMu`; PostgreSQL relies on MVCC.

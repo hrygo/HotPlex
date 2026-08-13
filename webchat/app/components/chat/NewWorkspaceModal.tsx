@@ -5,12 +5,14 @@ import type { Workspace } from '@/lib/api/workspaces';
 import { useTranslation } from 'react-i18next';
 
 interface NewWorkspaceModalProps {
-  uid: string;
+  // 服务端 workspace 沙箱根（List 响应 workspace_root），透传给创建表单。
+  workspaceRoot: string;
+  isAdmin: boolean;
   onClose: () => void;
   onCreated: (ws: Workspace) => void;
 }
 
-export function NewWorkspaceModal({ uid, onClose, onCreated }: NewWorkspaceModalProps) {
+export function NewWorkspaceModal({ workspaceRoot, isAdmin, onClose, onCreated }: NewWorkspaceModalProps) {
   const { t } = useTranslation(['chat', 'common']);
   return (
     <div
@@ -34,7 +36,8 @@ export function NewWorkspaceModal({ uid, onClose, onCreated }: NewWorkspaceModal
           </button>
         </div>
         <NewWorkspaceForm
-          uid={uid}
+          workspaceRoot={workspaceRoot}
+          isAdmin={isAdmin}
           onCreated={(ws) => {
             onCreated(ws);
             onClose();

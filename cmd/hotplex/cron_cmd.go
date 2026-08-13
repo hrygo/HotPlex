@@ -20,7 +20,7 @@ func newCronCmd() *cobra.Command {
 		Long: `Manage cron jobs for the HotPlex gateway.
 
 CRUD operations work directly on the local SQLite database.
-Use --config to specify the gateway config file (default: ~/.hotplex/config.yaml).
+Use --config to specify the gateway config file (default: $HOTPLEX_HOME/config.yaml when set, else ~/.hotplex/config.yaml).
 
 Schedule format:
   cron:"*/5 * * * *"   Standard cron expression

@@ -569,6 +569,17 @@ func (b *Bridge) finishRuntimeOnDone(sessionID string, fc *forwardContext, env *
 	// own context. cloneForReplay sets seq=0 so the hub reassigns it.
 	b.replayPending(sessionID)
 
+	// A late Done proves the worker actually executed the input. If the
+	// delivery was recorded as failed (e.g. a native skill invocation that
+	// timed out client-side while the server kept processing), converge it to
+	// unknown so the record does not claim failure while the runtime completed.
+	if rec.Status == execution.StatusFailed && rtStatus == execution.RuntimeCompleted {
+		if cerr := b.executionStore.ConvergeDeliveryFailed(context.Background(), rec.ExecutionID, fc.workerRunID); cerr != nil {
+			b.flogOf(fc).Debug("bridge: converge failed delivery after late done", "err", cerr,
+				"session_id", sessionID, observability.KeyExecutionID, rec.ExecutionID)
+		}
+	}
+
 	observability.ExecutionRuntimeOutcome().Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("runtime_status", string(rtStatus))))
 	if rec.StartedAt != nil {

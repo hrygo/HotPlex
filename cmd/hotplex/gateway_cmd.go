@@ -45,7 +45,7 @@ func newGatewayStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the gateway server",
-		Long: `Start the gateway server. Loads configuration from the specified config file (default: ~/.hotplex/config.yaml).
+		Long: `Start the gateway server. Loads configuration from the specified config file (default: $HOTPLEX_HOME/config.yaml when set, else ~/.hotplex/config.yaml).
 In dev mode (--dev), API key authentication and admin tokens are disabled.
 Use -d to run as a background daemon.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -129,10 +129,7 @@ Use --detached to spawn a helper process that survives worker shutdown.`,
 					time.Sleep(2 * time.Second)
 				}
 
-				// Use the running instance's config if user didn't specify one.
-				if configPath == defaultConfigPath && inst.ConfigPath != "" {
-					configPath = inst.ConfigPath
-				}
+				configPath = resolveRestartConfig(configPath, cmd.Flags().Changed("config"), inst.ConfigPath)
 				if !devMode && inst.DevMode {
 					devMode = true
 				}
@@ -222,4 +219,14 @@ func startDaemon(configPath string, devMode bool) error {
 	fmt.Fprintf(os.Stderr, "  %s gateway started as daemon (PID %d)\n", output.Green("✓"), childPID)
 	fmt.Fprintf(os.Stderr, "    %s %s\n", output.Dim("logs"), logPath)
 	return nil
+}
+
+// resolveRestartConfig returns the config path for a gateway restart: the
+// explicitly passed path always wins; otherwise the running instance's path
+// is preserved when available.
+func resolveRestartConfig(configPath string, changed bool, instConfigPath string) string {
+	if !changed && instConfigPath != "" {
+		return instConfigPath
+	}
+	return configPath
 }

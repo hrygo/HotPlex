@@ -403,6 +403,39 @@ func (s *SQLStore) FinishRuntime(ctx context.Context, executionID, workerRunID s
 	return nil
 }
 
+// ConvergeDeliveryFailed rewrites a delivery recorded as failed to unknown when
+// the runtime has since completed for the same worker run. A late Done proves
+// the worker actually executed the input, so a failed delivery (e.g. a native
+// skill invocation that timed out client-side while the server kept running)
+// is a misclassification. The original error code is retained for diagnostics.
+// This is the single explicit exception to the terminal-never-regresses
+// invariant: the update only fires on a failed delivery whose runtime already
+// reached completed, and unknown never triggers automatic redelivery. Any
+// other combination is a no-op.
+func (s *SQLStore) ConvergeDeliveryFailed(ctx context.Context, executionID, workerRunID string) error {
+	if executionID == "" || workerRunID == "" {
+		return errors.New("execution: execution id and worker run id are required")
+	}
+
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+
+	err := s.withWriteLock(func() error {
+		_, err := s.db.ExecContext(ctx, s.rebind(`
+			UPDATE execution_inputs
+			SET status = ?, updated_at = ?
+			WHERE execution_id = ? AND worker_run_id = ?
+			  AND status = ? AND runtime_status = ?`),
+			StatusUnknown, time.Now().UnixMilli(),
+			executionID, workerRunID, StatusFailed, RuntimeCompleted)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("execution: converge delivery failed: %w", err)
+	}
+	return nil
+}
+
 func (s *SQLStore) ActiveBySession(ctx context.Context, sessionID string) (*Record, error) {
 	if sessionID == "" {
 		return nil, errors.New("execution: session id is required")

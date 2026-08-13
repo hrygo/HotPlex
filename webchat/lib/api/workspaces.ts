@@ -16,6 +16,9 @@ export interface Workspace {
 
 export interface ListWorkspacesResponse {
   workspaces: Workspace[];
+  // workspace_root 是服务端 workspace 沙箱根（绝对路径，HotplexHome()/workspaces/<segment>），
+  // 前端路径构造的唯一事实源。旧后端缺失时前端应降级禁用创建（spec Root-HotplexHome §5.1.5）。
+  workspace_root: string;
   limit: number;
   offset: number;
 }
