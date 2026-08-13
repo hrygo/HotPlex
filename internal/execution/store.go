@@ -145,14 +145,18 @@ type Store interface {
 	Accept(ctx context.Context, request AcceptRequest) (record *Record, duplicate bool, err error)
 
 	// SetStatus advances an accepted record to a delivery outcome. Repeating the
-	// same update is idempotent; terminal outcomes never regress.
+	// same update is idempotent; terminal outcomes never regress (sole exception:
+	// ConvergeDeliveryFailed rewrites failed → unknown when the runtime already
+	// completed for the same worker run).
 	//
 	// Deprecated: use SetDelivery for owner-conditioned updates.
 	SetStatus(ctx context.Context, executionID string, status Status, errorCode string) error
 
 	// SetDelivery advances the delivery status of an execution owned by ownerID.
 	// The update is conditional on the current owner; mismatch returns
-	// ErrOwnerMismatch. Terminal delivery statuses never regress.
+	// ErrOwnerMismatch. Terminal delivery statuses never regress (sole exception:
+	// ConvergeDeliveryFailed rewrites failed → unknown when the runtime already
+	// completed for the same worker run).
 	SetDelivery(ctx context.Context, executionID, ownerID string, status Status, errorCode string) error
 
 	// MarkRunning transitions runtime_status from pending to running and records
