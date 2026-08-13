@@ -229,6 +229,7 @@ export default function ChatContainer() {
 
     // Workspaces State
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+    const [workspaceRoot, setWorkspaceRoot] = useState("");
     const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(
         null,
     );
@@ -248,14 +249,17 @@ export default function ChatContainer() {
         try {
             const res = await listWorkspaces();
             let list = res.workspaces || [];
+            // workspace_root 是前端路径构造的唯一事实源（spec Root-HotplexHome §5.1.5）；
+            // 旧后端缺失时跳过自动创建（创建表单侧降级禁用）。
+            const root = res.workspace_root || "";
+            setWorkspaceRoot(root);
 
             // Fallback: If no workspaces exist, create a default one
-            if (list.length === 0) {
-                const me = await getMe();
+            if (list.length === 0 && root) {
                 const defaultWS = await createWorkspace(
                     "Default Workspace",
                     buildWorkspaceWorkDir(
-                        me.id,
+                        root,
                         "Default Workspace",
                         "default",
                     ),
@@ -795,7 +799,8 @@ export default function ChatContainer() {
             {/* New Workspace Modal */}
             {showNewWsModal && currentUser && (
                 <NewWorkspaceModal
-                    uid={currentUser.id}
+                    workspaceRoot={workspaceRoot}
+                    isAdmin={currentUser.role === "admin"}
                     onClose={() => setShowNewWsModal(false)}
                     onCreated={(ws) => {
                         handleSwitchWorkspace(ws);

@@ -79,7 +79,7 @@ func TestCreateSession_RealStore_OwnerOK(t *testing.T) {
 	t.Parallel()
 	env, api, sm, bridge := newWorkspaceSessionEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "wsess-owner")
+	ws := env.createWorkspace(t, cookie, "admin", "proj", "wsess-owner")
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)
@@ -100,7 +100,7 @@ func TestCreateSession_RealStore_CrossUserForbidden(t *testing.T) {
 	t.Parallel()
 	env, api, _, _ := newWorkspaceSessionEnv(t)
 	cookieAdmin := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookieAdmin, "u-admin", "admin-proj", "wsess-admin")
+	ws := env.createWorkspace(t, cookieAdmin, "admin", "admin-proj", "wsess-admin")
 
 	env.createUser(t, "bob", "bobpass1234", "user")
 	cookieBob := env.loginAs(t, "bob", "bobpass1234", http.StatusOK)
@@ -121,7 +121,7 @@ func TestCreateSession_RealStore_KeyMethod3(t *testing.T) {
 	t.Parallel()
 	env, api, sm, bridge := newWorkspaceSessionEnv(t)
 	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
-	ws := env.createWorkspace(t, cookie, "u-admin", "proj", "wsess-key3")
+	ws := env.createWorkspace(t, cookie, "admin", "proj", "wsess-key3")
 
 	sm.On("Get", mock.Anything).Return(nil, session.ErrSessionNotFound)
 	bridge.On("StartSession", mock.Anything, mock.Anything).Return(nil)

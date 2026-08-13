@@ -51,7 +51,7 @@
   },
   "placeholder": {
     "workspace_name": "我的项目",
-    "directory_optional": "留空则使用项目名称",
+    "directory_optional": "留空则使用项目名称（支持多级，如 projects/myapp）",
     "search": "搜索历史...",
     "session_name": "例如：修复 HotPlex Bug",
     "composer": "输入消息，或输入 '/' 使用命令..."
@@ -114,7 +114,8 @@
     "send_failed_connection": "发送失败，请检查网络连接后重试。",
     "workspace_recovery_title": "无法连接工作区",
     "workspace_recovery_description": "所有可用工作区均未能完成连接验证。请检查权限或服务状态后重试。",
-    "workspace_recovery_retry": "重新尝试"
+    "workspace_recovery_retry": "重新尝试",
+    "workspace_root_missing": "无法创建工作区：服务端未提供工作区根目录（workspace_root）。请刷新页面或升级后端。"
   },
   "command": {
     "executed": "✅ {{command}} 已执行"
@@ -315,9 +316,15 @@
       "more_lines": "+ 还有 {{count}} 行",
       "awaiting_response": "正在等待终端响应..."
     },
-    "search": { "loading": "搜索中..." },
-    "list": { "loading": "列出目录中..." },
-    "todo": { "loading": "获取最新任务中..." },
+    "search": {
+      "loading": "搜索中..."
+    },
+    "list": {
+      "loading": "列出目录中..."
+    },
+    "todo": {
+      "loading": "获取最新任务中..."
+    },
     "filediff": {
       "loading": "合成文件补丁中...",
       "unknown_file": "未知文件"

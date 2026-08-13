@@ -51,7 +51,7 @@
   },
   "placeholder": {
     "workspace_name": "My Project",
-    "directory_optional": "Leave empty to use name",
+    "directory_optional": "Leave empty to use name (multi-level allowed, e.g. projects/myapp)",
     "search": "Search history...",
     "session_name": "e.g. HotPlex Bug Fix",
     "composer": "Type a message or '/' for commands..."
@@ -114,7 +114,8 @@
     "send_failed_connection": "Failed to send. Please check your connection and try again.",
     "workspace_recovery_title": "Unable to connect to a workspace",
     "workspace_recovery_description": "None of the available workspaces passed connection validation. Check permissions or service status, then retry.",
-    "workspace_recovery_retry": "Try again"
+    "workspace_recovery_retry": "Try again",
+    "workspace_root_missing": "Cannot create workspace: server did not provide a workspace root. Refresh the page or upgrade the gateway."
   },
   "command": {
     "executed": "✅ Executed {{command}}"
@@ -315,9 +316,15 @@
       "more_lines": "+ {{count}} more lines",
       "awaiting_response": "Awaiting response from shell..."
     },
-    "search": { "loading": "Searching..." },
-    "list": { "loading": "Listing directory..." },
-    "todo": { "loading": "Retrieving latest tasks..." },
+    "search": {
+      "loading": "Searching..."
+    },
+    "list": {
+      "loading": "Listing directory..."
+    },
+    "todo": {
+      "loading": "Retrieving latest tasks..."
+    },
     "filediff": {
       "loading": "Synthesizing file patch...",
       "unknown_file": "unknown file"

@@ -1,11 +1,14 @@
 package security
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 // ValidateBaseDir checks that the base directory is in the allowed list.
@@ -79,32 +82,100 @@ func ValidateWorkDir(dir string) error {
 	return checkForbidden(realPath)
 }
 
-// ErrWorkDirOutsideSandbox 由 ValidateWorkspaceWorkDir 在 work_dir 越出 owner 的 workspace
-// 沙箱前缀（$HOME/.hotplex/workspaces/<ownerUserID>）时返回。
+// ErrWorkDirOutsideSandbox 由 ValidateWorkspaceWorkDir 在 work_dir 越出 owner 的
+// workspace 沙箱根（WorkspaceSandboxRoot(username)）时返回。
 var ErrWorkDirOutsideSandbox = errors.New("security: work dir outside owner workspace sandbox")
 
-// ValidateWorkspaceWorkDir 校验 dir 恰好等于或位于 owner 的 workspace 沙箱前缀下：
+// WorkspaceSandboxRoot 返回 username 的 workspace 沙箱根目录：
 //
-//	$HOME/.hotplex/workspaces/<ownerUserID>
+//	HotplexHome()/workspaces/<sandboxDirSegment(username)>
 //
-// 这是 workspace 专用的额外约束，不替代通用 ValidateWorkDir（黑名单/symlink 仍需独立调用）。
-// dir 必须已是绝对路径（调用前先经 config.ExpandAndAbs）。
-func ValidateWorkspaceWorkDir(dir, ownerUserID string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("security: cannot resolve $HOME: %w", err)
+// 与 HotplexHome() 同源（跟随 HOTPLEX_HOME，未设置时回退 ~/.hotplex）；
+// 内部执行目录段映射（sandboxDirSegment）与 filepath.Abs（HOTPLEX_HOME 可能为
+// 相对值），是所有 workspace 路径校验/错误消息/API 暴露的唯一事实源。
+func WorkspaceSandboxRoot(username string) string {
+	base := filepath.Join(config.HotplexHome(), "workspaces", sandboxDirSegment(username))
+	abs, err := filepath.Abs(base)
+	if err != nil { // 不可达（HotplexHome 恒可拼接）；防御性保留原值
+		return base
 	}
-	return validateWorkspaceWorkDir(dir, home, ownerUserID)
+	return abs
 }
 
-// validateWorkspaceWorkDir 是 ValidateWorkspaceWorkDir 的可测试内核，注入 home 目录，
-// 使前缀/越界/owner 隔离逻辑可在不依赖进程级 $HOME 的情况下并行测试。
-func validateWorkspaceWorkDir(dir, home, ownerUserID string) error {
-	if dir == "" || ownerUserID == "" {
+// sandboxDirSegment 将 username 映射为沙箱目录段（四身份空间隔离，filesystem-safe）：
+//   - 无 ":" → 原样（密码用户经 ValidateUsername 已保证 [a-zA-Z0-9_.-]；
+//     系统身份 anonymous/api_user 同属此路径，字面量被 P1 封锁给密码用户）
+//   - "apikey:" 前缀 → 机器用户："apikey-" + lossySafeSegment(rest)
+//   - 其他含 ":" → OAuth 用户："oauth-" + lossySafeSegment(whole)
+//
+// 段注入性（G1b）：lossySafeSegment 在 sanitize 有损或含大写时追加稳定哈希，
+// 杜绝同空间内不同身份映射到同一目录段（如 "user/1" 与 "user-1"）。
+func sandboxDirSegment(username string) string {
+	if i := strings.IndexByte(username, ':'); i >= 0 {
+		prefix := username[:i]
+		switch prefix {
+		case "apikey":
+			return "apikey-" + lossySafeSegment(username[i+1:])
+		default: // OAuth provider:subject
+			return "oauth-" + lossySafeSegment(username)
+		}
+	}
+	return lossySafeSegment(username)
+}
+
+// sanitizePathSegment 将任意字符串转为 filesystem-safe 的单段目录名：
+// 非 [a-zA-Z0-9_.-] 字符替换为 "-"，连续 "-" 折叠，去首尾 "-"；
+// 结果为 "." / ".."（路径逃逸段）时返回空串。
+func sanitizePathSegment(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '_' || r == '.' || r == '-'
+		if !ok {
+			r = '-'
+		}
+		if r == '-' && prevDash {
+			continue
+		}
+		prevDash = r == '-'
+		b.WriteRune(r)
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "." || out == ".." {
+		return ""
+	}
+	return out
+}
+
+// lossySafeSegment 返回 filesystem-safe 且注入（无碰撞）的目录段：
+// sanitize 恒等且全小写且非空 → 原样返回（可读性保留）；否则追加完整 SHA-256
+// 十六进制摘要（64 字符，碰撞等价于 SHA-256 碰撞，计算上不可行；评审 F1 第二轮
+// 否决 4-byte 截断——32 位前缀生日碰撞可被暴力构造）。空段/空输入退化为纯摘要段。
+// 覆盖：sanitize 有损（"a/b" vs "a-b"）、大小写敏感文件系统（"Alice" vs "alice"）、
+// 逃逸段（".."）、空输入。
+func lossySafeSegment(s string) string {
+	seg := sanitizePathSegment(s)
+	if seg == s && seg == strings.ToLower(s) && s != "" {
+		return seg
+	}
+	sum := sha256.Sum256([]byte(s))
+	base := strings.ToLower(seg)
+	if base == "" {
+		return hex.EncodeToString(sum[:])
+	}
+	return base + "-" + hex.EncodeToString(sum[:])
+}
+
+// ValidateWorkspaceWorkDir 校验 dir 恰好等于或位于 sandboxRoot 下。
+// 这是 workspace 专用的额外约束，不替代通用 ValidateWorkDir（黑名单/symlink 仍需独立调用）。
+// dir 必须已是绝对路径（调用前先经 config.ExpandAndAbs）。
+// sandboxRoot 由调用方经 WorkspaceSandboxRoot(...) 组装。
+func ValidateWorkspaceWorkDir(dir, sandboxRoot string) error {
+	if dir == "" || sandboxRoot == "" {
 		return ErrWorkDirOutsideSandbox
 	}
-	base := filepath.Join(home, ".hotplex", "workspaces", ownerUserID)
-	rel, err := filepath.Rel(base, dir)
+	rel, err := filepath.Rel(sandboxRoot, dir)
 	if err != nil {
 		return ErrWorkDirOutsideSandbox
 	}

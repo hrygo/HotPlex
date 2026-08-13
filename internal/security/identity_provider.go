@@ -90,13 +90,20 @@ const (
 // ValidateUsername rejects it (code-review fix).
 const ReservedUsernamePrefix = "apikey:"
 
+// ReservedUsernameNamespaces 是沙箱目录段四身份空间隔离（spec §5.1.2 P1）的保留面：
+// 机器空间段前缀 "apikey-"、OAuth 空间段前缀 "oauth-"、系统身份字面量
+// anonymous/api_user。密码用户（username 即目录段）注册这些名字会与机器/OAuth/
+// 系统空间碰撞，造成跨用户目录段共享。ValidateUsername 拒绝之。
+var ReservedUsernameNamespaces = []string{"apikey-", "oauth-"}
+
 // ErrInvalidUsername is returned by ValidateUsername on any policy violation.
 var ErrInvalidUsername = errors.New("security: invalid username")
 
 // ValidateUsername enforces the account-login username policy: length 3-64,
 // charset [a-zA-Z0-9_.-], and must not collide with the reserved API-key
-// namespace. Applied at every user-creation entry point (accept-invite, admin
-// CLI) so the reserved prefix can never reach the users table (review fix).
+// namespace or the machine/OAuth/system sandbox namespaces (spec §5.1.2 P1).
+// Applied at every user-creation entry point (accept-invite, admin CLI) so the
+// reserved prefixes can never reach the users table (review fix).
 func ValidateUsername(username string) error {
 	if len(username) < UsernameMinLen || len(username) > UsernameMaxLen {
 		return ErrInvalidUsername
@@ -105,6 +112,14 @@ func ValidateUsername(username string) error {
 	// the ":" in the prefix; kept for documentation and to survive a future
 	// charset relaxation).
 	if strings.HasPrefix(username, ReservedUsernamePrefix) {
+		return ErrInvalidUsername
+	}
+	for _, prefix := range ReservedUsernameNamespaces {
+		if strings.HasPrefix(username, prefix) {
+			return ErrInvalidUsername
+		}
+	}
+	if username == "anonymous" || username == "api_user" {
 		return ErrInvalidUsername
 	}
 	for _, r := range username {

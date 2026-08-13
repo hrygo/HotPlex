@@ -53,6 +53,11 @@ type OAuthProviderConfig struct {
 
 var oauthProviderNameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
+// oauthReservedProviderNames 是沙箱目录段四身份空间隔离（spec §5.1.2 P1）的保留面：
+// provider 名为 "apikey" 时 username="apikey:<subject>" 会落入机器空间段（apikey-*），
+// 与 API-key 伪用户段碰撞；"oauth" 保留防段前缀歧义。OAuth provider 配置校验拒绝之。
+var oauthReservedProviderNames = []string{"apikey", "oauth"}
+
 // Validate checks the OAuthConfig for correctness.
 func (c *OAuthConfig) Validate() error {
 	seen := make(map[string]bool)
@@ -62,6 +67,11 @@ func (c *OAuthConfig) Validate() error {
 		}
 		if !oauthProviderNameRe.MatchString(p.Name) {
 			return fmt.Errorf("oauth.providers[%d]: name %q must match [a-z0-9-]+", i, p.Name)
+		}
+		for _, reserved := range oauthReservedProviderNames {
+			if p.Name == reserved {
+				return fmt.Errorf("oauth.providers[%d]: name %q is reserved", i, p.Name)
+			}
 		}
 		if seen[p.Name] {
 			return fmt.Errorf("oauth.providers[%d]: duplicate provider name %q", i, p.Name)

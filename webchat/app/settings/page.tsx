@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getWorkspace, type Workspace } from '@/lib/api/workspaces';
+import { getWorkspace, listWorkspaces, type Workspace } from '@/lib/api/workspaces';
 import { getMe, type User } from '@/lib/api/auth';
 import { ApiError } from '@/lib/api/errors';
 import { BrandIcon } from '@/components/icons';
@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const { t } = useTranslation(['chat', 'auth', 'common']);
   const router = useRouter();
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [workspaceRoot, setWorkspaceRoot] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(false);
@@ -32,6 +33,10 @@ export default function SettingsPage() {
       const me = await getMe();
       setCurrentUser(me);
       setAuthError(false);
+
+      // workspace_root 是沙箱根的唯一事实源（绝对路径，含 username 段）。
+      const listRes = await listWorkspaces();
+      setWorkspaceRoot(listRes.workspace_root || '');
 
       const wsId = localStorage.getItem('hotplex_active_workspace_id');
       if (wsId) {
@@ -284,6 +289,7 @@ export default function SettingsPage() {
                   {activeTab === 'general' && workspace && currentUser && (
                     <GeneralTab
                       workspace={workspace}
+                      workspaceRoot={workspaceRoot}
                       isAdmin={currentUser.role === 'admin'}
                       onUpdated={handleWorkspaceUpdated}
                     />

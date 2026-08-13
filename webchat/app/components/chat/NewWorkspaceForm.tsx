@@ -4,11 +4,18 @@ import { useState } from 'react';
 import { createWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { createSession, ANCHOR_CLIENT_SESSION_ID } from '@/lib/api/sessions';
 import { workerType } from '@/lib/config';
-import { buildWorkspaceWorkDir } from '@/lib/utils/workspace-path';
+import {
+  buildWorkspaceWorkDir,
+  workspaceSandboxPrefix,
+} from '@/lib/utils/workspace-path';
 import { useTranslation } from 'react-i18next';
 
 interface NewWorkspaceFormProps {
-  uid: string;
+  // 服务端 workspace 沙箱根（List 响应 workspace_root，绝对路径）。缺失（旧后端）
+  // 时表单禁用提交并提示刷新 —— 不发送错误路径（spec Root-HotplexHome §5.2.1）。
+  workspaceRoot: string;
+  // permission_mode 是 admin-only 字段：admin 显示下拉，非 admin 不渲染也不发送。
+  isAdmin: boolean;
   onCreated: (ws: Workspace) => void;
   onCancel?: () => void;
 }
@@ -19,23 +26,38 @@ const inputClass =
 const labelClass =
   'block text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-1.5';
 
-export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormProps) {
+const PERMISSION_MODE_OPTIONS: { value: string }[] = [
+  { value: 'workspace' },
+  { value: 'auto-edit' },
+  { value: 'bypass' },
+  { value: 'read-only' },
+];
+
+export function NewWorkspaceForm({ workspaceRoot, isAdmin, onCreated, onCancel }: NewWorkspaceFormProps) {
   const { t } = useTranslation(['chat', 'common']);
   const [name, setName] = useState('');
   const [subdir, setSubdir] = useState('');
+  const [permMode, setPermMode] = useState('workspace');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const preview = name.trim()
-    ? buildWorkspaceWorkDir(uid, name, subdir)
-    : `~/.hotplex/workspaces/${uid}/…`;
+  const rootKnown = workspaceRoot.trim().length > 0;
+  const preview = !rootKnown
+    ? ''
+    : name.trim()
+      ? buildWorkspaceWorkDir(workspaceRoot, name, subdir)
+      : `${workspaceSandboxPrefix(workspaceRoot)}…`;
 
   async function submit() {
-    if (!name.trim() || submitting) return;
+    if (!name.trim() || !rootKnown || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      const ws = await createWorkspace(name.trim(), buildWorkspaceWorkDir(uid, name, subdir));
+      const ws = await createWorkspace(
+        name.trim(),
+        buildWorkspaceWorkDir(workspaceRoot, name, subdir),
+        isAdmin ? permMode : undefined,
+      );
       // Pre-create the anchor session so the new workspace is immediately
       // usable on switch (listSessions returns it, no empty-state window).
       // Best-effort + idempotent: useSessions retries on switch, and
@@ -75,7 +97,7 @@ export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormP
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={t('chat:placeholder.workspace_name')}
-          disabled={submitting}
+          disabled={submitting || !rootKnown}
           autoFocus
         />
       </div>
@@ -86,18 +108,35 @@ export function NewWorkspaceForm({ uid, onCreated, onCancel }: NewWorkspaceFormP
           value={subdir}
           onChange={(e) => setSubdir(e.target.value)}
           placeholder={t('chat:placeholder.directory_optional')}
-          disabled={submitting}
+          disabled={submitting || !rootKnown}
         />
       </div>
+      {isAdmin && (
+        <div>
+          <label className={labelClass}>{t('chat:settings.label.permission_mode')}</label>
+          <select
+            className={inputClass}
+            value={permMode}
+            onChange={(e) => setPermMode(e.target.value)}
+            disabled={submitting || !rootKnown}
+          >
+            {PERMISSION_MODE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {t(('chat:settings.permission.' + opt.value) as any)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="text-[10px] font-mono text-[var(--text-faint)] break-all">
-        {t('chat:text.path')}: {preview}
+        {t('chat:text.path')}: {preview || t('chat:error.workspace_root_missing')}
       </div>
       {error && <div className="text-xs text-[var(--accent-coral)]">{error}</div>}
       <div className="flex items-center gap-2">
         <button
           type="submit"
           className="px-3 py-1.5 rounded-[var(--radius-sm)] bg-[var(--accent-gold)] text-black text-sm font-bold transition-opacity hover:opacity-90 disabled:opacity-50"
-          disabled={!name.trim() || submitting}
+          disabled={!name.trim() || !rootKnown || submitting}
         >
           {submitting ? t('common:action.creating') : t('chat:action.create_workspace')}
         </button>

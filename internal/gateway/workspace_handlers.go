@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -73,6 +75,61 @@ func (h *WorkspaceHandlers) isAdmin(r *http.Request, uid string) bool {
 	return true
 }
 
+// sandboxRootFor 解析 uid 对应的沙箱根。
+// 认证层已保证：非系统身份（非 anonymous/api_user）Lookup 必然成功（auth.go:207-215
+// 失败即 401）；系统身份与 dev 模式（idp nil）直接以 uid 字面量作为目录段
+// （与 v1.40 现状一致——anonymous/api_user 共享 uid 沙箱）。无 403 失败路径。
+func (h *WorkspaceHandlers) sandboxRootFor(r *http.Request, uid string) string {
+	name := uid // fallback：dev/anonymous/api_user/防御性 Lookup 失败 → uid 字面量
+	if idp := h.auth.IdentityProvider(); idp != nil && uid != "anonymous" && uid != "api_user" {
+		if u, err := idp.Lookup(r.Context(), uid); err == nil && u.Username != "" {
+			name = u.Username
+		}
+	}
+	return security.WorkspaceSandboxRoot(name)
+}
+
+// ensureSystemIdentityRow 确保系统身份（anonymous/api_user）在 users 表存在占位行。
+// workspaces.owner_user_id REFERENCES users(id)（FK 强制），而认证层对系统身份跳过
+// Lookup 且不保证 users 行存在（auth.go:207,263）——缺行时 workspace 创建会 FK 失败
+// （500）。password_hash=” 与 migration 018 模型一致（禁止账号登录）。幂等：
+// 并发插入以唯一冲突收敛；存量用户名冲突（P1 前注册的 anonymous/api_user 字面量）
+// 以 uid-system 用户名补行（系统身份不参与 Lookup，username 仅作 DB 簿记）。
+func (h *WorkspaceHandlers) ensureSystemIdentityRow(ctx context.Context, uid string) error {
+	if uid != "anonymous" && uid != "api_user" {
+		return nil
+	}
+	if idp := h.auth.IdentityProvider(); idp != nil {
+		if _, err := idp.Lookup(ctx, uid); err == nil {
+			return nil // 已存在
+		}
+	}
+	u := &security.User{ID: uid, Username: uid, PasswordHash: "", Role: "user", Status: "active"}
+	if err := h.store.CreateUser(ctx, u, h.nowUnix()); err != nil {
+		if !isUniqueViolation(err) {
+			return err
+		}
+		// 唯一冲突来源一：并发插入（同 ID 行已存在 → 视为完成）。
+		if existing, gerr := h.store.GetUserByID(ctx, uid); gerr == nil && existing.ID == uid {
+			return nil
+		}
+		// 唯一冲突来源二：存量用户名冲突（P1 前注册的 anonymous/api_user 字面量）。
+		// 以 uid-system-N 确定性后缀补行（系统身份不参与 Lookup，username 仅作 DB
+		// 簿记，沙箱段仍为 uid 字面量）；后缀也冲突时继续递增，穷尽后显式报错
+		// （评审第二轮：不再吞掉第二次唯一冲突）。
+		for i := 1; i <= 16; i++ {
+			u.Username = fmt.Sprintf("%s-system-%d", uid, i)
+			if err := h.store.CreateUser(ctx, u, h.nowUnix()); err == nil {
+				return nil
+			} else if !isUniqueViolation(err) {
+				return err
+			}
+		}
+		return fmt.Errorf("provision system identity row: username namespace exhausted for %q", uid)
+	}
+	return nil
+}
+
 type createWorkspaceRequest struct {
 	Name           string  `json:"name"`
 	WorkDir        string  `json:"work_dir"`
@@ -120,8 +177,14 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
 		return
 	}
-	if err := security.ValidateWorkspaceWorkDir(abs, uid); err != nil {
-		writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under $HOME/.hotplex/workspaces/<your-user-id>")
+	root := h.sandboxRootFor(r, uid)
+	if err := security.ValidateWorkspaceWorkDir(abs, root); err != nil {
+		writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under "+root)
+		return
+	}
+	// 系统身份（anonymous/api_user）无 users 行时先补占位行，否则 FK 拒绝创建（P4）。
+	if err := h.ensureSystemIdentityRow(r.Context(), uid); err != nil {
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "create failed")
 		return
 	}
 	ws := &session.Workspace{
@@ -154,9 +217,10 @@ func (h *WorkspaceHandlers) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, map[string]any{
-		"workspaces": wss,
-		"limit":      limit,
-		"offset":     offset,
+		"workspaces":     wss,
+		"workspace_root": h.sandboxRootFor(r, uid), // 绝对路径，服务端展开（复用 helper，避免二次 Lookup）
+		"limit":          limit,
+		"offset":         offset,
 	})
 }
 
@@ -231,10 +295,11 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		// Sandbox is keyed by the workspace OWNER, not the acting user, so an
 		// admin editing another user's workspace keeps owner isolation (spec §2 G2).
-		// Create (:106) passes uid because the creator IS the owner; Update is the
+		// Create (:123) passes uid because the creator IS the owner; Update is the
 		// admin-edit path where the two can differ.
-		if err := security.ValidateWorkspaceWorkDir(abs, ws.OwnerUserID); err != nil {
-			writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under the workspace owner's sandbox ($HOME/.hotplex/workspaces/<owner-user-id>)")
+		root := h.sandboxRootFor(r, ws.OwnerUserID)
+		if err := security.ValidateWorkspaceWorkDir(abs, root); err != nil {
+			writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under the workspace owner's sandbox ("+root+")")
 			return
 		}
 		// work_dir participates in DeriveSessionKey (key.go), so changing it shifts

@@ -190,35 +190,33 @@ func TestValidateWorkDir(t *testing.T) {
 func TestValidateWorkspaceWorkDir(t *testing.T) {
 	t.Parallel()
 
-	const home = "/home/testuser"
-	const uid = "11111111-2222-3333-4444-555555555555"
-	base := filepath.Join(home, ".hotplex", "workspaces", uid)
-	otherUID := "99999999-9999-9999-9999-999999999999"
+	root := filepath.Join("/home/testuser", ".hotplex", "workspaces", "alice")
+	otherRoot := filepath.Join("/home/testuser", ".hotplex", "workspaces", "bob")
 
 	tests := []struct {
 		name    string
 		dir     string
-		owner   string
+		root    string
 		wantErr bool
 	}{
-		{"empty dir rejected", "", uid, true},
-		{"empty owner rejected", base, "", true},
-		{"sandbox root allowed", base, uid, false},
-		{"direct subdir allowed", filepath.Join(base, "proj"), uid, false},
-		{"nested subdir allowed", filepath.Join(base, "a", "b", "c"), uid, false},
-		{"owner isolation: sibling uid rejected", filepath.Join(home, ".hotplex", "workspaces", otherUID, "x"), uid, true},
-		{"outside workspaces tree rejected", filepath.Join(home, "Documents", "proj"), uid, true},
-		{"unrelated tmp rejected", "/tmp/elsewhere", uid, true},
-		{"system dir rejected", "/etc/nginx", uid, true},
-		{"parent traversal to sibling uid rejected", filepath.Join(base, "..", otherUID), uid, true},
-		{"deep escape to system rejected", filepath.Join(base, "..", "..", "..", "..", "etc"), uid, true},
+		{"empty dir rejected", "", root, true},
+		{"empty root rejected", root, "", true},
+		{"sandbox root allowed", root, root, false},
+		{"direct subdir allowed", filepath.Join(root, "proj"), root, false},
+		{"nested subdir allowed", filepath.Join(root, "a", "b", "c"), root, false},
+		{"owner isolation: sibling root rejected", filepath.Join(otherRoot, "x"), root, true},
+		{"outside workspaces tree rejected", filepath.Join("/home/testuser", "Documents", "proj"), root, true},
+		{"unrelated tmp rejected", "/tmp/elsewhere", root, true},
+		{"system dir rejected", "/etc/nginx", root, true},
+		{"parent traversal to sibling root rejected", filepath.Join(root, "..", "bob"), root, true},
+		{"deep escape to system rejected", filepath.Join(root, "..", "..", "..", "..", "etc"), root, true},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := validateWorkspaceWorkDir(tt.dir, home, tt.owner)
+			err := ValidateWorkspaceWorkDir(tt.dir, tt.root)
 			if tt.wantErr {
 				require.ErrorIs(t, err, ErrWorkDirOutsideSandbox)
 			} else {
@@ -228,19 +226,121 @@ func TestValidateWorkspaceWorkDir(t *testing.T) {
 	}
 }
 
-// TestValidateWorkspaceWorkDir_HomeResolution 覆盖公共函数的 $HOME 解析与哨兵。
-// 本文件带 //go:build darwin || linux，HOME 在这两个平台由 os.UserHomeDir 读取。
+// TestValidateWorkspaceWorkDir_HomeResolution 证明沙箱根跟随 HotplexHome() 而非真实
+// 用户主目录：dir 落在 $HOTPLEX_HOME/workspaces/<segment> 下通过，落在
+// $HOME/.hotplex/workspaces/<segment> 下被拒（HOTPLEX_HOME 设置时的行为分裂回归）。
+// 串行：修改进程级 HOTPLEX_HOME/HOME。
 func TestValidateWorkspaceWorkDir_HomeResolution(t *testing.T) {
-	// 不并行：修改进程级 $HOME。
 	home := t.TempDir()
+	hot := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("HOTPLEX_HOME", hot)
 
-	const uid = "11111111-2222-3333-4444-555555555555"
-	inside := filepath.Join(home, ".hotplex", "workspaces", uid, "proj")
-	require.NoError(t, ValidateWorkspaceWorkDir(inside, uid))
+	root := WorkspaceSandboxRoot("alice")
+	require.Equal(t, filepath.Join(hot, "workspaces", "alice"), root, "sandbox root must follow HOTPLEX_HOME")
+
+	inside := filepath.Join(root, "proj")
+	require.NoError(t, ValidateWorkspaceWorkDir(inside, root))
+
+	// dir 位于真实 $HOME/.hotplex/workspaces/<segment> → 拒绝（不再锚定真实 home）。
+	legacy := filepath.Join(home, ".hotplex", "workspaces", "alice", "proj")
+	require.ErrorIs(t, ValidateWorkspaceWorkDir(legacy, root), ErrWorkDirOutsideSandbox)
 
 	outside := filepath.Join(t.TempDir(), "elsewhere")
-	require.ErrorIs(t, ValidateWorkspaceWorkDir(outside, uid), ErrWorkDirOutsideSandbox)
+	require.ErrorIs(t, ValidateWorkspaceWorkDir(outside, root), ErrWorkDirOutsideSandbox)
+}
+
+// ─── WorkspaceSandboxRoot / sandboxDirSegment ─────────────────────────────────
+
+// TestSandboxDirSegment 覆盖四身份空间隔离编码（spec §5.1.2）：
+// 密码/系统原样、机器 apikey- 前缀、OAuth oauth- 前缀；sanitize 有损或含大写时
+// 追加完整 SHA-256 摘要保证段注入性（G1b，评审 F1 修复）。
+func TestSandboxDirSegment(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		username string
+		want     string
+	}{
+		// 密码用户（ValidateUsername 已保证 [a-zA-Z0-9_.-]，恒等 + 全小写 → 原样）
+		{"password user", "alice", "alice"},
+		{"password user with separators", "alice-smith.dev", "alice-smith.dev"},
+		// 系统身份（uid 字面量，无 users 行）
+		{"system anonymous", "anonymous", "anonymous"},
+		{"system api_user", "api_user", "api_user"},
+		// 机器用户（apikey: 前缀）
+		{"machine user", "apikey:abc", "apikey-abc"},
+		{"machine user with dash", "apikey:a-b", "apikey-a-b"},
+		{"machine user slash folded + full digest", "apikey:a/b", "apikey-a-b-c14cddc033f64b9dea80ea675cf280a015e672516090a5626781153dc68fea11"},
+		{"machine user dotdot digest only", "apikey:..", "apikey-5ec1f7e700f37c3d0b2981d04855fc34b94aaa15457b05ca571817442d228f81"},
+		{"machine user unicode digest only", "apikey:用户", "apikey-0d0e1a86b3aa787709b00329fcd32b5baf036c87067c8d6c27a466675cb6b355"},
+		{"machine user uppercase folded + digest", "apikey:A", "apikey-a-559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd"},
+		// OAuth 用户（provider:subject）
+		{"oauth user", "github:user", "oauth-github-user-e14ec4764cff30ca3657d76edc1e77f2f41da3475298407fc58685620054ea66"},
+		{"oauth subject slash folded + digest", "github:user/1", "oauth-github-user-1-b2c25428504c4527fa319ee48cf2611f9392c9a52f746ab4e5f325f5f85bb3ee"},
+		{"oauth subject with colon defensively", "foo:apikey:bar", "oauth-foo-apikey-bar-67aea289500f4b0fe6927e9f96615c7b7fa7283a22ec2747b02ac7e68a8a07f6"},
+		{"oauth provider named apikey defensively", "apikey:sub", "apikey-sub"},
+		// 大小写敏感文件系统（G1b）
+		{"password user uppercase folded + digest", "Alice", "alice-3bc51062973c458d5a6f2d8d64a023246354ad7e064b1e4e009ec8a0699a3043"},
+		// 空输入（防御：空段退化为纯摘要段，不产生空目录段）
+		{"empty input digest only", "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, sandboxDirSegment(tt.username), "username=%q", tt.username)
+		})
+	}
+}
+
+// TestSandboxDirSegment_Injectivity 证明 sanitize 有损与大小写差异不会造成同空间
+// 段碰撞（评审 F1，G1b）：sanitize 等价的输入对必须映射到不同目录段。
+func TestSandboxDirSegment_Injectivity(t *testing.T) {
+	t.Parallel()
+	pairs := [][2]string{
+		{"apikey:a/b", "apikey:a-b"},
+		{"apikey:..", "apikey:."},
+		{"apikey:用户", "apikey:abc"},
+		{"github:user/1", "github:user-1"},
+		{"Alice", "alice"},
+		{"apikey:A", "apikey:a"},
+	}
+	for _, p := range pairs {
+		p := p
+		t.Run(p[0]+"_vs_"+p[1], func(t *testing.T) {
+			t.Parallel()
+			require.NotEqual(t, sandboxDirSegment(p[0]), sandboxDirSegment(p[1]),
+				"%q and %q must not collide", p[0], p[1])
+		})
+	}
+}
+
+// TestWorkspaceSandboxRoot 覆盖 HotplexHome() 同源 + filepath.Abs 兜底
+// （spec §5.1.1）。串行：t.Setenv 修改进程级 HOTPLEX_HOME/HOME。
+func TestWorkspaceSandboxRoot(t *testing.T) {
+	// ① 绝对 HOTPLEX_HOME → 直接拼接
+	t.Setenv("HOTPLEX_HOME", "/x")
+	require.Equal(t, filepath.Join("/x", "workspaces", "alice"), WorkspaceSandboxRoot("alice"))
+
+	// ④ 机器用户段
+	require.Equal(t, filepath.Join("/x", "workspaces", "apikey-svc1"), WorkspaceSandboxRoot("apikey:svc1"))
+
+	// ⑤ OAuth 用户段（含冒号有损 → 完整 SHA-256 摘要后缀，G1b）
+	require.Equal(t, filepath.Join("/x", "workspaces", "oauth-github-user-e14ec4764cff30ca3657d76edc1e77f2f41da3475298407fc58685620054ea66"), WorkspaceSandboxRoot("github:user"))
+
+	// ③ 相对 HOTPLEX_HOME → Abs 兜底（root 恒为绝对路径）
+	absRel, err := filepath.Abs("rel")
+	require.NoError(t, err)
+	t.Setenv("HOTPLEX_HOME", "rel")
+	require.Equal(t, filepath.Join(absRel, "workspaces", "alice"), WorkspaceSandboxRoot("alice"))
+
+	// ② 未设置 HOTPLEX_HOME → $HOME/.hotplex/workspaces/<segment>
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HOTPLEX_HOME", "")
+	require.Equal(t, filepath.Join(home, ".hotplex", "workspaces", "alice"), WorkspaceSandboxRoot("alice"))
 }
 
 // ─── Intelligent directory access ─────────────────────────────────────────────

@@ -62,8 +62,8 @@ func runAdminCreate(cmd *cobra.Command, _ []string) error {
 	// turning its WHERE NOT EXISTS guard into an identity-takeover vector
 	// (review fix).
 	if err := security.ValidateUsername(username); err != nil {
-		return fmt.Errorf("invalid username: must be %d-%d chars, [a-zA-Z0-9_.-], and not start with %q",
-			security.UsernameMinLen, security.UsernameMaxLen, security.ReservedUsernamePrefix)
+		return fmt.Errorf("invalid username: must be %d-%d chars, [a-zA-Z0-9_.-], and not be in a reserved namespace (apikey:, apikey-, oauth-, anonymous, api_user)",
+			security.UsernameMinLen, security.UsernameMaxLen)
 	}
 
 	cfg, err := loadConfig(configPath, false)

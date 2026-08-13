@@ -255,6 +255,18 @@ func (h *UserAdminHandlers) ResetUserPassword(w http.ResponseWriter, r *http.Req
 		web.WriteAppError(w, http.StatusServiceUnavailable, "NO_IDP", "no identity provider")
 		return
 	}
+	// 禁止为密码空哈希用户（API-key provision 用户、系统身份 anonymous/api_user
+	// 占位行，migration 018 模型）重置密码：它们以 password_hash='' 封锁账号登录，
+	// 重置后将成为可登录账号（系统身份共享沙箱会被接管）。404 同时给出明确语义。
+	u, err := h.store.GetUserByID(r.Context(), id)
+	if err != nil {
+		web.WriteAppError(w, http.StatusNotFound, "USER_NOT_FOUND", "user not found")
+		return
+	}
+	if u.PasswordHash == "" {
+		web.WriteAppError(w, http.StatusForbidden, "PASSWORD_RESET_BLOCKED", "cannot reset password for provisioned/system users")
+		return
+	}
 	hash, err := h.idp.HashPassword(req.Password)
 	if err != nil {
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "hash password failed")
