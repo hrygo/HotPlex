@@ -1265,7 +1265,7 @@ func (m *CodexAppServerManager) dispatchNotification(notif *JSONRPCNotification)
 	switch notif.Method {
 	case "item/agentMessage/delta", "item/reasoning/summaryTextDelta",
 		"item/reasoning/textDelta", "item/commandExecution/outputDelta",
-		"thread/tokenUsage/updated":
+		"thread/tokenUsage/updated", "mcpServer/startupStatus/updated":
 	default:
 		m.log.Debug("codex-app-server: dispatching notification", "method", notif.Method, "thread_id", params.ThreadID)
 	}
