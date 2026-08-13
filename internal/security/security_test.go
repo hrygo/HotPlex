@@ -3,6 +3,8 @@
 package security
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"os"
 	"path/filepath"
@@ -297,8 +299,15 @@ func TestSandboxDirSegment(t *testing.T) {
 
 // TestSandboxDirSegment_Injectivity 证明 sanitize 有损与大小写差异不会造成同空间
 // 段碰撞（评审 F1，G1b）：sanitize 等价的输入对必须映射到不同目录段。
+// 同时覆盖跨分支碰撞（评审 R6）：digest 分支输出形态本身是合法恒等输入
+// （"apikey:Abc" → "apikey-abc-<h>" 与恒等输入 "apikey:abc-<h>"；空 base 变体
+// "!!!" → "<h>" 与恒等输入 "<h>"），恒等分支必须排除 digest 形态输入。
 func TestSandboxDirSegment_Injectivity(t *testing.T) {
 	t.Parallel()
+	sha256Hex := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(sum[:])
+	}
 	pairs := [][2]string{
 		{"apikey:a/b", "apikey:a-b"},
 		{"apikey:..", "apikey:."},
@@ -306,6 +315,10 @@ func TestSandboxDirSegment_Injectivity(t *testing.T) {
 		{"github:user/1", "github:user-1"},
 		{"Alice", "alice"},
 		{"apikey:A", "apikey:a"},
+		// 跨分支碰撞：digest 输出可被恒等输入"回放"（R6）
+		{"apikey:Abc", "apikey:abc-" + sha256Hex("Abc")},
+		// 空 base 变体：纯 64-hex digest 输出可被恒等输入"回放"（R6）
+		{"!!!", sha256Hex("!!!")},
 	}
 	for _, p := range pairs {
 		p := p

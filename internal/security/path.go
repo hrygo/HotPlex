@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -149,14 +150,30 @@ func sanitizePathSegment(s string) string {
 }
 
 // lossySafeSegment 返回 filesystem-safe 且注入（无碰撞）的目录段：
-// sanitize 恒等且全小写且非空 → 原样返回（可读性保留）；否则追加完整 SHA-256
-// 十六进制摘要（64 字符，碰撞等价于 SHA-256 碰撞，计算上不可行；评审 F1 第二轮
-// 否决 4-byte 截断——32 位前缀生日碰撞可被暴力构造）。空段/空输入退化为纯摘要段。
+// sanitize 恒等且全小写且非空且非 digest 输出形态 → 原样返回（可读性保留）；
+// 否则追加完整 SHA-256 十六进制摘要（64 字符，碰撞等价于 SHA-256 碰撞，
+// 计算上不可行；评审 F1 第二轮否决 4-byte 截断——32 位前缀生日碰撞可被暴力构造）。
+// 空段/空输入退化为纯摘要段。
 // 覆盖：sanitize 有损（"a/b" vs "a-b"）、大小写敏感文件系统（"Alice" vs "alice"）、
-// 逃逸段（".."）、空输入。
+// 逃逸段（".."）、空输入、跨分支碰撞（评审 R6：digest 输出形态本身是合法恒等
+// 输入——"Abc" → "abc-<h>" 与恒等输入 "abc-<h>" 会映射到同一目录段；纯 64-hex
+// digest 输出同理，如 "!!!" → "<h>" 与恒等输入 "<h>"）。
+//
+// digest 分支输出只有两种形态（均只含 [a-z0-9-]）：
+//   - base + "-" + 64 位 hex（base 非空）→ 后缀形如 "-<64 hex>"
+//   - 纯 64 位 hex（base 为空，sanitize 全损输入）
+//
+// 恒等分支排除这两种形态后，digest 输出集合与恒等输出集合不相交，段映射
+// 恢复注入：任何可被"回放"为恒等输入的 digest 输出都会在回放时再次追加摘要。
+var (
+	digestSuffixRe = regexp.MustCompile(`-[0-9a-f]{64}$`)
+	pureDigestRe   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
 func lossySafeSegment(s string) string {
 	seg := sanitizePathSegment(s)
-	if seg == s && seg == strings.ToLower(s) && s != "" {
+	if seg == s && seg == strings.ToLower(s) && s != "" &&
+		!digestSuffixRe.MatchString(s) && !pureDigestRe.MatchString(s) {
 		return seg
 	}
 	sum := sha256.Sum256([]byte(s))
