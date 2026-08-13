@@ -700,6 +700,41 @@ func TestWorkspace_Update_WorkDir_OutsideSandbox_Rejected(t *testing.T) {
 	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
 }
 
+// TestWorkspace_Update_LegacyUidRoot_UnchangedWorkDirNoop: 存量 UUID 根 workspace
+// （spec §5.4 P3）的 work_dir 落在 v1.40 uid-keyed 路径下，按新 username 根重校验
+// 必 403。前端 general-tab 保存时总是携带未变 work_dir（只读段原样回传），因此
+// 未变更的 work_dir 必须视为 no-op（跳过沙箱重校验，评审 R5）：name 等字段正常
+// 更新、work_dir 原样保留；显式修改 work_dir 仍按新 base 校验 403（P3：不可再改）。
+func TestWorkspace_Update_LegacyUidRoot_UnchangedWorkDirNoop(t *testing.T) {
+	t.Parallel()
+	env := newTestAuthEnv(t)
+	cookie := env.loginAs(t, "admin", "adminpass", http.StatusOK)
+
+	// 正常创建后把 work_dir 改写为 v1.40 存量 uid-keyed 路径（u-admin），
+	// 模拟升级前的存量 workspace 记录。Create 不回写 updated_at，须先取行
+	// 再改，否则 UpdateWorkspace 的乐观锁（CAS updated_at）会冲突。
+	ws := env.createWorkspace(t, cookie, "admin", "legacy", "legacy")
+	stored, err := env.store.GetWorkspaceByID(context.Background(), ws.ID)
+	require.NoError(t, err)
+	legacy := filepath.Join(config.HotplexHome(), "workspaces", "u-admin", "legacy")
+	stored.WorkDir = legacy
+	require.NoError(t, env.store.UpdateWorkspace(context.Background(), stored, 1700000001))
+
+	// 未变 legacy work_dir + name 变更 → 200，name 生效、work_dir 原样。
+	body := `{"name":"renamed","work_dir":"` + legacy + `"}`
+	w := env.patchWorkspace(t, cookie, ws.ID, body)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	var got session.Workspace
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&got))
+	require.Equal(t, "renamed", got.Name)
+	require.Equal(t, legacy, got.WorkDir)
+
+	// 显式修改 legacy work_dir → 403（P3：work_dir 不可再改）。
+	w2 := env.patchWorkspace(t, cookie, ws.ID, `{"work_dir":"`+legacy+`/moved"}`)
+	require.Equal(t, http.StatusForbidden, w2.Code)
+	require.Contains(t, w2.Body.String(), "WORK_DIR_OUTSIDE_SANDBOX")
+}
+
 // TestWorkspace_OwnerIsolation_Sandbox: 即使 work_dir 落在 workspaces 树下，只要不在
 // 调用者自己 uid 的子树下（例如别人的 uid），也必须被拒。
 func TestWorkspace_OwnerIsolation_Sandbox(t *testing.T) {

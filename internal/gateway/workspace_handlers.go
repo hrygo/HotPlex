@@ -130,6 +130,12 @@ func (h *WorkspaceHandlers) ensureSystemIdentityRow(ctx context.Context, uid str
 	return nil
 }
 
+// writeWorkDirTaken 输出 per-user 1:1 work_dir 冲突的 409 响应（spec §6.2）。
+// Create/Update 共用的唯一错误码/文案定义，避免两处字面重复漂移（PR #785 P3）。
+func writeWorkDirTaken(w http.ResponseWriter) {
+	writeAppError(w, http.StatusConflict, "WORK_DIR_TAKEN", "work_dir already used by you")
+}
+
 type createWorkspaceRequest struct {
 	Name           string  `json:"name"`
 	WorkDir        string  `json:"work_dir"`
@@ -193,7 +199,7 @@ func (h *WorkspaceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.store.CreateWorkspace(r.Context(), ws, h.nowUnix()); err != nil {
 		if isUniqueViolation(err) {
-			writeAppError(w, http.StatusConflict, "WORK_DIR_TAKEN", "work_dir already used by you")
+			writeWorkDirTaken(w)
 			return
 		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "create failed")
@@ -289,25 +295,29 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 			writeAppError(w, http.StatusBadRequest, "INVALID_WORK_DIR", err.Error())
 			return
 		}
-		if err := security.ValidateWorkDir(abs); err != nil {
-			writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
-			return
-		}
-		// Sandbox is keyed by the workspace OWNER, not the acting user, so an
-		// admin editing another user's workspace keeps owner isolation (spec §2 G2).
-		// Create (:123) passes uid because the creator IS the owner; Update is the
-		// admin-edit path where the two can differ.
-		root := h.sandboxRootFor(r, ws.OwnerUserID)
-		if err := security.ValidateWorkspaceWorkDir(abs, root); err != nil {
-			writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under the workspace owner's sandbox ("+root+")")
-			return
-		}
-		// work_dir participates in DeriveSessionKey (key.go), so changing it shifts
-		// the deterministic session id and orphans any bound active session's
-		// history. Reject the change while active sessions exist, mirroring the
-		// DeleteWorkspaceIfEmpty guard used by Delete (spec §9.1). No-op when the
-		// value is unchanged.
+		// 未变更的 work_dir 是 no-op：跳过沙箱重校验。存量 UUID 根 workspace
+		// （spec §5.4 P3）存的是 v1.40 uid-keyed 路径，按新 username 根重校验必 403，
+		// 而前端 general-tab 保存时总是携带未变 work_dir（只读段原样回传）——若此处
+		// 无条件校验，存量 workspace 的 name/overrides 等一切保存都会失败，
+		// 违背 P3 "其他字段不受影响"。校验只在值真正变化时生效。
 		if abs != ws.WorkDir {
+			if err := security.ValidateWorkDir(abs); err != nil {
+				writeAppError(w, http.StatusForbidden, "WORK_DIR_FORBIDDEN", err.Error())
+				return
+			}
+			// Sandbox is keyed by the workspace OWNER, not the acting user, so an
+			// admin editing another user's workspace keeps owner isolation (spec §2 G2).
+			// Create (:123) passes uid because the creator IS the owner; Update is the
+			// admin-edit path where the two can differ.
+			root := h.sandboxRootFor(r, ws.OwnerUserID)
+			if err := security.ValidateWorkspaceWorkDir(abs, root); err != nil {
+				writeAppError(w, http.StatusForbidden, "WORK_DIR_OUTSIDE_SANDBOX", "work_dir must be under the workspace owner's sandbox ("+root+")")
+				return
+			}
+			// work_dir participates in DeriveSessionKey (key.go), so changing it shifts
+			// the deterministic session id and orphans any bound active session's
+			// history. Reject the change while active sessions exist, mirroring the
+			// DeleteWorkspaceIfEmpty guard used by Delete (spec §9.1).
 			n, err := h.store.CountActiveSessionsInWorkspace(r.Context(), ws.ID)
 			if err != nil {
 				writeAppError(w, http.StatusInternalServerError, "INTERNAL", "check active sessions failed")
@@ -317,8 +327,8 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 				writeAppError(w, http.StatusConflict, "WORKSPACE_NOT_EMPTY", "cannot change work_dir while the workspace has active sessions")
 				return
 			}
+			ws.WorkDir = abs
 		}
-		ws.WorkDir = abs
 	}
 	if req.Name != "" {
 		ws.Name = req.Name
@@ -372,7 +382,7 @@ func (h *WorkspaceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if isUniqueViolation(err) {
-			writeAppError(w, http.StatusConflict, "WORK_DIR_TAKEN", "work_dir already used by you")
+			writeWorkDirTaken(w)
 			return
 		}
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "update failed")
