@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.40.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.41.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,12 +133,11 @@ HotPlex 把“用户在哪里对话”和“哪个 Agent 执行任务”分离�
 
 Worker 可以按 Bot 或平台指定，其余场景继承部署级共享默认值。
 
-## ✨ 最新版本：v1.40.0
+## ✨ 最新版本：v1.41.0
 
-- **Agent 忙碌时也可以继续说。** Claude Code 和 Codex CLI 会把补充输入注入当前 Turn；ACP 和 OpenCode Server 则暂存输入，并在当前 Turn 完成后自动重投。
-- **所有 SDK 共用一份协议契约。** AEP v1 canonical schema 和 38 个 golden envelope 在 CI 中同时校验 Go、TypeScript、Python 和 Java 客户端。
-- **完整的后台管理体验。** v1.38 系列提供 Session、Bot、Cron、用户、API Key、Skill 和活动记录管理页面。
-- **重连恢复更加可靠。** Session 序号水位恢复与 ACP resume 修复，避免重连后的历史丢失和事件序号冲突。
+- **一个环境变量迁移整个工作区。** `HOTPLEX_HOME` 统一控制默认配置、数据、日志、PID、Agent 人格、skills、Worker 工作目录与 WebChat 沙箱——不再出现"配置在 A、数据在 B"的分离。
+- **晚到完成事件收敛投递终态。** Worker 在投递标记失败之后才完成的任务，现在会收敛到终态而不是泄漏悬挂执行。
+- **更干净的日志。** Worker stderr 自动剥离 ANSI 转义序列，codexcli 重复的 MCP 状态更新被去重，日志不再被洪泛刷屏。
 
 完整版本历史见[更新记录](CHANGELOG.md)。
 

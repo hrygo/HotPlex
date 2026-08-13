@@ -1,6 +1,6 @@
 # HotPlex 项目知识库
 
-**最后更新**: 2026-08-07 · **分支**: feat/957-native-skill-dispatch-3x4 · **版本**: v1.40.0 · **提交**: 7f600e7b
+**最后更新**: 2026-08-13 · **分支**: feat/configurable-workspace · **版本**: v1.41.0 · **提交**: 199dfa1e
 
 ---
 
