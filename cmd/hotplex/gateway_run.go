@@ -1647,12 +1647,7 @@ func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
 }
 
 func releaseDBStatsManual(log *slog.Logger) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Warn("db-stats: cannot determine home dir for skill manual release", "err", err)
-		return
-	}
-	dir := filepath.Join(home, ".hotplex", "skills")
+	dir := filepath.Join(config.HotplexHome(), "skills")
 	_ = os.MkdirAll(dir, 0o755)
 	path := filepath.Join(dir, "db-stats.md")
 	if err := os.WriteFile(path, []byte(dbutil.SkillManual()), 0o644); err != nil {
