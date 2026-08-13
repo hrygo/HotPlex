@@ -32,10 +32,7 @@ Requires the gateway to be running.`,
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
-				triggerPath := configPath
-				if !cmd.Flags().Changed("config") {
-					triggerPath = ""
-				}
+				triggerPath := triggerConfigPath(configPath, cmd.Flags().Changed("config"))
 				if err := croncli.TriggerViaAdmin(ctx, triggerPath, job.ID); err != nil {
 					return err
 				}
@@ -47,4 +44,14 @@ Requires the gateway to be running.`,
 	}
 	configFlag(cmd, &configPath)
 	return cmd
+}
+
+// triggerConfigPath returns the effective config path for TriggerViaAdmin:
+// empty when --config was not explicitly passed (the callee then resolves
+// the running gateway's config); the explicit path otherwise.
+func triggerConfigPath(configPath string, changed bool) string {
+	if !changed {
+		return ""
+	}
+	return configPath
 }
