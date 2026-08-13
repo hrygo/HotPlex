@@ -45,7 +45,7 @@ func newGatewayStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the gateway server",
-		Long: `Start the gateway server. Loads configuration from the specified config file (default: ~/.hotplex/config.yaml).
+		Long: `Start the gateway server. Loads configuration from the specified config file (default: $HOTPLEX_HOME/config.yaml when set, else ~/.hotplex/config.yaml).
 In dev mode (--dev), API key authentication and admin tokens are disabled.
 Use -d to run as a background daemon.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -130,7 +130,7 @@ Use --detached to spawn a helper process that survives worker shutdown.`,
 				}
 
 				// Use the running instance's config if user didn't specify one.
-				if configPath == defaultConfigPath && inst.ConfigPath != "" {
+				if !cmd.Flags().Changed("config") && inst.ConfigPath != "" {
 					configPath = inst.ConfigPath
 				}
 				if !devMode && inst.DevMode {

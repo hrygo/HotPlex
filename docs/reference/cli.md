@@ -8,13 +8,15 @@ description: HotPlex 命令行工具所有命令和标志的详尽参考文档
 
 HotPlex CLI（`hotplex`）是 HotPlex Worker Gateway 的统一管理工具，基于 [cobra](https://github.com/spf13/cobra) 构建。本文档覆盖所有命令、子命令及其标志。
 
+> **`--config` 默认值**：以下表格中的默认 `$HOTPLEX_HOME/config.yaml` 表示未显式传入 `--config` 时的解析结果——设置 `HOTPLEX_HOME` 环境变量后整个 workspace（配置文件、数据、日志、PID）随之迁移；未设置时回退 `$HOTPLEX_HOME/config.yaml`。
+
 ## 全局标志
 
 以下标志在所有子命令中可用：
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 ---
 
@@ -84,7 +86,7 @@ hotplex
 
 ### `hotplex gateway start`
 
-启动 Gateway 服务器。默认加载 `~/.hotplex/config.yaml`，前台运行。
+启动 Gateway 服务器。默认加载 `$HOTPLEX_HOME/config.yaml`，前台运行。
 
 **示例**：
 
@@ -97,7 +99,7 @@ hotplex gateway start -c /path/to/config.yaml  # 指定配置文件
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--dev` | | `bool` | `false` | 开发模式，禁用 API Key 认证和 Admin Token |
 | `--daemon` | `-d` | `bool` | `false` | 后台守护进程模式运行，日志写入 `~/.hotplex/logs/gateway.log` |
 
@@ -125,7 +127,7 @@ hotplex gateway restart --detached  # Worker-initiated restart（独立进程安
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--dev` | | `bool` | `false` | 开发模式 |
 | `--daemon` | `-d` | `bool` | `false` | 后台守护进程模式 |
 | `--detached` | | `bool` | `false` | 从 Worker 进程内部安全重启 Gateway。Fork 独立 PGID 的 helper 进程执行重启，与调用方 Worker 的生命周期完全隔离。内置 60s 冷却期防止循环重启 |
@@ -149,7 +151,7 @@ hotplex dev -c /path/to/config.yaml
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 ---
 
@@ -170,7 +172,7 @@ hotplex status --format json  # JSON 输出
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--format` | | `string` | `text` | 输出格式：`text`、`json` |
 
 ---
@@ -210,7 +212,7 @@ hotplex doctor --json              # JSON 输出（用于脚本集成）
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--fix` | | `bool` | `false` | 自动修复可修复的问题 |
 | `--verbose` | `-v` | `bool` | `false` | 显示详细信息 |
 | `--json` | | `bool` | `false` | JSON 格式输出 |
@@ -250,7 +252,7 @@ hotplex security --json            # JSON 输出
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--fix` | | `bool` | `false` | 自动修复安全问题 |
 | `--verbose` | `-v` | `bool` | `false` | 显示详细信息 |
 | `--json` | | `bool` | `false` | JSON 格式输出 |
@@ -268,7 +270,7 @@ hotplex security --json            # JSON 输出
 **示例**：
 
 ```bash
-hotplex audit verify               # 校验审计链（默认 ~/.hotplex/config.yaml）
+hotplex audit verify               # 校验审计链（默认 $HOTPLEX_HOME/config.yaml）
 hotplex audit verify --config configs/config-dev.yaml   # 指定配置
 ```
 
@@ -283,7 +285,7 @@ advice: chain gap before this row: previous row missing/modified, ...
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 ### `hotplex audit rebase --next-id <id> --confirm`
 
@@ -313,7 +315,7 @@ audit chain OK after rebase: 705 rows checked, no breaks
 |------|--------|------|--------|------|
 | `--next-id` | | `int` | 必填 | 链上首个保留行的 id（其 `prev_hash` 成为新锚点） |
 | `--confirm` | | `bool` | `false` | 确认执行不可逆的重锚定 |
-| `--config` | | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 > **运维提示**：执行前先停止 Gateway（写操作与运行实例并发会破坏内存写回）；执行后用 `hotplex audit verify` 确认转绿并重启 Gateway。
 
@@ -339,7 +341,7 @@ hotplex runtime fences list --session-id sess-1 --json
 | `--session-id` | `string` | "" | 按 session 过滤 |
 | `--json` | `bool` | `false` | JSON 输出 |
 | `--limit` | `int` | 100 | 最大条数（上限 500） |
-| `--config` / `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` / `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 输出列：`EXECUTION` / `SESSION` / `RUNTIME` / `REASON` / `FENCE VERSION` / `FENCED AT`。表格尾部提示决策命令模板。
 
@@ -385,7 +387,7 @@ hotplex config validate -c /path/to/config.yaml
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 ---
 
@@ -410,7 +412,7 @@ hotplex onboard --non-interactive \
 
 | 标志 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--non-interactive` | `bool` | `false` | 非交互模式，使用默认值 |
 | `--force` | `bool` | `false` | 覆盖已有配置 |
 | `--enable-slack` | `bool` | `false` | 在非交互模式下启用 Slack（凭据通过 `.env` 配置） |
@@ -499,7 +501,7 @@ hotplex service install --level system      # 系统级安装（需 sudo）
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--level` | | `string` | `user` | 服务级别：`user`（无需 root）或 `system`（需 sudo） |
 
 ### `hotplex service uninstall`
@@ -610,7 +612,7 @@ hotplex slack send-message -t "Reply" --thread-ts 1777797319.120439 --channel C1
 | `--channel` | | `string` | | 否 | 目标频道或 DM ID |
 | `--thread-ts` | | `string` | | 否 | 线程时间戳（回复线程消息） |
 | `--json` | | `bool` | `false` | 否 | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack update-message`
 
@@ -626,7 +628,7 @@ hotplex slack update-message --channel C12345678 --ts 1777797319.120439 --text "
 | `--channel` | | `string` | | 是 | 频道 ID |
 | `--ts` | | `string` | | 是 | 消息时间戳 |
 | `--json` | | `bool` | `false` | 否 | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack schedule-message`
 
@@ -645,7 +647,7 @@ hotplex slack schedule-message -t "Report" --at 1746316800 --channel C12345678
 | `--channel` | | `string` | | 否 | 目标频道 |
 | `--at` | | `string` | | 是 | 发送时间（ISO 8601 或 Unix 时间戳） |
 | `--json` | | `bool` | `false` | 否 | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack upload-file`
 
@@ -667,7 +669,7 @@ hotplex slack upload-file -f report.pdf --comment "Q4 report"
 | `--thread-ts` | | `string` | | 否 | 线程时间戳（回复线程） |
 | `--max-size` | | `int64` | `52428800`（50MB） | 否 | 文件大小上限（字节） |
 | `--json` | | `bool` | `false` | 否 | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack download-file`
 
@@ -683,7 +685,7 @@ hotplex slack download-file --file-id F0AQJ5CLZN0 --output ./report.pdf
 |------|--------|------|--------|------|------|
 | `--file-id` | | `string` | | 是 | Slack 文件 ID |
 | `--output` | `-o` | `string` | | 是 | 本地保存路径 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack delete-file`
 
@@ -698,7 +700,7 @@ hotplex slack delete-file --file-id F0AQJ5CLZN0
 | 标志 | 类型 | 默认值 | 必填 | 说明 |
 |------|------|--------|------|------|
 | `--file-id` | `string` | | 是 | Slack 文件 ID |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack list-channels`
 
@@ -717,7 +719,7 @@ hotplex slack list-channels --types im,public_channel,private_channel --limit 20
 | `--types` | | `string` | `im` | 频道类型（逗号分隔）：`im`、`public_channel`、`private_channel` |
 | `--limit` | `-n` | `int` | `100` | 最大返回数量 |
 | `--json` | | `bool` | `false` | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 ### `hotplex slack bookmark`
 
@@ -739,7 +741,7 @@ hotplex slack bookmark add --channel C12345678 --title "Status" --emoji "white_c
 | `--url` | `string` | | 否 | 书签 URL（与 `--emoji` 二选一） |
 | `--emoji` | `string` | | 否 | 书签图标 emoji |
 | `--json` | `bool` | `false` | 否 | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 #### `hotplex slack bookmark list`
 
@@ -753,7 +755,7 @@ hotplex slack bookmark list --channel C12345678
 |------|------|--------|------|------|
 | `--channel` | `string` | | 是 | 频道 ID |
 | `--json` | `bool` | `false` | 否 | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 #### `hotplex slack bookmark remove`
 
@@ -767,7 +769,7 @@ hotplex slack bookmark remove --channel C12345678 --bookmark-id Bk12345678
 |------|------|--------|------|------|
 | `--channel` | `string` | | 是 | 频道 ID |
 | `--bookmark-id` | `string` | | 是 | 书签 ID |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex slack react`
 
@@ -786,7 +788,7 @@ hotplex slack react add --channel D0AQJ5CLZN0 --ts 1777797319.120439 --emoji whi
 | `--channel` | | `string` | | 是 | 频道 ID |
 | `--ts` | | `string` | | 是 | 消息时间戳 |
 | `--emoji` | `-e` | `string` | | 是 | Emoji 名称（不含冒号） |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 #### `hotplex slack react remove`
 
@@ -801,7 +803,7 @@ hotplex slack react remove --channel D0AQJ5CLZN0 --ts 1777797319.120439 --emoji 
 | `--channel` | | `string` | | 是 | 频道 ID |
 | `--ts` | | `string` | | 是 | 消息时间戳 |
 | `--emoji` | `-e` | `string` | | 是 | Emoji 名称（不含冒号） |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ---
 
@@ -867,7 +869,7 @@ hotplex cron create \
 | `--platform` | | `string` | | 否 | 目标投递平台：`slack`、`feishu`、`cron`（未设置时根据 `bot_id` 关联的 session 平台信息推断；若推断失败则默认为 `cron`，不投递结果） |
 | `--platform-key` | | `string` | | 否 | 平台路由键（JSON 对象），如 `'{"channel_id":"C123"}'` |
 | `--worker-type` | | `string` | | 否 | AI Agent 引擎类型：`claude_code`、`opencode_server`、`codex_cli`、`acp`。未设置时使用平台默认 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 ### `hotplex cron list`
 
@@ -885,7 +887,7 @@ hotplex cron list --json         # JSON 输出
 |------|------|--------|------|
 | `--enabled` | `bool` | `false` | 仅显示已启用的任务 |
 | `--json` | `bool` | `false` | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 ### `hotplex cron get`
 
@@ -900,7 +902,7 @@ hotplex cron get cron_abc123     # 通过 ID 查看
 | 标志 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--json` | `bool` | `false` | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 **位置参数**：
 
@@ -933,7 +935,7 @@ hotplex cron update cron_abc123 --schedule "cron:0 */2 * * *" -m "新的消息�
 | `--max-retries` | | `int` | `0` | 最大重试次数 |
 | `--max-runs` | | `int` | `0` | 最大执行次数 |
 | `--expires-at` | | `string` | | 自动禁用时间（RFC3339） |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 **位置参数**：
 
@@ -952,7 +954,7 @@ hotplex cron delete daily-health
 
 | 标志 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 **位置参数**：
 
@@ -971,7 +973,7 @@ hotplex cron trigger daily-health
 
 | 标志 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 **位置参数**：
 
@@ -991,7 +993,7 @@ hotplex cron history daily-health --json
 | 标志 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--json` | `bool` | `false` | JSON 格式输出 |
-| `--config` | `-c` | `string` | `~/.hotplex/config.yaml` | 配置文件路径 |
+| `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 
 **位置参数**：
 
@@ -1025,7 +1027,7 @@ hotplex admin create --username ops --config /path/config.yaml
 | `--username` | `string` | | 是 | 用户名（3-64 字符，仅 `[a-zA-Z0-9_.-]`，不可 `apikey:` 开头） |
 | `--password` | `string` | | 否 | 密码（省略则交互式不回显；最少 8 字符）。⚠️ 作为进程参数对同机其他用户经 `ps`/`/proc` 可见，生产环境请使用交互式输入 |
 | `--admin` | `bool` | `true` | 否 | 创建为 admin 角色 |
-| `--config` | `string` | `~/.hotplex/config.yaml` | 否 | 配置文件路径 |
+| `--config` | `string` | `$HOTPLEX_HOME/config.yaml` | 否 | 配置文件路径 |
 
 密码使用 bcrypt（cost=12）存储。用户名保留命名空间 `apikey:` 检查用于防止与 API key 伪用户冲突导致的身份接管。
 

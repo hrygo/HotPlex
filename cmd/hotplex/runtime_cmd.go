@@ -75,7 +75,9 @@ type fenceAdminClient struct {
 // The token can be overridden with HOTPLEX_ADMIN_TOKEN for split-admin
 // deployments.
 func newFenceAdminClient(configPath string) (*fenceAdminClient, error) {
-	if configPath == "" || configPath == config.DefaultConfigPath {
+	// Empty string means "not specified": fall back to the running gateway's
+	// actual config path from the PID file when available.
+	if configPath == "" {
 		if state, stateErr := readGatewayState(); stateErr == nil && state.ConfigPath != "" {
 			configPath = state.ConfigPath
 		}
@@ -237,6 +239,9 @@ func newFencesListCmd() *cobra.Command {
 		Example: `  hotplex runtime fences list
   hotplex runtime fences list --session-id sess-1 --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !cmd.Flags().Changed("config") {
+				configPath = ""
+			}
 			client, err := newFenceAdminClient(configPath)
 			if err != nil {
 				return err
@@ -311,6 +316,9 @@ func newFencesActionCmd(decision string) *cobra.Command {
 				return errors.New("--reason is required (1-512 chars)")
 			}
 
+			if !cmd.Flags().Changed("config") {
+				configPath = ""
+			}
 			client, err := newFenceAdminClient(configPath)
 			if err != nil {
 				return err

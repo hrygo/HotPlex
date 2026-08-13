@@ -32,7 +32,11 @@ Requires the gateway to be running.`,
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
-				if err := croncli.TriggerViaAdmin(ctx, configPath, job.ID); err != nil {
+				triggerPath := configPath
+				if !cmd.Flags().Changed("config") {
+					triggerPath = ""
+				}
+				if err := croncli.TriggerViaAdmin(ctx, triggerPath, job.ID); err != nil {
 					return err
 				}
 

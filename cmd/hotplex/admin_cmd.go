@@ -23,7 +23,7 @@ func newAdminCmd() *cobra.Command {
 		Use:   "admin",
 		Short: "用户与账号管理（bootstrap admin 等）",
 	}
-	cmd.PersistentFlags().String("config", config.DefaultConfigPath, "配置文件路径（默认 ~/.hotplex/config.yaml）")
+	cmd.PersistentFlags().String("config", config.DefaultConfigPath(), "配置文件路径（默认 $HOTPLEX_HOME/config.yaml，未设置时为 ~/.hotplex/config.yaml）")
 
 	create := &cobra.Command{
 		Use:   "create",

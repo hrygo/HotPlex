@@ -281,7 +281,7 @@ func CheckMaxJobs(ctx context.Context, store cron.Store, configPath string) erro
 func TriggerViaAdmin(ctx context.Context, configPath, jobID string) error {
 	// If the user didn't specify --config, try reading the gateway's actual
 	// config path from the PID file to avoid loading a different .env.
-	if configPath == "" || configPath == config.DefaultConfigPath {
+	if configPath == "" {
 		if gwCfg := gatewayConfigPath(); gwCfg != "" {
 			configPath = gwCfg
 		}
