@@ -81,17 +81,19 @@ jobs:
           fi
           echo "No oversized files in HEAD tree."
 
-  # ── Prune: expired artifacts from completed runs ────────────────────────
+  # ── Prune: artifacts consumed within a run, then deleted ───────────────
   # Coverage shards land on every push to main; without active pruning the
   # repository accumulates them until GitHub's backend expiry (which lags the
   # retention-days upload setting). Delete every artifact whose run has
-  # finished — artifacts are only consumed within the run that uploads them.
-  # Kept: artifacts of the current run and of any in-progress run, so parallel
-  # workflows never lose intermediate inputs. Mirrors tte-mrcp's approach.
+  # finished. Kept: artifacts of the current run and of any in-progress run
+  # (nothing here consumes cross-run artifacts, so this is safe). Runs in
+  # parallel and never blocks CI: during the initial backlog drain the one-by-
+  # one deletion saturates the GITHUB_TOKEN API budget (~1000 req/hr), and
+  # each run simply processes the next batch.
   prune-artifacts:
     name: Prune stale artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: write
@@ -149,7 +151,7 @@ jobs:
   # On PRs: runs affected packages only (smart scope detection).
   # On push to main: shards the full suite across 3 parallel runners.
   test:
-    needs: [large-file-guard, prune-artifacts]
+    needs: [large-file-guard]
     name: ${{ matrix.shard != '' && format('Test (shard {0})', matrix.shard) || 'Test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
