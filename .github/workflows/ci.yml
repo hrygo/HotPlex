@@ -37,6 +37,9 @@ on:
 env:
   # TODO: remove after Node 24 becomes the default runtime for GitHub Actions
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Coverage artifacts are consumed within the same run; 90-day default
+  # retention is excessive when 3 shards land on every push to main.
+  ARTIFACT_RETENTION_DAYS: 7
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -78,11 +81,75 @@ jobs:
           fi
           echo "No oversized files in HEAD tree."
 
+  # ── Prune: expired artifacts from completed runs ────────────────────────
+  # Coverage shards land on every push to main; without active pruning the
+  # repository accumulates them until GitHub's backend expiry (which lags the
+  # retention-days upload setting). Delete every artifact whose run has
+  # finished — artifacts are only consumed within the run that uploads them.
+  # Kept: artifacts of the current run and of any in-progress run, so parallel
+  # workflows never lose intermediate inputs. Mirrors tte-mrcp's approach.
+  prune-artifacts:
+    name: Prune stale artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Delete artifacts from prior runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          current_run="$GITHUB_RUN_ID"
+
+          artifacts_file="$(mktemp)"
+          runs_file="$(mktemp)"
+          trap 'rm -f "$artifacts_file" "$runs_file"' EXIT
+
+          if ! gh api --paginate "repos/$repo/actions/artifacts?per_page=100" \
+              > "$artifacts_file" 2>/dev/null; then
+            echo "::warning::Cannot list actions artifacts (read-only token, e.g. fork PR?); skipping prune"
+            exit 0
+          fi
+          if ! gh api "repos/$repo/actions/runs?status=in_progress&per_page=100" \
+              > "$runs_file" 2>/dev/null; then
+            echo "::warning::Cannot list in-progress runs; skipping prune"
+            exit 0
+          fi
+
+          # Keep artifacts that belong to the current run or to any run still
+          # in progress so concurrent workflows keep their inputs; delete every
+          # artifact from completed runs. Do not limit this to a workflow-
+          # specific name prefix: the Actions storage quota is repository-wide.
+          keep_runs="$(jq -r '.workflow_runs[].id' "$runs_file")"
+          keep_set="$(printf '%s\n%s\n' "$current_run" "$keep_runs" \
+            | sort -n | uniq | tr '\n' ' ')"
+          deleted=0
+          while IFS=$'\t' read -r artifact_id run_id name; do
+            case " $keep_set " in
+              *" $run_id "*) ;;
+              *)
+                echo "Deleting artifact $artifact_id ($name) from run $run_id"
+                if gh api -X DELETE "repos/$repo/actions/artifacts/$artifact_id" \
+                    >/dev/null 2>&1; then
+                  deleted=$((deleted + 1))
+                else
+                  echo "  (delete failed — artifact may already be expired)"
+                fi
+                ;;
+            esac
+          done < <(jq -sr '[.[].artifacts[]] |
+              .[] | "\(.id)\t\(.workflow_run.id)\t\(.name)"' "$artifacts_file")
+          echo "Deleted $deleted stale artifact(s)"
+
   # ── Test: race + coverage ───────────────────────────────────────────────
   # On PRs: runs affected packages only (smart scope detection).
   # On push to main: shards the full suite across 3 parallel runners.
   test:
-    needs: [large-file-guard]
+    needs: [large-file-guard, prune-artifacts]
     name: ${{ matrix.shard != '' && format('Test (shard {0})', matrix.shard) || 'Test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -201,6 +268,7 @@ jobs:
         with:
           name: coverage${{ matrix.shard != '' && format('-{0}', matrix.shard) || '' }}
           path: coverage*.out
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
   # ── Platform × Worker contract matrix ──────────────────────────────────
   # Keep this deterministic gate independent from the affected-package shard.
@@ -277,7 +345,7 @@ jobs:
             webchat/playwright-report
             webchat/test-results
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
 
   # ── Coverage merge + threshold check (push-to-main only) ────────────────
   coverage-check:
