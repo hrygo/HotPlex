@@ -162,7 +162,6 @@ title: Agent Event Protocol (AEP) v1
       "max_frame_size": 32768,
       "modalities": ["text", "code"]
     },
-    "server_version": "v1.41.0",
     "capabilities": [
       "control_stop_v1",
       "init_retry_v2",
@@ -193,7 +192,7 @@ title: Agent Event Protocol (AEP) v1
 | `session_id` | 是 | 分配或恢复的 session ID |
 | `state` | 是 | Session 当前状态（错误时为 `deleted`） |
 | `server_caps` | 是 | Gateway 能力声明 |
-| `server_version` | 否 | Gateway 构建版本；仅用于诊断，不替代能力判断 |
+| `server_version` | 否 | Gateway 构建版本；仅在运行时能够提供可信构建版本时发送，用于诊断，不替代能力判断 |
 | `capabilities` | 否 | Gateway 支持的可选行为集合；旧客户端忽略 |
 | `error` | 否 | 错误描述（仅错误响应） |
 | `code` | 否 | 错误码（仅错误响应） |

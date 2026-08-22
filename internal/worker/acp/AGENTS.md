@@ -71,8 +71,9 @@ WorkerSessionID 存在：ForkSession→Fork；loadSession cap→Load；否则 Ne
 - `client.Cancel` 2s 短超时，不侵蚀 SIGTERM grace period
 
 **SystemPrompt/JSONSchema 注入**
-- ACP v1 无原生 system prompt，作为首条 user input 前缀（`[SYSTEM INSTRUCTIONS]...[/SYSTEM INSTRUCTIONS]` 包裹）
-- `CompareAndSwap(false, true)` 保证只注入一次；ResetContext 后重置
+- ACP v1 无原生 system prompt；完整 AgentConfig 不得拼入 user input
+- 首条普通输入只附加固定、非私密的兼容规则；显式 Skill invocation 保持原始 slash command
+- `CompareAndSwap(false, true)` 保证兼容规则只注入一次；ResetContext 后重置
 
 **Capability 协商（worker.go:649）**：缺省 true（未声明视为支持），显式 false 才否定；当前仅 `loadSession` 受控
 
