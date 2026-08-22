@@ -488,7 +488,7 @@ func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclu
 	}{
 		{admin.AgentConfigSoul, configs.Soul},
 		{admin.AgentConfigAgents, configs.Agents},
-		{admin.AgentConfigSkills, configs.Skills},
+		{admin.AgentConfigSkills, configs.Tools},
 		{admin.AgentConfigUser, configs.User},
 		{admin.AgentConfigMemory, configs.Memory},
 	} {
@@ -526,7 +526,7 @@ func getConfigField(configs *agentconfig.AgentConfigs, file admin.AgentConfigFil
 	case admin.AgentConfigAgents:
 		return configs.Agents
 	case admin.AgentConfigSkills:
-		return configs.Skills
+		return configs.Tools
 	case admin.AgentConfigUser:
 		return configs.User
 	case admin.AgentConfigMemory:

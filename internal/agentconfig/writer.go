@@ -37,6 +37,10 @@ func ResolveFilePath(dir, platform, botName, fileName string) (string, error) {
 // It validates that content size does not exceed maxBytes, creates a temp
 // file in the same directory, writes content, then renames to the target path.
 func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) error {
+	canonical, known := canonicalFileName(fileName)
+	if !known || canonical != fileName {
+		return fmt.Errorf("%w: %q", ErrUnknownConfigFile, fileName)
+	}
 	if len(content) > maxBytes {
 		return fmt.Errorf("agentconfig: content size %d exceeds limit %d", len(content), maxBytes)
 	}
@@ -79,30 +83,35 @@ func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) e
 // os.Stat at each level in priority order. Returns "bot", "platform", "global",
 // or "" if the file is not found at any level.
 func ResolvedSource(dir, platform, botName, fileName string) string {
+	names := readAliases(fileName)
+	statAny := func(parent string) bool {
+		for _, name := range names {
+			if _, err := os.Stat(filepath.Join(parent, name)); err == nil {
+				return true
+			}
+		}
+		return false
+	}
 	// 1. Bot-level
 	if botName != "" && platform != "" {
-		p := filepath.Join(dir, platform, botName, fileName)
-		if _, err := os.Stat(p); err == nil {
+		if statAny(filepath.Join(dir, platform, botName)) {
 			return "bot"
 		}
 	}
 	// 2. Platform-level
 	if platform != "" {
-		p := filepath.Join(dir, platform, fileName)
-		if _, err := os.Stat(p); err == nil {
+		if statAny(filepath.Join(dir, platform)) {
 			return "platform"
 		}
 		// 2b. Legacy backward compat: dir/platform/default/fileName
 		if botName == "" {
-			p := filepath.Join(dir, platform, LegacyDefaultBotName, fileName)
-			if _, err := os.Stat(p); err == nil {
+			if statAny(filepath.Join(dir, platform, LegacyDefaultBotName)) {
 				return "legacy"
 			}
 		}
 	}
 	// 3. Global-level
-	p := filepath.Join(dir, fileName)
-	if _, err := os.Stat(p); err == nil {
+	if statAny(dir) {
 		return "global"
 	}
 	return ""

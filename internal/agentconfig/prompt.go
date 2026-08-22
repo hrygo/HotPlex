@@ -47,7 +47,7 @@ func BuildSystemPrompt(configs *AgentConfigs) string {
 
 	// B-channel: behavior-shaping directives (highest priority, listed first).
 	// HotPlex metacognition goes first as it defines the systemic ground rules.
-	if configs.Soul != "" || configs.Agents != "" || configs.Skills != "" || hotplex != "" {
+	if configs.Soul != "" || configs.Agents != "" || configs.Tools != "" || hotplex != "" {
 		var b []string
 		if hotplex != "" {
 			b = append(b, hotplex)
@@ -64,8 +64,8 @@ func BuildSystemPrompt(configs *AgentConfigs) string {
 				sanitize(configs.Agents),
 			))
 		}
-		if configs.Skills != "" {
-			catalog := buildSkillCatalog(configs.Skills)
+		if configs.Tools != "" {
+			catalog := buildSkillCatalog(configs.Tools)
 			if catalog == "" {
 				catalog = skillCatalogNotice
 			}

@@ -47,7 +47,7 @@ func TestLoad(t *testing.T) {
 		require.Equal(t, "I am an AI assistant.", cfg.Soul)
 		require.Equal(t, "Workspace rules here.", cfg.Agents)
 		require.Equal(t, "User profile data.", cfg.User)
-		require.Empty(t, cfg.Skills)
+		require.Empty(t, cfg.Tools)
 		require.Empty(t, cfg.Memory)
 	})
 
@@ -136,7 +136,7 @@ func TestLoad(t *testing.T) {
 		require.Contains(t, err.Error(), "invalid botName")
 	})
 
-	t.Run("empty file falls through to next level", func(t *testing.T) {
+	t.Run("empty file explicitly clears and stops fallback", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "SOUL.md", "Global soul.")
@@ -144,7 +144,72 @@ func TestLoad(t *testing.T) {
 
 		cfg, err := Load(dir, "slack", "")
 		require.NoError(t, err)
-		require.Equal(t, "Global soul.", cfg.Soul)
+		require.Empty(t, cfg.Soul)
+	})
+
+	t.Run("loads canonical tools file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "TOOLS.md", "Prefer native tools.")
+
+		cfg, err := Load(dir, "", "")
+		require.NoError(t, err)
+		require.Equal(t, "Prefer native tools.", cfg.Tools)
+	})
+
+	t.Run("loads legacy skills file as tools fallback", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SKILLS.md", "Legacy tool notes.")
+
+		cfg, err := Load(dir, "", "")
+		require.NoError(t, err)
+		require.Equal(t, "Legacy tool notes.", cfg.Tools)
+	})
+
+	t.Run("canonical tools wins over legacy in same scope", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "TOOLS.md", "Canonical.")
+		writeFile(t, dir, "SKILLS.md", "Legacy.")
+
+		cfg, err := Load(dir, "", "")
+		require.NoError(t, err)
+		require.Equal(t, "Canonical.", cfg.Tools)
+	})
+
+	t.Run("empty canonical tools masks legacy in same scope", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "TOOLS.md", "")
+		writeFile(t, dir, "SKILLS.md", "Legacy.")
+
+		cfg, err := Load(dir, "", "")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Tools)
+	})
+
+	t.Run("bot legacy tools beats platform canonical", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "slack/TOOLS.md", "Platform canonical.")
+		writeFile(t, dir, "slack/U12345/SKILLS.md", "Bot legacy.")
+
+		cfg, err := Load(dir, "slack", "U12345")
+		require.NoError(t, err)
+		require.Equal(t, "Bot legacy.", cfg.Tools)
+	})
+
+	t.Run("empty bot canonical tools masks lower scopes", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "TOOLS.md", "Global.")
+		writeFile(t, dir, "slack/TOOLS.md", "Platform.")
+		writeFile(t, dir, "slack/U12345/TOOLS.md", "")
+
+		cfg, err := Load(dir, "slack", "U12345")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Tools)
 	})
 
 	t.Run("flat directory backward compatible", func(t *testing.T) {
@@ -232,7 +297,7 @@ func TestSizeLimits(t *testing.T) {
 
 		cfg, err := Load(dir, "", "")
 		require.NoError(t, err)
-		total := len(cfg.Soul) + len(cfg.Agents) + len(cfg.Skills) + len(cfg.User) + len(cfg.Memory)
+		total := len(cfg.Soul) + len(cfg.Agents) + len(cfg.Tools) + len(cfg.User) + len(cfg.Memory)
 		require.LessOrEqual(t, total, MaxTotalChars)
 	})
 }
@@ -272,7 +337,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("assembles B+C with nested XML tags", func(t *testing.T) {
-		cfg := &AgentConfigs{Soul: "Persona", Agents: "Rules", Skills: "Tools", User: "User data", Memory: "Memory data"}
+		cfg := &AgentConfigs{Soul: "Persona", Agents: "Rules", Tools: "Tools", User: "User data", Memory: "Memory data"}
 		prompt := BuildSystemPrompt(cfg)
 		require.Contains(t, prompt, "<agent-configuration>")
 		require.Contains(t, prompt, "</agent-configuration>")
@@ -328,7 +393,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("behavioral directives present per section", func(t *testing.T) {
-		cfg := &AgentConfigs{Soul: "S", Agents: "A", Skills: "K", User: "U", Memory: "M"}
+		cfg := &AgentConfigs{Soul: "S", Agents: "A", Tools: "K", User: "U", Memory: "M"}
 		prompt := BuildSystemPrompt(cfg)
 		require.Contains(t, prompt, "自然地代入并体现此人格定位")
 		require.Contains(t, prompt, "视为强制性的工作空间行为约束")
@@ -363,7 +428,9 @@ func TestShouldExclude(t *testing.T) {
 		{"mixed case", "Soul.Md", []string{"sOul.mD"}, true},
 		{"no match", "SOUL.md", []string{"AGENTS.md"}, false},
 		{"multiple exclude one match", "USER.md", []string{"SOUL.md", "USER.md"}, true},
-		{"multiple exclude no match", "SKILLS.md", []string{"SOUL.md", "USER.md"}, false},
+		{"multiple exclude no match", "TOOLS.md", []string{"SOUL.md", "USER.md"}, false},
+		{"canonical tools excluded by legacy name", "TOOLS.md", []string{"SKILLS.md"}, true},
+		{"legacy tools excluded by canonical name", "SKILLS.md", []string{"TOOLS.md"}, true},
 	}
 
 	for _, tt := range tests {
@@ -442,6 +509,16 @@ func TestLoadWithInjectExclude(t *testing.T) {
 		require.Empty(t, cfg.Soul, "excluded file should not load from any level")
 		require.Equal(t, "Rules.", cfg.Agents)
 	})
+
+	t.Run("either tools basename excludes the logical slot", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "TOOLS.md", "Canonical tools.")
+
+		cfg, err := Load(dir, "", "", "SKILLS.md")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Tools)
+	})
 }
 
 func TestLoadForWorkspace(t *testing.T) {
@@ -472,7 +549,7 @@ func TestLoadForWorkspace(t *testing.T) {
 		require.Equal(t, "team-rules", cfg.Agents) // inherited
 	})
 
-	t.Run("empty override value inherits team default", func(t *testing.T) {
+	t.Run("empty override value explicitly clears team default", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "SOUL.md", "team-soul")
@@ -480,7 +557,27 @@ func TestLoadForWorkspace(t *testing.T) {
 		overrides := map[string]string{"SOUL.md": ""}
 		cfg, err := LoadForWorkspace(dir, "webchat", overrides)
 		require.NoError(t, err)
-		require.Equal(t, "team-soul", cfg.Soul) // empty value does not override
+		require.Empty(t, cfg.Soul)
+	})
+
+	t.Run("legacy tools override is accepted", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "TOOLS.md", "team-tools")
+
+		cfg, err := LoadForWorkspace(dir, "webchat", map[string]string{"SKILLS.md": "legacy-override"})
+		require.NoError(t, err)
+		require.Equal(t, "legacy-override", cfg.Tools)
+	})
+
+	t.Run("canonical tools override wins independently", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "SKILLS.md", "team-legacy")
+
+		cfg, err := LoadForWorkspace(dir, "webchat", map[string]string{"TOOLS.md": "canonical-override"})
+		require.NoError(t, err)
+		require.Equal(t, "canonical-override", cfg.Tools)
 	})
 
 	t.Run("override without team default applies", func(t *testing.T) {
@@ -539,7 +636,7 @@ func TestEnforceTotalLimit(t *testing.T) {
 
 	enforceTotalLimit(cfg)
 
-	total := len(cfg.Soul) + len(cfg.Agents) + len(cfg.Skills) + len(cfg.User) + len(cfg.Memory)
+	total := len(cfg.Soul) + len(cfg.Agents) + len(cfg.Tools) + len(cfg.User) + len(cfg.Memory)
 	require.LessOrEqual(t, total, MaxTotalChars)
 	require.Equal(t, MaxTotalChars, len(cfg.Soul)) // first field consumes full budget
 	require.Empty(t, cfg.Agents)                   // subsequent fields truncated to 0

@@ -21,13 +21,28 @@ var ErrInvalidBotName = errors.New("agentconfig: invalid botName")
 // before PR #679. Kept for backward compatibility during migration.
 const LegacyDefaultBotName = "default"
 
+const (
+	FileSoul         = "SOUL.md"
+	FileAgents       = "AGENTS.md"
+	FileTools        = "TOOLS.md"
+	LegacyFileSkills = "SKILLS.md"
+	FileUser         = "USER.md"
+	FileMemory       = "MEMORY.md"
+)
+
 // AgentConfigs holds loaded content for all agent config files.
 type AgentConfigs struct {
 	Soul   string // SOUL.md   (B channel)
 	Agents string // AGENTS.md (B channel)
-	Skills string // SKILLS.md (B channel)
+	Tools  string // TOOLS.md  (B channel; SKILLS.md is a legacy read alias)
 	User   string // USER.md   (C channel)
 	Memory string // MEMORY.md (C channel)
+}
+
+type fileState struct {
+	content string
+	found   bool
+	legacy  bool
 }
 
 // MaxFileChars is the maximum character limit per file.
@@ -73,14 +88,15 @@ func Load(dir, platform, botName string, injectExclude ...string) (*AgentConfigs
 		if shouldExclude(baseName, injectExclude) {
 			return nil
 		}
-		content, err := resolveFile(dir, platform, botName, baseName)
+		state, err := resolveFile(dir, platform, botName, baseName)
 		if err != nil {
 			return err
 		}
-		n := len(content)
-		if n == 0 {
+		if !state.found {
 			return nil
 		}
+		content := state.content
+		n := len(content)
 		if total+n > MaxTotalChars {
 			origN := n
 			n = MaxTotalChars - total
@@ -98,19 +114,19 @@ func Load(dir, platform, botName string, injectExclude ...string) (*AgentConfigs
 		return nil
 	}
 
-	if err := load("SOUL.md", &c.Soul); err != nil {
+	if err := load(FileSoul, &c.Soul); err != nil {
 		return nil, err
 	}
-	if err := load("AGENTS.md", &c.Agents); err != nil {
+	if err := load(FileAgents, &c.Agents); err != nil {
 		return nil, err
 	}
-	if err := load("SKILLS.md", &c.Skills); err != nil {
+	if err := load(FileTools, &c.Tools); err != nil {
 		return nil, err
 	}
-	if err := load("USER.md", &c.User); err != nil {
+	if err := load(FileUser, &c.User); err != nil {
 		return nil, err
 	}
-	if err := load("MEMORY.md", &c.Memory); err != nil {
+	if err := load(FileMemory, &c.Memory); err != nil {
 		return nil, err
 	}
 
@@ -118,7 +134,7 @@ func Load(dir, platform, botName string, injectExclude ...string) (*AgentConfigs
 }
 
 // configFiles lists recognized agent config file names.
-var configFiles = []string{"SOUL.md", "AGENTS.md", "SKILLS.md", "USER.md", "MEMORY.md"}
+var configFiles = []string{FileSoul, FileAgents, FileTools, FileUser, FileMemory}
 
 // KnownFiles returns the list of recognized config file names for validation/logging.
 func KnownFiles() []string {
@@ -157,8 +173,13 @@ func shouldExclude(baseName string, exclude []string) bool {
 	if len(exclude) == 0 {
 		return false
 	}
+	baseCanonical, baseKnown := canonicalFileName(baseName)
 	for _, name := range exclude {
-		if strings.EqualFold(name, baseName) {
+		nameCanonical, nameKnown := canonicalFileName(name)
+		if baseKnown && nameKnown && strings.EqualFold(nameCanonical, baseCanonical) {
+			return true
+		}
+		if !baseKnown && !nameKnown && strings.EqualFold(name, baseName) {
 			return true
 		}
 	}
@@ -170,14 +191,7 @@ func shouldExclude(baseName string, exclude []string) bool {
 func ValidateExcludeList(exclude []string) []string {
 	var unknown []string
 	for _, name := range exclude {
-		found := false
-		for _, cfg := range configFiles {
-			if strings.EqualFold(name, cfg) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if _, found := canonicalFileName(name); !found {
 			unknown = append(unknown, name)
 		}
 	}
@@ -187,37 +201,40 @@ func ValidateExcludeList(exclude []string) []string {
 // HasGlobalFiles reports whether any config file exists at the global level (dir/<file>).
 func HasGlobalFiles(dir string) bool {
 	for _, name := range configFiles {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			return true
+		for _, candidate := range readAliases(name) {
+			if _, err := os.Stat(filepath.Join(dir, candidate)); err == nil {
+				return true
+			}
 		}
 	}
 	return false
 }
 
 // resolveFile implements the 3-level per-file fallback.
-// Returns the content of the first non-empty file found, or ("", nil) if none exist.
+// A present file resolves the slot even when its content is empty; only a
+// missing file falls through to the next scope.
 // Non-NotExist I/O errors (e.g., permission denied) are propagated immediately
 // rather than falling through — a file that exists but is unreadable indicates
 // a real configuration problem that should not be silently masked.
-func resolveFile(dir, platform, botName, fileName string) (string, error) {
+func resolveFile(dir, platform, botName, fileName string) (fileState, error) {
 	// 1. Bot-level: dir/platform/botName/fileName
 	if botName != "" && platform != "" {
-		content, err := readFile(filepath.Join(dir, platform, botName), fileName)
+		state, err := readLogicalFile(filepath.Join(dir, platform, botName), fileName)
 		if err != nil {
-			return "", err
+			return fileState{}, err
 		}
-		if content != "" {
-			return content, nil
+		if state.found {
+			return state, nil
 		}
 	}
 	// 2. Platform-level: dir/platform/fileName
 	if platform != "" {
-		content, err := readFile(filepath.Join(dir, platform), fileName)
+		state, err := readLogicalFile(filepath.Join(dir, platform), fileName)
 		if err != nil {
-			return "", err
+			return fileState{}, err
 		}
-		if content != "" {
-			return content, nil
+		if state.found {
+			return state, nil
 		}
 		// 2b. Legacy backward compat: dir/platform/default/fileName
 		// Before PR #679, single-bot mode used "default" as botName. If a user
@@ -225,31 +242,77 @@ func resolveFile(dir, platform, botName, fileName string) (string, error) {
 		// fallback ensures they are still discovered. New deployments should use
 		// platform-level (dir/platform/fileName) instead.
 		if botName == "" {
-			content, err := readFile(filepath.Join(dir, platform, LegacyDefaultBotName), fileName)
+			state, err := readLogicalFile(filepath.Join(dir, platform, LegacyDefaultBotName), fileName)
 			if err != nil {
-				return "", err
+				return fileState{}, err
 			}
-			if content != "" {
+			if state.found {
 				slog.Warn("agentconfig: legacy default/ directory detected; move files to platform-level",
 					"platform", platform, "file", fileName)
-				return content, nil
+				return state, nil
 			}
 		}
 	}
 	// 3. Global-level: dir/fileName
-	return readFile(dir, fileName)
+	return readLogicalFile(dir, fileName)
 }
 
-// readFile reads a file, strips YAML frontmatter, and enforces per-file size limit.
-// Returns ("", nil) if the file does not exist (expected), ("", error) for other errors.
-func readFile(dir, name string) (string, error) {
+func readLogicalFile(dir, name string) (fileState, error) {
+	aliases := readAliases(name)
+	for i, candidate := range aliases {
+		state, err := readFileState(dir, candidate)
+		if err != nil {
+			return fileState{}, err
+		}
+		if !state.found {
+			continue
+		}
+		state.legacy = i > 0
+		if i == 0 && len(aliases) > 1 {
+			if _, statErr := os.Stat(filepath.Join(dir, aliases[1])); statErr == nil {
+				slog.Warn("agentconfig: canonical and legacy tools files coexist; using canonical",
+					"dir", dir, "canonical", FileTools, "legacy", LegacyFileSkills)
+			}
+		}
+		if state.legacy {
+			slog.Warn("agentconfig: legacy tools filename detected; migrate to TOOLS.md",
+				"dir", dir, "file", LegacyFileSkills)
+		}
+		return state, nil
+	}
+	return fileState{}, nil
+}
+
+func readAliases(name string) []string {
+	canonical, known := canonicalFileName(name)
+	if known && canonical == FileTools {
+		return []string{FileTools, LegacyFileSkills}
+	}
+	return []string{name}
+}
+
+func canonicalFileName(name string) (string, bool) {
+	if strings.EqualFold(name, LegacyFileSkills) {
+		return FileTools, true
+	}
+	for _, candidate := range configFiles {
+		if strings.EqualFold(name, candidate) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// readFileState reads a file, strips YAML frontmatter, and enforces per-file size limit.
+// Missing and present-empty files remain distinct so an empty file can stop fallback.
+func readFileState(dir, name string) (fileState, error) {
 	path := filepath.Join(dir, name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil
+			return fileState{}, nil
 		}
-		return "", fmt.Errorf("agentconfig: read %s: %w", name, err)
+		return fileState{}, fmt.Errorf("agentconfig: read %s: %w", name, err)
 	}
 	s := stripFrontmatter(string(data))
 	if len(s) > MaxFileChars {
@@ -257,7 +320,7 @@ func readFile(dir, name string) (string, error) {
 			"file", name, "original", len(s), "limit", MaxFileChars)
 		s = s[:MaxFileChars]
 	}
-	return s, nil
+	return fileState{content: s, found: true}, nil
 }
 
 // stripFrontmatter removes YAML frontmatter (--- blocks) from markdown content.
@@ -299,14 +362,15 @@ func EnsureDir(dir string) error {
 
 // IsEmpty returns true if all config fields are empty.
 func (c *AgentConfigs) IsEmpty() bool {
-	return c.Soul == "" && c.Agents == "" && c.Skills == "" &&
+	return c.Soul == "" && c.Agents == "" && c.Tools == "" &&
 		c.User == "" && c.Memory == ""
 }
 
 // LoadForWorkspace resolves WebChat-track agent configs via two-level inheritance:
 // team defaults (loaded from dir via Load with botName="") → workspace overrides.
 //
-// Each non-empty override entry replaces the corresponding team-default field.
+// Each present override entry replaces the corresponding team-default field;
+// an empty value explicitly clears the slot.
 // injectExclude has highest priority: an excluded file is never injected even if
 // overridden. Unknown override keys are silently ignored (defense-in-depth —
 // ValidateOverrides rejects them at write time).
@@ -314,6 +378,11 @@ func (c *AgentConfigs) IsEmpty() bool {
 // The Message Channel track calls Load directly; this function is WebChat-only.
 // See design spec §5.
 func LoadForWorkspace(dir, platform string, overrides map[string]string, injectExclude ...string) (*AgentConfigs, error) {
+	if _, hasTools := overrides[FileTools]; hasTools {
+		if _, hasLegacy := overrides[LegacyFileSkills]; hasLegacy {
+			return nil, fmt.Errorf("%w: %s and %s", ErrConflictingConfigFiles, FileTools, LegacyFileSkills)
+		}
+	}
 	base, err := Load(dir, platform, "", injectExclude...)
 	if err != nil {
 		return nil, err
@@ -323,26 +392,26 @@ func LoadForWorkspace(dir, platform string, overrides map[string]string, injectE
 	return base, nil
 }
 
-// applyOverrides applies per-file overrides onto base in place. Only keys in
-// configFiles are applied; empty values do not override; excluded files are skipped.
+// applyOverrides applies per-file overrides onto base in place. Only canonical
+// keys and the legacy Tools alias are applied; excluded files are skipped.
 func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclude []string) {
 	set := func(baseName, val string, target *string) {
-		if val == "" || shouldExclude(baseName, injectExclude) {
+		if shouldExclude(baseName, injectExclude) {
 			return
 		}
 		*target = val
 	}
 	for k, v := range overrides {
 		switch k {
-		case "SOUL.md":
+		case FileSoul:
 			set(k, v, &base.Soul)
-		case "AGENTS.md":
+		case FileAgents:
 			set(k, v, &base.Agents)
-		case "SKILLS.md":
-			set(k, v, &base.Skills)
-		case "USER.md":
+		case FileTools, LegacyFileSkills:
+			set(k, v, &base.Tools)
+		case FileUser:
 			set(k, v, &base.User)
-		case "MEMORY.md":
+		case FileMemory:
 			set(k, v, &base.Memory)
 		}
 	}
@@ -352,17 +421,17 @@ func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclu
 // MaxTotalChars. Load already enforces this on team defaults, but overrides can grow
 // individual fields beyond the budget (write-side ValidateOverrides caps each override
 // at MaxFileChars, not the merged total); this re-checks the merged result as
-// defense-in-depth. Truncates in field order (SOUL→AGENTS→SKILLS→USER→MEMORY).
+// defense-in-depth. Truncates in field order (SOUL→AGENTS→TOOLS→USER→MEMORY).
 func enforceTotalLimit(c *AgentConfigs) {
 	fields := []struct {
 		name   string
 		target *string
 	}{
-		{"SOUL.md", &c.Soul},
-		{"AGENTS.md", &c.Agents},
-		{"SKILLS.md", &c.Skills},
-		{"USER.md", &c.User},
-		{"MEMORY.md", &c.Memory},
+		{FileSoul, &c.Soul},
+		{FileAgents, &c.Agents},
+		{FileTools, &c.Tools},
+		{FileUser, &c.User},
+		{FileMemory, &c.Memory},
 	}
 	total := 0
 	for _, f := range fields {

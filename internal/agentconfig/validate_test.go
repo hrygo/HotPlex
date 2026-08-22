@@ -63,8 +63,18 @@ func TestValidateOverrides(t *testing.T) {
 		},
 		{
 			name: "all five known files accepted",
-			raw:  `{"SOUL.md":"s","AGENTS.md":"a","SKILLS.md":"k","USER.md":"u","MEMORY.md":"m"}`,
-			want: map[string]string{"SOUL.md": "s", "AGENTS.md": "a", "SKILLS.md": "k", "USER.md": "u", "MEMORY.md": "m"},
+			raw:  `{"SOUL.md":"s","AGENTS.md":"a","TOOLS.md":"t","USER.md":"u","MEMORY.md":"m"}`,
+			want: map[string]string{"SOUL.md": "s", "AGENTS.md": "a", "TOOLS.md": "t", "USER.md": "u", "MEMORY.md": "m"},
+		},
+		{
+			name: "legacy skills key accepted during compatibility window",
+			raw:  `{"SKILLS.md":"legacy tools"}`,
+			want: map[string]string{"SKILLS.md": "legacy tools"},
+		},
+		{
+			name:    "canonical and legacy tools keys conflict",
+			raw:     `{"TOOLS.md":"new","SKILLS.md":"old"}`,
+			wantErr: ErrConflictingConfigFiles,
 		},
 	}
 
