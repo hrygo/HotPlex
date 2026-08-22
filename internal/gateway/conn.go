@@ -109,6 +109,7 @@ type Conn struct {
 	// are buffered here. This ensures init_ack is always the first
 	// application-level message the client receives. Flushed by markInitDone.
 	initDone    bool
+	initFailed  bool
 	initPending [][]byte
 
 	// writeCh decouples Hub.Run from WebSocket write latency. Hub.routeMessage
@@ -211,7 +212,10 @@ func (c *Conn) ReadPump(handler connHandler, sm connSM, auth connAuth) {
 		// If we unregister first, routeMessage finds no connections and the
 		// state event is silently dropped. Only the owner that successfully
 		// released may change session lifecycle state.
-		if ownerReleased && c.sessionID != "" && sm != nil {
+		c.mu.Lock()
+		initFailed := c.initFailed
+		c.mu.Unlock()
+		if ownerReleased && !initFailed && c.sessionID != "" && sm != nil {
 			if si, getErr := sm.Get(context.Background(), c.sessionID); getErr == nil && si != nil && si.State == events.StateRunning {
 				if err := sm.Transition(context.Background(), c.sessionID, events.StateIdle); err != nil {
 					c.log.Warn("gateway: conn close transition to idle", "session_id", c.sessionID, "err", err)
@@ -519,7 +523,7 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	var sessionID string
 	var preResolved *session.SessionInfo
 	if env.SessionID != "" {
-		if existing, getErr := sm.Get(context.Background(), env.SessionID); getErr == nil && existing != nil && existing.State != events.StateDeleted {
+		if existing, getErr := sm.Get(context.Background(), env.SessionID); getErr == nil && existing != nil {
 			sessionID = env.SessionID
 			preResolved = existing
 		}
@@ -562,16 +566,33 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 	c.webchatOwner = true
 
 	c.hub.JoinSession(sessionID, c)
-	// Hydrate SeqGen before resolveSessionState can start a worker or finalizeInit
-	// can allocate init_ack. Never fall back to 1 on a database error because a
-	// duplicate could roll back an entire collector batch.
-	if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
-		c.sendInitError(events.ErrCodeInternalError, "unable to restore session event sequence; retry later")
-		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
-		return "", nil, err
+	// Existing durable sessions can hydrate before resume/start. Missing and
+	// deleted sessions must first be classified and created/recreated; otherwise
+	// EnsureSeqHydrated's existence fence mistakes a new record for a released
+	// one. The create/start path is followed by the same hydration barrier before
+	// finalizeInit allocates the init_ack sequence.
+	needsHydrationAfterResolve := preResolved == nil || preResolved.State == events.StateDeleted
+	if !needsHydrationAfterResolve {
+		if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
+			c.sendInitError(events.ErrCodeInternalError, "unable to restore session event sequence; retry later")
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+			return "", nil, err
+		}
 	}
 
-	return c.resolveSessionState(sessionID, initData, workDir, sm, preResolved, env.SessionID)
+	resolvedID, si, err := c.resolveSessionState(sessionID, initData, workDir, sm, preResolved, env.SessionID)
+	if err != nil {
+		return "", nil, err
+	}
+	if needsHydrationAfterResolve {
+		if err := c.hub.EnsureSeqHydrated(resolvedID); err != nil {
+			c.sendInitError(events.ErrCodeInternalError, "unable to restore session event sequence; retry later")
+			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
+			return "", nil, err
+		}
+	}
+
+	return resolvedID, si, nil
 }
 
 // resolveSessionState handles the session state machine transitions:
@@ -837,6 +858,10 @@ func (c *Conn) writeSync(data []byte) error {
 }
 
 func (c *Conn) sendInitError(code events.ErrorCode, msg string) {
+	c.mu.Lock()
+	c.initFailed = true
+	c.mu.Unlock()
+
 	ack := BuildInitAckError(c.sessionID, &InitError{Code: code, Message: msg})
 	// Init failures happen before durable sequence hydration is guaranteed.
 	// Keep the builder's seq=0 so reporting an error cannot initialize a session
@@ -1051,6 +1076,14 @@ func (c *Conn) bufferOrReject(data []byte) (bool, error) {
 func (c *Conn) markInitDone() {
 	c.mu.Lock()
 	c.initDone = true
+	if c.initFailed {
+		// Failed handshakes must not release state events buffered while the
+		// session was being resolved. They would be observed after an error ack
+		// and could allocate/appear as a second lifecycle outcome.
+		c.initPending = nil
+		c.mu.Unlock()
+		return
+	}
 	needClose := false
 flushLoop:
 	for _, data := range c.initPending {
