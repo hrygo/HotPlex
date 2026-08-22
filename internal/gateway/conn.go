@@ -65,8 +65,9 @@ type connAuth interface {
 	AuthenticateKey(ctx context.Context, key string) (string, bool)
 }
 
-// SessionStarter initiates a worker session. It is the only Bridge capability
-// used by Conn (called once during the AEP init handshake).
+// SessionStarter initiates or resumes a worker session. Conn uses the optional
+// SessionInitGate below for fresh/recreated sessions so hydration can precede
+// worker startup without changing the existing resume surface.
 type SessionStarter interface {
 	StartSession(ctx context.Context, p worker.SessionStartParams) error
 	ResumeSession(ctx context.Context, id string, workDir string) error
@@ -75,6 +76,17 @@ type SessionStarter interface {
 }
 
 var _ SessionStarter = (*Bridge)(nil) // compile-time: Bridge implements SessionStarter
+
+// SessionInitGate splits durable session creation from worker startup for the
+// WebSocket init path. A fresh or recreated session must be durable and have
+// its sequence counter hydrated before StartSessionAfterHydration can attach a
+// worker or emit a state event.
+type SessionInitGate interface {
+	CreateSession(ctx context.Context, p worker.SessionStartParams) (*session.SessionInfo, error)
+	StartSessionAfterHydration(ctx context.Context, p worker.SessionStartParams) error
+}
+
+var _ SessionInitGate = (*Bridge)(nil) // compile-time: Bridge implements the init gate
 
 // Conn represents a single WebSocket client connection.
 type Conn struct {
@@ -567,10 +579,8 @@ func (c *Conn) resolveSession(env *events.Envelope, initData InitData, sm connSM
 
 	c.hub.JoinSession(sessionID, c)
 	// Existing durable sessions can hydrate before resume/start. Missing and
-	// deleted sessions must first be classified and created/recreated; otherwise
-	// EnsureSeqHydrated's existence fence mistakes a new record for a released
-	// one. The create/start path is followed by the same hydration barrier before
-	// finalizeInit allocates the init_ack sequence.
+	// deleted sessions are created/recreated through SessionInitGate, which
+	// keeps worker startup and state events behind the hydration barrier.
 	needsHydrationAfterResolve := preResolved == nil || preResolved.State == events.StateDeleted
 	if !needsHydrationAfterResolve {
 		if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
@@ -672,7 +682,7 @@ func (c *Conn) handleSessionNotFound(sessionID string, initData InitData, workDi
 	}
 
 	if c.starter != nil {
-		if err := c.starter.StartSession(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
+		if err := c.startNewSessionAfterHydration(sessionID, initData, workDir, sm, clientKey); err != nil {
 			c.hub.InitThrottle.RecordFailure(sessionID)
 			c.sendInitError(events.ErrCodeInternalError, "failed to create session")
 			observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -702,7 +712,14 @@ func (c *Conn) startCreatedSession(sessionID string, initData InitData, workDir 
 	if c.starter == nil {
 		return si, nil // no starter in test mode, session stays CREATED
 	}
-	if err := c.starter.StartSession(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
+	gate, ok := c.starter.(SessionInitGate)
+	if !ok {
+		err := errors.New("session starter does not support sequence hydration gate")
+		c.hub.InitThrottle.RecordFailure(sessionID)
+		c.sendInitError(events.ErrCodeInternalError, err.Error())
+		return nil, err
+	}
+	if err := gate.StartSessionAfterHydration(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, "failed to start session")
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -726,7 +743,7 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 		}
 		return newSI, nil
 	}
-	if err := c.starter.StartSession(context.Background(), c.webchatStartParams(sessionID, initData, workDir, clientKey)); err != nil {
+	if err := c.startNewSessionAfterHydration(sessionID, initData, workDir, sm, clientKey); err != nil {
 		c.hub.InitThrottle.RecordFailure(sessionID)
 		c.sendInitError(events.ErrCodeInternalError, fmt.Sprintf("failed to recreate deleted session: %v", err))
 		observability.GatewayErrors().Add(c.hub.ctx, 1, metric.WithAttributes(attribute.String("error_code", string(events.ErrCodeInternalError))))
@@ -738,6 +755,32 @@ func (c *Conn) recreateDeletedSession(sessionID string, initData InitData, workD
 		return nil, fmt.Errorf("get session after recreation: %w", err)
 	}
 	return si, nil
+}
+
+// startNewSessionAfterHydration performs the fresh-session init ordering:
+// create the durable record, hydrate its sequence counter, then start the
+// worker. The cleanup on hydration failure is deliberately physical and
+// silent so a failed handshake cannot leave a CREATED/RUNNING orphan or emit
+// a state event using an unhydrated sequence.
+func (c *Conn) startNewSessionAfterHydration(sessionID string, initData InitData, workDir string, sm connSM, clientKey string) error {
+	gate, ok := c.starter.(SessionInitGate)
+	if !ok {
+		return errors.New("session starter does not support sequence hydration gate")
+	}
+	p := c.webchatStartParams(sessionID, initData, workDir, clientKey)
+	if _, err := gate.CreateSession(context.Background(), p); err != nil {
+		return fmt.Errorf("create durable session: %w", err)
+	}
+	if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
+		if cleanupErr := sm.DeletePhysical(context.Background(), sessionID); cleanupErr != nil {
+			return fmt.Errorf("hydrate session sequence: %w (cleanup failed: %v)", err, cleanupErr)
+		}
+		return fmt.Errorf("hydrate session sequence: %w", err)
+	}
+	if err := gate.StartSessionAfterHydration(context.Background(), p); err != nil {
+		return fmt.Errorf("start session after hydration: %w", err)
+	}
+	return nil
 }
 
 func (c *Conn) handleExistingSession(sessionID, workDir string, sm connSM, si *session.SessionInfo, initData InitData, clientKey string) (*session.SessionInfo, error) {

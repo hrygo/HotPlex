@@ -398,19 +398,16 @@ func (b *Bridge) StopPendingReplays() {
 	b.ClearAllPending()
 }
 
-// StartSession creates a new session and starts a worker.
+// StartSession creates a durable session, hydrates its sequence counter, and
+// starts a worker. The hydration barrier is inside the bridge so non-WebSocket
+// callers cannot start a worker before the first event sequence is safe.
 func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) error {
 	if b.closed.Load() {
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
-
-	// Validate and expand workDir for all callers.
-	if p.WorkDir != "" {
-		expanded, err := validateAndExpandWorkDir(p.WorkDir)
-		if err != nil {
-			return fmt.Errorf("bridge: invalid work dir: %w", err)
-		}
-		p.WorkDir = expanded
+	p, err := normalizeSessionStartParams(p)
+	if err != nil {
+		return err
 	}
 
 	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
@@ -419,14 +416,78 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		observability.SessionStartDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	}()
 
-	// Create the session with its final workspace identity in one persistence
-	// operation so the create audit and runtime surfaces share the same AgentID.
-	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkspaceID, p.WorkDir, p.Title, p.ClientKey)
+	si, err := b.CreateSession(ctx, p)
 	if err != nil {
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "create_failed")))
-		return fmt.Errorf("bridge: create session: %w", err)
+		return err
 	}
 
+	if err := b.hub.EnsureSeqHydrated(p.ID); err != nil {
+		if cleanupErr := b.sm.DeletePhysical(context.Background(), p.ID); cleanupErr != nil {
+			return fmt.Errorf("bridge: hydrate session sequence: %w (cleanup failed: %v)", err, cleanupErr)
+		}
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "hydration_failed")))
+		return fmt.Errorf("bridge: hydrate session sequence: %w", err)
+	}
+
+	if err := b.startPreparedSession(ctx, p, si); err != nil {
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "start_failed")))
+		return err
+	}
+	return nil
+}
+
+// CreateSession persists a CREATED session without attaching a worker. Conn
+// uses this half of SessionInitGate before calling Hub.EnsureSeqHydrated.
+func (b *Bridge) CreateSession(ctx context.Context, p worker.SessionStartParams) (*session.SessionInfo, error) {
+	if b.closed.Load() {
+		return nil, fmt.Errorf("bridge: rejecting new session during shutdown")
+	}
+	p, err := normalizeSessionStartParams(p)
+	if err != nil {
+		return nil, err
+	}
+	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkspaceID, p.WorkDir, p.Title, p.ClientKey)
+	if err != nil {
+		return nil, fmt.Errorf("bridge: create session: %w", err)
+	}
+	return si, nil
+}
+
+// StartSessionAfterHydration starts a worker for an already durable CREATED
+// session. It is the second half of SessionInitGate and must only be called
+// after Hub.EnsureSeqHydrated has succeeded.
+func (b *Bridge) StartSessionAfterHydration(ctx context.Context, p worker.SessionStartParams) error {
+	if b.closed.Load() {
+		return fmt.Errorf("bridge: rejecting new session during shutdown")
+	}
+	p, err := normalizeSessionStartParams(p)
+	if err != nil {
+		return err
+	}
+	si, err := b.sm.Get(ctx, p.ID)
+	if err != nil {
+		return fmt.Errorf("bridge: get prepared session: %w", err)
+	}
+	if si.State != events.StateCreated {
+		return fmt.Errorf("bridge: prepared session %s is %s", p.ID, si.State)
+	}
+	return b.startPreparedSession(ctx, p, si)
+}
+
+func normalizeSessionStartParams(p worker.SessionStartParams) (worker.SessionStartParams, error) {
+	if p.WorkDir == "" {
+		return p, nil
+	}
+	expanded, err := validateAndExpandWorkDir(p.WorkDir)
+	if err != nil {
+		return p, fmt.Errorf("bridge: invalid work dir: %w", err)
+	}
+	p.WorkDir = expanded
+	return p, nil
+}
+
+func (b *Bridge) startPreparedSession(ctx context.Context, p worker.SessionStartParams, si *session.SessionInfo) error {
 	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
@@ -466,7 +527,6 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 			_ = b.sm.Delete(context.Background(), p.ID)
 		},
 	); err != nil {
-		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "start_failed")))
 		return err
 	}
 
