@@ -221,6 +221,88 @@ describe("BrowserHotPlexClient connection handoff", () => {
         socket.finishClose();
     });
 
+    it("clears reconnecting when the reconnect attempt budget is exhausted", () => {
+        vi.useFakeTimers();
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+            reconnect: { enabled: true, maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1 },
+        });
+        const internal = client as unknown as {
+            reconnectAttempt: number;
+            _reconnecting: boolean;
+            _scheduleReconnect(): void;
+        };
+        internal.reconnectAttempt = 1;
+        internal._reconnecting = true;
+
+        internal._scheduleReconnect();
+
+        expect(client.reconnecting).toBe(false);
+        client.disconnect();
+    });
+
+    it("preserves the gateway code and message when init fails", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-init-error");
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-error"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "deleted",
+                    error: "session no longer exists",
+                    code: ErrorCode.SessionNotFound,
+                },
+            },
+        });
+
+        await expect(connect).rejects.toMatchObject({
+            code: ErrorCode.SessionNotFound,
+            message: "session no longer exists",
+        });
+    });
+
+    it("does not let disconnect cleanup overwrite a gateway init error", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-init-internal-error");
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-internal-error"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "running",
+                    error: "gateway unavailable",
+                    code: ErrorCode.InternalError,
+                },
+            },
+        });
+
+        // Cleanup is allowed to run after the handshake error, but it must not
+        // replace the already-settled gateway error with "Client disconnected".
+        client.disconnect();
+        await expect(connect).rejects.toMatchObject({
+            code: ErrorCode.InternalError,
+            message: "gateway unavailable",
+        });
+    });
+
     it("routes retryable init errors through bounded reconnect", async () => {
         vi.useFakeTimers();
         vi.stubGlobal("WebSocket", ControlledWebSocket);

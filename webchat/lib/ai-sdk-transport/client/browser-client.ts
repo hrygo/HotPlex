@@ -457,8 +457,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
             code: ErrorCode.SessionNotFound,
             message: errorMsg,
           } as ErrorData, env);
+          this._settleConnectError(reject, ErrorCode.SessionNotFound, errorMsg);
           this.disconnect();
-          reject(new Error(errorMsg));
           return;
         }
 
@@ -502,8 +502,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           this._stopHeartbeat();
           this._clearReconnectTimer();
           this.emit('sessionAlreadyConnected', errorData, env);
+          this._settleConnectError(reject, ErrorCode.SessionAlreadyConnected, errorMsg);
           this.disconnect();
-          reject(new Error(errorMsg));
           return;
         }
 
@@ -513,12 +513,10 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           // Init retries must go through the same bounded controller as
           // transport reconnects. Do not open a replacement socket from this
           // message handler or leave the original handshake flight pending.
-          this._connecting = false;
-          this.pendingConnectReject = null;
+          this._settleConnectError(reject, ackData.code || ErrorCode.InternalError, errorMsg);
           this._reconnecting = true;
           this._closeCurrentSocketForHandoff('Retryable handshake error');
           this._scheduleReconnect(ackData.retry_after_ms);
-          reject(new Error(errorMsg));
           return;
         }
 
@@ -528,8 +526,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           message: errorMsg
         } as ErrorData, env);
 
+        this._settleConnectError(reject, ackData.code || ErrorCode.InternalError, errorMsg);
         this.disconnect();
-        reject(new Error(errorMsg));
         return;
       }
 
@@ -545,8 +543,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           code: ErrorCode.SessionNotFound,
           message: errorMsg,
         } as ErrorData, env);
+        this._settleConnectError(reject, ErrorCode.SessionNotFound, errorMsg);
         this.disconnect();
-        reject(new Error(errorMsg));
         return;
       }
 
@@ -569,7 +567,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
       this._startHeartbeat();
 
-      if (this.reconnectTimer) {
+      if (this.reconnectTimer !== null) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
@@ -584,6 +582,30 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     }
 
     this._routeEvent(env);
+  }
+
+  /**
+   * Settle the active connect flight before lifecycle cleanup can reject it
+   * with the generic "Client disconnected" error. Gateway handshake errors
+   * must remain observable to callers with their original code and message.
+   */
+  private _settleConnectError(
+    reject: ((err: Error) => void) | null,
+    code: ErrorCode | undefined,
+    message: string,
+  ): void {
+    this._connecting = false;
+    if (!reject) return;
+
+    if (this.pendingConnectReject === reject) {
+      this.pendingConnectReject = null;
+    }
+
+    const error = new Error(message) as Error & { code?: ErrorCode };
+    if (code) {
+      error.code = code;
+    }
+    reject(error);
   }
 
   private _routeEvent(env: Envelope): void {
@@ -936,6 +958,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this.lifecycleGeneration++;
     this.closed = true;
     this.shouldReconnect = false;
+    this._reconnecting = false;
 
     this._stopHeartbeat();
     this._clearReconnectTimer();
@@ -1056,10 +1079,13 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   // ============================================================================
 
   private _scheduleReconnect(retryAfterMs?: number): void {
-    if (!this.reconnectConfig.enabled ||
-        !this.shouldReconnect ||
-        this.closed ||
-        this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+    if (!this.reconnectConfig.enabled || !this.shouldReconnect || this.closed) {
+      this._reconnecting = false;
+      return;
+    }
+
+    if (this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+      this._settleReconnectFailure();
       return;
     }
 
@@ -1074,10 +1100,15 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       : Math.min(Math.max(0, retryAfterMs), this.reconnectConfig.maxDelayMs);
 
     this.emit('reconnecting', this.reconnectAttempt);
+    const lifecycleGeneration = this.lifecycleGeneration;
 
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
-      if (!this._sessionId || this.closed) return;
+      if (!this._sessionId || this.closed || !this.shouldReconnect ||
+          lifecycleGeneration !== this.lifecycleGeneration) {
+        this._reconnecting = false;
+        return;
+      }
 
       try {
         await this.connect(this._sessionId);
@@ -1085,15 +1116,24 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         // A socket close during the handshake already schedules the next
         // attempt. Only synthesize a close when connect() failed without a
         // close event (for example, the WebSocket constructor threw).
-        if (this._reconnecting && !this.reconnectTimer) {
+        if (this._reconnecting && this.reconnectTimer === null) {
           this._handleClose(4001, 'Reconnect failed');
         }
       }
     }, delay);
   }
 
+  private _settleReconnectFailure(): void {
+    this._reconnecting = false;
+    this._clearReconnectTimer();
+    this._clearInputTimers();
+    this._settlePending({ kind: 'reject', error: new Error('Reconnect failed'), force: true });
+    this._settleStop({ kind: 'reject', error: new Error('Reconnect failed') });
+    this.emit('reconnect_failed', this.reconnectAttempt);
+  }
+
   private _clearReconnectTimer(): void {
-    if (this.reconnectTimer) {
+    if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
@@ -1117,9 +1157,11 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       // Every failed handshake must settle its single-flight promise. During
       // automatic reconnect the close path continues below to schedule the
       // next attempt; the timer catch sees that timer and does not duplicate it.
-      this._connecting = false;
-      this.pendingConnectReject(new Error(`WebSocket closed during handshake: ${reason}`));
-      this.pendingConnectReject = null;
+      this._settleConnectError(
+        this.pendingConnectReject,
+        undefined,
+        `WebSocket closed during handshake: ${reason}`,
+      );
     }
 
     if (!wasConnected && !this._reconnecting) {
@@ -1137,11 +1179,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       // as well (the runtime adapter does — hotplex-runtime-adapter.ts). Kept
       // singular to preserve observed event ordering; add a concurrent
       // 'disconnected' emit here if a future consumer listens only to that event.
-      this._reconnecting = false;
-      this._clearInputTimers();
-      this._settlePending({ kind: 'reject', error: new Error('Reconnect failed'), force: true });
-      this._settleStop({ kind: 'reject', error: new Error('Reconnect failed') });
-      this.emit('reconnect_failed', this.reconnectAttempt);
+      this._settleReconnectFailure();
     } else if (!this.shouldReconnect || this.closed) {
       this._clearInputTimers();
       this._settlePending({ kind: 'reject', error: new Error(reason || 'Disconnected'), force: true });

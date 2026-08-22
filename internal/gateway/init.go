@@ -17,11 +17,6 @@ const (
 	InitAck = "init_ack"
 )
 
-// GatewayServerVersion is the server build line advertised during the AEP
-// handshake. It is intentionally independent from the wire protocol version;
-// clients can use it for diagnostics while capabilities gate behavior.
-const GatewayServerVersion = "v1.41.0"
-
 var gatewayCapabilities = []string{
 	"control_stop_v1",
 	"init_retry_v2",
@@ -122,7 +117,6 @@ func BuildInitAck(sessionID string, state events.SessionState, wt worker.WorkerT
 			SessionID:     sessionID,
 			State:         state,
 			ServerCaps:    DefaultServerCaps(wt),
-			ServerVersion: GatewayServerVersion,
 			Capabilities:  append([]string(nil), gatewayCapabilities...),
 		},
 	)
