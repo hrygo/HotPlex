@@ -19,6 +19,7 @@ export type { HotPlexMessage };
 export interface ConversationTurn {
   id: number;
   session_id: string;
+  client_message_id?: string;
   generation: number;
   turn_num: number;
   seq: number;
@@ -83,6 +84,8 @@ export function conversationTurnsToMessages(turns: ConversationTurn[]): HistoryM
       parts,
       createdAt: isNaN(createdAt.getTime()) ? new Date() : createdAt,
       status: 'complete' as const,
+      clientMessageId: turn.client_message_id,
+      deliveryStatus: turn.role === 'user' ? 'delivered' as const : undefined,
     };
   });
 }

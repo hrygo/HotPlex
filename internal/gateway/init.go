@@ -17,6 +17,18 @@ const (
 	InitAck = "init_ack"
 )
 
+// GatewayServerVersion is the server build line advertised during the AEP
+// handshake. It is intentionally independent from the wire protocol version;
+// clients can use it for diagnostics while capabilities gate behavior.
+const GatewayServerVersion = "v1.41.0"
+
+var gatewayCapabilities = []string{
+	"control_stop_v1",
+	"init_retry_v2",
+	"client_message_id_v1",
+	"ordered_session_events_v1",
+}
+
 // InitData is the payload of a client → gateway init message.
 type InitData struct {
 	Version     string            `json:"version"`
@@ -55,13 +67,15 @@ type ClientCaps struct {
 
 // InitAckData is the payload of a gateway → client init_ack message.
 type InitAckData struct {
-	SessionID    string              `json:"session_id"`
-	State        events.SessionState `json:"state"`
-	ServerCaps   ServerCaps          `json:"server_caps"`
-	Error        string              `json:"error,omitempty"`
-	Code         events.ErrorCode    `json:"code,omitempty"`
-	Retryable    bool                `json:"retryable,omitempty"`
-	RetryAfterMS int                 `json:"retry_after_ms,omitempty"`
+	SessionID     string              `json:"session_id"`
+	State         events.SessionState `json:"state"`
+	ServerCaps    ServerCaps          `json:"server_caps"`
+	ServerVersion string              `json:"server_version,omitempty"`
+	Capabilities  []string            `json:"capabilities,omitempty"`
+	Error         string              `json:"error,omitempty"`
+	Code          events.ErrorCode    `json:"code,omitempty"`
+	Retryable     bool                `json:"retryable,omitempty"`
+	RetryAfterMS  int                 `json:"retry_after_ms,omitempty"`
 }
 
 // ServerCaps declares what the gateway / worker supports.
@@ -105,9 +119,11 @@ func BuildInitAck(sessionID string, state events.SessionState, wt worker.WorkerT
 		0,
 		InitAck,
 		InitAckData{
-			SessionID:  sessionID,
-			State:      state,
-			ServerCaps: DefaultServerCaps(wt),
+			SessionID:     sessionID,
+			State:         state,
+			ServerCaps:    DefaultServerCaps(wt),
+			ServerVersion: GatewayServerVersion,
+			Capabilities:  append([]string(nil), gatewayCapabilities...),
 		},
 	)
 }

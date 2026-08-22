@@ -182,6 +182,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   private _connected: boolean = false;
   private _connecting: boolean = false;
   private _reconnecting: boolean = false;
+  private _serverVersion: string | null = null;
+  private _capabilities = new Set<string>();
 
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -274,6 +276,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   /** True while a connection handshake is in progress (awaiting init_ack). */
   get connecting(): boolean { return this._connecting; }
   get reconnecting(): boolean { return this._reconnecting; }
+  get serverVersion(): string | null { return this._serverVersion; }
+  get capabilities(): ReadonlySet<string> { return this._capabilities; }
 
   // ============================================================================
   // Connection Lifecycle
@@ -434,10 +438,6 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     if (isInitAck(env)) {
       const ackData = event.data as unknown as InitAckData;
-      const retryMeta = ackData as InitAckData & {
-        retryable?: boolean;
-        retry_after_ms?: number;
-      };
       const wasReconnecting = this._reconnecting;
 
       // Handle handshake-level errors
@@ -507,7 +507,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           return;
         }
 
-        if (retryMeta.retryable === true &&
+        if (ackData.retryable === true &&
             this.reconnectConfig.enabled &&
             this.reconnectAttempt < this.reconnectConfig.maxAttempts) {
           // Init retries must go through the same bounded controller as
@@ -517,7 +517,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           this.pendingConnectReject = null;
           this._reconnecting = true;
           this._closeCurrentSocketForHandoff('Retryable handshake error');
-          this._scheduleReconnect(retryMeta.retry_after_ms);
+          this._scheduleReconnect(ackData.retry_after_ms);
           reject(new Error(errorMsg));
           return;
         }
@@ -560,6 +560,8 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
       this.pendingConnectReject = null;
       this.lastInitAck = ackData;
       this.connectTarget = session_id || this.connectTarget;
+      this._serverVersion = ackData.server_version ?? null;
+      this._capabilities = new Set(ackData.capabilities ?? []);
 
       if (ackData.state) {
         this._state = ackData.state;
@@ -800,13 +802,18 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     this.ws.send(serializeEnvelope(env));
   }
 
-  sendInput(content: string): string {
+  /** Allocate the stable identity used to reconcile an optimistic user turn. */
+  createClientMessageId(): string {
+    return newEventId();
+  }
+
+  sendInput(content: string, clientMessageId = this.createClientMessageId()): string {
     if (this.pendingInput) {
       throw new Error('Input already pending');
     }
     const pending = {
       content,
-      clientMessageId: newEventId(),
+      clientMessageId,
       retryable: true,
       tombstone: false,
       resolve: () => undefined,
@@ -841,13 +848,12 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
     return true;
   }
 
-  async sendInputAsync(content: string): Promise<void> {
+  async sendInputAsync(content: string, clientMessageId = this.createClientMessageId()): Promise<void> {
     if (this.pendingInput) {
       throw new Error('Input already pending');
     }
 
     return new Promise((resolve, reject) => {
-      const clientMessageId = newEventId();
       const pending = { content, clientMessageId, retryable: true, tombstone: false, resolve, reject };
       this.pendingInput = pending;
       this._armInputSettleTimer();

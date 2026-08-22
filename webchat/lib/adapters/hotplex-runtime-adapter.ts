@@ -227,6 +227,12 @@ export function convertToThreadMessage(
                     ? { turnSummary: turnSummaryPart.data }
                     : {}),
                 ...(message.progress ? { progress: message.progress } : {}),
+                ...(message.clientMessageId
+                    ? { clientMessageId: message.clientMessageId }
+                    : {}),
+                ...(message.deliveryStatus
+                    ? { deliveryStatus: message.deliveryStatus }
+                    : {}),
             },
         } satisfies Record<string, unknown>,
     } as ThreadMessageLike & {
@@ -289,7 +295,34 @@ function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
             .filter((p): p is TextPart | ToolSummaryPart => p !== null),
         createdAt: m.createdAt,
         status: "complete" as const,
+        clientMessageId: m.clientMessageId,
+        deliveryStatus: m.deliveryStatus,
     }));
+}
+
+/**
+ * Reconcile live optimistic messages with authoritative history by the stable
+ * client identity. Durable history wins, while an optimistic user turn whose
+ * delivery is still unknown remains visible until history proves its outcome.
+ */
+export function reconcileMessagesByClientMessageId(
+    liveMessages: HotPlexMessage[],
+    historyMessages: HotPlexMessage[],
+): HotPlexMessage[] {
+    const seenClientMessageIds = new Set<string>();
+    const history = historyMessages.filter((message) => {
+        if (message.role !== "user" || !message.clientMessageId) return true;
+        if (seenClientMessageIds.has(message.clientMessageId)) return false;
+        seenClientMessageIds.add(message.clientMessageId);
+        return true;
+    });
+    const liveOnly = liveMessages.filter(
+        (message) =>
+            message.role !== "user" ||
+            !message.clientMessageId ||
+            !seenClientMessageIds.has(message.clientMessageId),
+    );
+    return [...history, ...liveOnly];
 }
 
 // ============================================================================
@@ -481,7 +514,9 @@ export function useHotPlexRuntime({
                                 return "";
                             })
                             .join("");
-                    // Merge server messages with live messages (dedup by ID and content signature)
+                    // Stable client identity wins over content signatures. The
+                    // signature fallback remains for older gateways that do not
+                    // persist client_message_id yet.
                     setMessages((prev) => {
                         const serverIds = new Set(
                             serverMessages.map((m) => m.id),
@@ -491,9 +526,10 @@ export function useHotPlexRuntime({
                                 (m) => `${m.role}:${extractText(m.parts)}`,
                             ),
                         );
-                        const liveOnly = prev.filter((m) => {
+                        const identityMerged =
+                            reconcileMessagesByClientMessageId(prev, serverMessages);
+                        const liveOnly = identityMerged.filter((m) => {
                             if (serverIds.has(m.id)) return false;
-                            // Also dedup by role+content for user messages (live ID vs server ID)
                             const sig = `${m.role}:${extractText(m.parts)}`;
                             return !serverSigs.has(sig);
                         });
@@ -1511,6 +1547,28 @@ export function useHotPlexRuntime({
             ) {
                 return;
             }
+            if (
+                data.status === "delivered" ||
+                data.status === "unknown" ||
+                data.status === "failed"
+            ) {
+                const deliveryStatus: "delivered" | "unknown" | "failed" =
+                    data.status === "delivered"
+                        ? "delivered"
+                        : data.status === "unknown"
+                          ? "unknown"
+                          : "failed";
+                setMessages((prev) =>
+                    prev.map((message) =>
+                        message.clientMessageId === data.client_message_id
+                            ? {
+                                  ...message,
+                                  deliveryStatus,
+                              }
+                            : message,
+                    ),
+                );
+            }
             if (queuedDispatch && matchesQueuedDispatch) {
                 if (data.status === "delivered") {
                     const wasUnknown = queuedDispatch.outcomeUnknown === true;
@@ -2026,12 +2084,15 @@ export function useHotPlexRuntime({
             const localId =
                 queueItemId ??
                 `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const clientMessageId = client.createClientMessageId();
             const userMessage: HotPlexMessage = {
                 id: `user-${localId}`,
                 role: "user",
+                clientMessageId,
                 parts: [{ type: "text", text: textContent }],
                 createdAt: new Date(),
                 status: "complete",
+                deliveryStatus: "pending",
             };
             const assistantID = `assistant-local-${localId}`;
             const pendingAssistant = createPendingAssistantMessage(
@@ -2158,20 +2219,35 @@ export function useHotPlexRuntime({
 
             // Send to HotPlex gateway with error handling
             try {
-                const clientMessageId = client.sendInput(textContent);
-                activeInputMessageIdRef.current = clientMessageId;
+                const sentClientMessageId = client.sendInput(
+                    textContent,
+                    clientMessageId,
+                );
+                activeInputMessageIdRef.current = sentClientMessageId;
+                // Keep the optimistic record correlated even if a caller
+                // supplies a transport implementation that normalizes IDs.
+                setMessages((prev) =>
+                    prev.map((message) =>
+                        message.id === userMessage.id
+                            ? {
+                                  ...message,
+                                  clientMessageId: sentClientMessageId,
+                              }
+                            : message,
+                    ),
+                );
                 const activeQueueDispatch = activeQueueDispatchRef.current;
                 if (
                     queueItemId &&
                     activeQueueDispatch?.itemId === queueItemId &&
                     activeQueueDispatch.sessionId === sessionIdRef.current
                 ) {
-                    activeQueueDispatch.clientMessageId = clientMessageId;
+                    activeQueueDispatch.clientMessageId = sentClientMessageId;
                     if (
                         !queueStore.attachClientMessageId(
                             activeQueueDispatch.sessionId,
                             queueItemId,
-                            clientMessageId,
+                            sentClientMessageId,
                         )
                     ) {
                         failActiveQueueDispatchRef.current(
@@ -2181,7 +2257,7 @@ export function useHotPlexRuntime({
                         throw new Error("Queue dispatch correlation was lost");
                     }
                 }
-                return clientMessageId;
+                return sentClientMessageId;
             } catch (err) {
                 rollbackOptimisticInput();
                 throw err;

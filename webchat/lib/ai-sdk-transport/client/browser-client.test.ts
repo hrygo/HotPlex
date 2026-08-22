@@ -124,6 +124,40 @@ describe("BrowserHotPlexClient connection handoff", () => {
         socket.finishClose();
     });
 
+    it("records advertised gateway capabilities without requiring them from old servers", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-capabilities");
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-capabilities"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "running",
+                    server_version: "v1.test",
+                    capabilities: ["control_stop_v1"],
+                },
+            },
+        });
+
+        await connect;
+        const introspect = client as unknown as {
+            capabilities: ReadonlySet<string>;
+            serverVersion: string | null;
+        };
+        expect(introspect.capabilities.has("control_stop_v1")).toBe(true);
+        expect(introspect.serverVersion).toBe("v1.test");
+        client.disconnect();
+        socket.finishClose();
+    });
+
     it("does not recursively reconnect when init reports a missing session", async () => {
         vi.stubGlobal("WebSocket", ControlledWebSocket);
         const client = new BrowserHotPlexClient({

@@ -42,6 +42,7 @@ export interface ListSessionsResponse {
 export interface ConversationRecord {
   id: number;
   session_id: string;
+  client_message_id?: string;
   generation: number;
   turn_num: number;
   seq: number;
