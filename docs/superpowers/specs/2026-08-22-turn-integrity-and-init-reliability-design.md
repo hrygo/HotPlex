@@ -38,7 +38,7 @@ Out of scope:
 
 ## Design principles
 
-1. A Gateway-accepted user input is durable before uncertain worker delivery can hide it.
+1. A Gateway-accepted user input is durable in the execution-ingress ledger before worker delivery. Conversation turns are materialized after successful delivery or an explicitly unknown timeout; a confirmed hard rejection remains an execution record and cannot be paired with assistant output.
 2. Every accepted execution reaches exactly one observable terminal state.
 3. All events carrying a session `seq` share one ordered delivery path.
 4. Lifecycle state and initialization error classification are separate concepts.
@@ -95,7 +95,7 @@ BrowserClient removes recursive `_doConnect` calls from init-error handling. Eve
 
 ## Workstream B: Durable user-turn identity
 
-Gateway writes the user turn immediately after durable ingress acceptance and before calling `Worker.Input`. Worker delivery then updates execution delivery state to `delivered`, `failed`, or `unknown`.
+Gateway records the input in the durable execution-ingress ledger before calling `Worker.Input`. It materializes the user conversation turn when delivery succeeds or returns the explicitly unknown timeout classification. A confirmed hard rejection does not create a pairable conversation turn.
 
 An `ErrKindTimeout` means delivery outcome is unknown; it does not remove or omit the user turn. If the worker later emits assistant events, both sides of the exchange remain queryable in the same generation.
 

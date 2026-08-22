@@ -15,7 +15,7 @@
 - Do not guess or reset sequence state when EventStore hydration fails.
 - Existing AEP v1 fields remain parseable; new protocol fields are optional and additive.
 - New clients make retry decisions from `code` and `retryable`, not lifecycle `state`.
-- A Gateway-accepted user input is durable before uncertain worker delivery can hide it.
+- A Gateway-accepted user input is durable in the execution-ingress ledger before worker delivery; the conversation turn is materialized for successful or explicitly unknown delivery, not confirmed hard rejection.
 - Every accepted execution emits exactly one terminal result.
 - Every event carrying session `seq` uses one ordered delivery path.
 - Do not log complete AgentConfig, system prompts, skill bodies, user profiles, or memories.
