@@ -273,31 +273,26 @@ func TestJSONSchema_EmptySchema_NoInjection(t *testing.T) {
 	require.True(t, w.jsonSchemaInjected.CompareAndSwap(false, true))
 }
 
-func TestJSONSchema_BothSystemPromptAndSchema(t *testing.T) {
+func TestJSONSchema_UsesCompatibilityRulesWithoutSystemPrompt(t *testing.T) {
 	t.Parallel()
 	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
-	w.systemPrompt = "You are a helpful assistant."
+	w.systemPrompt = "PRIVATE_PROMPT_SENTINEL"
 	w.jsonSchema = `{"type":"object","properties":{"result":{"type":"string"}}}`
 
-	// Both should be injectable independently.
-	require.True(t, w.systemPromptInjected.CompareAndSwap(false, true))
+	// JSON schema remains supported; the full system prompt does not.
 	require.True(t, w.jsonSchemaInjected.CompareAndSwap(false, true))
 
 	// Simulate the Input() injection logic.
 	content := "Hello"
-	if w.systemPrompt != "" {
-		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
-	}
 	if w.jsonSchema != "" {
 		content = fmt.Sprintf("[JSON SCHEMA]\n%s\n[/JSON SCHEMA]\n\n%s", w.jsonSchema, content)
 	}
+	content = w.injectCompatibilityPrefix(content)
 
-	require.Contains(t, content, "[SYSTEM INSTRUCTIONS]")
+	require.Contains(t, content, acpCompatibilityRules)
 	require.Contains(t, content, "[JSON SCHEMA]")
-	require.Contains(t, content, "You are a helpful assistant.")
+	require.NotContains(t, content, "PRIVATE_PROMPT_SENTINEL")
 	require.Contains(t, content, `"type":"object"`)
-	// JSON Schema should be injected AFTER system prompt (prepended).
-	require.True(t, strings.Contains(content, "[JSON SCHEMA]"))
 	require.True(t, strings.Contains(content, "Hello"))
 }
 
@@ -306,17 +301,16 @@ func TestJSONSchema_SchemaOnly_NoSystemPrompt(t *testing.T) {
 	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
 	w.jsonSchema = `{"type":"array","items":{"type":"number"}}`
 
-	// Only JSON Schema, no system prompt.
+	// Only JSON Schema and the fixed ACP compatibility rules are sent.
 	content := "List primes"
-	if w.systemPrompt != "" {
-		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
-	}
 	if w.jsonSchema != "" {
 		content = fmt.Sprintf("[JSON SCHEMA]\n%s\n[/JSON SCHEMA]\n\n%s", w.jsonSchema, content)
 	}
+	content = w.injectCompatibilityPrefix(content)
 
-	// System prompt should NOT be injected.
+	// Full system prompt should NOT be injected.
 	require.NotContains(t, content, "[SYSTEM INSTRUCTIONS]")
+	require.Contains(t, content, acpCompatibilityRules)
 	// JSON Schema should be injected.
 	require.Contains(t, content, "[JSON SCHEMA]")
 	require.Contains(t, content, `"type":"array"`)

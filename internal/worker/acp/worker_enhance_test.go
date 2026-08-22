@@ -2,9 +2,12 @@ package acp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -157,7 +160,24 @@ func TestACPFirstOrdinaryInputExcludesFullSystemPrompt(t *testing.T) {
 	w.systemPrompt = "PRIVATE_PROMPT_SENTINEL"
 
 	require.NoError(t, w.Input(ctx, "hello", nil))
-	require.Equal(t, "hello", <-receivedPrompt)
+	received := <-receivedPrompt
+	require.Equal(t, acpCompatibilityRules+"\n\nhello", received)
+	require.NotContains(t, received, "PRIVATE_PROMPT_SENTINEL")
+}
+
+func TestACPSystemPromptUnsupportedDiagnosticIsBounded(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	w := &Worker{BaseWorker: base.NewBaseWorker(logger, nil)}
+
+	w.recordSystemPromptUnsupported(1)
+	w.recordSystemPromptUnsupported(1)
+
+	require.Contains(t, logs.String(), "ACP_SYSTEM_PROMPT_UNSUPPORTED")
+	require.Equal(t, 1, strings.Count(logs.String(), "ACP_SYSTEM_PROMPT_UNSUPPORTED"))
+	require.NotContains(t, logs.String(), "PRIVATE")
 }
 
 // ─── usageSnapshot / updateUsage / LastUsage / Reset ──────────────────────────

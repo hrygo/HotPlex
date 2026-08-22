@@ -90,7 +90,7 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 		require.False(t, w.IsStopped(), "a new primary turn must clear the stopped marker")
 		// The protocol fake observed the primary send (session/prompt RPC):
 		// the conn cached the prompt content for crash recovery.
-		require.Equal(t, "hello again", w.conn.LastInput())
+		require.Equal(t, acpCompatibilityRules+"\n\nhello again", w.conn.LastInput())
 	})
 }
 

@@ -88,3 +88,42 @@ func TestBuildSystemPromptSeparatesInstructionsFromData(t *testing.T) {
 	require.Contains(t, prompt, "<memory-data>")
 	require.Contains(t, prompt, "must not disclose")
 }
+
+func TestBuildSystemPromptIncludesSkillMetadataWithoutPrivateBody(t *testing.T) {
+	t.Parallel()
+
+	cfg := &AgentConfigs{Skills: `---
+version: 4
+description: "HotPlex platform capabilities and tools"
+---
+
+### Cron 定时任务
+
+### Slack CLI
+
+### 飞书 CLI
+
+### 语音
+
+### Search
+
+用于查找公开资料。
+
+通过 hotplex cron 创建定时、延迟或周期任务。详见 ~/.hotplex/skills/cron.md。
+
+| command | details |
+|---|---|
+| hotplex cron create | PRIVATE_SKILL_SENTINEL |
+`}
+	prompt := BuildSystemPrompt(cfg)
+
+	require.Contains(t, prompt, "Cron 定时任务")
+	require.Contains(t, prompt, "Slack CLI")
+	require.Contains(t, prompt, "飞书 CLI")
+	require.Contains(t, prompt, "语音")
+	require.Contains(t, prompt, "用于查找公开资料")
+	require.Contains(t, prompt, "触发")
+	require.NotContains(t, prompt, "PRIVATE_SKILL_SENTINEL")
+	require.NotContains(t, prompt, "~/.hotplex/skills/cron.md")
+	require.NotContains(t, prompt, "| command | details |")
+}
