@@ -59,7 +59,9 @@ func TestAdminAPI_HandleListSkills_PaginationAndSearch(t *testing.T) {
 
 	skillsList, ok := res["skills"].([]any)
 	require.True(t, ok)
+	require.NotNil(t, skillsList)
 	require.Len(t, skillsList, 10)
+	require.NotContains(t, res, "tools")
 
 	// 2. Page 2, page_size=10 -> 5 skills
 	req2 := httptest.NewRequest("GET", "/admin/api/skills?page=2&page_size=10", nil)
