@@ -53,8 +53,8 @@ In the workspace-installed CRUD test, retain the existing `SKILL.md` fixture and
 
 ```go
 require.Len(t, got, 1)
-require.Equal(t, "SKILL.md", filepath.Base(got[0].Path))
-require.Contains(t, got[0].Path, filepath.Join(".agents", "skills"))
+require.Equal(t, "SKILL.md", filepath.Base(got[0].FilePath))
+require.Contains(t, got[0].FilePath, filepath.Join(".agents", "skills"))
 ```
 
 - [ ] **Step 3: Run the regression tests**
