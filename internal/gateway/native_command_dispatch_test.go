@@ -416,8 +416,16 @@ func TestWorkerCommandBusyBuffersNativeInvocation(t *testing.T) {
 func TestWorkerCommandCrashReplayCarriesNativeInvocation(t *testing.T) {
 	t.Parallel()
 
+	sm := new(mockInputSM)
+	w := &advertisedSkillWorker{descriptors: oracleDBASkill()}
+	sm.On("Get", "s1").Return(sessionWithWorkDir("s1"), nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+	locator := fixedSkillsLocator{items: contractFSSkills()}
+	h := newInputHandler(t, sm)
+	h.skillsLocator = locator
+	h.catalogStore = newSessionCatalogStore(slog.Default(), locator)
 	b := &Bridge{log: testLogger(t)}
-	w := &recordedSkillWorker{}
+	b.SetReplayValidator(h.ValidateNativeReplay)
 	replay := worker.InputReplay{
 		Content: "/worker oracle-dba 10.0.0.1",
 		Skill: &worker.NativeCommandInvocation{
@@ -428,8 +436,12 @@ func TestWorkerCommandCrashReplayCarriesNativeInvocation(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
-	require.Equal(t, *replay.Skill, w.invocation, "replay must use the structured native invocation")
+	require.NoError(t, b.deliverInputReplayForSession(t.Context(), "s1", w, replay))
+	require.Equal(t, "oracle-dba", w.invocation.Name)
+	require.Equal(t, "10.0.0.1", w.invocation.Args)
+	require.Equal(t, "/private/workspace/.agents/skills/oracle-dba/SKILL.md", w.invocation.Path)
+	require.Equal(t, worker.SkillModeTextCommand, w.invocation.Mode,
+		"replay must use the current Worker descriptor mode, not stale metadata")
 	require.NotEqual(t, "oracle-dba", strings.TrimSpace("/worker oracle-dba 10.0.0.1"), "guard: slash text must never be mistaken for the invocation name")
 	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
 }
@@ -534,8 +546,8 @@ func TestWorkerCommandWorkernameNoSpaceFallsThroughToSkill(t *testing.T) {
 	h.catalogStore = newSessionCatalogStore(slog.Default(), h.skillsLocator)
 
 	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
-	sm.On("Get", "s1").Return(si, nil).Times(3)
-	sm.On("GetWorker", "s1").Return(w).Once()
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
 
 	// "/workername" is not a /worker input: it resolves as a filesystem Skill
 	// and dispatches through the durable Skill path.

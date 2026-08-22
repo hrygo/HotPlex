@@ -74,7 +74,7 @@ type SkillsLocator interface {
 
 // NewHandler creates a new message handler.
 func NewHandler(deps HandlerDeps) *Handler {
-	return &Handler{
+	h := &Handler{
 		log:             deps.Log.With("component", "handler"),
 		hub:             deps.Hub,
 		sm:              deps.SM,
@@ -88,6 +88,10 @@ func NewHandler(deps HandlerDeps) *Handler {
 		catalogGen:      make(map[string]uint64),
 		// stopFence stays zero-valued: the turn stop fence is ready to use.
 	}
+	if deps.Bridge != nil {
+		deps.Bridge.SetReplayValidator(h.ValidateNativeReplay)
+	}
+	return h
 }
 
 // InvalidateCatalog drops the session's cached command catalog and bumps its
@@ -450,6 +454,10 @@ func (h *Handler) handleInput(ctx context.Context, env *events.Envelope) error {
 		if errors.Is(err, skills.ErrAmbiguousInvocation) {
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
 		}
+		if errors.Is(err, worker.ErrSkillNotSupported) {
+			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+				"native Skill is discoverable but not callable by the current Worker; inspect /skills for callable entries")
+		}
 		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "skill resolution failed: %v", err)
 	} else if matched {
 		return h.deliverSkillToWorker(ctx, env, content, invocation)
@@ -548,6 +556,16 @@ func (h *Handler) tryExplicitNativeCommand(ctx context.Context, env *events.Enve
 		}
 		return fail("worker %s does not support native command %q", w.Type(), name)
 	}
+	if descriptor.Kind == worker.NativeCommandKindSkill {
+		fsSkills, fsErr := h.listSessionSkills(ctx, si)
+		if fsErr != nil {
+			return fail("native command catalog unavailable: %v", fsErr)
+		}
+		fs, hasFS := findFilesystemSkill(fsSkills, descriptor.Name)
+		if status := classifyNativeSkillCallability(*descriptor, fs, hasFS, w, true); status != events.SkillStatusCallable {
+			return fail("worker %s does not advertise callable Skill %q", w.Type(), name)
+		}
+	}
 
 	// Gateway fixed commands are gateway-handled (spec §5.2) — the merged
 	// catalog's fixed tier always shadows same-named Worker commands, so an
@@ -595,9 +613,6 @@ func (h *Handler) tryExplicitNativeCommand(ctx context.Context, env *events.Enve
 }
 
 func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content string) (worker.NativeCommandInvocation, bool, error) {
-	if h.skillsLocator == nil {
-		return worker.NativeCommandInvocation{}, false, nil
-	}
 	// Only slash-prefixed input can be a Skill invocation. Gating here keeps
 	// the ordinary-message hot path free of session lookups and filesystem
 	// catalog scans.
@@ -612,15 +627,139 @@ func (h *Handler) resolveSkillForSession(ctx context.Context, sessionID, content
 		// internal error here.
 		return worker.NativeCommandInvocation{}, false, nil
 	}
+	if h.catalogStore == nil {
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	w := h.sm.GetWorker(sessionID)
+	if w == nil {
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	descriptors, fsSkills, authoritativeOK, err := h.loadNativeSkillEvidence(ctx, sessionID, si, w)
+	if err != nil {
+		return worker.NativeCommandInvocation{}, false, err
+	}
+	invocation, matched, err := resolveNativeSkillInvocation(content, descriptors)
+	if err != nil {
+		return worker.NativeCommandInvocation{}, matched, err
+	}
+	if !matched {
+		if nativeSkillSurfaceAvailable(h, w) {
+			return worker.NativeCommandInvocation{}, true,
+				nativeSkillNotSupportedError(nativeSkillNameFromInput(content))
+		}
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	fs, hasFS := findFilesystemSkill(fsSkills, invocation.Name)
+	descriptor := findNativeSkillDescriptor(descriptors, invocation.Name)
+	if descriptor == nil {
+		return worker.NativeCommandInvocation{}, false, nil
+	}
+	if status := classifyNativeSkillCallability(*descriptor, fs, hasFS, w, authoritativeOK); status != events.SkillStatusCallable {
+		return worker.NativeCommandInvocation{}, true, nativeSkillNotSupportedError(invocation.Name)
+	}
+	invocation.Path = descriptor.Path
+	invocation.Mode = descriptor.Mode
+	return invocation, true, nil
+}
+
+func nativeSkillSurfaceAvailable(h *Handler, w worker.Worker) bool {
+	if h.skillsLocator != nil || (h.catalogStore != nil && h.catalogStore.skillsLocator != nil) {
+		return true
+	}
+	_, ok := worker.AsNativeCatalogProvider(w)
+	return ok
+}
+
+func nativeSkillNameFromInput(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "/") {
+		return ""
+	}
+	fields := strings.Fields(strings.TrimPrefix(trimmed, "/"))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// listSessionSkills returns the current filesystem discovery snapshot used for
+// source metadata and evidence-origin classification. It is never used as
+// invocation authority by itself.
+func (h *Handler) listSessionSkills(ctx context.Context, si *session.SessionInfo) ([]skills.Skill, error) {
+	if si == nil {
+		return nil, nil
+	}
+	locator := h.skillsLocator
+	if locator == nil && h.catalogStore != nil {
+		locator = h.catalogStore.skillsLocator
+	}
+	if locator == nil {
+		return nil, nil
+	}
 	homeDir, err := h.userHomeDir()
 	if err != nil {
-		return worker.NativeCommandInvocation{}, false, err
+		return nil, err
 	}
-	catalog, err := h.skillsLocator.List(ctx, homeDir, si.WorkDir)
+	return locator.List(ctx, homeDir, si.WorkDir)
+}
+
+func (h *Handler) loadNativeSkillEvidence(
+	ctx context.Context,
+	sessionID string,
+	si *session.SessionInfo,
+	w worker.Worker,
+) ([]worker.NativeCommandDescriptor, []skills.Skill, bool, error) {
+	if h.catalogStore == nil {
+		return nil, nil, false, nil
+	}
+	descriptors, lookupErr := h.catalogStore.Lookup(ctx, sessionID, si.WorkDir, w, h.catalogGeneration(sessionID))
+	fsSkills, err := h.listSessionSkills(ctx, si)
 	if err != nil {
-		return worker.NativeCommandInvocation{}, false, err
+		return nil, nil, false, err
 	}
-	return resolveSkillInvocation(content, catalog)
+	// Keep the resolver aligned with the filesystem snapshot even when a test
+	// or a custom Handler constructed its catalog store without a locator. The
+	// synthetic entries carry discovery evidence only; authoritativeOK still
+	// controls whether the shared classifier can make them callable.
+	seen := make(map[string]struct{}, len(descriptors))
+	for _, descriptor := range descriptors {
+		seen[descriptor.Name] = struct{}{}
+	}
+	mode := worker.NativeModeForType(w.Type())
+	for _, skill := range fsSkills {
+		if _, exists := seen[skill.Name]; exists {
+			continue
+		}
+		descriptors = append(descriptors, worker.NativeCommandDescriptor{
+			Name:        skill.Name,
+			Description: skill.Description,
+			Kind:        worker.NativeCommandKindSkill,
+			Mode:        mode,
+			StartsTurn:  true,
+			AcceptsArgs: true,
+			Path:        skill.FilePath,
+		})
+		seen[skill.Name] = struct{}{}
+	}
+	return descriptors, fsSkills, lookupErr == nil, nil
+}
+
+func findFilesystemSkill(fsSkills []skills.Skill, name string) (skills.Skill, bool) {
+	for _, skill := range fsSkills {
+		if skill.Name == name {
+			return skill, true
+		}
+	}
+	return skills.Skill{}, false
+}
+
+func findNativeSkillDescriptor(descriptors []worker.NativeCommandDescriptor, name string) *worker.NativeCommandDescriptor {
+	for i := range descriptors {
+		if descriptors[i].Kind == worker.NativeCommandKindSkill && descriptors[i].Name == name {
+			return &descriptors[i]
+		}
+	}
+	return nil
 }
 
 // userHomeDir caches os.UserHomeDir for the process lifetime: it is consulted
@@ -976,13 +1115,25 @@ func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error
 	// still re-validates against the Worker's authoritative catalog and fails
 	// loudly when the Skill is no longer supported.
 	if stashed, ok := invocationFromMetadata(env.Metadata, content); ok {
-		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &stashed, false)
+		validated, err := h.revalidateStashedNativeInvocation(ctx, env.SessionID, stashed)
+		if err != nil {
+			if errors.Is(err, worker.ErrSkillNotSupported) {
+				return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+					"native Skill replay is no longer callable by the current Worker")
+			}
+			return err
+		}
+		return h.deliverToWorkerWithBusyHandling(ctx, env, content, &validated, false)
 	}
 
 	invocation, matched, err := h.resolveSkillForSession(ctx, env.SessionID, content)
 	if err != nil {
 		if errors.Is(err, skills.ErrAmbiguousInvocation) {
 			return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "ambiguous Skill invocation")
+		}
+		if errors.Is(err, worker.ErrSkillNotSupported) {
+			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
+				"native Skill replay is discoverable but not callable by the current Worker")
 		}
 		return err
 	}
@@ -993,6 +1144,63 @@ func (h *Handler) DeliverReplay(ctx context.Context, env *events.Envelope) error
 	// busy result lets replayPending requeue without recursively entering the
 	// supplement handler and acquiring the same RWMutex behind a queued writer.
 	return h.deliverToWorkerWithBusyHandling(ctx, env, content, nil, false)
+}
+
+// revalidateStashedNativeInvocation treats replay metadata as correlation
+// only. The current session catalog supplies the descriptor path/mode and the
+// shared classifier decides whether the Worker can still invoke the Skill.
+func (h *Handler) revalidateStashedNativeInvocation(
+	ctx context.Context,
+	sessionID string,
+	invocation worker.NativeCommandInvocation,
+) (worker.NativeCommandInvocation, error) {
+	if h.catalogStore == nil {
+		return worker.NativeCommandInvocation{}, nativeSkillNotSupportedError(invocation.Name)
+	}
+	si, err := h.sm.Get(ctx, sessionID)
+	if err != nil {
+		return worker.NativeCommandInvocation{}, err
+	}
+	w := h.sm.GetWorker(sessionID)
+	if w == nil {
+		return worker.NativeCommandInvocation{}, nativeSkillNotSupportedError(invocation.Name)
+	}
+	descriptors, fsSkills, authoritativeOK, err := h.loadNativeSkillEvidence(ctx, sessionID, si, w)
+	if err != nil {
+		return worker.NativeCommandInvocation{}, err
+	}
+	return revalidatedNativeInvocation(invocation, descriptors, fsSkills, w, authoritativeOK)
+}
+
+// ValidateNativeReplay validates a Worker-produced structured replay against
+// the current session catalog. It is injected into Bridge after construction;
+// the replay's stored path and mode are correlation data only.
+func (h *Handler) ValidateNativeReplay(
+	ctx context.Context,
+	sessionID string,
+	w worker.Worker,
+	replay worker.InputReplay,
+) (worker.InputReplay, error) {
+	if replay.Skill == nil {
+		return replay, nil
+	}
+	if h.catalogStore == nil || h.sm == nil || w == nil {
+		return worker.InputReplay{}, nativeSkillNotSupportedError(replay.Skill.Name)
+	}
+	si, err := h.sm.Get(ctx, sessionID)
+	if err != nil {
+		return worker.InputReplay{}, err
+	}
+	descriptors, fsSkills, authoritativeOK, err := h.loadNativeSkillEvidence(ctx, sessionID, si, w)
+	if err != nil {
+		return worker.InputReplay{}, err
+	}
+	validated, err := revalidatedNativeInvocation(*replay.Skill, descriptors, fsSkills, w, authoritativeOK)
+	if err != nil {
+		return worker.InputReplay{}, err
+	}
+	replay.Skill = &validated
+	return replay, nil
 }
 
 // deliverToWorker validates session state, handles IDLE→RUNNING transition,
@@ -1239,7 +1447,9 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	var inputErr error
 	if invocation != nil {
 		resolvedInvocation := *invocation
-		resolvedInvocation.Mode = worker.NativeModeForType(w.Type())
+		if resolvedInvocation.Mode == "" {
+			resolvedInvocation.Mode = worker.NativeModeForType(w.Type())
+		}
 		invocation = &resolvedInvocation
 		if provider, ok := worker.AsNativeCatalogProvider(w); ok {
 			// Bound the authoritative re-validation with the same "cannot
@@ -1273,6 +1483,9 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 					// pointing at a path the Worker cannot resolve.
 					if descriptor.Path != "" {
 						resolvedInvocation.Path = descriptor.Path
+					}
+					if descriptor.Mode != "" {
+						resolvedInvocation.Mode = descriptor.Mode
 					}
 					break
 				}

@@ -94,7 +94,7 @@ func TestNativeDispatchCoversThreeChannelsFourWorkers(t *testing.T) {
 func runMatrixNativeDispatch(t *testing.T, combo e2econtract.Combination) {
 	t.Helper()
 
-	const skillPath = "/workspace/.agents/skills/oracle-dba/SKILL.md"
+	const skillPath = "/worker/oracle-dba"
 	w := &matrixNativeWorker{
 		workerType: combo.Worker,
 		descriptors: []worker.NativeCommandDescriptor{{

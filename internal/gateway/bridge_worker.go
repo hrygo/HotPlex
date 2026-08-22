@@ -427,7 +427,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 			replay.Content = p.lastInput
 		}
 		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(replay.Content), "skill", replay.Skill != nil)
-		if err := b.deliverInputReplay(context.Background(), w, replay); err != nil {
+		if err := b.deliverInputReplayForSession(context.Background(), p.sessionID, w, replay); err != nil {
 			b.log.Warn("bridge: input re-delivery failed", "session_id", p.sessionID, "err", err)
 		}
 	}

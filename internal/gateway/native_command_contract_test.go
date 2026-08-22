@@ -82,6 +82,10 @@ type nativeContractFixture struct {
 	combo    e2econtract.Combination
 	worker   worker.Worker
 	fsSkills []skills.Skill
+	// skillAdvertised distinguishes a Worker-authoritative command from a
+	// filesystem-only discovery entry. Native invoker support alone is not
+	// enough to make a filesystem entry callable.
+	skillAdvertised bool
 
 	// longFormPath is the invocation path the explicit "/worker <name>" entry
 	// resolves to (descriptor path; empty when the authoritative descriptor
@@ -137,6 +141,7 @@ func newClaudeContractFixture(t *testing.T) *nativeContractFixture {
 		combo:            e2econtract.Combination{Worker: worker.TypeClaudeCode},
 		worker:           w,
 		fsSkills:         contractFSSkills(),
+		skillAdvertised:  false,
 		longFormPath:     contractFSPath,
 		shortFormPath:    contractFSPath,
 		wantCallable:     nil,
@@ -234,6 +239,7 @@ func newOpenCodeContractFixture(t *testing.T) *nativeContractFixture {
 		combo:            e2econtract.Combination{Worker: worker.TypeOpenCodeSrv},
 		worker:           w,
 		fsSkills:         contractFSSkills(),
+		skillAdvertised:  true,
 		longFormPath:     "", // authoritative descriptors carry no path
 		shortFormPath:    contractFSPath,
 		wantCallable:     []string{contractSkillName},
@@ -339,6 +345,7 @@ func newCodexContractFixture(t *testing.T) *nativeContractFixture {
 		combo:            e2econtract.Combination{Worker: worker.TypeCodexCLI},
 		worker:           w,
 		fsSkills:         contractFSSkills(),
+		skillAdvertised:  true,
 		longFormPath:     contractCodexPath,
 		shortFormPath:    contractCodexPath,
 		wantCallable:     []string{contractSkillName},
@@ -449,6 +456,7 @@ func newACPContractFixture(t *testing.T) *nativeContractFixture {
 		combo:            e2econtract.Combination{Worker: worker.TypeACP},
 		worker:           w,
 		fsSkills:         contractFSSkills(),
+		skillAdvertised:  true,
 		longFormPath:     "",
 		shortFormPath:    contractFSPath,
 		wantCallable:     []string{contractSkillName},
@@ -565,9 +573,11 @@ func runNativeContractPhases(t *testing.T, f *nativeContractFixture) {
 	// per-protocol invocation wire shape.
 	f.phaseParser(t)
 	f.phaseCatalog(t)
-	f.phaseBusy(t)
-	f.phaseReplay(t)
-	f.phaseDuplicate(t)
+	if f.skillAdvertised {
+		f.phaseBusy(t)
+		f.phaseReplay(t)
+		f.phaseDuplicate(t)
+	}
 	f.phaseTerminal(t)
 }
 
@@ -597,6 +607,22 @@ func (f *nativeContractFixture) settleWire(t *testing.T) int {
 // plus the REAL wire shape. Unknown names resolve to NOT_SUPPORTED with no wire.
 func (f *nativeContractFixture) phaseParser(t *testing.T) {
 	t.Helper()
+	if !f.skillAdvertised {
+		// Claude exposes a native invoker but no authoritative catalog. Both
+		// entry forms therefore remain discoverable-only and must be rejected;
+		// the filesystem path is never invocation authority.
+		for _, content := range []string{contractSkillInput, contractSlashInput} {
+			before := f.settleWire(t)
+			h, _, _ := f.newContractHandler(t, &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)})
+			err := h.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", content, nil))
+			require.Error(t, err, "%s: filesystem-only %q must be rejected", f.combo.ID, content)
+			require.ErrorContains(t, err, string(events.ErrCodeNotSupported),
+				"%s: filesystem-only %q must map to NOT_SUPPORTED", f.combo.ID, content)
+			require.Equal(t, before, f.settleWire(t),
+				"%s: filesystem-only %q must never reach the wire", f.combo.ID, content)
+		}
+		return
+	}
 
 	// Explicit "/worker oracle-dba 10.0.0.1".
 	h, _, conn := f.newContractHandler(t, &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)})
@@ -609,8 +635,8 @@ func (f *nativeContractFixture) phaseParser(t *testing.T) {
 	})
 	assertDeliveredAck(t, conn, events.ExecutionStatusDelivered)
 
-	// Short "/oracle-dba 10.0.0.1" resolves through the filesystem catalog and
-	// re-dispatches through the same native invoker.
+	// Short "/oracle-dba 10.0.0.1" resolves through the merged session catalog
+	// and re-dispatches through the same native invoker.
 	before := f.settleWire(t)
 	h2, _, _ := f.newContractHandler(t, &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)})
 	require.NoError(t, h2.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", contractSlashInput, nil)),
@@ -695,6 +721,8 @@ func (f *nativeContractFixture) phaseReplay(t *testing.T) {
 	t.Helper()
 
 	b := &Bridge{log: testLogger(t)}
+	h, _, _ := f.newContractHandler(t, &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)})
+	b.SetReplayValidator(h.ValidateNativeReplay)
 	inv := worker.NativeCommandInvocation{
 		Name: contractSkillName,
 		Args: contractSkillArgs,
@@ -702,7 +730,7 @@ func (f *nativeContractFixture) phaseReplay(t *testing.T) {
 		Mode: f.mode(),
 	}
 	replay := worker.InputReplay{Content: contractSlashInput, Skill: &inv}
-	require.NoError(t, b.deliverInputReplay(t.Context(), f.worker, replay),
+	require.NoError(t, b.deliverInputReplayForSession(t.Context(), "s1", f.worker, replay),
 		"%s: crash replay must re-dispatch the native invocation", f.combo.ID)
 	f.verifyWire(t, inv)
 }

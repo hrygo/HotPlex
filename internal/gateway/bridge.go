@@ -115,6 +115,9 @@ type Bridge struct {
 	// SetCatalogInvalidator because the Handler (which owns the catalog
 	// generation map) is built after the Bridge. Nil disables invalidation.
 	catalogInvalidate func(sessionID string)
+	// replayValidate is injected by Handler so session-aware crash replay can
+	// revalidate structured native invocations before they reach the Worker.
+	replayValidate func(context.Context, string, worker.Worker, worker.InputReplay) (worker.InputReplay, error)
 }
 
 type workerRunBinding struct {
@@ -265,6 +268,12 @@ func (b *Bridge) SetPendingReplayer(r PendingReplayer) { b.replayer = r }
 // and injects itself here during gateway init; nil disables invalidation.
 func (b *Bridge) SetCatalogInvalidator(fn func(sessionID string)) {
 	b.catalogInvalidate = fn
+}
+
+// SetReplayValidator registers the callback used by session-aware crash and
+// resume replay. The Handler owns the merged catalog and its generation.
+func (b *Bridge) SetReplayValidator(fn func(context.Context, string, worker.Worker, worker.InputReplay) (worker.InputReplay, error)) {
+	b.replayValidate = fn
 }
 
 // BufferPending appends a busy-supplement for the fallback path (worker lacks
@@ -769,7 +778,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		b.log.Info("bridge: re-delivering pending input to resumed worker",
 			"session_id", id, "content_len", len(pendingReplay.Content),
 			"skill", pendingReplay.Skill != nil)
-		if err := b.deliverInputReplay(ctx, w, pendingReplay); err != nil {
+		if err := b.deliverInputReplayForSession(ctx, id, w, pendingReplay); err != nil {
 			b.log.Warn("bridge: pending input re-delivery failed",
 				"session_id", id, "err", err)
 		}
@@ -1260,6 +1269,26 @@ func sanitizeLastInput(input string) string {
 }
 
 func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay worker.InputReplay) error {
+	// This legacy low-level helper has no session identity and therefore cannot
+	// establish catalog authority. Keep it fail-closed for structured replay;
+	// production paths must call deliverInputReplayForSession.
+	if replay.Skill != nil {
+		return fmt.Errorf("%w: session-aware native replay validation required", worker.ErrSkillNotSupported)
+	}
+	return b.deliverInputReplayForSession(ctx, "", w, replay)
+}
+
+func (b *Bridge) deliverInputReplayForSession(ctx context.Context, sessionID string, w worker.Worker, replay worker.InputReplay) error {
+	if replay.Skill != nil && sessionID != "" {
+		if b.replayValidate == nil {
+			return fmt.Errorf("%w: native replay validation unavailable", worker.ErrSkillNotSupported)
+		}
+		validated, err := b.replayValidate(ctx, sessionID, w, replay)
+		if err != nil {
+			return err
+		}
+		replay = validated
+	}
 	if replay.Skill == nil {
 		if replay.Content == "" {
 			return nil

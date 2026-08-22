@@ -47,30 +47,144 @@ func (w *advertisedSkillWorker) ListNativeCommands(context.Context, string) ([]w
 	return w.descriptors, nil
 }
 
-func TestHandleInputKnownSkillUsesWorkerInvoker(t *testing.T) {
+func TestHandleInputFilesystemOnlySkill(t *testing.T) {
 	t.Parallel()
 
 	sm := new(mockInputSM)
 	w := &recordedSkillWorker{}
 	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
-	sm.On("Get", "s1").Return(si, nil).Times(3)
-	sm.On("GetWorker", "s1").Return(w).Once()
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
 
-	h := newInputHandler(t, sm)
-	h.skillsLocator = fixedSkillsLocator{items: []skills.Skill{{
+	locator := fixedSkillsLocator{items: []skills.Skill{{
 		Name:     "oracle-dba",
 		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
 	}}}
+	hub := newTestHub(t)
+	go hub.Run()
+	capture := &recordingSessionWriter{}
+	hub.mu.Lock()
+	hub.sessions["s1"] = map[SessionWriter]bool{capture: true}
+	hub.everHadConn["s1"] = true
+	hub.mu.Unlock()
+	h := &Handler{
+		log:           slog.Default(),
+		hub:           hub,
+		sm:            sm,
+		skillsLocator: locator,
+		catalogStore:  newSessionCatalogStore(slog.Default(), locator),
+	}
 
-	err := h.handleInput(context.Background(), inputEnvelopeWithMetadata("s1", "/oracle-dba 10.102.78.1", nil))
-	require.NoError(t, err)
-	require.Equal(t, worker.NativeCommandInvocation{
-		Name: "oracle-dba",
-		Args: "10.102.78.1",
-		Path: "/workspace/.agents/skills/oracle-dba/SKILL.md",
-		Mode: worker.SkillModeTextCommand,
-	}, w.invocation)
+	// Filesystem discovery is still visible through the real /skills listing,
+	// but a native invoker without an authoritative catalog cannot claim that
+	// the Worker can execute the discovered Skill.
+	require.NoError(t, h.handleSkillsList(t.Context(), &events.Envelope{SessionID: "s1"}, w, ""))
+	listing := capture.waitFor(t, "s1", events.SkillsList)
+	data, ok := listing.Event.Data.(events.SkillsListData)
+	require.True(t, ok)
+	var found *events.SkillEntry
+	for i := range data.Skills {
+		if data.Skills[i].Name == "oracle-dba" {
+			found = &data.Skills[i]
+			break
+		}
+	}
+	require.NotNil(t, found)
+	require.Equal(t, events.SkillStatusDiscoverable, found.Status)
+
+	for _, content := range []string{
+		"/oracle-dba 10.102.78.1",
+		"/worker oracle-dba 10.102.78.1",
+	} {
+		err := h.handleInput(context.Background(), inputEnvelopeWithMetadata("s1", content, nil))
+		require.Error(t, err, "%s must not be callable from filesystem discovery alone", content)
+		require.ErrorContains(t, err, string(events.ErrCodeNotSupported))
+	}
+	require.Empty(t, w.invocation)
+	require.Empty(t, w.Calls)
 	sm.AssertExpectations(t)
+}
+
+func TestHandleInputWorkerAdvertisedSkillBothEntryForms(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{
+		Name:        "oracle-dba",
+		Kind:        worker.NativeCommandKindSkill,
+		Mode:        worker.SkillModeTextCommand,
+		StartsTurn:  true,
+		AcceptsArgs: true,
+		Path:        "/private/workspace/oracle-dba/SKILL.md",
+	}}}
+	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+
+	locator := fixedSkillsLocator{items: []skills.Skill{{
+		Name:     "oracle-dba",
+		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	}}}
+	h := newInputHandler(t, sm)
+	h.skillsLocator = locator
+	h.catalogStore = newSessionCatalogStore(slog.Default(), locator)
+
+	for _, content := range []string{
+		"/worker oracle-dba 10.102.78.1",
+		"/oracle-dba 10.102.78.1",
+	} {
+		require.NoError(t, h.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", content, nil)), content)
+		require.Equal(t, "oracle-dba", w.invocation.Name)
+		require.Equal(t, "10.102.78.1", w.invocation.Args)
+		require.Equal(t, "/private/workspace/oracle-dba/SKILL.md", w.invocation.Path)
+		require.Equal(t, worker.SkillModeTextCommand, w.invocation.Mode)
+	}
+	sm.AssertExpectations(t)
+}
+
+func TestExplicitWorkerFilesystemOnlySkill(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &recordedSkillWorker{}
+	si := sessionWithWorkDir("s1")
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+	locator := fixedSkillsLocator{items: []skills.Skill{{
+		Name:     "oracle-dba",
+		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	}}}
+	h := newInputHandler(t, sm)
+	h.skillsLocator = locator
+	h.catalogStore = newSessionCatalogStore(slog.Default(), locator)
+
+	err := h.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", "/worker oracle-dba 10.102.78.1", nil))
+	require.Error(t, err)
+	require.ErrorContains(t, err, string(events.ErrCodeNotSupported))
+	require.Empty(t, w.invocation)
+	require.Empty(t, w.Calls)
+}
+
+func TestHandleInputUnknownSkillDoesNotReachWorker(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &recordedSkillWorker{}
+	sm.On("Get", "s1").Return(sessionWithWorkDir("s1"), nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
+	locator := fixedSkillsLocator{items: []skills.Skill{{
+		Name:     "oracle-dba",
+		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	}}}
+	h := newInputHandler(t, sm)
+	h.skillsLocator = locator
+	h.catalogStore = newSessionCatalogStore(slog.Default(), locator)
+
+	err := h.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", "/missing-skill", nil))
+	require.Error(t, err)
+	require.ErrorContains(t, err, string(events.ErrCodeNotSupported))
+	require.Empty(t, w.invocation)
+	require.Empty(t, w.Calls)
 }
 
 func TestHandleInputKnownSkillRequiresWorkerAdvertisement(t *testing.T) {
@@ -79,14 +193,15 @@ func TestHandleInputKnownSkillRequiresWorkerAdvertisement(t *testing.T) {
 	sm := new(mockInputSM)
 	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{Name: "other", Kind: worker.NativeCommandKindSkill}}}
 	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
-	sm.On("Get", "s1").Return(si, nil).Times(3)
-	sm.On("GetWorker", "s1").Return(w).Once()
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
 
 	h := newInputHandler(t, sm)
 	h.skillsLocator = fixedSkillsLocator{items: []skills.Skill{{
 		Name:     "oracle-dba",
 		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
 	}}}
+	h.catalogStore = newSessionCatalogStore(slog.Default(), h.skillsLocator)
 
 	err := h.handleInput(context.Background(), inputEnvelopeWithMetadata("s1", "/oracle-dba 10.102.78.1", nil))
 	require.Error(t, err)
@@ -153,14 +268,15 @@ func TestHandleInputKnownSkillPrefersWorkerAuthoritativePath(t *testing.T) {
 		Kind: worker.NativeCommandKindSkill,
 	}}}
 	si := &session.SessionInfo{ID: "s1", State: events.StateRunning, WorkDir: "/workspace", Platform: "webchat"}
-	sm.On("Get", "s1").Return(si, nil).Times(3)
-	sm.On("GetWorker", "s1").Return(w).Once()
+	sm.On("Get", "s1").Return(si, nil).Maybe()
+	sm.On("GetWorker", "s1").Return(w).Maybe()
 
 	h := newInputHandler(t, sm)
 	h.skillsLocator = fixedSkillsLocator{items: []skills.Skill{{
 		Name:     "oracle-dba",
 		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
 	}}}
+	h.catalogStore = newSessionCatalogStore(slog.Default(), h.skillsLocator)
 
 	err := h.handleInput(context.Background(), inputEnvelopeWithMetadata("s1", "/oracle-dba 10.102.78.1", nil))
 	require.NoError(t, err)
@@ -207,11 +323,11 @@ func TestHandleSupplementOnBusy_SkillNeverInjectedAsText(t *testing.T) {
 	require.Equal(t, "10.102.78.1", got.Args)
 }
 
-// TestDeliverReplay_SkillStashSurvivesCatalogRemoval covers the replay path:
-// when the Skill vanished from the filesystem catalog between buffering and
-// replay, the stashed invocation keeps native semantics instead of degrading
-// to raw slash text delivered as an ordinary prompt.
-func TestDeliverReplay_SkillStashSurvivesCatalogRemoval(t *testing.T) {
+// TestDeliverReplay_FilesystemOnlyStashRequiresCurrentAdvertisement covers the
+// replay path: a stashed filesystem invocation is correlation metadata only;
+// when the current Worker has no authoritative advertisement it is rejected
+// instead of reaching the native invoker.
+func TestDeliverReplay_FilesystemOnlyStashRequiresCurrentAdvertisement(t *testing.T) {
 	t.Parallel()
 
 	sm := new(mockInputSM)
@@ -219,7 +335,13 @@ func TestDeliverReplay_SkillStashSurvivesCatalogRemoval(t *testing.T) {
 	sm.On("Get", "s").Return(&session.SessionInfo{ID: "s", State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
 	sm.On("GetWorker", "s").Return(w).Maybe()
 
-	h := newInputHandler(t, sm) // skillsLocator nil → re-resolution never matches
+	locator := fixedSkillsLocator{items: []skills.Skill{{
+		Name:     "oracle-dba",
+		FilePath: "/workspace/.agents/skills/oracle-dba/SKILL.md",
+	}}}
+	h := newInputHandler(t, sm)
+	h.skillsLocator = locator
+	h.catalogStore = newSessionCatalogStore(slog.Default(), locator)
 
 	const content = "/oracle-dba 10.102.78.1"
 	env := inputEnvelopeWithMetadata("s", content, nil)
@@ -230,9 +352,10 @@ func TestDeliverReplay_SkillStashSurvivesCatalogRemoval(t *testing.T) {
 		Mode: worker.SkillModeTextCommand,
 	}, content)
 
-	require.NoError(t, h.DeliverReplay(t.Context(), env))
-	require.Equal(t, "oracle-dba", w.invocation.Name, "stashed invocation must reach the native Skill path")
-	require.Equal(t, "10.102.78.1", w.invocation.Args)
+	err := h.DeliverReplay(t.Context(), env)
+	require.Error(t, err)
+	require.ErrorContains(t, err, string(events.ErrCodeNotSupported))
+	require.Empty(t, w.invocation, "stashed filesystem path must not bypass current Worker evidence")
 }
 
 // TestDeliverReplay_StashIgnoredWhenContentDiverged guards the merged-replay
@@ -260,32 +383,75 @@ func TestDeliverReplay_StashIgnoredWhenContentDiverged(t *testing.T) {
 // TestDeliverReplay_PrefersStashOverFilesystemHijack guards the replay path
 // against the /worker namespace: a filesystem Skill literally named "worker"
 // must never hijack a buffered explicit "/worker oracle-dba ..." entry at
-// replay time. The content-keyed stash records the buffer-time resolution
-// against the merged catalog and wins over filesystem re-resolution.
+// replay time. The content-keyed stash records the buffer-time resolution, but
+// current Worker evidence still supplies the callable descriptor and path.
 func TestDeliverReplay_PrefersStashOverFilesystemHijack(t *testing.T) {
 	t.Parallel()
 
 	sm := new(mockInputSM)
-	w := &recordedSkillWorker{}
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{
+		Name:        "oracle-dba",
+		Kind:        worker.NativeCommandKindSkill,
+		Mode:        worker.SkillModeTextCommand,
+		StartsTurn:  true,
+		AcceptsArgs: true,
+		Path:        "/worker/oracle-dba",
+	}}}
 	sm.On("Get", "s").Return(&session.SessionInfo{ID: "s", State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
 	sm.On("GetWorker", "s").Return(w).Maybe()
 
 	h := newInputHandler(t, sm)
-	h.skillsLocator = fixedSkillsLocator{items: []skills.Skill{{
+	locator := fixedSkillsLocator{items: []skills.Skill{{
 		Name:     "worker",
 		FilePath: "/workspace/.agents/skills/worker/SKILL.md",
 	}}}
+	h.skillsLocator = locator
+	h.catalogStore = newSessionCatalogStore(slog.Default(), locator)
 
 	const content = "/worker oracle-dba 10.102.78.1"
 	env := inputEnvelopeWithMetadata("s", content, nil)
 	stashInvocation(env, worker.NativeCommandInvocation{
 		Name: "oracle-dba",
 		Args: "10.102.78.1",
+		Path: "/stale/path/oracle-dba/SKILL.md",
 	}, content)
 
 	require.NoError(t, h.DeliverReplay(t.Context(), env))
 	require.Equal(t, "oracle-dba", w.invocation.Name, "stashed oracle-dba must win over the filesystem \"worker\" skill")
 	require.Equal(t, "10.102.78.1", w.invocation.Args)
+	require.Equal(t, "/worker/oracle-dba", w.invocation.Path, "current Worker evidence must replace the stashed path")
+}
+
+func TestDeliverReplayStartsTurnControlUsesCurrentDescriptor(t *testing.T) {
+	t.Parallel()
+
+	sm := new(mockInputSM)
+	w := &advertisedSkillWorker{descriptors: []worker.NativeCommandDescriptor{{
+		Name:       "queue",
+		Kind:       worker.NativeCommandKindControl,
+		Mode:       worker.SkillModeAdvertisedCommand,
+		StartsTurn: true,
+		Path:       "/worker/queue",
+	}}}
+	sm.On("Get", "s").Return(sessionWithWorkDir("s"), nil).Maybe()
+	sm.On("GetWorker", "s").Return(w).Maybe()
+	h := newInputHandler(t, sm)
+	h.catalogStore = newSessionCatalogStore(slog.Default(), nil)
+
+	const content = "/worker queue refresh"
+	env := inputEnvelopeWithMetadata("s", content, nil)
+	stashInvocation(env, worker.NativeCommandInvocation{
+		Name: "queue",
+		Args: "refresh",
+		Path: "/stale/path/queue",
+		Mode: worker.SkillModeTextCommand,
+	}, content)
+
+	require.NoError(t, h.DeliverReplay(t.Context(), env))
+	require.Equal(t, "queue", w.invocation.Name)
+	require.Equal(t, "refresh", w.invocation.Args)
+	require.Equal(t, "/worker/queue", w.invocation.Path)
+	require.Equal(t, worker.SkillModeAdvertisedCommand, w.invocation.Mode)
 }
 
 type failingCatalogWorker struct {
@@ -327,7 +493,7 @@ func TestDeliverToWorkerAuthoritativeQueryIsBounded(t *testing.T) {
 	start := time.Now()
 	err := h.handleInput(t.Context(), inputEnvelopeWithMetadata("s1", "/oracle-dba 10.102.78.1", nil))
 	require.Error(t, err)
-	require.ErrorContains(t, err, string(events.ErrCodeInternalError))
+	require.ErrorContains(t, err, string(events.ErrCodeNotSupported))
 	require.Less(t, time.Since(start), 2*time.Second, "delivery-path catalog query must honor the injected bound")
 	sm.AssertExpectations(t)
 }

@@ -314,18 +314,10 @@ func buildSkillEntriesFromCatalog(merged []worker.NativeCommandDescriptor, fsSki
 			if fs, ok := fsByName[d.Name]; ok {
 				e.Source = fs.Source
 				e.Managed = fs.Managed
-				if authoritativeOK && !isFilesystemTierDescriptor(d, fs, w) {
-					e.Status = events.SkillStatusCallable
-				} else {
-					e.Status = events.SkillStatusDiscoverable
-				}
+				e.Status = classifyNativeSkillCallability(d, fs, true, w, authoritativeOK)
 			} else {
 				e.Source = "worker"
-				if authoritativeOK {
-					e.Status = events.SkillStatusCallable
-				} else {
-					e.Status = events.SkillStatusDiscoverable
-				}
+				e.Status = classifyNativeSkillCallability(d, skills.Skill{}, false, w, authoritativeOK)
 			}
 		default:
 			e.Status = events.SkillStatusDiscoverable
@@ -333,6 +325,27 @@ func buildSkillEntriesFromCatalog(merged []worker.NativeCommandDescriptor, fsSki
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// classifyNativeSkillCallability is the single evidence-based decision used
+// by /skills and every native Skill invocation entry point. A merged
+// filesystem-tier descriptor is discoverable but never callable; only an
+// authoritative Worker descriptor (or a future explicit adapter evidence
+// path) may be callable after a successful catalog lookup.
+func classifyNativeSkillCallability(
+	d worker.NativeCommandDescriptor,
+	fs skills.Skill,
+	hasFS bool,
+	w worker.Worker,
+	authoritativeOK bool,
+) events.SkillStatus {
+	if d.Kind != worker.NativeCommandKindSkill || !authoritativeOK {
+		return events.SkillStatusDiscoverable
+	}
+	if hasFS && isFilesystemTierDescriptor(d, fs, w) {
+		return events.SkillStatusDiscoverable
+	}
+	return events.SkillStatusCallable
 }
 
 // filterCatalogDescriptors narrows merged catalog descriptors by
