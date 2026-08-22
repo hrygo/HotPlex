@@ -23,6 +23,7 @@ description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配�
    - [pool — 资源池](#36-pool--资源池)
    - [worker — Worker 运行时](#37-worker--worker-运行时)
    - [agent_config — Agent 人格与上下文](#38-agent_config--agent-人格与上下文)
+   - [agent_config runtime facts](#381-agent_config-runtime-facts)
    - [skills — Skills 发现](#39-skills--skills-发现)
    - [cron — 定时任务调度器](#310-cron--定时任务调度器)
    - [webhook — GitHub Webhook 接收器](#3101-webhook--github-webhook-接收器)
@@ -417,7 +418,17 @@ Agent B/C 通道配置加载器。
 
 **Tools 兼容期**：新文件和写接口只使用 `TOOLS.md`。旧 `SKILLS.md` 暂作为同一逻辑槽位的只读别名：每个作用域先检查 `TOOLS.md`，再检查旧名；同层两者并存时 `TOOLS.md` 胜出并由 `hotplex doctor` 告警。`inject_exclude` 中两种名字等价。
 
-**与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，通过 `/admin/api/skills`、WebChat Skills 页面和 Worker Skills 能力管理，不由 `TOOLS.md` 派生，也不会把 Skill 正文常驻注入 AgentConfig prompt。
+**与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，通过 `/admin/api/skills`、WebChat Skills 页面和 Worker `/skills` 能力管理，不由 `TOOLS.md` 派生，也不会把 Skill catalog 或正文常驻注入 AgentConfig prompt。文件系统发现不代表当前 Session 可调用。
+
+#### 3.8.1 agent_config runtime facts
+
+实时 AgentConfig prompt 的外层版本为 `<agent-configuration schema-version="3">`。Worker 已选定且 Session 信息已解析后，Gateway 可在 `<directives>` 前插入 `<runtime-facts format="application/json" schema-version="1">`；内层 schema 1 是 facts 载荷版本，不能与外层 prompt schema 混淆。新 Session 和 `/reset` 使用同一构建路径，Admin 预览使用 runtime-neutral 的 `BuildSystemPrompt`，不伪造运行时事实。
+
+facts 是受限的**声明**，不是外部 Worker 健康或权限已执行的证明。字段范围仅包括平台、Worker 类型、作用域种类、声明的权限模式、`resume`/`streaming`/`tools`、`skills`/`mcp`/`worker` 查询面、声明的 Skill catalog 所有者，以及 allowlist Gateway 环境键名的存在性。它不包含身份值、Session/频道/线程/团队 ID、工作目录、环境变量值、凭据、动态 catalog、Skill metadata/正文或 MCP 配置。
+
+Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，HotPlex 不复制一份 catalog 到 AgentConfig。Session `/skills` 的 `callable`、`discoverable`、`unavailable` 状态是当前调用边界：只有 Worker 权威目录确认的 `callable` 才能执行；短 `/name`、显式 `/worker <name>`、结构化/WebChat 调用及 busy/crash replay 共用该判定，filesystem-only Skill 不可调用。
+
+Phase A 尚未实现 built-in registry、`hotplex skills sync`/`hotplex skills status`/`hotplex skills remove` 或 Worker-native projections；不要将这些命令或机制当作当前配置项或已上线能力。
 
 ---
 
@@ -443,6 +454,8 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `tick_interval_sec` | int | `60` | — | 调度器 tick 间隔（秒） |
 | `yaml_config_path` | string | `""` | — | 外部 YAML 配置文件路径（可选） |
 | `jobs` | []map | `[]` | — | 内联 Job 定义（可选） |
+
+**Agent 路由与验证**：处理 Cron 请求时优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时查询当前二进制的 `hotplex cron --help`，必要时再看 `hotplex cron create --help`。创建后必须用独立读取路径执行 `hotplex cron get <id|name>` 验证，不能把 Skill 文档或旧示例当作成功证据。
 
 ---
 

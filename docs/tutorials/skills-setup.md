@@ -63,7 +63,7 @@ description: 一句话描述这个技能的作用（1-1024 字符）
 
 WebChat UI → 管理后台（全局）或 Workspace 设置（workspace）→ Skills →「上传 Skill」→ 选择 zip → 勾选「覆盖同名」可替换已有同名 skill。
 
-安装成功后，skill 立即出现在列表：`.agents/skills` 下的标注「可管理」，`.claude`/`.hotplex` 等目录下的标注「只读外部」。
+安装成功后，skill 立即出现在管理列表：`.agents/skills` 下的标注「可管理」，`.claude`/`.hotplex` 等目录下的标注「只读外部」。它是否能在某个 Session 中调用，仍取决于该 Session 的 Worker 目录证据。
 
 ## 4. 各 Worker 加载与软链引导
 
@@ -92,16 +92,28 @@ ls -l ~/.claude/skills
 # 应显示: ~/.claude/skills -> ~/.agents/skills 的符号链接
 ```
 
-建立软链后，新会话即可加载 `~/.agents/skills` 下的全部 skill。
+建立软链后，新会话可让 Claude Code 按其原生规则发现 `~/.agents/skills` 下的 skill；这不等于 HotPlex 已确认可调用。应在新 Session 或 `/reset` 后检查 `/skills` 的状态。
 
 > ⚠️ **为什么不由程序代建软链？** 软链涉及「已有真实目录被覆盖、方向冲突、跨 Worker 归一化」等数据安全风险。HotPlex 把这一步留给用户显式完成，避免程序误覆盖用户已有的 `.claude/skills` 内容——这是有意的设计决策（spec §2「软链管理」）。
 
-## 5. 修改与删除
+## 5. 发现不等于可调用
+
+Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 `/skills` 管理或展示的都是 Agent Skills；`TOOLS.md`（以及兼容读取的 AgentConfig `SKILLS.md`）只是常驻指导，不会变成 Skill catalog。状态含义如下：
+
+- `discoverable`：HotPlex 找到有效文件定义，但当前 Worker 没有确认调用路径；filesystem-only Skill 属于此类，不能调用。
+- `callable`：当前 Worker 的权威目录确认可原生执行，才允许调用。
+- `unavailable`：权威 Worker 目录明确不包含该 Skill，返回受限的 unsupported 结果。
+
+短 `/name`、显式 `/worker <name>`、结构化/WebChat 调用和 busy/crash replay 共用当前 Session 的 callability 判定；不能用旧路径、缓存 metadata 或 `NativeInvoker` 绕过它。新建 Session 或 `/reset` 后再检查 `/skills`，因为配置和 Worker 目录证据按 Session 激活。
+
+Phase A 不包含 built-in registry、`hotplex skills sync`/`hotplex skills status`/`hotplex skills remove` 或 Worker-native projections；这些尚未上线，不能把上传成功或文件系统发现写成已完成同步。
+
+## 6. 修改与删除
 
 - **修改 skill** 有两种方式：① 在线编辑——在 skill 详情的「Body」标签页直接改写 `SKILL.md` 全文并保存（对应 `PUT /admin/api/skills/{name}`，仅 `managed` skill 可改）；② 重新打包 zip 上传覆盖（勾选「覆盖同名」）。两种方式都只更新 `SKILL.md`，包内其他文件需通过 zip 覆盖替换。
 - **删除 skill** = 列表中点击删除。仅 `managed` skill（`.agents/skills` 下）可删；`.claude`/`.hotplex` 下的只读外部 skill 需在文件系统手动删除。
 
-## 6. REST API
+## 7. REST API
 
 除 WebChat UI 外，也可通过 REST API 管理（详见 [Admin API 参考](../reference/admin-api.md) 的「Skill 管理」章节）：
 

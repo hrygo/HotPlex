@@ -1,7 +1,7 @@
 ---
 title: Agent 配置系统
 weight: 2
-description: HotPlex B/C 双通道 Agent 配置：确定性加载、冲突隔离、XML 安全与热更新时机
+description: HotPlex B/C 双通道 Agent 配置：确定性加载、冲突隔离、XML 安全与会话生效边界
 ---
 
 # Agent 配置系统
@@ -23,7 +23,7 @@ HotPlex 是一个多租户、多平台的 AI Agent 接入层。不同用户、�
 HotPlex 将所有配置分为两个通道，使用 XML 嵌套表达结构性优先级：
 
 ```xml
-<agent-configuration schema-version="2">
+<agent-configuration schema-version="3">
   <directives>
     <hotplex>  META-COGNITION.md (go:embed, 始终首位) </hotplex>
     <persona>  SOUL.md  </persona>
@@ -85,7 +85,28 @@ var embeddedMetacognition string
 - **始终首位**：在 `<directives>` 中排在 `<persona>` 之前
 - **不可覆盖**：fallback 机制不适用于此文件，它是嵌入在代码中的
 
-META-COGNITION 定义 Worker 与 Gateway 的身份边界、五文件模型、Tools/Skills 区分、自配置授权事务和生效/验证语义。它不包含动态工具清单、凭据或内部绝对路径，是整个系统稳定的认知与安全基线。
+META-COGNITION 定义 Worker 与 Gateway 的身份边界、五文件模型、Tools/Skills 区分、自配置授权事务和生效/验证语义。它不包含动态工具或 Skill catalog、凭据或内部绝对路径，是整个系统稳定的认知与安全基线。
+
+### Session Runtime Facts：schema v3 的边界
+
+实时 Worker 的 system prompt 使用外层 `<agent-configuration schema-version="3">`。有运行时事实时，Gateway 会在 `<directives>` 之前插入一个受限的
+`<runtime-facts format="application/json" schema-version="1">` 块；这里的 `schema-version="1"` 是 facts 载荷版本，不是外层 prompt schema。Admin 预览继续调用不带 facts 的 `BuildSystemPrompt`，因此不会伪造某个运行中的 Session。
+
+Runtime facts 在 Worker 已选定、Session 信息已解析后由 Gateway 构建；首次启动和 `/reset` 共用同一个注入边界。它只声明当前 Session 的有限事实：平台、Worker 类型、作用域种类、声明的权限模式、`resume`/`streaming`/`tools` 能力、`skills`/`mcp`/`worker` 查询面、Skill catalog 所有者，以及 allowlist Gateway 环境键名的存在性。
+
+这些是**声明（declared）而不是观测或强制执行证明（observed/enforced）**：它们不能证明外部 Worker 健康、权限实际生效或某个命令已经成功。载荷不包含身份值、Session/频道/线程/团队 ID、工作目录、环境变量值、凭据、动态 catalog、Skill 的 `name`/`description`/正文或 MCP 配置。Agent 不得从缺失的事实或文档推断出未暴露的能力。
+
+### Agent Skills 的发现、所有权与调用
+
+Admin API 的 `skills`、WebChat Skills、Session `/skills` 以及 Worker 的原生 `/skills` 都指向真实 Agent Skills，不是 AgentConfig 的 `TOOLS.md` 槽位。原生 Worker 负责向模型做 `name`、`description` 的 progressive disclosure 和按需加载；HotPlex 不把动态 Skill catalog 重复注入 AgentConfig prompt。
+
+Skill 状态按当前 Session 的证据区分：文件系统找到定义但没有当前 Worker 调用证据是 `discoverable`；Worker 权威目录确认可原生执行才是 `callable`；权威目录明确排除则是 `unavailable`。只有 `callable` 可以调用。短 `/name`、显式 `/worker <name>`、结构化/WebChat 调用，以及 busy/crash replay 都复用同一个 Session callability 判定；filesystem-only Skill 永远不能绕过它变成可调用。
+
+当前 Phase A 尚未实现 built-in registry、`hotplex skills sync`/`hotplex skills status`/`hotplex skills remove` 或 Worker-native projections。不能把文件系统发现、管理列表或 `TOOLS.md` 描述当成这些能力已上线的证明。
+
+### CLI 与 Cron 路由
+
+处理 Cron 请求时，优先路由到当前 Session 实际暴露的 `hotplex-cli` Skill；Skill 不可用时，查询当前安装二进制而不是依赖旧示例：`hotplex cron --help`，再按需查看 `hotplex cron create --help`。创建后必须使用独立读取路径执行 `hotplex cron get <id|name>` 验证结果；无法调用 CLI 时应明确返回 `unsupported`/degraded。
 
 ### 自配置事务与能力边界
 
@@ -203,7 +224,7 @@ var reservedTags = []string{
    - <memory-data>/<memory> 包裹 MEMORY.md，明确标记为数据
    - 外层用 <context> 包裹
 
-3. 外层用 <agent-configuration schema-version="2"> 包裹全部
+3. 外层用 <agent-configuration schema-version="3"> 包裹全部；实时 Session 在 directives 前可选插入 schema 1 的 runtime facts
 ```
 
 ### Worker 注入差异

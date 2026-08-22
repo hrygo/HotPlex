@@ -105,6 +105,31 @@ mkdir -p ~/.hotplex/agent-configs
 按需加载。旧 AgentConfig `SKILLS.md` 在兼容期仍可读取，但新配置应只创建
 `TOOLS.md`；同一目录两者并存时 `TOOLS.md` 生效，`hotplex doctor` 会报告迁移提示。
 
+### Session 自我认知与 Skills 调用边界
+
+实时 Session 的 system prompt 使用外层 schema v3，并可在 directives 前携带受限的
+`runtime-facts`（载荷 schema 1）。它只提供 Gateway 构建的声明性事实：平台、Worker、
+作用域种类、声明的权限/能力、查询面、Skill catalog 所有者和 allowlist 环境键名的存在性；
+不提供身份值、路径、环境值、凭据、动态 catalog 或 Skill 正文。事实不是 Worker 健康或权限
+已经执行的证明，Admin 预览没有运行时 facts。
+
+Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 `/skills` 都是
+真实 Agent Skills 的表面；`TOOLS.md` 不是 Skill catalog，META 也不会复制 catalog。当前
+Session 的状态含义是：文件系统发现但没有调用证据为 `discoverable`，Worker 权威目录确认
+可执行为 `callable`，权威目录明确排除为 `unavailable`。只有 `callable` 可调用；短
+`/name`、显式 `/worker <name>`、结构化/WebChat 调用以及 busy/crash replay 共用同一判定，
+filesystem-only Skill 不会因为存在路径而变成可调用。
+
+配置变更和 Skill 可见性都应在新建 Session 或 `/reset` 后重新检查，并以当前 `/skills` 状态
+为准。Phase A 尚未提供 built-in registry、`hotplex skills sync/status/remove` 或
+Worker-native projections，不要把它们当作已安装能力。
+
+### Cron 请求的 CLI 路由
+
+Cron 请求优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时先查询当前二进制的
+`hotplex cron --help`，必要时再看 `hotplex cron create --help`。执行 `cron create` 后，必须再执行
+`hotplex cron get <id|name>` 做独立验证；不能以 Skill 文档或命令示例代替成功证据。
+
 ## 4. 添加用户档案（C 通道）
 
 C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的规则：
