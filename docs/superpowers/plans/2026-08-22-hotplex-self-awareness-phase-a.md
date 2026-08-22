@@ -242,32 +242,69 @@ Run: `git add internal/agentconfig/META-COGNITION.md internal/agentconfig/prompt
 
 Run: `git commit -m "docs(agentconfig): correct self-awareness defaults"`
 
-### Task 4: Skill callability regression verification
+### Task 4: Unify Skill callability across listing and dispatch
 
 **Files:**
 
-- No planned file changes. This is a verification task for behavior already present on the branch.
+- Modify: `internal/gateway/handler.go`
+- Modify: `internal/gateway/skill_dispatch.go`
+- Modify: `internal/gateway/worker_cmds.go`
+- Modify: `internal/gateway/skill_dispatch_handler_test.go`
+- Modify: `internal/gateway/native_command_contract_test.go`
+- Modify if required by shared helper coverage: `internal/gateway/skill_dispatch_test.go`
 
 **Interfaces:**
 
-- Preserves: `callable`, `discoverable`, `unavailable`.
+- Preserves: `callable`, `discoverable`, `unavailable` wire values.
 - Preserves: Gateway fixed > Worker authoritative > filesystem discovery precedence.
+- Changes: every invocation entry point must consume the same evidence-based callability decision as `/skills`; filesystem discovery alone is never invocation authority.
 
-- [ ] **Step 1: Run existing authoritative-catalog tests**
+- [ ] **Step 1: Add failing dispatch-parity tests**
 
-Run: `go test ./internal/gateway -run 'Test(HandleInputKnownSkillRequiresWorkerAdvertisement|SkillsListEntriesClassifyMergedCatalog|NativeDispatchCoversThreeChannelsFourWorkers|HandleSkillsListLookupErrorNoCallable)' -count=1`
+Add focused tests proving:
 
-Expected: PASS. If so, do not edit production dispatch.
+- a filesystem-only Skill remains `discoverable` in `/skills` and both short `/name` and explicit `/worker <name>` reject it with `NOT_SUPPORTED`, including a native-invoker Worker that has no authoritative catalog provider;
+- a Worker-advertised Skill remains callable through both short and explicit forms and uses the authoritative descriptor path/mode;
+- authoritative catalog failure, stale replay metadata, and structured invocation cannot fall back to filesystem-only authority;
+- ordinary non-slash text still skips catalog lookup;
+- unknown, ambiguous, and shadowed slash names preserve bounded error behavior and never reach the Worker wire.
 
-- [ ] **Step 2: Confirm parity coverage**
+Update the native contract fixture: its short-form success case must be backed by Worker advertisement, never only by `shortFormPath` from the filesystem fixture.
 
-Read the named tests and confirm they prove a filesystem-only Skill is discoverable in `/skills` and rejected by short `/name`, while explicit `/worker`, replay, and structured invocation revalidate against the authoritative catalog. If this evidence is absent or the command fails, stop Phase A and report the exact uncovered path instead of changing the wire contract opportunistically.
+Run the new focused tests before production edits and confirm the filesystem-only cases fail for the expected reason.
 
-- [ ] **Step 3: Run full Skill suite**
+- [ ] **Step 2: Extract one shared callability classifier**
+
+Refactor the existing `/skills` classification into a small shared helper that classifies a merged descriptor using its evidence origin, filesystem match, current Worker, and authoritative lookup result. `buildSkillEntriesFromCatalog` remains the wire mapper and delegates to that helper; do not introduce a new AEP enum or source value.
+
+- Gateway fixed commands are callable only through their existing Gateway handler.
+- Worker-advertised commands/Skills are callable when the authoritative lookup succeeds.
+- adapter-verified native activation may be callable only when represented by explicit adapter evidence; `NativeInvoker` support or a filesystem path alone is insufficient.
+- filesystem-only entries and any entry whose authoritative lookup cannot be confirmed are discoverable, not callable.
+
+- [ ] **Step 3: Route short and explicit invocation through the shared decision**
+
+Replace `resolveSkillForSession`'s direct filesystem resolution with merged session-catalog resolution. Preserve canonical and legacy compact parsing, but build the `NativeCommandInvocation` from the selected callable descriptor. A discoverable-only match returns `NOT_SUPPORTED` with bounded remediation guidance; it must not fall through as ordinary prompt text.
+
+Apply the same classifier in `tryExplicitNativeCommand` before calling the native invoker. Keep the fixed-command reservation and capability gates unchanged.
+
+Replay and structured invocation must revalidate against current session evidence before wire delivery. A stashed path is correlation data, not callability authority. Reuse the shared lookup/validation path where practical and keep the existing bounded catalog timeout.
+
+- [ ] **Step 4: Run focused and full Skill suites**
+
+Run: `go test ./internal/gateway -run 'Test(HandleInputKnownSkillRequiresWorkerAdvertisement|HandleInputFilesystemOnlySkill|ExplicitWorkerFilesystemOnlySkill|SkillsListEntriesClassifyMergedCatalog|NativeDispatchCoversThreeChannelsFourWorkers|HandleSkillsListLookupErrorNoCallable|Replay|Structured)' -count=1 -race -shuffle=on`
+
+Expected: PASS. Adjust the regex only to the exact new test names if necessary; do not weaken the asserted cases.
 
 Run: `go test ./internal/gateway -run 'Skill|NativeCatalog|NativeDispatch' -count=1 -race -shuffle=on`
 
 Expected: PASS with no AEP enum/source changes.
+
+- [ ] **Step 5: Commit**
+
+Run: `git add internal/gateway/handler.go internal/gateway/skill_dispatch.go internal/gateway/worker_cmds.go internal/gateway/*skill*test.go internal/gateway/native_command_contract_test.go`
+
+Run: `git commit -m "fix(gateway): enforce session skill callability"`
 
 ### Task 5: Current documentation and final verification
 
