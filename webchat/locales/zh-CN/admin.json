@@ -211,9 +211,9 @@
         "label": "Agents",
         "description": "Agent 行为规则"
       },
-      "skills": {
-        "label": "Skills",
-        "description": "能力定义"
+      "tools": {
+        "label": "Tools",
+        "description": "环境特有的工具使用指南"
       },
       "user": {
         "label": "User",
@@ -226,7 +226,7 @@
     },
     "source_labels": {
       "agents": "规则",
-      "skills": "技能",
+      "tools": "工具",
       "user": "用户",
       "memory": "记忆"
     },

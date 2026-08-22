@@ -161,7 +161,7 @@ func displayAgentConfigPanel(created []string) {
 	descriptions := map[string]string{
 		"SOUL.md":   "Agent 人格定义 — 身份、沟通风格和核心价值观",
 		"AGENTS.md": "工作区规则 — 自主行为边界、错误处理、输出风格",
-		"SKILLS.md": "工具使用指南 — 平台能力和最佳实践",
+		"TOOLS.md":  "工具使用指南 — 环境能力、边界和最佳实践",
 		"USER.md":   "用户偏好 — 你的技术背景、工作习惯和沟通偏好",
 		"MEMORY.md": "上下文记忆 — 跨会话持久化知识（自动管理）",
 	}

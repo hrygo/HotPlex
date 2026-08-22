@@ -444,5 +444,17 @@ func boolPtr(v bool) *bool { return &v }
 func TestStepAgentConfig(t *testing.T) {
 	result, files := stepAgentConfig()
 	require.Equal(t, "agent_config", result.Name)
-	_ = files // may be empty
+	require.NotContains(t, files, "SKILLS.md")
+}
+
+func TestDefaultTemplatesUsesCanonicalToolsFile(t *testing.T) {
+	t.Parallel()
+
+	templates := DefaultTemplates()
+	names := make([]string, 0, len(templates))
+	for _, template := range templates {
+		names = append(names, template.Name)
+	}
+	require.Contains(t, names, "TOOLS.md")
+	require.NotContains(t, names, "SKILLS.md")
 }

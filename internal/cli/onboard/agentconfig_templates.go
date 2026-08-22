@@ -16,7 +16,7 @@ func DefaultTemplates() []struct {
 	Name    string
 	Content string
 } {
-	names := []string{"SOUL.md", "AGENTS.md", "SKILLS.md", "USER.md", "MEMORY.md"}
+	names := []string{"SOUL.md", "AGENTS.md", "TOOLS.md", "USER.md", "MEMORY.md"}
 	files := make([]struct {
 		Name    string
 		Content string

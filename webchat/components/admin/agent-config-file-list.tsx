@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { hasAgentConfigOverride } from '@/lib/agent-config-overrides';
 
 export interface ConfigFileDef {
   key: string;
@@ -13,7 +14,7 @@ export interface ConfigFileDef {
 export const CONFIG_FILES: ConfigFileDef[] = [
   { key: 'soul', file: 'SOUL.md', label: 'Soul', description: 'Persona & identity' },
   { key: 'agents', file: 'AGENTS.md', label: 'Agents', description: 'Behavior rules' },
-  { key: 'skills', file: 'SKILLS.md', label: 'Skills', description: 'Capabilities' },
+  { key: 'tools', file: 'TOOLS.md', label: 'Tools', description: 'Tool usage guidance' },
   { key: 'user', file: 'USER.md', label: 'User', description: 'User preferences' },
   { key: 'memory', file: 'MEMORY.md', label: 'Memory', description: 'Persistent context' },
 ];
@@ -33,7 +34,7 @@ export function AgentConfigFileList({
     switch (key) {
       case 'soul': return t('admin:bots.config_files.soul.label', { defaultValue: 'Soul' });
       case 'agents': return t('admin:bots.config_files.agents.label', { defaultValue: 'Agents' });
-      case 'skills': return t('admin:bots.config_files.skills.label', { defaultValue: 'Skills' });
+      case 'tools': return t('admin:bots.config_files.tools.label', { defaultValue: 'Tools' });
       case 'user': return t('admin:bots.config_files.user.label', { defaultValue: 'User' });
       case 'memory': return t('admin:bots.config_files.memory.label', { defaultValue: 'Memory' });
       default: return key;
@@ -44,7 +45,7 @@ export function AgentConfigFileList({
     switch (key) {
       case 'soul': return t('admin:bots.config_files.soul.description', { defaultValue: 'Persona & identity' });
       case 'agents': return t('admin:bots.config_files.agents.description', { defaultValue: 'Behavior rules' });
-      case 'skills': return t('admin:bots.config_files.skills.description', { defaultValue: 'Capabilities' });
+      case 'tools': return t('admin:bots.config_files.tools.description', { defaultValue: 'Tool usage guidance' });
       case 'user': return t('admin:bots.config_files.user.description', { defaultValue: 'User preferences' });
       case 'memory': return t('admin:bots.config_files.memory.description', { defaultValue: 'Persistent context' });
       default: return '';
@@ -55,7 +56,7 @@ export function AgentConfigFileList({
     <div className="w-full flex flex-wrap gap-1.5 border-b border-[var(--border-subtle)] pb-3">
       {CONFIG_FILES.map((def) => {
         const isActive = activeKey === def.key;
-        const hasOverride = !!(overrides[def.file] && overrides[def.file].trim());
+        const hasOverride = hasAgentConfigOverride(overrides, def.file);
         const fileLabel = getFileLabel(def.key);
         const fileDesc = getFileDescription(def.key);
         return (
