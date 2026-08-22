@@ -79,40 +79,49 @@ func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) e
 	return nil
 }
 
-// ResolvedSource reports which level a config file resolves from by checking
-// os.Stat at each level in priority order. Returns "bot", "platform", "global",
-// or "" if the file is not found at any level.
-func ResolvedSource(dir, platform, botName, fileName string) string {
+// ResolvedLocation reports the effective scope and physical basename for a
+// logical config slot. The basename matters during the TOOLS.md migration:
+// callers can distinguish a canonical file from the deprecated SKILLS.md
+// alias without treating AgentConfig guidance as a real Agent Skill.
+func ResolvedLocation(dir, platform, botName, fileName string) (source, resolvedFile string) {
 	names := readAliases(fileName)
-	statAny := func(parent string) bool {
+	statAny := func(parent string) string {
 		for _, name := range names {
 			if _, err := os.Stat(filepath.Join(parent, name)); err == nil {
-				return true
+				return name
 			}
 		}
-		return false
+		return ""
 	}
 	// 1. Bot-level
 	if botName != "" && platform != "" {
-		if statAny(filepath.Join(dir, platform, botName)) {
-			return "bot"
+		if name := statAny(filepath.Join(dir, platform, botName)); name != "" {
+			return "bot", name
 		}
 	}
 	// 2. Platform-level
 	if platform != "" {
-		if statAny(filepath.Join(dir, platform)) {
-			return "platform"
+		if name := statAny(filepath.Join(dir, platform)); name != "" {
+			return "platform", name
 		}
 		// 2b. Legacy backward compat: dir/platform/default/fileName
 		if botName == "" {
-			if statAny(filepath.Join(dir, platform, LegacyDefaultBotName)) {
-				return "legacy"
+			if name := statAny(filepath.Join(dir, platform, LegacyDefaultBotName)); name != "" {
+				return "legacy", name
 			}
 		}
 	}
 	// 3. Global-level
-	if statAny(dir) {
-		return "global"
+	if name := statAny(dir); name != "" {
+		return "global", name
 	}
-	return ""
+	return "", ""
+}
+
+// ResolvedSource reports which level a config file resolves from by checking
+// os.Stat at each level in priority order. Returns "bot", "platform", "global",
+// "legacy", or "" if the file is not found at any level.
+func ResolvedSource(dir, platform, botName, fileName string) string {
+	source, _ := ResolvedLocation(dir, platform, botName, fileName)
+	return source
 }

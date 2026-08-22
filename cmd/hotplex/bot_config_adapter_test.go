@@ -48,6 +48,60 @@ func TestBotConfigAdapter_PlatformAgentConfigFile_WriteRead(t *testing.T) {
 	require.Contains(t, string(data), "WebChat Soul")
 }
 
+func TestBotConfigAdapter_PlatformToolsConfig_WriteRead(t *testing.T) {
+	t.Parallel()
+	a, dir := newTestBotConfigAdapter(t)
+
+	content := "# Tool guidance\nUse the runtime tool catalog as authority.\n"
+	require.NoError(t, a.WritePlatformAgentConfigFile(
+		context.Background(), "webchat", admin.AgentConfigTools, content))
+
+	got, err := a.GetPlatformAgentConfigFile(context.Background(), "webchat", admin.AgentConfigTools)
+	require.NoError(t, err)
+	require.Equal(t, content, got.Content)
+	require.Equal(t, "platform", got.Source)
+	require.Equal(t, "TOOLS.md", got.File)
+
+	data, err := os.ReadFile(filepath.Join(dir, "webchat", "TOOLS.md"))
+	require.NoError(t, err)
+	require.Equal(t, content, string(data))
+	_, err = os.Stat(filepath.Join(dir, "webchat", "SKILLS.md"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestBotConfigAdapter_PlatformToolsConfig_LegacyReadMetadata(t *testing.T) {
+	t.Parallel()
+	a, dir := newTestBotConfigAdapter(t)
+
+	legacyContent := "legacy tool guidance"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "webchat"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "webchat", "SKILLS.md"), []byte(legacyContent), 0o644))
+
+	got, err := a.GetPlatformAgentConfigFile(context.Background(), "webchat", admin.AgentConfigTools)
+	require.NoError(t, err)
+	require.Equal(t, legacyContent, got.Content)
+	require.Equal(t, "TOOLS.md", got.File)
+
+	summary := getAgentConfigSummary("webchat", "", dir)
+	require.NotNil(t, summary)
+	require.Equal(t, &admin.AgentConfigMeta{Source: "platform", Size: len(legacyContent)}, summary.Tools)
+	require.Equal(t, summary.Tools, summary.LegacySkills)
+}
+
+func TestBotConfigAdapter_PlatformToolsConfig_CanonicalSummaryOmitsLegacyAlias(t *testing.T) {
+	t.Parallel()
+	a, dir := newTestBotConfigAdapter(t)
+
+	content := "canonical tool guidance"
+	require.NoError(t, a.WritePlatformAgentConfigFile(
+		context.Background(), "webchat", admin.AgentConfigTools, content))
+
+	summary := getAgentConfigSummary("webchat", "", dir)
+	require.NotNil(t, summary)
+	require.Equal(t, &admin.AgentConfigMeta{Source: "platform", Size: len(content)}, summary.Tools)
+	require.Nil(t, summary.LegacySkills)
+}
+
 // The written platform-level file must serve as the webchat channel team
 // default via LoadForWorkspace, and be overridden per-workspace following the
 // existing precedence (issue #796 acceptance ②).
@@ -70,10 +124,10 @@ func TestBotConfigAdapter_PlatformAgentConfigFile_TeamDefaultEffective(t *testin
 	require.NoError(t, err)
 	require.Equal(t, "# Override\nWorkspace-specific rules.", cfg2.Agents)
 
-	// Empty override value inherits the team default.
+	// Empty override value explicitly clears the team default.
 	cfg3, err := agentconfig.LoadForWorkspace(dir, "webchat", map[string]string{"AGENTS.md": ""})
 	require.NoError(t, err)
-	require.Equal(t, content, cfg3.Agents)
+	require.Empty(t, cfg3.Agents)
 }
 
 // Unknown platforms are rejected before any path resolution (defense-in-depth

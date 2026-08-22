@@ -13,21 +13,29 @@ var ErrBotRunning = errors.New("bot is currently running")
 type AgentConfigFileName string
 
 const (
-	AgentConfigSoul   AgentConfigFileName = "SOUL.md"
-	AgentConfigAgents AgentConfigFileName = "AGENTS.md"
-	AgentConfigSkills AgentConfigFileName = "SKILLS.md"
-	AgentConfigUser   AgentConfigFileName = "USER.md"
-	AgentConfigMemory AgentConfigFileName = "MEMORY.md"
+	AgentConfigSoul         AgentConfigFileName = "SOUL.md"
+	AgentConfigAgents       AgentConfigFileName = "AGENTS.md"
+	AgentConfigTools        AgentConfigFileName = "TOOLS.md"
+	AgentConfigLegacySkills AgentConfigFileName = "SKILLS.md"
+	AgentConfigUser         AgentConfigFileName = "USER.md"
+	AgentConfigMemory       AgentConfigFileName = "MEMORY.md"
 )
 
-// ValidConfigFiles is the whitelist of agent config file names accepted by
-// read/write endpoints. Entries outside this set are rejected.
+// ValidConfigFiles is the canonical whitelist accepted by AgentConfig write
+// endpoints. AgentConfigLegacySkills is intentionally read-only during the
+// compatibility window; it is not a real Agent Skill definition.
 var ValidConfigFiles = map[AgentConfigFileName]bool{
 	AgentConfigSoul:   true,
 	AgentConfigAgents: true,
-	AgentConfigSkills: true,
+	AgentConfigTools:  true,
 	AgentConfigUser:   true,
 	AgentConfigMemory: true,
+}
+
+// IsReadableConfigFile reports whether an AgentConfig file endpoint may read
+// the name. SKILLS.md remains a deprecated alias for the logical Tools slot.
+func IsReadableConfigFile(file AgentConfigFileName) bool {
+	return ValidConfigFiles[file] || file == AgentConfigLegacySkills
 }
 
 // ---------------------------------------------------------------------------
@@ -81,11 +89,12 @@ type TTSAttrs struct {
 // AgentConfigSummary provides per-file metadata for each of the five agent
 // config files. nil entries indicate the file was not found.
 type AgentConfigSummary struct {
-	Soul   *AgentConfigMeta `json:"soul,omitempty"`
-	Agents *AgentConfigMeta `json:"agents,omitempty"`
-	Skills *AgentConfigMeta `json:"skills,omitempty"`
-	User   *AgentConfigMeta `json:"user,omitempty"`
-	Memory *AgentConfigMeta `json:"memory,omitempty"`
+	Soul         *AgentConfigMeta `json:"soul,omitempty"`
+	Agents       *AgentConfigMeta `json:"agents,omitempty"`
+	Tools        *AgentConfigMeta `json:"tools,omitempty"`
+	LegacySkills *AgentConfigMeta `json:"skills,omitempty"` // Deprecated: legacy AgentConfig basename metadata.
+	User         *AgentConfigMeta `json:"user,omitempty"`
+	Memory       *AgentConfigMeta `json:"memory,omitempty"`
 }
 
 // AgentConfigMeta describes a single agent config file's provenance and size.
@@ -116,8 +125,8 @@ type BotConfigProvider interface {
 	// ListBotConfigs returns all registered bot configurations.
 	ListBotConfigs(ctx context.Context) ([]BotConfigEntry, error)
 
-	// GetAgentConfigFile reads a single agent config file for a bot,
-	// identified by the whitelisted file name.
+	// GetAgentConfigFile reads a single agent config file for a bot. Canonical
+	// names and the deprecated SKILLS.md read alias are accepted.
 	GetAgentConfigFile(ctx context.Context, botName string, file AgentConfigFileName) (*AgentConfigFile, error)
 
 	// GetSystemPromptPreview returns the assembled B+C channel system prompt
@@ -134,7 +143,8 @@ type BotConfigProvider interface {
 	DeleteBot(ctx context.Context, name string) error
 
 	// WriteAgentConfigFile writes content to a single agent config file
-	// for the named bot. The file name must appear in ValidConfigFiles.
+	// for the named bot. The file name must appear in ValidConfigFiles;
+	// deprecated aliases are never writable.
 	WriteAgentConfigFile(ctx context.Context, botName string, file AgentConfigFileName, content string) error
 
 	// GetPlatformAgentConfigFile reads a single platform-level (channel team
@@ -147,7 +157,8 @@ type BotConfigProvider interface {
 
 	// WritePlatformAgentConfigFile writes content to a single platform-level
 	// agent config file. The platform must be recognized and the file name
-	// must appear in ValidConfigFiles. Writes serve as channel team defaults,
-	// overridden per-workspace by LoadForWorkspace's existing precedence.
+	// must appear in ValidConfigFiles; deprecated aliases are never writable.
+	// Writes serve as channel team defaults, overridden per-workspace by
+	// LoadForWorkspace's existing precedence.
 	WritePlatformAgentConfigFile(ctx context.Context, platform string, file AgentConfigFileName, content string) error
 }

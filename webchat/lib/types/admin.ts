@@ -39,6 +39,8 @@ export interface BotConfigAttrs {
 export interface AgentConfigSummary {
   soul?: AgentConfigMeta;
   agents?: AgentConfigMeta;
+  tools?: AgentConfigMeta;
+  /** @deprecated Legacy AgentConfig SKILLS.md provenance; not a real Agent Skill. */
   skills?: AgentConfigMeta;
   user?: AgentConfigMeta;
   memory?: AgentConfigMeta;

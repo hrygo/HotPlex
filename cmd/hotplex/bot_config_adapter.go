@@ -105,14 +105,15 @@ func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName strin
 		return nil, fmt.Errorf("load agent config: %w", err)
 	}
 
-	content := getConfigField(configs, file)
-	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, agentConfigBotName(botName), string(file))
+	canonicalFile := canonicalAgentConfigFile(file)
+	content := getConfigField(configs, canonicalFile)
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, agentConfigBotName(botName), string(canonicalFile))
 
 	return &admin.AgentConfigFile{
 		Content: content,
 		Source:  source,
 		Size:    len(content),
-		File:    string(file),
+		File:    string(canonicalFile),
 	}, nil
 }
 
@@ -302,20 +303,21 @@ func (a *botConfigAdapter) GetPlatformAgentConfigFile(ctx context.Context, platf
 		return nil, fmt.Errorf("load platform agent config: %w", err)
 	}
 
-	content := getConfigField(configs, file)
-	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, "", string(file))
+	canonicalFile := canonicalAgentConfigFile(file)
+	content := getConfigField(configs, canonicalFile)
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, "", string(canonicalFile))
 
 	return &admin.AgentConfigFile{
 		Content: content,
 		Source:  source,
 		Size:    len(content),
-		File:    string(file),
+		File:    string(canonicalFile),
 	}, nil
 }
 
 // WritePlatformAgentConfigFile writes content to a single platform-level
-// agent config file (channel team default). An empty platform-level file lets
-// resolution fall through to the global layer, matching the read semantics.
+// agent config file (channel team default). A present empty file explicitly
+// clears the slot and stops fallback, matching the three-state read semantics.
 func (a *botConfigAdapter) WritePlatformAgentConfigFile(ctx context.Context, platform string, file admin.AgentConfigFileName, content string) error {
 	if !agentconfig.IsValidPlatform(platform) {
 		return fmt.Errorf("unknown platform %q", platform)
@@ -488,14 +490,14 @@ func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclu
 	}{
 		{admin.AgentConfigSoul, configs.Soul},
 		{admin.AgentConfigAgents, configs.Agents},
-		{admin.AgentConfigSkills, configs.Tools},
+		{admin.AgentConfigTools, configs.Tools},
 		{admin.AgentConfigUser, configs.User},
 		{admin.AgentConfigMemory, configs.Memory},
 	} {
 		if file.value == "" {
 			continue
 		}
-		source := agentconfig.ResolvedSource(agentConfigDir, platform, botName, string(file.field))
+		source, resolvedFile := agentconfig.ResolvedLocation(agentConfigDir, platform, botName, string(file.field))
 		meta := &admin.AgentConfigMeta{
 			Source: source,
 			Size:   len(file.value),
@@ -505,8 +507,11 @@ func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclu
 			summary.Soul = meta
 		case admin.AgentConfigAgents:
 			summary.Agents = meta
-		case admin.AgentConfigSkills:
-			summary.Skills = meta
+		case admin.AgentConfigTools:
+			summary.Tools = meta
+			if resolvedFile == agentconfig.LegacyFileSkills {
+				summary.LegacySkills = meta
+			}
 		case admin.AgentConfigUser:
 			summary.User = meta
 		case admin.AgentConfigMemory:
@@ -525,7 +530,7 @@ func getConfigField(configs *agentconfig.AgentConfigs, file admin.AgentConfigFil
 		return configs.Soul
 	case admin.AgentConfigAgents:
 		return configs.Agents
-	case admin.AgentConfigSkills:
+	case admin.AgentConfigTools, admin.AgentConfigLegacySkills:
 		return configs.Tools
 	case admin.AgentConfigUser:
 		return configs.User
@@ -534,6 +539,13 @@ func getConfigField(configs *agentconfig.AgentConfigs, file admin.AgentConfigFil
 	default:
 		return ""
 	}
+}
+
+func canonicalAgentConfigFile(file admin.AgentConfigFileName) admin.AgentConfigFileName {
+	if file == admin.AgentConfigLegacySkills {
+		return admin.AgentConfigTools
+	}
+	return file
 }
 
 // writeConfig atomically writes the config to disk: marshal YAML, write to a
