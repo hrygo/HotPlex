@@ -424,7 +424,7 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 
 	if err := b.hub.EnsureSeqHydrated(p.ID); err != nil {
 		if cleanupErr := b.sm.DeletePhysical(context.Background(), p.ID); cleanupErr != nil {
-			return fmt.Errorf("bridge: hydrate session sequence: %w (cleanup failed: %v)", err, cleanupErr)
+			return fmt.Errorf("bridge: hydrate session sequence: %w (cleanup failed: %w)", err, cleanupErr)
 		}
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "hydration_failed")))
 		return fmt.Errorf("bridge: hydrate session sequence: %w", err)

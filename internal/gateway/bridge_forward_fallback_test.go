@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/pkg/events"
 )

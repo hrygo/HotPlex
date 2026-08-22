@@ -114,10 +114,10 @@ func BuildInitAck(sessionID string, state events.SessionState, wt worker.WorkerT
 		0,
 		InitAck,
 		InitAckData{
-			SessionID:     sessionID,
-			State:         state,
-			ServerCaps:    DefaultServerCaps(wt),
-			Capabilities:  append([]string(nil), gatewayCapabilities...),
+			SessionID:    sessionID,
+			State:        state,
+			ServerCaps:   DefaultServerCaps(wt),
+			Capabilities: append([]string(nil), gatewayCapabilities...),
 		},
 	)
 }

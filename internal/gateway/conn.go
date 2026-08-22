@@ -773,7 +773,7 @@ func (c *Conn) startNewSessionAfterHydration(sessionID string, initData InitData
 	}
 	if err := c.hub.EnsureSeqHydrated(sessionID); err != nil {
 		if cleanupErr := sm.DeletePhysical(context.Background(), sessionID); cleanupErr != nil {
-			return fmt.Errorf("hydrate session sequence: %w (cleanup failed: %v)", err, cleanupErr)
+			return fmt.Errorf("hydrate session sequence: %w (cleanup failed: %w)", err, cleanupErr)
 		}
 		return fmt.Errorf("hydrate session sequence: %w", err)
 	}
