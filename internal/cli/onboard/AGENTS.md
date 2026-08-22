@@ -1,7 +1,7 @@
 # onboard — Interactive Setup Wizard for `hotplex onboard`
 
 ## OVERVIEW
-Multi-step interactive wizard producing `config.yaml` + `.env` + agent-config skeletons. Drives platform credential collection, STT/TTS preflight, optional service install, and binary install. Supports `--non-interactive` for CI. The `templates/` subdir (SOUL/AGENTS/SKILLS/USER/MEMORY .md files) has its **own AGENTS.md** and is out of scope here.
+Multi-step interactive wizard producing `config.yaml` + `.env` + agent-config skeletons. Drives platform credential collection, STT/TTS preflight, optional service install, and binary install. Supports `--non-interactive` for CI. The `templates/` subdir (SOUL/AGENTS/TOOLS/USER/MEMORY .md files) has its **own AGENTS.md** and is out of scope here.
 
 ## STRUCTURE
 ```

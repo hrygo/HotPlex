@@ -32,7 +32,7 @@ Cron 任务的创建不通过 CLI 手动输入 cron 表达式，而是通过 Age
   -> timerLoop.arm() 重新计算下次触发时间
 ```
 
-Skill Manual（`cron-skill-manual.md`）通过 `go:embed` 编译进二进制文件，在 Scheduler 启动时释放到 `~/.hotplex/skills/cron.md`。Agent 在 B 通道的 `<skills>` 中读取这个手册，获得 cron 任务的创建语法和参数说明。
+Skill Manual（`cron-skill-manual.md`）通过 `go:embed` 编译进二进制文件，在 Scheduler 启动时释放到 `~/.hotplex/skills/cron.md`，由独立 Skills scanner 作为外部 Skill 发现并按需读取。它不进入 AgentConfig B 通道，也不来自 `TOOLS.md`。
 
 ### 3 种调度类型
 

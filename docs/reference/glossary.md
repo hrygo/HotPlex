@@ -22,15 +22,23 @@ AEP 事件分为三个方向：C→S（客户端到服务端，如 `init`、`inp
 
 HotPlex 提供的 HTTP 管理接口，默认监听 `localhost:9999`。支持 session 管理、配置查询、诊断端点等运维操作。通过 Token 认证和细粒度 Scope 授权（如 `session:read`、`config:write`）控制访问权限。
 
+### Agent Skill
+
+按需加载的可执行知识包，以 `<name>/SKILL.md` 为入口，由独立 Skills scanner、Admin API 和 WebChat Skills 页面发现与管理。Agent Skill 不属于五文件 AgentConfig，不能由 `TOOLS.md` 推断。
+
+### AgentConfig Tools
+
+五文件 AgentConfig 中的 `TOOLS.md` 逻辑槽位，用于常驻注入环境特有的工具使用指南、偏好和边界。它不声明工具实际存在，也不是 Agent Skill catalog；实际能力以当前 Session 的结构化工具目录为准。
+
 ---
 
 ## B
 
 ### B 通道 (B Channel)
 
-Agent 配置的指令通道（Directives Channel），以 XML `<directives>` 标签注入 Worker 的系统提示词。内容包括 `<hotplex>`（META-COGNITION.md，始终存在且排首位）、`<persona>`（SOUL.md）、`<rules>`（AGENTS.md）和 `<skills>`（SKILLS.md）。B 通道为强制性指令，与 C 通道冲突时无条件覆盖。
+Agent 配置的指令通道（Directives Channel），以 XML `<directives>` 标签注入 Worker 的系统提示词。内容包括 `<hotplex>`（META-COGNITION.md，始终存在且排首位）、`<persona>`（SOUL.md）、`<rules>`（AGENTS.md）和 `<tool-guidance>`（TOOLS.md）。B 通道为强制性指令，与 C 通道冲突时无条件覆盖。
 
-配置文件存放于 `~/.hotplex/agent-configs/`，通过三级 fallback 加载：全局 → 平台（`slack/`）→ Bot（`slack/U12345/`），每文件独立解析，命中即终止。
+配置文件存放于 `~/.hotplex/agent-configs/`，按 Bot → 平台 → 全局优先级逐文件解析。缺失表示继承，present-empty 表示显式清空并终止。旧 `SKILLS.md` 仅是 Tools 槽位的临时只读兼容名。
 
 ### Brain
 

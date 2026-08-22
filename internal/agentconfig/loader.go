@@ -352,6 +352,13 @@ func stripFrontmatter(s string) string {
 	return s
 }
 
+// EffectiveContentEmpty reports whether a loaded Markdown value has no
+// meaningful body after the same frontmatter normalization used by Load.
+// Diagnostics use this helper so migration warnings match loader semantics.
+func EffectiveContentEmpty(s string) bool {
+	return strings.TrimSpace(stripFrontmatter(s)) == ""
+}
+
 // EnsureDir creates the config directory and its parents if they don't exist.
 func EnsureDir(dir string) error {
 	if dir == "" {

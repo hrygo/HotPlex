@@ -18,7 +18,7 @@ HotPlex 通过**双通道配置系统**控制 Agent 的人格、行为规则和�
 |------|------|------|--------|
 | **B 通道 (Directives)** | `SOUL.md` | Agent 人格、语气、价值观 | **强制执行** |
 | | `AGENTS.md` | 工作规则、约束、禁止事项 | **强制执行** |
-| | `SKILLS.md` | 工具使用指南 | **强制执行** |
+| | `TOOLS.md` | 环境工具使用指南（不声明实际可用性） | **强制执行** |
 | **C 通道 (Context)** | `USER.md` | 用户档案、偏好 | 仅供参考 |
 | | `MEMORY.md` | 跨会话记忆 | 仅供参考 |
 
@@ -86,7 +86,26 @@ mkdir -p ~/.hotplex/agent-configs
 - 不确定时说"需要调查"，不猜测
 ```
 
-## 3. 添加用户档案（C 通道）
+## 3. 添加工具指南
+
+如果需要说明当前环境如何使用工具，可创建 `TOOLS.md`：
+
+```markdown
+<!-- ~/.hotplex/agent-configs/TOOLS.md -->
+
+# 工具使用指南
+
+- 执行项目检查优先使用 `make check`
+- 调用外部服务前先确认当前 Session 是否暴露相应工具
+- 不把文档中出现的命令当作工具已安装的证据
+```
+
+`TOOLS.md` 只是常驻指导，不是 Agent Skill 列表。真实 Skills 由独立的
+`.agents/skills/<name>/SKILL.md` 定义，并通过 Admin API / WebChat Skills 页面管理、
+按需加载。旧 AgentConfig `SKILLS.md` 在兼容期仍可读取，但新配置应只创建
+`TOOLS.md`；同一目录两者并存时 `TOOLS.md` 生效，`hotplex doctor` 会报告迁移提示。
+
+## 4. 添加用户档案（C 通道）
 
 C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的规则：
 
@@ -114,7 +133,7 @@ C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的�
 - 主要开发分支：main
 ```
 
-## 4. 添加跨会话记忆
+## 5. 添加跨会话记忆
 
 `MEMORY.md` 帮助 Agent 在不同会话间保持上下文连贯：
 
@@ -142,7 +161,7 @@ C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的�
 
 > **注意**：如果 MEMORY.md 的内容与 AGENTS.md 的规则冲突，Agent 会以 AGENTS.md 为准（B 通道优先）。
 
-## 5. 按平台或 Bot 覆盖配置
+## 6. 按平台或 Bot 覆盖配置
 
 HotPlex 支持**三级 fallback**，每个文件独立解析，命中即终止：
 
@@ -152,7 +171,7 @@ HotPlex 支持**三级 fallback**，每个文件独立解析，命中即终止�
 Bot 级：~/.hotplex/agent-configs/slack/my-bot/SOUL.md
 ```
 
-Bot 级目录名使用 YAML 配置中 `bots[].name` 的值（如 `"my-bot"`），而非平台运行时 ID。单 Bot 模式无 Bot 级目录，直接使用平台级。解析顺序：Bot 级 → 平台级 → 全局级，第一个非空文件生效。
+Bot 级目录名使用 YAML 配置中 `bots[].name` 的值（如 `"my-bot"`），而非平台运行时 ID。单 Bot 模式无 Bot 级目录，直接使用平台级。解析顺序：Bot 级 → 平台级 → 全局级，第一个**存在**的文件生效；缺失表示继续继承，存在但正文为空表示显式清空并停止 fallback。
 
 ### 示例：为特定 Bot 定制人格
 
@@ -195,7 +214,7 @@ mkdir -p ~/.hotplex/agent-configs/slack/dev-bot
 > # 然后编辑 Bot 级文件
 > ```
 
-## 6. 配置限制与注意事项
+## 7. 配置限制与注意事项
 
 | 项目 | 限制 |
 |------|------|
@@ -210,6 +229,7 @@ mkdir -p ~/.hotplex/agent-configs/slack/dev-bot
 2. **内容加载**：发送 `/reset` 后提问，观察行为是否符合预期
 3. **通道优先级**：故意让 MEMORY.md 与 AGENTS.md 内容冲突，验证 Agent 以 AGENTS.md 为准
 4. **Bot 级覆盖**：在 Bot 级目录放置 SOUL.md，验证覆盖生效
+5. **迁移检查**：运行 `hotplex doctor`，确认没有旧 `SKILLS.md`、同层冲突或意外的 present-empty 文件
 
 ---
 

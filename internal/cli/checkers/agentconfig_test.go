@@ -121,6 +121,21 @@ func TestAgentConfigDirChecker(t *testing.T) {
 		require.Contains(t, d.Message, "explicit clear")
 	})
 
+	t.Run("frontmatter-only tools file warns about explicit clear", func(t *testing.T) {
+		t.Parallel()
+		cfgDir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(cfgDir, "TOOLS.md"),
+			[]byte("---\nversion: 1\n---\n"),
+			0o644,
+		))
+
+		d := (agentConfigDirChecker{dir: cfgDir}).Check(context.Background())
+		require.Equal(t, cli.StatusWarn, d.Status)
+		require.Contains(t, d.Message, "TOOLS.md")
+		require.Contains(t, d.Message, "explicit clear")
+	})
+
 	t.Run("valid with bot subdirectory", func(t *testing.T) {
 		t.Parallel()
 		cfgDir := t.TempDir()

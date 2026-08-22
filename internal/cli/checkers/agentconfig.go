@@ -235,7 +235,7 @@ func boundedFileEmpty(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(string(data)) == "", nil
+	return agentconfig.EffectiveContentEmpty(string(data)), nil
 }
 
 // agentConfigGlobalFilesChecker detects config files at the global level

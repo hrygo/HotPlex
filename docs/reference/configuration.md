@@ -409,11 +409,15 @@ Agent B/C 通道配置加载器。
 | `config_dir` | string | `~/.hotplex/agent-configs` | `HOTPLEX_AGENT_CONFIG_DIR` | 配置文件根目录。支持 `~` 和 `${VAR}` 展开 |
 | `inject_exclude` | []string | `[]` | — | 全局默认排除列表。列出的配置文件（如 `SOUL.md`、`MEMORY.md`）不会被加载和注入。平台级和 Bot 级可覆盖。`META-COGNITION.md` 始终注入（go:embed），不可排除 |
 
-**B 通道**（`<directives>`）：`META-COGNITION.md`（go:embed，始终首位）+ `SOUL.md` + `AGENTS.md` + `SKILLS.md`
+**B 通道**（`<directives>`）：`META-COGNITION.md`（go:embed，始终首位）+ `SOUL.md` + `AGENTS.md` + `TOOLS.md`。`TOOLS.md` 注入 `<tool-guidance>`，只描述环境工具的使用方式、偏好和边界，不声明工具实际存在。
 
 **C 通道**（`<context>`）：`USER.md` + `MEMORY.md`
 
-**三级 fallback**：全局 → 平台（slack/） → Bot（slack/{botName}/），每文件独立解析，命中即终止。Bot 级目录名使用 YAML 配置中 `bots[].name` 的值。
+**三级 fallback**：解析优先级为 Bot（`slack/{botName}/`）→ 平台（`slack/`）→ 全局，每文件独立、命中即终止。Bot 级目录名使用 YAML 配置中 `bots[].name` 的值。键/文件缺失表示继续继承；存在但正文为空表示显式清空并停止 fallback。
+
+**Tools 兼容期**：新文件和写接口只使用 `TOOLS.md`。旧 `SKILLS.md` 暂作为同一逻辑槽位的只读别名：每个作用域先检查 `TOOLS.md`，再检查旧名；同层两者并存时 `TOOLS.md` 胜出并由 `hotplex doctor` 告警。`inject_exclude` 中两种名字等价。
+
+**与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，通过 `/admin/api/skills`、WebChat Skills 页面和 Worker Skills 能力管理，不由 `TOOLS.md` 派生，也不会把 Skill 正文常驻注入 AgentConfig prompt。
 
 ---
 

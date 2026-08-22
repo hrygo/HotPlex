@@ -295,7 +295,7 @@ worker:
 
 agent_config:
   enabled: true
-  # Root directory for personality (SOUL.md, AGENTS.md, SKILLS.md)
+  # Root directory for AgentConfig (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md)
   # and user context (USER.md, MEMORY.md).
   config_dir: ~/.hotplex/agent-configs
 

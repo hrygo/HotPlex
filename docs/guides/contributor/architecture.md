@@ -335,10 +335,11 @@ type Envelope struct {
 
 Agent 人格/上下文通过 B/C 双通道注入 Worker：
 
-- **B 通道** (`<directives>`)：`META-COGNITION.md` + `SOUL.md` + `AGENTS.md` + `SKILLS.md`
+- **B 通道** (`<directives>`)：`META-COGNITION.md` + `SOUL.md` + `AGENTS.md` + `TOOLS.md`（`<tool-guidance>`）
 - **C 通道** (`<context>`)：`USER.md` + `MEMORY.md`
 
 B 通道无条件覆盖 C 通道，防止上下文冲突。
+`TOOLS.md` 是环境工具使用指南，不是真实 Agent Skills catalog；真实 Skills 由独立的 `<name>/SKILL.md` 定义并按需加载。
 
 ### DI 注入模式
 

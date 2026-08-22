@@ -12,6 +12,7 @@ progress: 100
 > Status: Final
 > Created: 2026-05-03
 > Reviewed: 2026-05-03
+> Amended: 2026-08-22 — canonical Tools slot and present-empty semantics
 
 ## 1. Overview
 
@@ -21,7 +22,7 @@ Replace the existing platform-suffix agent config mechanism (`SOUL.slack.md`) wi
 
 ### 2.1 Per-File Granularity Fallback
 
-Each config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md) resolves independently through:
+Each config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md) resolves independently through:
 
 ```
 1. dir/{platform}/{botID}/{file}    ← bot-level (highest priority)
@@ -29,7 +30,7 @@ Each config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md) resolves in
 3. dir/{file}                       ← global-level (fallback)
 ```
 
-If a file exists at a higher priority level, it is used; lower levels are **not** appended (no merge/overlay). An empty file (content is empty after frontmatter stripping) is treated as "not found" and falls through to the next level — this is consistent with current behavior.
+If a file exists at a higher priority level, it is used; lower levels are **not** appended (no merge/overlay). A present-empty file explicitly clears the logical slot and stops fallback; only a missing file inherits the next scope. For the Tools slot, `SKILLS.md` is a deprecated read alias during one minor compatibility window; same-scope `TOOLS.md` wins.
 
 ### 2.2 Four Configuration Dimensions
 
@@ -123,6 +124,10 @@ func Load(dir, platform, botID string) (*AgentConfigs, error)
 **Internal changes**: `loadFile` and `loadFileWithErrorCount` are replaced by `resolveFile`. The `Load` function's total-size tracking logic remains unchanged.
 
 ### 3.2 agentconfig.resolveFile (NEW)
+
+> **Implementation amendment (2026-08-22):** the original pseudocode below used
+> `content != ""` as the hit signal. The implemented resolver now returns a
+> `fileState{content, found, legacy}` so present-empty and missing remain distinct.
 
 ```go
 // resolveFile implements the 3-level fallback for a single config file.
@@ -331,7 +336,7 @@ Three `createAndLaunchWorker` call sites must pass botID:
 - Update `agentconfig/loader_test.go`:
   - Replace suffix-append tests with 3-level fallback tests
   - Add path traversal test for botID
-  - Add empty-file-equals-missing test
+  - Add present-empty-explicit-clear test
   - Add flat-directory backward-compatibility test
 
 ### Phase 2: BotID Propagation — Adapter Layer
@@ -385,7 +390,7 @@ Three `createAndLaunchWorker` call sites must pass botID:
 | PBAC-005 | Flat directory (no subdirs) produces identical results to current behavior | Unit test |
 | PBAC-006 | `SOUL.slack.md` suffix files are no longer loaded | Unit test |
 | PBAC-007 | `Load(dir, "slack", "../etc")` returns error (path traversal blocked) | Unit test |
-| PBAC-008 | Empty file (frontmatter only) falls through to next level | Unit test |
+| PBAC-008 | Empty file (frontmatter only) explicitly clears the slot and stops fallback | Unit test |
 | PBAC-009 | Slack adapter exposes botID via `GetBotID()` | Unit test |
 | PBAC-010 | Feishu adapter exposes botID via `GetBotID()` | Unit test |
 | PBAC-011 | `makeEnvelope` includes botID in PlatformContext | Unit test |

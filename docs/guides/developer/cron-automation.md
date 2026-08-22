@@ -21,7 +21,7 @@ HotPlex 内置 AI-native Cron 调度器，支持从自然语言到自动化执�
 | Store | `store.go` | SQLite 持久化 |
 | Executor | `executor.go` | Worker 执行适配、Session 构造、环境注入 |
 | Delivery | `delivery.go` | 结果投递到飞书/Slack |
-| Skill Manual | `skill.go` | `go:embed cron-skill-manual.md` 注入 B 通道 |
+| Skill Manual | `skill.go` | `go:embed cron-skill-manual.md`，释放后由独立 Skills scanner 发现 |
 
 ## 三种调度模式
 
@@ -230,7 +230,7 @@ timerLoop tick → collectDue → CAS 并发槽 → executeJob → Worker 执行
 
 ## 自然语言创建
 
-Cron 功能通过 `go:embed cron-skill-manual.md` 注入 Agent 的 B 通道。Agent 自身了解 cron 的完整用法，可通过自然语言识别调度意图：
+Cron 功能将 `go:embed cron-skill-manual.md` 释放到外部 Skills 目录，由独立 Skills catalog 发现并按需读取；它不常驻 AgentConfig B 通道。Agent 可通过自然语言识别调度意图：
 
 1. 用户发送"每天早上 9 点检查代码质量"
 2. Brain 层 Router 识别为 cron 意图

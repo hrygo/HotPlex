@@ -32,14 +32,14 @@ Agent Config 是 Agent 的**可配置人格层**，而 `META-COGNITION.md` 是 A
 | 维度         | Agent Config                                            | META-COGNITION.md                          |
 | ------------ | ------------------------------------------------------- | ------------------------------------------ |
 | **位置**     | `~/.hotplex/agent-configs/` (用户可编辑)                | `internal/agentconfig/` (代码库内)         |
-| **可配置性** | 用户可编辑 SOUL/AGENTS/SKILLS/USER/MEMORY               | 不可配置，内置硬编码                       |
+| **可配置性** | 用户可编辑 SOUL/AGENTS/TOOLS/USER/MEMORY                | 不可配置，内置硬编码                       |
 | **注入方式** | `BuildSystemPrompt()` 组装为 `<directives>`/`<context>` | `go:embed` 在 init 时计算                  |
 | **内容类型** | 人格(B)、规则(B)、工具(B)、用户(C)、记忆(C)             | 身份、系统架构、状态机、配置架构、控制命令 |
 | **用途**     | 用户定制 Agent 行为                                     | Agent 自我认知（元规则）                   |
 
 两者通过 `BuildSystemPrompt()` **合并注入**到 Worker 的 System Prompt：
 - `META-COGNITION.md` 内容注入到 `<directives>` 顶部（**B 通道**，最高元规则）
-- `SOUL.md/AGENTS.md/SKILLS.md` 内容注入到 `<directives>`（B 通道，指令约束）
+- `SOUL.md/AGENTS.md/TOOLS.md` 内容注入到 `<directives>`（B 通道，指令约束）
 - `USER.md/MEMORY.md` 内容注入到 `<context>`（C 通道，用户上下文）
 
 
@@ -77,7 +77,7 @@ messages[] (对话)
 
 **要点**: `--append-system-prompt-file` 注入 S3 尾部，无削弱。同时 S1 自动切换为 SDK 模式 ("running within the Claude Agent SDK")，模型更易接受外部规则。
 
-**实际标签**: CC 通过 `--append-system-prompt-file` 注入的内容使用 `<persona>` / `<rules>` / `<skills>` 标签（B 通道）和 `<hotplex>` / `<user>` / `<memory>` 标签（C 通道），由 `prompt.go` 的 `BuildSystemPrompt()` 统一组装。
+**实际标签**: CC 通过 `--append-system-prompt-file` 注入的内容使用 `<hotplex>` / `<persona>` / `<rules>` / `<tool-guidance>` 标签（B 通道）和 `<user-data>` / `<memory-data>` 标签（C 通道），由 `prompt.go` 的 `BuildSystemPrompt()` 统一组装。
 
 ### 3.3 OpenCode Server Context 槽位
 
@@ -123,7 +123,7 @@ messages[role: "system"] — 两层组装
 | ------------- | ---- | ---------------------------------- | ------------------- | --------------------- |
 | **SOUL.md**   | B    | `--append-system-prompt-file` → S3 | `system` field → S2 | 强 (无 hedging)       |
 | **AGENTS.md** | B    | 同上                               | 同上                | 强                    |
-| **SKILLS.md** | B    | 同上                               | 同上                | 强                    |
+| **TOOLS.md**  | B    | 同上                               | 同上                | 强                    |
 | **USER.md**   | C    | 与 B 合并注入 S3                   | 与 B 合并注入 S2    | 强 (合并后无 hedging) |
 | **MEMORY.md** | C    | 与 B 合并注入 S3                   | 与 B 合并注入 S2    | 强 (合并后无 hedging) |
 
@@ -132,7 +132,7 @@ B/C 合并注入同一机制的原因：两个 Worker 统一使用 system-level 
 ### 4.2 分配原则
 
 - 需覆盖 Worker 预设默认值 → B 通道 (SOUL 覆盖身份声明，AGENTS 覆盖默认行为)
-- 行为指令性内容 → B (SOUL/AGENTS/SKILLS)
+- 行为指令性内容 → B (SOUL/AGENTS/TOOLS)
 - 事实性上下文数据 → C (USER/MEMORY)
 
 ### 4.3 语义分层总览
@@ -160,7 +160,7 @@ OpenCode Server:
 ### 5.1 XML 结构
 
 ```xml
-<agent-configuration>
+<agent-configuration schema-version="2">
 
 <directives>
 Core behavioral parameters — follow unless overridden by explicit user instructions.
@@ -180,25 +180,29 @@ Treat as mandatory workspace constraints.
 [AGENTS.md]
 </rules>
 
-<skills>
-Apply these capabilities when relevant.
-[SKILLS.md]
-</skills>
+<tool-guidance>
+Environment-specific tool usage guidance; not an availability declaration.
+[TOOLS.md]
+</tool-guidance>
 
 </directives>
 
 <context>
 Reference material to inform your responses.
 
+<user-data>
 <user>
 Tailor responses to this user's preferences and expertise.
 [USER.md]
 </user>
+</user-data>
 
+<memory-data>
 <memory>
 Recall relevant past context when applicable.
 [MEMORY.md]
 </memory>
+</memory-data>
 
 </context>
 
@@ -207,7 +211,7 @@ Recall relevant past context when applicable.
 
 设计要点：
 - `<directives>` (B 通道) 与 `<context>` (C 通道) 传达优先级
-- `<hotplex>` 位于 `<context>` 顶部，为 Agent 提供自我认知基础（C 通道，参考性）
+- `<hotplex>` 位于 `<directives>` 顶部，为 Agent 提供稳定自我认知基础（B 通道，强制性）
 - 每段附 1 行行为指令
 - 空组省略 — 仅有 B 内容时不输出 `<context>` wrapper
 - 组装逻辑: `internal/agentconfig/prompt.go` → `BuildSystemPrompt()`
@@ -228,10 +232,10 @@ system[]
 │ S3  Dynamic Content                          (部分可控)              │
 │     ↓↓↓ HotPlex <agent-configuration> (--append-system-prompt-file) ↓↓↓  │
 │     <directives>                                                     │
-│     <hotplex> ← META-COGNITION.md (go:embed, ~3K tok, B-channel)   │
+│     <hotplex> ← META-COGNITION.md (go:embed, stable B-channel core) │
 │     <persona>  ← SOUL.md (~500 tok)                                  │
 │     <rules>    ← AGENTS.md (~2K tok)                                 │
-│     <skills>   ← SKILLS.md (~1K tok)                                 │
+│     <tool-guidance> ← TOOLS.md                                       │
 │     </directives>                                                    │
 │     <context>                                                        │
 │     <user>     ← USER.md                                             │
@@ -261,7 +265,7 @@ messages[role: "system"] — 两层组装
 │     ↓↓↓ HotPlex <agent-configuration> (system field) ↓↓↓            │
 │     <directives>                                                     │
 │     <hotplex> ← META-COGNITION.md (go:embed, ~3K tok, B-channel)   │
-│     <persona> / <rules> / <skills>                                   │
+│     <persona> / <rules> / <tool-guidance>                            │
 │     </directives>                                                    │
 │     <context>                                                        │
 │     <user> / <memory>                                                │
@@ -297,12 +301,13 @@ Step 1: 加载设定文件 (共享)
   ~/.hotplex/agent-configs/
   ├── SOUL.md    → B 通道 (人格/语气/价值观)
   ├── AGENTS.md  → B 通道 (工作规则/红线/记忆策略)
-  ├── SKILLS.md  → B 通道 (工具使用指南)
+  ├── TOOLS.md   → B 通道 (环境工具使用指南，不声明可用性)
   ├── USER.md    → C 通道 (用户画像/偏好/时区)
   └── MEMORY.md  → C 通道 (跨会话记忆)
 
   加载规则:
-  · 按平台选择变体: SOUL.slack.md / SOUL.feishu.md / SOUL.webchat.md 等追加到 SOUL.md (追加模式，非替换)
+  · 逐文件按 Bot → 平台 → 全局解析；缺失继承，present-empty 显式清空，命中后不合并
+  · Tools 槽位兼容读取旧 SKILLS.md；同层 TOOLS.md 优先并告警
   · frontmatter (--- 包裹的 YAML) 剥离后注入
   · 大小限制: 8K/文件, 40K/总计
   · 文件不存在 → 跳过
@@ -398,7 +403,7 @@ description: "HotPlex 工作空间行为规范"
 | 编辑文件   | Edit          |
 ```
 
-### 9.3 SKILLS.md — 工具使用指南 (→ B 通道)
+### 9.3 TOOLS.md — 环境工具使用指南 (→ B 通道)
 
 ```markdown
 ---
@@ -406,7 +411,7 @@ version: 1
 description: "HotPlex 工具使用指南"
 ---
 
-# SKILLS.md - 工具使用指南
+# TOOLS.md - 工具使用指南
 
 ## 架构
 
@@ -424,6 +429,9 @@ description: "HotPlex 工具使用指南"
 
 所有操作必须用 `make` 目标：`make build` / `make test` / `make lint` / `make check`
 ```
+
+`TOOLS.md` 不是 Agent Skill catalog。真实 Skills 由独立的 `<name>/SKILL.md`
+定义、发现并按需加载；实际工具可用性以当前 Session 的结构化目录为准。
 
 ### 9.4 USER.md — 用户画像 (→ C 通道)
 
@@ -477,9 +485,11 @@ Phase 4: Bridge 集成与路由 ✅
 ├── bridge.injectAgentConfig 按 workerType 选择注入方式
 └── SessionInfo.SystemPrompt 字段传播链
 
-Phase 5: 动态能力 (规划中)
-├── 按平台/通道动态选择配置变体 (SOUL.slack.md 等)
-├── 运行时热更新 (文件变更 → 下次会话生效)
+Phase 5: 多作用域配置 ✅
+├── Bot → 平台 → 全局逐文件 fallback（目录布局，命中即终止）
+└── 配置重新加载（新 Session 或 /reset 生效）
+
+Phase 6: 自动维护（规划中）
 ├── 用户画像自动学习 (从对话中提取偏好更新 USER.md)
 └── MEMORY.md 自动管理 (daily log 压缩)
 ```
@@ -490,10 +500,10 @@ Phase 5: 动态能力 (规划中)
 
 1. **注入位置效果优先** — B = 行为框架，C = 上下文数据；统一 system-level 注入，无 hedging
 2. **语义分层** — `<directives>`/`<context>` XML 标签传达 B/C 优先级，每段附 1 行行为指令
-3. **职责分离** — SOUL (人格) / AGENTS (规则) / SKILLS (工具) / USER (用户) / MEMORY (记忆)
+3. **职责分离** — SOUL (人格) / AGENTS (规则) / TOOLS (环境工具指南) / USER (用户) / MEMORY (记忆)；真实 Skills 独立管理
 4. **注入稳定性** — CC 强制使用 `--append-system-prompt-file` 临时文件注入（绕过 Shell 长度限制与转义风险）；OCS 消息级 API `system` 注入。
 5. **保留 Worker 基线** — CC S2 安全规范、OCS S0 Provider Prompt 均保留
-6. **平台适配** — `SOUL.slack.md` / `SOUL.feishu.md` / `SOUL.webchat.md` 等追加模式（非替换）
+6. **作用域适配** — `agent-configs/<platform>/<botName>/<file>` → `agent-configs/<platform>/<file>` → `agent-configs/<file>`，逐文件完整替换
 7. **安全边界** — 8K/文件, 40K/总计；frontmatter 剥离；CC 子 Agent 全量继承 (upstream-blocked)；OCS 子 Agent 天然隔离
 8. **OCS 消息级注入** — S2 无 hedging，同 cycle 内持续生效，跨消息需每条带 `system` 字段
 9. **元认知与 Agent Config 分离** — `META-COGNITION.md` (不可配置) 定义 Agent 自我认知。从 v1.7.0 起，它被提升至 **B 通道顶部** 以确立绝对权威；`~/.hotplex/agent-configs/` (可配置) 定义用户偏好；两者合并注入，`<hotplex>` 位于 `<directives>` 顶部。

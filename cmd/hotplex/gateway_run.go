@@ -1548,14 +1548,24 @@ func warnDeprecatedSuffixFiles(dir string, log *slog.Logger) {
 		return
 	}
 	platforms := agentconfig.KnownPlatforms()
-	bases := []string{"SOUL", "AGENTS", "SKILLS", "USER", "MEMORY"}
+	files := []struct {
+		legacyBase string
+		targetBase string
+	}{
+		{"SOUL", "SOUL"},
+		{"AGENTS", "AGENTS"},
+		{"TOOLS", "TOOLS"},
+		{"SKILLS", "TOOLS"},
+		{"USER", "USER"},
+		{"MEMORY", "MEMORY"},
+	}
 	for _, p := range platforms {
-		for _, b := range bases {
-			suffix := b + "." + p + ".md"
+		for _, file := range files {
+			suffix := file.legacyBase + "." + p + ".md"
 			if _, err := os.Stat(filepath.Join(dir, suffix)); err == nil {
 				log.Warn("agent-config: deprecated suffix file found; use directory-based layout instead",
 					"file", suffix,
-					"migration", "move to "+p+"/"+b+".md")
+					"migration", "move to "+p+"/"+file.targetBase+".md")
 			}
 		}
 	}

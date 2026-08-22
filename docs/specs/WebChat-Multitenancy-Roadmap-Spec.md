@@ -103,7 +103,7 @@ PR #746 最新 review（基线 `68b1660`）早于 R6，其 **P1 阻塞项已在 
 
 ### spec ② — per-workspace agent-configs 自定义（两层继承）
 
-**目标**：让 WebChat 轨的 agent-configs（SOUL/AGENTS/SKILLS/USER/MEMORY 等）走 spec ① §2.4 确立的**两层继承**（团队默认 → workspace 自定义），而非现状的全局/Bot 级共享。同一团队内不同 workspace 拥有各自定制。
+**目标**：让 WebChat 轨的 agent-configs（SOUL/AGENTS/TOOLS/USER/MEMORY）走 spec ① §2.4 确立的**两层继承**（团队默认 → workspace 自定义），而非现状的全局/Bot 级共享。同一团队内不同 workspace 拥有各自定制。
 
 **现状**：Message Channel 轨的三级 fallback 全局 → 平台 → Bot（`internal/agentconfig/loader.go`）——**这条链保持不动**。WebChat 轨需新增独立解析路径。
 
