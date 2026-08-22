@@ -531,6 +531,7 @@ func TestInputExecution_TimeoutStillCapturesInboundTurn(t *testing.T) {
 	require.Len(t, turns, 2, "timeout delivery must retain both sides of the exchange")
 	require.Equal(t, eventstore.RoleUser, turns[0].Role)
 	require.Equal(t, "hello", turns[0].Content)
+	require.Equal(t, "evt-client-1", turns[0].ClientMessageID)
 	require.Equal(t, eventstore.RoleAssistant, turns[1].Role)
 	require.Equal(t, "assistant response", turns[1].Content)
 	require.Equal(t, turns[0].Generation, turns[1].Generation)

@@ -84,12 +84,12 @@ func queryBySession(ctx context.Context, qe queryExecer, q map[string]string, se
 }
 
 // turnScanDest returns the scan destination slice for a turn row. It is shared
-// by scanTurns (SQLite) and scanTurnsPG (Postgres) so the 22-column projection
+// by scanTurns (SQLite) and scanTurnsPG (Postgres) so the 23-column projection
 // order cannot drift between backends. successPtr is dialect-specific
 // (*sql.NullInt64 for SQLite INTEGER, *sql.NullBool for Postgres BOOLEAN).
-func turnScanDest(r *TurnRecord, successPtr, toolsJSON any) []any {
+func turnScanDest(r *TurnRecord, successPtr, clientMessageID, toolsJSON any) []any {
 	return []any{
-		&r.ID, &r.SessionID, &r.Generation, &r.TurnNum, &r.Seq, &r.Role, &r.Content,
+		&r.ID, &r.SessionID, clientMessageID, &r.Generation, &r.TurnNum, &r.Seq, &r.Role, &r.Content,
 		&r.Platform, &r.UserID, &r.Model, successPtr, &r.Source,
 		toolsJSON, &r.ToolCount,
 		&r.TokensInput, &r.TokensCacheWrite, &r.TokensCacheRead, &r.TokensIn,

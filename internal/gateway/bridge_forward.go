@@ -1195,7 +1195,7 @@ func (b *Bridge) CaptureInboundEvent(sessionID string, seq int64, eventType even
 
 // CaptureInbound persists an inbound (user→worker) event for replay.
 // Also writes a user turn record when eventType is Input.
-func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64, eventType events.Kind, data any, platform, owner string) {
+func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64, clientMessageID string, eventType events.Kind, data any, platform, owner string) {
 	if b.collector != nil && b.hub != nil {
 		releaseSeq, ok := b.hub.BeginSeqOperation(sessionID)
 		if !ok {
@@ -1228,16 +1228,17 @@ func (b *Bridge) CaptureInbound(ctx context.Context, sessionID string, seq int64
 		}
 		content := extractInputContent(data)
 		turn := &eventstore.TurnWriteRequest{
-			SessionID:  sessionID,
-			Generation: acc.Generation.Load(),
-			TurnNum:    int(acc.TurnCount.Load()) + 1,
-			Seq:        seq,
-			Role:       eventstore.RoleUser,
-			Content:    content,
-			Platform:   platform,
-			UserID:     owner,
-			Source:     eventstore.SourceNormal,
-			CreatedAt:  time.Now().UnixMilli(),
+			SessionID:       sessionID,
+			ClientMessageID: clientMessageID,
+			Generation:      acc.Generation.Load(),
+			TurnNum:         int(acc.TurnCount.Load()) + 1,
+			Seq:             seq,
+			Role:            eventstore.RoleUser,
+			Content:         content,
+			Platform:        platform,
+			UserID:          owner,
+			Source:          eventstore.SourceNormal,
+			CreatedAt:       time.Now().UnixMilli(),
 		}
 		b.collector.CaptureTurn(turn)
 	}

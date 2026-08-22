@@ -35,6 +35,7 @@ func newTestStoreWithTurnsTable(t *testing.T) *SQLiteStore {
 	_, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS turns (
 		id                  INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id          TEXT    NOT NULL,
+		client_message_id   TEXT,
 		generation          INTEGER NOT NULL DEFAULT 1,
 		turn_num            INTEGER NOT NULL,
 		seq                 INTEGER NOT NULL DEFAULT 0,
@@ -88,7 +89,7 @@ func TestTurnsTable_Schema(t *testing.T) {
 	require.NoError(t, rows.Err())
 
 	expected := []string{
-		"id", "session_id", "generation", "turn_num", "seq", "role", "content",
+		"id", "session_id", "client_message_id", "generation", "turn_num", "seq", "role", "content",
 		"platform", "user_id", "model", "success", "source", "tools_json",
 		"tool_count", "tokens_input", "tokens_cache_write", "tokens_cache_read",
 		"tokens_out", "duration_ms", "cost_usd", "created_at",
@@ -762,6 +763,30 @@ func TestTurnsTable_Pagination(t *testing.T) {
 		_, err := store.QueryTurns(ctx, "s1", 10, 100)
 		require.ErrorIs(t, err, ErrNotFound)
 	})
+}
+
+func TestTurnsTable_ClientMessageIDRoundTrip(t *testing.T) {
+	t.Parallel()
+	store := newTestStoreWithTurnsTable(t)
+	ctx := testCtx(t)
+	tx, err := store.BeginTx(ctx)
+	require.NoError(t, err)
+	require.NoError(t, tx.AppendTurn(ctx, &TurnWriteRequest{
+		SessionID:       "s-client-id",
+		Generation:      1,
+		TurnNum:         1,
+		Seq:             7,
+		Role:            RoleUser,
+		Content:         "hello",
+		ClientMessageID: "cm-roundtrip",
+		CreatedAt:       time.Now().UnixMilli(),
+	}))
+	require.NoError(t, tx.Commit())
+
+	records, err := store.QueryLatestTurns(ctx, "s-client-id", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, "cm-roundtrip", records[0].ClientMessageID)
 }
 
 // ─── QueryLatestTurns: returns newest N turns (regression: ASC+LIMIT bug) ────

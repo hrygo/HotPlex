@@ -776,6 +776,32 @@ func TestGetHistory_Success(t *testing.T) {
 	require.False(t, resp.HasMore)
 }
 
+func TestGetHistory_ReturnsClientMessageID(t *testing.T) {
+	t.Parallel()
+	sm := new(mockAPISM)
+	bridge := new(mockAPIBridge)
+	ts := new(mockTurnsStore)
+	api := newTestAPIWithTurns(t, sm, bridge, ts)
+
+	sm.On("Get", "sess-1").Return(&session.SessionInfo{ID: "sess-1", UserID: "anonymous"}, nil)
+	records := []*eventstore.TurnRecord{
+		{SessionID: "sess-1", Seq: 1, Role: "user", Content: "hello", ClientMessageID: "cm-history"},
+	}
+	ts.On("QueryLatestTurns", mock.Anything, "sess-1", 51).Return(records, nil)
+
+	mux := setupMux(api)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedReq("GET", "/api/sessions/sess-1/history", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		Records []map[string]any `json:"records"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Records, 1)
+	require.Equal(t, "cm-history", resp.Records[0]["client_message_id"])
+}
+
 func TestGetHistory_HasMore(t *testing.T) {
 	t.Parallel()
 	sm := new(mockAPISM)

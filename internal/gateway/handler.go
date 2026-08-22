@@ -1073,7 +1073,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		}
 		capturedInbound = true
 		h.bridge.CaptureInbound(context.WithoutCancel(ctx), env.SessionID, env.Seq,
-			events.Input, env.Event.Data, si.Platform, si.OwnerID)
+			clientMessageID(env), events.Input, env.Event.Data, si.Platform, si.OwnerID)
 	}
 	h.cancelRetryIfNeeded(env.SessionID)
 

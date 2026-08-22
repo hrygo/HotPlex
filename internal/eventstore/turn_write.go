@@ -11,6 +11,7 @@ const (
 // consumed by the Collector's background batch writer.
 type TurnWriteRequest struct {
 	SessionID        string
+	ClientMessageID  string
 	Generation       int64
 	TurnNum          int
 	Seq              int64
@@ -30,4 +31,11 @@ type TurnWriteRequest struct {
 	DurationMs       int64
 	CostUSD          float64
 	CreatedAt        int64 // Unix ms
+}
+
+func nullableClientMessageID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
 }
