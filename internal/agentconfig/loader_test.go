@@ -334,14 +334,14 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	t.Run("empty configs still include hotplex metacognition", func(t *testing.T) {
 		prompt := BuildSystemPrompt(&AgentConfigs{})
-		require.Contains(t, prompt, `<agent-configuration schema-version="2">`)
+		require.Contains(t, prompt, `<agent-configuration schema-version="3">`)
 		require.Contains(t, prompt, "<hotplex>")
 	})
 
 	t.Run("assembles B+C with nested XML tags", func(t *testing.T) {
 		cfg := &AgentConfigs{Soul: "Persona", Agents: "Rules", Tools: "Tools", User: "User data", Memory: "Memory data"}
 		prompt := BuildSystemPrompt(cfg)
-		require.Contains(t, prompt, `<agent-configuration schema-version="2">`)
+		require.Contains(t, prompt, `<agent-configuration schema-version="3">`)
 		require.Contains(t, prompt, "</agent-configuration>")
 		require.Contains(t, prompt, "<directives>")
 		require.Contains(t, prompt, "</directives>")

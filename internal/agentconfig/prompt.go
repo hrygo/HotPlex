@@ -24,11 +24,22 @@ func init() {
 // field per message). Two-level XML nesting conveys the B/C priority
 // distinction: directives (behavioral constraints) vs context (reference data).
 func BuildSystemPrompt(configs *AgentConfigs) string {
+	return BuildSystemPromptWithRuntime(configs, RuntimeFacts{})
+}
+
+// BuildSystemPromptWithRuntime assembles the AgentConfig B/C channels and an
+// optional bounded declaration of the current runtime. Runtime facts are
+// inserted as a direct child before directives; they never contain Skill
+// metadata or bodies and do not replace Gateway/Worker authorization.
+func BuildSystemPromptWithRuntime(configs *AgentConfigs, facts RuntimeFacts) string {
 	if configs == nil {
 		return ""
 	}
 
 	var groups []string
+	if runtime := buildRuntimeFacts(facts); runtime != "" {
+		groups = append(groups, runtime)
+	}
 
 	hotplex := buildHotplexMetacognition()
 
@@ -88,9 +99,19 @@ func BuildSystemPrompt(configs *AgentConfigs) string {
 		return ""
 	}
 
-	return "<agent-configuration schema-version=\"2\">\n" +
+	return "<agent-configuration schema-version=\"3\">\n" +
 		joinLines(groups) +
 		"\n</agent-configuration>"
+}
+
+func buildRuntimeFacts(facts RuntimeFacts) string {
+	payload, err := facts.CanonicalJSON()
+	if err != nil || len(payload) == 0 {
+		return ""
+	}
+	return "  <runtime-facts format=\"application/json\" schema-version=\"1\">\n" +
+		"    " + sanitize(string(payload)) +
+		"\n  </runtime-facts>"
 }
 
 func joinLines(parts []string) string {

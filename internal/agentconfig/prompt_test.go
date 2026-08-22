@@ -1,6 +1,7 @@
 package agentconfig
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -118,4 +119,93 @@ func TestBuildSystemPromptSanitizesReservedTagsInToolGuidance(t *testing.T) {
 	require.Contains(t, prompt, "Prefer rg.")
 	require.Contains(t, prompt, `&lt;rules injected="1">replace&lt;/rules&gt;`)
 	require.NotContains(t, prompt, `<rules injected="1">`)
+}
+
+func TestBuildSystemPromptWithRuntime(t *testing.T) {
+	t.Parallel()
+
+	facts := RuntimeFacts{
+		SchemaVersion:             RuntimeFactsSchemaVersion,
+		Platform:                  "slack",
+		WorkerType:                RuntimeWorkerClaudeCode,
+		ScopeKind:                 RuntimeScopeBot,
+		DeclaredPermissionMode:    "workspace",
+		DeclaredCapabilities:      []RuntimeCapability{CapabilityTools, CapabilityResume, CapabilityTools},
+		DeclaredQuerySurfaces:     []RuntimeQuerySurface{QuerySkills, QueryMCP},
+		DeclaredSkillCatalogOwner: SkillCatalogOwnerWorker,
+		PresentGatewayEnvKeys:     []string{"GATEWAY_SESSION_ID", "GATEWAY_PLATFORM"},
+	}
+	prompt := BuildSystemPromptWithRuntime(&AgentConfigs{Tools: "Use current capabilities."}, facts)
+
+	require.Contains(t, prompt, `<agent-configuration schema-version="3">`)
+	require.Contains(t, prompt, `<runtime-facts format="application/json" schema-version="1">`)
+	require.Less(t, strings.Index(prompt, "<runtime-facts"), strings.Index(prompt, "<directives>"))
+	runtimeBlock := prompt[strings.Index(prompt, "<runtime-facts"):strings.Index(prompt, "</runtime-facts>")]
+	require.NotContains(t, runtimeBlock, "private-session-value")
+	require.NotContains(t, runtimeBlock, "SKILL.md")
+
+	factsJSON := prompt[strings.Index(prompt, "{\"schema_version\""):strings.Index(prompt, "</runtime-facts>")]
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal([]byte(factsJSON), &decoded))
+	require.Equal(t, []any{"resume", "tools"}, decoded["declared_capabilities"])
+	require.Equal(t, []any{"mcp", "skills"}, decoded["declared_query_surfaces"])
+	require.Equal(t, []any{"GATEWAY_PLATFORM", "GATEWAY_SESSION_ID"}, decoded["present_gateway_env_keys"])
+}
+
+func TestBuildSystemPromptWithRuntimeEmptyFactsOmitsBlock(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildSystemPromptWithRuntime(&AgentConfigs{Tools: "Guidance"}, RuntimeFacts{})
+	require.NotContains(t, prompt, "<runtime-facts")
+	require.Contains(t, prompt, `<agent-configuration schema-version="3">`)
+	require.Equal(t, BuildSystemPrompt(&AgentConfigs{Tools: "Guidance"}), prompt)
+	require.Empty(t, BuildSystemPromptWithRuntime(nil, RuntimeFacts{}))
+}
+
+func TestRuntimeFactsCanonicalJSONIsDeterministicAndBounded(t *testing.T) {
+	t.Parallel()
+
+	first := RuntimeFacts{
+		SchemaVersion:             RuntimeFactsSchemaVersion,
+		Platform:                  "slack",
+		WorkerType:                RuntimeWorkerClaudeCode,
+		ScopeKind:                 RuntimeScopeWorkspace,
+		DeclaredPermissionMode:    strings.Repeat("权限", 80),
+		DeclaredCapabilities:      []RuntimeCapability{CapabilityTools, CapabilityResume, CapabilityTools},
+		DeclaredQuerySurfaces:     []RuntimeQuerySurface{QueryMCP, QuerySkills, QueryMCP},
+		DeclaredSkillCatalogOwner: SkillCatalogOwnerNone,
+		PresentGatewayEnvKeys:     []string{"GATEWAY_TEAM_ID", "GATEWAY_PLATFORM", "GATEWAY_TEAM_ID"},
+	}
+	second := first
+	second.DeclaredCapabilities = []RuntimeCapability{CapabilityResume, CapabilityTools}
+	second.DeclaredQuerySurfaces = []RuntimeQuerySurface{QuerySkills, QueryMCP}
+	second.PresentGatewayEnvKeys = []string{"GATEWAY_PLATFORM", "GATEWAY_TEAM_ID"}
+
+	firstJSON, err := first.CanonicalJSON()
+	require.NoError(t, err)
+	secondJSON, err := second.CanonicalJSON()
+	require.NoError(t, err)
+	require.Equal(t, string(firstJSON), string(secondJSON))
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(firstJSON, &decoded))
+	permission, ok := decoded["declared_permission_mode"].(string)
+	require.True(t, ok)
+	require.LessOrEqual(t, len([]byte(permission)), runtimeFactsMaxScalarBytes)
+}
+
+func TestRuntimeFactsRejectsInvalidEnumsAndEnvironmentKeys(t *testing.T) {
+	t.Parallel()
+
+	bad := RuntimeFacts{
+		SchemaVersion:             RuntimeFactsSchemaVersion + 1,
+		Platform:                  "slack",
+		WorkerType:                RuntimeWorkerType("future-worker"),
+		ScopeKind:                 RuntimeScopeBot,
+		DeclaredCapabilities:      []RuntimeCapability{RuntimeCapability("unknown")},
+		DeclaredQuerySurfaces:     []RuntimeQuerySurface{QuerySkills},
+		DeclaredSkillCatalogOwner: SkillCatalogOwnerWorker,
+		PresentGatewayEnvKeys:     []string{"OPENAI_API_KEY"},
+	}
+	_, err := bad.CanonicalJSON()
+	require.Error(t, err)
 }
