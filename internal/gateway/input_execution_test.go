@@ -197,6 +197,81 @@ func TestInputExecution_DeliveredAckAfterWorkerAccepts(t *testing.T) {
 	w.AssertExpectations(t)
 }
 
+func TestInputExecution_HardWorkerFailureDoesNotCaptureUserTurn(t *testing.T) {
+	t.Parallel()
+
+	execStore := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
+	bridge, turnStore := newBridgeWithCollector(t)
+	hub := newTestHub(t)
+	bridge.hub = hub
+	bridge.sm = new(mockInputSM)
+	hub.JoinPlatformSession("s-exec", &mockPlatformConn{})
+
+	sm := bridge.sm.(*mockInputSM)
+	w := new(mockWorkerForHandler)
+	sm.On("Get", "s-exec").Return(&session.SessionInfo{State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
+	sm.On("GetWorker", "s-exec").Return(w).Maybe()
+	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	w.On("Input", mock.Anything, "hello", mock.Anything).Return(errors.New("worker rejected input"))
+
+	h := &Handler{
+		log:             testLogger(t),
+		hub:             hub,
+		sm:              sm,
+		bridge:          bridge,
+		executionStore:  execStore,
+		ownerInstanceID: "gw-test",
+	}
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.Error(t, h.handleInput(context.Background(), env))
+	require.NoError(t, bridge.collector.Close())
+	turns, err := turnStore.QueryLatestTurns(context.Background(), "s-exec", 10)
+	if errors.Is(err, eventstore.ErrNotFound) {
+		return
+	}
+	require.NoError(t, err)
+	require.Empty(t, turns, "a hard Worker.Input failure must not leave an unmatched user turn")
+}
+
+func TestInputExecution_SuccessCapturesUserTurnOnce(t *testing.T) {
+	t.Parallel()
+
+	execStore := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
+	bridge, turnStore := newBridgeWithCollector(t)
+	hub := newTestHub(t)
+	bridge.hub = hub
+	bridge.sm = new(mockInputSM)
+	hub.JoinPlatformSession("s-exec", &mockPlatformConn{})
+
+	sm := bridge.sm.(*mockInputSM)
+	w := new(mockWorkerForHandler)
+	sm.On("Get", "s-exec").Return(&session.SessionInfo{State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
+	sm.On("GetWorker", "s-exec").Return(w).Maybe()
+	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
+
+	h := &Handler{
+		log:             testLogger(t),
+		hub:             hub,
+		sm:              sm,
+		bridge:          bridge,
+		executionStore:  execStore,
+		ownerInstanceID: "gw-test",
+	}
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.NoError(t, h.handleInput(context.Background(), env))
+	require.NoError(t, bridge.collector.Close())
+	turns, err := turnStore.QueryLatestTurns(context.Background(), "s-exec", 10)
+	require.NoError(t, err)
+	require.Len(t, turns, 1, "successful delivery must capture exactly one user turn")
+	require.Equal(t, eventstore.RoleUser, turns[0].Role)
+	require.Equal(t, 1, turns[0].TurnNum, "first user turn must keep its turn number")
+}
+
 func TestAcceptInputExecution_UsesAttachedWorkerRunID(t *testing.T) {
 	t.Parallel()
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}

@@ -1066,11 +1066,12 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	// The first acknowledgement means the input is durably recorded. A second
 	// acknowledgement below reports the worker-delivery outcome.
 	h.sendInputAck(ctx, env, execRecord, false)
-	// Persist the user turn immediately after durable ingress acceptance and
-	// before uncertain Worker.Input delivery. A timeout means the worker may
-	// still be processing, so waiting for the success path would leave a late
-	// assistant turn without its corresponding user turn in history.
-	if h.bridge != nil {
+	capturedInbound := false
+	captureInbound := func() {
+		if capturedInbound || h.bridge == nil {
+			return
+		}
+		capturedInbound = true
 		h.bridge.CaptureInbound(context.WithoutCancel(ctx), env.SessionID, env.Seq,
 			events.Input, env.Event.Data, si.Platform, si.OwnerID)
 	}
@@ -1304,6 +1305,9 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		var we *worker.WorkerError
 		if errors.As(inputErr, &we) && we.Kind == worker.ErrKindTimeout {
 			h.log.Info("gateway: worker input delivery timed out (worker still processing)", "session_id", env.SessionID)
+			// The worker may still complete this input after the request timeout;
+			// retain the user turn so late assistant output remains pairable.
+			captureInbound()
 			finishOutcome(execution.StatusUnknown, events.ErrCodeExecutionTimeout)
 			return nil
 		}
@@ -1325,6 +1329,11 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 		return h.sendErrorf(ctx, env, code, "worker input failed: %v", inputErr)
 	}
+	// Worker.Input returned successfully, so this is the first point at which
+	// the accepted input is known to have reached the worker. Capture exactly
+	// once here; timeout paths call the same guard above, while hard failures do
+	// not create an unmatched user turn.
+	captureInbound()
 	if h.bridge != nil && execRecord != nil {
 		h.bridge.markTurnWorkerAccepted(env.SessionID, execRecord.ExecutionID)
 	}
