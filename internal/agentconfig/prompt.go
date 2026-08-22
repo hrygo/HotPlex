@@ -19,13 +19,16 @@ func init() {
 
 const skillCatalogNotice = "Tools are available only through explicit slash invocation or structured selection. Ordinary text never invokes a skill; complete skill instructions are loaded only after an explicit selection."
 
-type skillMetadata struct {
-	title       string
-	description string
-	triggers    string
+var trustedSkillCatalog = []struct {
+	markers []string
+	line    string
+}{
+	{markers: []string{"cron", "定时", "提醒"}, line: "Cron 定时任务：创建定时、延迟或周期任务。触发：定时、延迟、周期、提醒、计划任务或 cron 请求。"},
+	{markers: []string{"slack"}, line: "Slack CLI：处理 Slack 消息、频道、文件和反应。触发：Slack、频道、消息、文件、反应或书签请求。"},
+	{markers: []string{"feishu", "lark", "飞书"}, line: "飞书 CLI：处理飞书消息、文档、云盘或多维表格。触发：飞书、文档、云盘、多维表格或消息请求。"},
+	{markers: []string{"voice", "speech", "语音"}, line: "语音：处理语音转写或语音合成。触发：语音、转写或合成请求。"},
+	{markers: []string{"search", "搜索", "查找"}, line: "Search：用于查找公开资料。触发：用户明确提出搜索或查找请求。"},
 }
-
-const maxSkillMetadataEntries = 32
 
 // BuildSystemPrompt assembles the agent configuration (B+C channels) into a
 // single system prompt. User-provided skill bodies are deliberately excluded:
@@ -131,49 +134,22 @@ func joinLines(parts []string) string {
 
 func buildHotplexMetacognition() string { return hotplexMetacognition }
 
-// buildSkillCatalog deliberately treats SKILLS.md as untrusted metadata. It
-// exposes only short, derived records from markdown headings; instructions,
-// tables, paths, SOPs, and arbitrary body text never cross the prompt boundary.
+// buildSkillCatalog treats SKILLS.md as untrusted input. It only uses the
+// presence of known capability markers to select fixed, audited descriptions;
+// no user-provided heading or body text crosses the system-prompt boundary.
 func buildSkillCatalog(raw string) string {
-	lines := strings.Split(stripFrontmatter(raw), "\n")
-	entries := make([]skillMetadata, 0, 8)
-	seen := make(map[string]struct{})
-	for index, line := range lines {
-		title, ok := safeSkillHeading(line)
-		if !ok || genericSkillHeading(title) {
-			continue
+	lower := strings.ToLower(stripFrontmatter(raw))
+	entries := make([]string, 0, len(trustedSkillCatalog))
+	for _, capability := range trustedSkillCatalog {
+		matched := false
+		for _, marker := range capability.markers {
+			if strings.Contains(lower, strings.ToLower(marker)) {
+				matched = true
+				break
+			}
 		}
-		key := strings.ToLower(title)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		description, triggers := describeSkill(title)
-		if short := safeSkillDescription(lines, index); short != "" {
-			description = short
-		}
-		entries = append(entries, skillMetadata{
-			title:       title,
-			description: description,
-			triggers:    triggers,
-		})
-		if len(entries) == maxSkillMetadataEntries {
-			break
-		}
-	}
-
-	// A small amount of legacy configuration uses a single short value rather
-	// than markdown headings (for example, "Tools"). Keep that discoverable,
-	// but still reject anything that looks like private or operational content.
-	if len(entries) == 0 {
-		candidate := strings.TrimSpace(stripFrontmatter(raw))
-		if isSafeSkillMetadata(candidate) && !strings.ContainsAny(candidate, "\n\r") {
-			description, triggers := describeSkill(candidate)
-			entries = append(entries, skillMetadata{
-				title:       candidate,
-				description: description,
-				triggers:    triggers,
-			})
+		if matched {
+			entries = append(entries, capability.line)
 		}
 	}
 	if len(entries) == 0 {
@@ -184,105 +160,9 @@ func buildSkillCatalog(raw string) string {
 	b.WriteString(skillCatalogNotice)
 	b.WriteString("\n\n可用能力元数据（仅用于发现；完整说明须在显式选择后加载）：")
 	for _, entry := range entries {
-		fmt.Fprintf(&b, "\n- %s：%s 触发：%s。", entry.title, entry.description, entry.triggers)
+		fmt.Fprintf(&b, "\n- %s", entry)
 	}
 	return b.String()
-}
-
-func safeSkillHeading(line string) (string, bool) {
-	trimmed := strings.TrimSpace(line)
-	level := 0
-	for level < len(trimmed) && trimmed[level] == '#' {
-		level++
-	}
-	if level == 0 || level > 3 || level == len(trimmed) || trimmed[level] != ' ' {
-		return "", false
-	}
-	title := strings.Join(strings.Fields(strings.TrimSpace(trimmed[level:])), " ")
-	if title == "" || len([]rune(title)) > 80 || !isSafeSkillMetadata(title) {
-		return "", false
-	}
-	return title, true
-}
-
-func isSafeSkillMetadata(s string) bool {
-	if s == "" || strings.ContainsAny(s, "<>|~/\\") {
-		return false
-	}
-	lower := strings.ToLower(s)
-	for _, marker := range []string{
-		"private", "secret", "password", "credential", "api_key", "apikey", "token",
-		"sentinel", "system prompt", "agentconfig", "sop", "step-by-step", "procedure",
-		"内部路径", "运行时配置", "步骤", "命令示例", "操作步骤",
-	} {
-		if strings.Contains(lower, marker) {
-			return false
-		}
-	}
-	return true
-}
-
-func safeSkillDescription(lines []string, headingIndex int) string {
-	for i := headingIndex + 1; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			return ""
-		}
-		return normalizeSkillDescription(line)
-	}
-	return ""
-}
-
-func normalizeSkillDescription(line string) string {
-	line = strings.Join(strings.Fields(line), " ")
-	if line == "" || len([]rune(line)) > 160 || strings.HasPrefix(line, "|") || strings.HasPrefix(line, "```") {
-		return ""
-	}
-	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "> ") {
-		return ""
-	}
-	if strings.ContainsAny(line, "<>|~/\\") {
-		return ""
-	}
-	lower := strings.ToLower(line)
-	for _, marker := range []string{
-		"private", "secret", "password", "credential", "api_key", "apikey", "token", "sentinel",
-		"system prompt", "agentconfig", "sop", "step-by-step", "procedure", "步骤", "流程", "操作步骤", "内部路径",
-	} {
-		if strings.Contains(lower, marker) {
-			return ""
-		}
-	}
-	return line
-}
-
-func genericSkillHeading(title string) bool {
-	switch strings.ToLower(strings.TrimSpace(title)) {
-	case "skills.md", "tools", "available tools", "capabilities", "architecture", "platform features",
-		"架构", "你可以使用的工具", "平台特性", "网关命令（无需你处理）", "配置层级":
-		return true
-	default:
-		return false
-	}
-}
-
-func describeSkill(title string) (string, string) {
-	lower := strings.ToLower(title)
-	switch {
-	case strings.Contains(lower, "cron"), strings.Contains(lower, "定时"), strings.Contains(lower, "提醒"):
-		return "创建定时、延迟或周期任务", "定时、延迟、周期、提醒、计划任务或 cron 请求"
-	case strings.Contains(lower, "slack"):
-		return "处理 Slack 消息、频道、文件和反应", "Slack、频道、消息、文件、反应或书签请求"
-	case strings.Contains(lower, "feishu"), strings.Contains(lower, "lark"), strings.Contains(title, "飞书"):
-		return "处理飞书消息、文档、云盘或多维表格", "飞书、文档、云盘、多维表格或消息请求"
-	case strings.Contains(title, "语音"), strings.Contains(lower, "voice"), strings.Contains(lower, "speech"):
-		return "处理语音转写或语音合成", "语音、转写或合成请求"
-	default:
-		return "提供与该能力相关的受控操作", "用户明确请求该能力或完成结构化选择"
-	}
 }
 
 var reservedTags = []string{

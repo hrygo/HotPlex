@@ -204,6 +204,43 @@ func TestBridge_ProcessForwardedEventSendsExactlyOneTerminal(t *testing.T) {
 	require.Nil(t, tryReadEnvelope(t, server), "duplicate Done must be suppressed")
 }
 
+func TestBridge_CompleteMessageStartsNextTurnAfterTerminal(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+	const sessionID = "message-starts-next-turn"
+	h.JoinSession(sessionID, newConn(h, conn, sessionID, nil))
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
+	fw := &mockBridgeWorker{
+		workerType: worker.TypeClaudeCode,
+		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
+	}
+	fc := &forwardContext{sessionID: sessionID, workerType: worker.TypeClaudeCode}
+	fc.doneReceived = true
+	fc.terminalSent.Store(true)
+
+	b.processForwardedEvent(
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Message, map[string]any{"content": "next reply"}),
+		fw,
+		forwardOpts{},
+		fc,
+	)
+	b.processForwardedEvent(
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done, events.DoneData{Success: true}),
+		fw,
+		forwardOpts{},
+		fc,
+	)
+
+	message := tryReadEnvelope(t, server)
+	require.NotNil(t, message)
+	require.Equal(t, events.Message, message.Event.Type)
+	done := tryReadEnvelope(t, server)
+	require.NotNil(t, done, "a complete Message must reopen the terminal fence for the next turn")
+	require.Equal(t, events.Done, done.Event.Type)
+}
+
 // tryReadEnvelope reads one envelope from the WS conn with a short deadline.
 // Returns nil if nothing arrived (used to assert "no message was sent").
 func tryReadEnvelope(t *testing.T, server interface {

@@ -542,7 +542,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 
 func isTurnStartEvent(kind events.Kind) bool {
 	switch kind {
-	case events.MessageStart, events.MessageDelta, events.Reasoning,
+	case events.Message, events.MessageStart, events.MessageDelta, events.Reasoning,
 		events.ToolCall, events.PermissionRequest, events.QuestionRequest,
 		events.ElicitationRequest:
 		return true
