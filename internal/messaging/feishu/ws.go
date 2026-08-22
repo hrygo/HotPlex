@@ -87,25 +87,14 @@ func (a *Adapter) runWebSocket(ctx context.Context) {
 
 		a.Log.Info("feishu: starting WebSocket connection", "attempt", attempt)
 
-		if err := client.Start(ctx); err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(backoff.Next()):
-				a.Log.Warn("feishu: WebSocket disconnected, reconnecting...",
-					"err", err, "attempt", attempt)
-				attempt++
-				continue
-			}
-		}
-
-		backoff.Reset()
-		attempt = 1
-		a.Log.Info("feishu: WebSocket closed cleanly, reconnecting...")
+		err := client.Start(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(backoff.Next()):
+			a.Log.Warn("feishu: WebSocket disconnected, reconnecting...",
+				"err", err, "attempt", attempt)
+			attempt++
 		}
 	}
 }
