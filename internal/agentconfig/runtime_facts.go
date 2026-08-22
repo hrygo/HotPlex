@@ -47,13 +47,9 @@ const (
 type RuntimeCapability string
 
 const (
-	CapabilityResume             RuntimeCapability = "resume"
-	CapabilityResumeTerminated   RuntimeCapability = "resume_terminated"
-	CapabilityStreaming          RuntimeCapability = "streaming"
-	CapabilityTools              RuntimeCapability = "tools"
-	CapabilityNativeCatalog      RuntimeCapability = "native_catalog"
-	CapabilityNativeInvocation   RuntimeCapability = "native_invocation"
-	CapabilitySystemPromptUpdate RuntimeCapability = "system_prompt_update"
+	CapabilityResume    RuntimeCapability = "resume"
+	CapabilityStreaming RuntimeCapability = "streaming"
+	CapabilityTools     RuntimeCapability = "tools"
 )
 
 // RuntimeQuerySurface identifies a bounded query surface exposed by the
@@ -132,13 +128,9 @@ var allowedRuntimeScopes = map[RuntimeScopeKind]struct{}{
 }
 
 var allowedRuntimeCapabilities = map[RuntimeCapability]struct{}{
-	CapabilityResume:             {},
-	CapabilityResumeTerminated:   {},
-	CapabilityStreaming:          {},
-	CapabilityTools:              {},
-	CapabilityNativeCatalog:      {},
-	CapabilityNativeInvocation:   {},
-	CapabilitySystemPromptUpdate: {},
+	CapabilityResume:    {},
+	CapabilityStreaming: {},
+	CapabilityTools:     {},
 }
 
 var allowedRuntimeQuerySurfaces = map[RuntimeQuerySurface]struct{}{
@@ -179,8 +171,8 @@ func (f RuntimeFacts) Validate() error {
 }
 
 func (f RuntimeFacts) isZero() bool {
-	return f.SchemaVersion == 0 && f.Platform == "" && f.WorkerType == "" &&
-		f.ScopeKind == "" && f.DeclaredPermissionMode == "" &&
+	return f.Platform == "" && f.WorkerType == "" && f.ScopeKind == "" &&
+		f.DeclaredPermissionMode == "" &&
 		len(f.DeclaredCapabilities) == 0 && len(f.DeclaredQuerySurfaces) == 0 &&
 		f.DeclaredSkillCatalogOwner == "" && len(f.PresentGatewayEnvKeys) == 0
 }

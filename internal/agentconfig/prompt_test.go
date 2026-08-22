@@ -159,6 +159,7 @@ func TestBuildSystemPromptWithRuntimeEmptyFactsOmitsBlock(t *testing.T) {
 	require.NotContains(t, prompt, "<runtime-facts")
 	require.Contains(t, prompt, `<agent-configuration schema-version="3">`)
 	require.Equal(t, BuildSystemPrompt(&AgentConfigs{Tools: "Guidance"}), prompt)
+	require.NotContains(t, BuildSystemPromptWithRuntime(&AgentConfigs{Tools: "Guidance"}, RuntimeFacts{SchemaVersion: RuntimeFactsSchemaVersion}), "<runtime-facts")
 	require.Empty(t, BuildSystemPromptWithRuntime(nil, RuntimeFacts{}))
 }
 
@@ -208,4 +209,7 @@ func TestRuntimeFactsRejectsInvalidEnumsAndEnvironmentKeys(t *testing.T) {
 	}
 	_, err := bad.CanonicalJSON()
 	require.Error(t, err)
+	prompt := BuildSystemPromptWithRuntime(&AgentConfigs{Tools: "Guidance"}, bad)
+	require.NotContains(t, prompt, "<runtime-facts")
+	require.Contains(t, prompt, "<directives>")
 }
