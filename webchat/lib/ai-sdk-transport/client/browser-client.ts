@@ -434,6 +434,10 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
 
     if (isInitAck(env)) {
       const ackData = event.data as unknown as InitAckData;
+      const retryMeta = ackData as InitAckData & {
+        retryable?: boolean;
+        retry_after_ms?: number;
+      };
       const wasReconnecting = this._reconnecting;
 
       // Handle handshake-level errors
@@ -441,14 +445,20 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         const errorMsg = ackData.error || `Handshake failed with code: ${ackData.code}`;
 
         if (ackData.code === ErrorCode.SessionNotFound) {
-          // Session was deleted on server — retry with the original session ID.
-          // Server uses DeriveSessionKey(userID, workerType, clientSessionID, workDir)
-          // to map client session_id to a deterministic UUIDv5. By retrying with the
-          // same session ID, the auto-created session always maps to the same server-side
-          // session key, providing stable worker-to-session consistency.
-          const retryId = connectionSessionId;
-          this._sessionId = null;
-          this._doConnect(retryId, true, lifecycleGeneration).then(resolve, reject);
+          // A missing session is terminal for this connection. Retrying the same
+          // init from this handler used to bypass the reconnect controller and
+          // create an unbounded WebSocket loop when the server kept returning
+          // SESSION_NOT_FOUND.
+          this.shouldReconnect = false;
+          this._stopHeartbeat();
+          this._clearReconnectTimer();
+          logger.error('BrowserClient', 'Handshake session not found', { message: errorMsg });
+          this.emit('error', {
+            code: ErrorCode.SessionNotFound,
+            message: errorMsg,
+          } as ErrorData, env);
+          this.disconnect();
+          reject(new Error(errorMsg));
           return;
         }
 
@@ -497,12 +507,44 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           return;
         }
 
+        if (retryMeta.retryable === true &&
+            this.reconnectConfig.enabled &&
+            this.reconnectAttempt < this.reconnectConfig.maxAttempts) {
+          // Init retries must go through the same bounded controller as
+          // transport reconnects. Do not open a replacement socket from this
+          // message handler or leave the original handshake flight pending.
+          this._connecting = false;
+          this.pendingConnectReject = null;
+          this._reconnecting = true;
+          this._closeCurrentSocketForHandoff('Retryable handshake error');
+          this._scheduleReconnect(retryMeta.retry_after_ms);
+          reject(new Error(errorMsg));
+          return;
+        }
+
         logger.error('BrowserClient', 'Handshake error', { message: errorMsg });
         this.emit('error', {
           code: ackData.code || ErrorCode.InternalError,
           message: errorMsg
         } as ErrorData, env);
 
+        this.disconnect();
+        reject(new Error(errorMsg));
+        return;
+      }
+
+      if (ackData.state === 'deleted') {
+        // Older gateways encoded an init failure only as state=deleted. Never
+        // promote that legacy response to a successful connected state.
+        const errorMsg = 'Handshake returned a deleted session';
+        this.shouldReconnect = false;
+        this._stopHeartbeat();
+        this._clearReconnectTimer();
+        logger.error('BrowserClient', 'Handshake returned deleted session', { message: errorMsg });
+        this.emit('error', {
+          code: ErrorCode.SessionNotFound,
+          message: errorMsg,
+        } as ErrorData, env);
         this.disconnect();
         reject(new Error(errorMsg));
         return;
@@ -1007,18 +1049,23 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
   // Reconnection
   // ============================================================================
 
-  private _scheduleReconnect(): void {
-    if (!this.shouldReconnect || this.closed || this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+  private _scheduleReconnect(retryAfterMs?: number): void {
+    if (!this.reconnectConfig.enabled ||
+        !this.shouldReconnect ||
+        this.closed ||
+        this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
       return;
     }
 
     this._reconnecting = true;
     this.reconnectAttempt++;
 
-    const delay = Math.min(
-      this.reconnectConfig.baseDelayMs * Math.pow(2, this.reconnectAttempt - 1),
-      this.reconnectConfig.maxDelayMs,
-    );
+    const delay = retryAfterMs === undefined
+      ? Math.min(
+        this.reconnectConfig.baseDelayMs * Math.pow(2, this.reconnectAttempt - 1),
+        this.reconnectConfig.maxDelayMs,
+      )
+      : Math.min(Math.max(0, retryAfterMs), this.reconnectConfig.maxDelayMs);
 
     this.emit('reconnecting', this.reconnectAttempt);
 
