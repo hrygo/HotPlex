@@ -57,7 +57,7 @@ func TestBuildRuntimeFacts(t *testing.T) {
 				agentconfig.CapabilityTools,
 			},
 			wantQuery: []agentconfig.RuntimeQuerySurface{agentconfig.QuerySkills},
-			wantOwner: agentconfig.SkillCatalogOwnerNone,
+			wantOwner: agentconfig.SkillCatalogOwnerWorker,
 		},
 		{
 			name: "full worker workspace",
@@ -91,7 +91,7 @@ func TestBuildRuntimeFacts(t *testing.T) {
 				agentconfig.CapabilityTools,
 			},
 			wantQuery: []agentconfig.RuntimeQuerySurface{agentconfig.QuerySkills},
-			wantOwner: agentconfig.SkillCatalogOwnerNone,
+			wantOwner: agentconfig.SkillCatalogOwnerWorker,
 		},
 		{
 			name:       "acp platform",
@@ -105,7 +105,7 @@ func TestBuildRuntimeFacts(t *testing.T) {
 				agentconfig.CapabilityTools,
 			},
 			wantQuery: []agentconfig.RuntimeQuerySurface{agentconfig.QuerySkills},
-			wantOwner: agentconfig.SkillCatalogOwnerNone,
+			wantOwner: agentconfig.SkillCatalogOwnerWorker,
 		},
 		{
 			name:       "unknown unbound worker",

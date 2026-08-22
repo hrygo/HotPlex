@@ -47,7 +47,7 @@ func buildRuntimeFacts(w worker.Worker, info worker.SessionInfo, platform string
 	if w.SupportsTools() {
 		facts.DeclaredCapabilities = append(facts.DeclaredCapabilities, agentconfig.CapabilityTools)
 	}
-	if _, ok := worker.AsNativeCatalogProvider(w); ok {
+	if facts.WorkerType != agentconfig.RuntimeWorkerUnknown {
 		facts.DeclaredSkillCatalogOwner = agentconfig.SkillCatalogOwnerWorker
 	}
 	if _, ok := w.(worker.ControlRequester); ok {
