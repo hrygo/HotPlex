@@ -213,3 +213,29 @@ func TestRuntimeFactsRejectsInvalidEnumsAndEnvironmentKeys(t *testing.T) {
 	require.NotContains(t, prompt, "<runtime-facts")
 	require.Contains(t, prompt, "<directives>")
 }
+
+func TestEmbeddedMetacognitionDefinesStableRuntimeInvariants(t *testing.T) {
+	t.Parallel()
+
+	for _, required := range []string{
+		"Gateway 负责",
+		"五个可编辑配置槽位",
+		"TOOLS.md",
+		"SKILL.md",
+		"Admin API",
+		"WebChat",
+		"/reset",
+		"fallback",
+		"inspect",
+	} {
+		require.Contains(t, embeddedMetacognition, required)
+	}
+	for _, forbidden := range []string{
+		"真实 Skills",
+		"5 分钟",
+		"最多 3 次",
+		"完整 Skill 清单",
+	} {
+		require.NotContains(t, embeddedMetacognition, forbidden)
+	}
+}

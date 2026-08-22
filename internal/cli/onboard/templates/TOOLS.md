@@ -1,82 +1,32 @@
 ---
-version: 5
-description: "HotPlex environment-specific tool usage guidance"
+version: 6
+description: "HotPlex capability routing and safety guidance"
 ---
 
 # TOOLS.md
 
-本文件提供 HotPlex 环境中的工具使用指南、偏好和边界。它不是 Agent Skill
-目录，也不保证某个工具在当前会话可用；实际能力以 Worker、MCP 或宿主暴露的
-结构化工具定义为准。
+本文件是 HotPlex 的常驻操作路由，不是工具或 Agent Skill 清单，也不保证某个工具在当前会话可用。能力以可信 runtime facts、当前 Worker/Gateway/MCP 查询和宿主实际暴露的结构化接口为准。
 
-## 架构
+## 能力发现与 Agent Skills
 
-    用户 → 消息平台 (Slack/飞书/WebChat) → HotPlex 网关 → Worker (你)
+按以下顺序确认能力：runtime facts → live Worker/Gateway query → `/skills` 或 `/mcp` → 已激活的 Agent Skill → 本文件路由 → `hotplex <domain> --help`。只有状态为 `callable` 的 Skill 才可调用；`discoverable` 或 `unavailable` 必须说明限制并停止猜测。Worker 原生机制负责 Skill metadata 和 `SKILL.md` 加载；本文件不复制 Skill 正文。
 
-网关管理连接、路由、心跳和 Session 生命周期。Worker 负责理解请求、调用当前
-会话实际暴露的工具并生成结果，不应自行接管网关状态或传输协议。
+## Gateway 命令
 
-## 常用工具指南
+`/help`、`/stop`、`/reset`、`/new`、`/gc`、`/park`、`/cd <path>`、`/skills`、`/mcp`、`/worker <name>` 由当前 Gateway/Worker 路由决定。先查询当前会话能力；不要模拟 Gateway 状态或把命令发送给 Worker 作为普通文本。
 
-### Slack CLI
+## 平台与 CLI 路由
 
-通过 `hotplex slack` 命令操作 Slack：
+- Slack 操作使用当前暴露的 `hotplex slack` 能力；只在请求明确涉及 Slack 时调用，并先用命令帮助确认参数。
+- Feishu 操作使用 `lark-cli`，不把它当作 `hotplex-cli` 的别名。
+- Cron 使用 `hotplex cron`。创建前确认 schedule、目标平台和授权；创建后用 `hotplex cron get` 独立核对任务状态、schedule 和投递目标。二次确认失败时报告 degraded，不重复创建。
+- 若适用任务已激活 `hotplex-cli` Agent Skill，先按其流程执行；未激活时以当前二进制的 `--help` 为事实来源，不猜测隐藏参数。
+- `status`、`doctor`、`security`、配置读取等诊断优先保持只读；Admin、服务、主机或其他特权操作需要对应的认证和明确授权。
 
-| 命令 | 用途 |
-|------|------|
-| `hotplex slack send-message --channel <id> --text "..."` | 发送消息（支持 mrkdwn） |
-| `hotplex slack upload-file --file <path> --title "..."` | 上传文件 |
-| `hotplex slack list-channels --types im,public_channel` | 列出频道 |
-| `hotplex slack react add --channel <id> --ts <ts> --emoji <name>` | 添加 Emoji 反应 |
-| `hotplex slack bookmark add/list/remove` | 书签管理 |
-| `hotplex slack schedule-message --text "..." --at <RFC3339>` | 定时发送 |
+## 运行时依赖
 
-### 飞书 CLI
+STT/TTS 是否可用取决于当前 runtime facts、Worker 和平台配置；未声明时说明不可用，不自行安装或替换 provider。不同平台的输出格式、限流和交互行为以当前平台能力为准。
 
-通过 `lark-cli` 操作飞书：
+## AgentConfig 生效
 
-| 命令 | 用途 |
-|------|------|
-| `lark-cli im +messages-send --chat-id <id> --markdown "..."` | 发送消息 |
-| `lark-cli im +messages-reply --message-id <id> --text "..."` | 回复消息 |
-| `lark-cli im +chat-search --query "..."` | 搜索群组 |
-| `lark-cli docs` / `lark-cli drive` | 文档与云盘操作 |
-| `lark-cli base` | 多维表格操作 |
-
-### Cron 定时任务
-
-通过 `hotplex cron` 创建定时、延迟或周期任务。先使用 `hotplex cron --help`
-确认当前版本实际支持的子命令和参数。
-
-### 语音
-
-STT 可将语音转写为文本，TTS 可合成语音输出。是否启用及可用的 provider 以
-当前运行时配置为准。
-
-## 平台特性
-
-| 平台 | 输出特点 |
-|------|---------|
-| Slack | 消息分块、Markdown 转换、限流流式 |
-| 飞书 | 流式卡片、交互按钮、卡片 TTL |
-| WebChat | 完整 Markdown、实时流式 |
-
-## 网关命令
-
-`/gc`、`/park`、`/reset`、`/new`、`/cd <path>` 由网关处理。Worker 不应
-模拟这些命令的网关状态变更。
-
-## 配置层级
-
-本槽位支持全局、平台和 Bot 三级 fallback，高作用域完整替换低作用域：
-
-- 全局级：`~/.hotplex/agent-configs/TOOLS.md`
-- 平台级：`~/.hotplex/agent-configs/slack/TOOLS.md`
-- Bot 级：`~/.hotplex/agent-configs/slack/<botName>/TOOLS.md`
-
-文件缺失表示继承；文件存在但正文为空表示显式清空。修改后对新 Session 或
-明确执行 `/reset` 后生效。
-
-真实 Agent Skills 由独立的 `<name>/SKILL.md` 定义并按需加载，不在本文件中
-声明或展开。需要调整 AgentConfig 时，应先检查有效来源并展示 diff，获得用户
-批准后再通过受控配置接口写入。
+五个配置文件逐文件按 global → platform → Bot fallback；缺失才继承，present-empty 显式清空。配置修改只在新 Session 或明确执行 `/reset` 后生效；修改前读取有效来源，修改后独立验证。
