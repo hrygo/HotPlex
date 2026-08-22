@@ -506,6 +506,7 @@ func (b *Bridge) startPreparedSession(ctx context.Context, p worker.SessionStart
 		wt:                 p.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           p.Platform,
+		scope:              runtimeScopeForSession(p.WorkspaceID, p.BotID, p.BotName),
 		botID:              p.BotID,
 		botName:            p.BotName,
 		forwardOpts:        &forwardOpts{workDir: p.WorkDir},
@@ -624,6 +625,7 @@ func (b *Bridge) StartFreshWorker(ctx context.Context, sessionID string) (string
 		wt:                 si.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           si.Platform,
+		scope:              runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName),
 		botID:              si.BotID,
 		botName:            si.BotName,
 		forwardOpts:        &opts,
@@ -715,6 +717,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		wt:                 si.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           si.Platform,
+		scope:              runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName),
 		botID:              si.BotID,
 		botName:            si.BotName,
 		forwardOpts:        &opts,
@@ -950,8 +953,11 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	// Reload agent config so the worker's next session picks up file changes.
 	if si, err := b.sm.Get(ctx, sessionID); err == nil {
 		if su, ok := w.(worker.SystemPromptUpdater); ok {
-			info := &worker.SessionInfo{SystemPrompt: ""}
-			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(ctx, si.WorkspaceID))
+			info := b.buildWorkerInfo(si.ID, si.UserID, si.WorkDir, si)
+			injectSlackEnv(&info, si.PlatformKey)
+			info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.BotName, si.UserID, si.PlatformKey, si.ID, si.WorkDir)
+			facts := buildRuntimeFacts(w, info, si.Platform, runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName))
+			b.injectAgentConfig(&info, facts, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(ctx, si.WorkspaceID))
 			if info.SystemPrompt != "" {
 				su.UpdateSystemPrompt(info.SystemPrompt)
 				b.log.Info("bridge: reset reloaded agent config",

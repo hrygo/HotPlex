@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -46,6 +47,8 @@ func TestBridge_SetWorkerFactory(t *testing.T) {
 func TestBridge_StartFreshWorker_IsolatesOldRunAndStartsWithoutResume(t *testing.T) {
 	t.Parallel()
 	const sessionID = "sess-fenced-fresh"
+	agentConfigDir := t.TempDir()
+	writeAgentConfigFile(t, agentConfigDir, "SOUL.md", "fresh-start persona")
 	oldWorker := &mockBridgeWorker{
 		workerType: worker.TypeClaudeCode,
 		conn:       &fakeWorkerConn{ch: make(chan *events.Envelope)},
@@ -59,13 +62,22 @@ func TestBridge_StartFreshWorker_IsolatesOldRunAndStartsWithoutResume(t *testing
 	sm.On("Get", sessionID).Return(&session.SessionInfo{
 		ID: sessionID, UserID: "u1", WorkerType: worker.TypeClaudeCode,
 		State: events.StateRunning, WorkerSessionID: "provider-session-old",
+		Platform: "slack", BotID: "bot-1", BotName: "primary",
+		PermissionCeiling: "workspace", WorkDir: "/private/work",
+		PlatformKey: map[string]string{"channel_id": "C-private"},
 	}, nil).Once()
 	sm.On("GetWorker", sessionID).Return(oldWorker).Once()
 	sm.On("DetachWorkerIf", sessionID, oldWorker).Return(true).Once()
 	sm.On("AttachWorker", sessionID, freshWorker).Return(nil).Once()
 	sm.On("GetWorker", sessionID).Return(freshWorker).Once()
+	sm.On("DetachWorkerIf", sessionID, freshWorker).Return(true).Maybe()
 
-	b := NewBridge(BridgeDeps{Log: testLogger(t), Hub: newTestHub(t), SM: sm})
+	b := NewBridge(BridgeDeps{
+		Log:            testLogger(t),
+		Hub:            newTestHub(t),
+		SM:             sm,
+		AgentConfigDir: agentConfigDir,
+	})
 	b.SetWorkerFactory(&mockBridgeWorkerFactory{workers: []*mockBridgeWorker{freshWorker}})
 	runID, err := b.StartFreshWorker(context.Background(), sessionID)
 	require.NoError(t, err)
@@ -76,6 +88,14 @@ func TestBridge_StartFreshWorker_IsolatesOldRunAndStartsWithoutResume(t *testing
 	require.Equal(t, runID, currentRunID)
 	require.False(t, freshWorker.terminated.Load())
 	require.Empty(t, freshWorker.startInfo.WorkerSessionID, "fresh start must not load the fenced provider session")
+	require.Contains(t, freshWorker.startInfo.SystemPrompt, `<runtime-facts format="application/json" schema-version="1">`)
+	require.Contains(t, freshWorker.startInfo.SystemPrompt, `"platform":"slack"`)
+	require.Contains(t, freshWorker.startInfo.SystemPrompt, `"worker_type":"claude_code"`)
+	require.Contains(t, freshWorker.startInfo.SystemPrompt, `"scope_kind":"bot"`)
+	require.Contains(t, freshWorker.startInfo.SystemPrompt, `"declared_permission_mode":"workspace"`)
+	require.NotContains(t, freshWorker.startInfo.SystemPrompt, "private/work")
+	require.NotContains(t, freshWorker.startInfo.SystemPrompt, "C-private")
+	require.NotContains(t, freshWorker.startInfo.SystemPrompt, "bot-1")
 	sm.AssertExpectations(t)
 
 	b.closed.Store(true)
@@ -482,7 +502,12 @@ func TestBridge_InjectAgentConfig_BotNameResolution(t *testing.T) {
 			})
 
 			info := &worker.SessionInfo{}
-			b.injectAgentConfig(info, tt.platform, tt.botName, tt.botID, nil, nil)
+			b.injectAgentConfig(info, agentconfig.RuntimeFacts{
+				SchemaVersion: agentconfig.RuntimeFactsSchemaVersion,
+				Platform:      tt.platform,
+				ScopeKind:     agentconfig.RuntimeScopeBot,
+				WorkerType:    agentconfig.RuntimeWorkerClaudeCode,
+			}, tt.platform, tt.botName, tt.botID, nil, nil)
 
 			if tt.wantEmpty {
 				assert.Empty(t, info.SystemPrompt)
@@ -956,19 +981,32 @@ func TestResetSession_ReloadsAgentConfig(t *testing.T) {
 	})
 
 	sid := "test-reset-reload-session"
-	mw := &mockPromptUpdater{}
+	mw := &mockPromptUpdater{mockBridgeWorker: mockBridgeWorker{workerType: worker.TypeClaudeCode}}
 
 	sm.On("GetWorker", sid).Return(mw)
 	sm.On("Get", sid).Return(&session.SessionInfo{
-		ID:       sid,
-		Platform: "webchat",
-		BotID:    "bot-1",
+		ID:                sid,
+		UserID:            "user-1",
+		Platform:          "webchat",
+		BotID:             "bot-1",
+		PermissionCeiling: "read-only",
+		WorkDir:           "/private/work",
+		PlatformKey:       map[string]string{"channel_id": "chat-private"},
 	}, nil)
 
 	err := b.ResetSession(context.Background(), sid)
 	require.NoError(t, err)
 
 	assert.Contains(t, mw.updatedPrompt, "Updated persona v2.")
+	assert.Contains(t, mw.updatedPrompt, `<runtime-facts format="application/json" schema-version="1">`)
+	assert.Contains(t, mw.updatedPrompt, `"platform":"webchat"`)
+	assert.Contains(t, mw.updatedPrompt, `"worker_type":"claude_code"`)
+	assert.Contains(t, mw.updatedPrompt, `"scope_kind":"bot"`)
+	assert.Contains(t, mw.updatedPrompt, `"declared_permission_mode":"read-only"`)
+	assert.NotContains(t, mw.updatedPrompt, "user-1")
+	assert.NotContains(t, mw.updatedPrompt, "bot-1")
+	assert.NotContains(t, mw.updatedPrompt, "private/work")
+	assert.NotContains(t, mw.updatedPrompt, "chat-private")
 	sm.AssertExpectations(t)
 }
 
