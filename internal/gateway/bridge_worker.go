@@ -619,12 +619,6 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 		}
 		return
 	}
-	if configs.IsEmpty() {
-		b.log.Warn("bridge: agent config empty, no files found",
-			"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID)
-		return
-	}
-
 	if prompt := agentconfig.BuildSystemPrompt(configs); prompt != "" {
 		info.SystemPrompt = prompt
 		b.log.Info("bridge: agent config injected", "prompt_len", len(prompt), "platform", platform, "bot_name", botName, "bot_id", botID)

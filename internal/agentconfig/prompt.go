@@ -17,27 +17,14 @@ func init() {
 	}
 }
 
-const skillCatalogNotice = "Tools are available only through explicit slash invocation or structured selection. Ordinary text never invokes a skill; complete skill instructions are loaded only after an explicit selection."
-
-var trustedSkillCatalog = []struct {
-	markers []string
-	line    string
-}{
-	{markers: []string{"cron", "定时", "提醒"}, line: "Cron 定时任务：创建定时、延迟或周期任务。触发：定时、延迟、周期、提醒、计划任务或 cron 请求。"},
-	{markers: []string{"slack"}, line: "Slack CLI：处理 Slack 消息、频道、文件和反应。触发：Slack、频道、消息、文件、反应或书签请求。"},
-	{markers: []string{"feishu", "lark", "飞书"}, line: "飞书 CLI：处理飞书消息、文档、云盘或多维表格。触发：飞书、文档、云盘、多维表格或消息请求。"},
-	{markers: []string{"voice", "speech", "语音"}, line: "语音：处理语音转写或语音合成。触发：语音、转写或合成请求。"},
-	{markers: []string{"search", "搜索", "查找"}, line: "Search：用于查找公开资料。触发：用户明确提出搜索或查找请求。"},
-}
-
 // BuildSystemPrompt assembles the agent configuration (B+C channels) into a
-// single system prompt. User-provided skill bodies are deliberately excluded:
-// skill resolution and loading happen at the explicit invocation boundary.
+// single system prompt. TOOLS.md is environment guidance, not an Agent Skill
+// catalog; real Skill discovery and loading use the independent skills system.
 // Used by both Claude Code (--append-system-prompt) and OpenCode Server (system
 // field per message). Two-level XML nesting conveys the B/C priority
 // distinction: directives (behavioral constraints) vs context (reference data).
 func BuildSystemPrompt(configs *AgentConfigs) string {
-	if configs == nil || configs.IsEmpty() {
+	if configs == nil {
 		return ""
 	}
 
@@ -65,13 +52,9 @@ func BuildSystemPrompt(configs *AgentConfigs) string {
 			))
 		}
 		if configs.Tools != "" {
-			catalog := buildSkillCatalog(configs.Tools)
-			if catalog == "" {
-				catalog = skillCatalogNotice
-			}
 			b = append(b, fmt.Sprintf(
-				"    <skills>\n    在相关时调用这些能力。\n\n%s\n    </skills>",
-				catalog,
+				"    <tool-guidance>\n    以下内容是环境工具使用指南，不是工具可用性声明。\n\n%s\n    </tool-guidance>",
+				sanitize(configs.Tools),
 			))
 		}
 		groups = append(groups, "  <directives>\n  核心行为准则 —— 除非用户有明确的反向指令，否则必须严格遵守。\n\n"+
@@ -105,7 +88,7 @@ func BuildSystemPrompt(configs *AgentConfigs) string {
 		return ""
 	}
 
-	return "<agent-configuration>\n" +
+	return "<agent-configuration schema-version=\"2\">\n" +
 		joinLines(groups) +
 		"\n</agent-configuration>"
 }
@@ -134,40 +117,10 @@ func joinLines(parts []string) string {
 
 func buildHotplexMetacognition() string { return hotplexMetacognition }
 
-// buildSkillCatalog treats SKILLS.md as untrusted input. It only uses the
-// presence of known capability markers to select fixed, audited descriptions;
-// no user-provided heading or body text crosses the system-prompt boundary.
-func buildSkillCatalog(raw string) string {
-	lower := strings.ToLower(stripFrontmatter(raw))
-	entries := make([]string, 0, len(trustedSkillCatalog))
-	for _, capability := range trustedSkillCatalog {
-		matched := false
-		for _, marker := range capability.markers {
-			if strings.Contains(lower, strings.ToLower(marker)) {
-				matched = true
-				break
-			}
-		}
-		if matched {
-			entries = append(entries, capability.line)
-		}
-	}
-	if len(entries) == 0 {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString(skillCatalogNotice)
-	b.WriteString("\n\n可用能力元数据（仅用于发现；完整说明须在显式选择后加载）：")
-	for _, entry := range entries {
-		fmt.Fprintf(&b, "\n- %s", entry)
-	}
-	return b.String()
-}
-
 var reservedTags = []string{
 	"agent-configuration", "directives", "context", "persona",
-	"rules", "skills", "user", "memory", "user-data", "memory-data", "hotplex", "notice",
+	"rules", "skills", "tool-guidance", "runtime-facts", "user", "memory",
+	"user-data", "memory-data", "hotplex", "notice",
 }
 
 // sanitize prevents XML injection by escaping tags that match our structural schema.

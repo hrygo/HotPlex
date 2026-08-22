@@ -332,14 +332,16 @@ func TestBuildSystemPrompt(t *testing.T) {
 		require.Empty(t, BuildSystemPrompt(nil))
 	})
 
-	t.Run("empty configs returns empty", func(t *testing.T) {
-		require.Empty(t, BuildSystemPrompt(&AgentConfigs{}))
+	t.Run("empty configs still include hotplex metacognition", func(t *testing.T) {
+		prompt := BuildSystemPrompt(&AgentConfigs{})
+		require.Contains(t, prompt, `<agent-configuration schema-version="2">`)
+		require.Contains(t, prompt, "<hotplex>")
 	})
 
 	t.Run("assembles B+C with nested XML tags", func(t *testing.T) {
 		cfg := &AgentConfigs{Soul: "Persona", Agents: "Rules", Tools: "Tools", User: "User data", Memory: "Memory data"}
 		prompt := BuildSystemPrompt(cfg)
-		require.Contains(t, prompt, "<agent-configuration>")
+		require.Contains(t, prompt, `<agent-configuration schema-version="2">`)
 		require.Contains(t, prompt, "</agent-configuration>")
 		require.Contains(t, prompt, "<directives>")
 		require.Contains(t, prompt, "</directives>")
@@ -347,8 +349,9 @@ func TestBuildSystemPrompt(t *testing.T) {
 		require.Contains(t, prompt, "Persona")
 		require.Contains(t, prompt, "<rules>")
 		require.Contains(t, prompt, "Rules")
-		require.Contains(t, prompt, "<skills>")
+		require.Contains(t, prompt, "<tool-guidance>")
 		require.Contains(t, prompt, "Tools")
+		require.NotContains(t, prompt, "<skills>")
 		require.Contains(t, prompt, "<context>")
 		require.Contains(t, prompt, "</context>")
 		require.Contains(t, prompt, "<user>")
@@ -381,7 +384,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		require.Contains(t, prompt, "Memory only")
 		require.NotContains(t, prompt, "<persona>")
 		require.NotContains(t, prompt, "<rules>")
-		require.NotContains(t, prompt, "<skills>")
+		require.NotContains(t, prompt, "<tool-guidance>")
 	})
 
 	t.Run("directives before context", func(t *testing.T) {
@@ -397,7 +400,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		prompt := BuildSystemPrompt(cfg)
 		require.Contains(t, prompt, "自然地代入并体现此人格定位")
 		require.Contains(t, prompt, "视为强制性的工作空间行为约束")
-		require.Contains(t, prompt, "在相关时调用这些能力")
+		require.Contains(t, prompt, "环境工具使用指南")
 		require.Contains(t, prompt, "提供个性化的服务体验")
 		require.Contains(t, prompt, "确保任务执行的连贯性与深度")
 	})

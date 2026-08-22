@@ -445,13 +445,13 @@ func TestBridge_InjectAgentConfig_BotNameResolution(t *testing.T) {
 			wantContain: "Global soul.",
 		},
 		{
-			name: "disabled when empty dir",
+			name: "empty external config still injects metacognition",
 			setup: func(t *testing.T) string {
 				return t.TempDir()
 			},
-			platform:  "webchat",
-			botID:     "bot",
-			wantEmpty: true,
+			platform:    "webchat",
+			botID:       "bot",
+			wantContain: "<hotplex>",
 		},
 		{
 			name: "path traversal rejected via botName",
