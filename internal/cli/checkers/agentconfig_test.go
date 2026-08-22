@@ -73,10 +73,52 @@ func TestAgentConfigDirChecker(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(cfgDir, "slack"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "slack", "SOUL.md"), []byte("soul"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "slack", "AGENTS.md"), []byte("agents"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "slack", "TOOLS.md"), []byte("tool guidance"), 0o644))
 
 		c := agentConfigDirChecker{dir: cfgDir}
 		d := c.Check(context.Background())
 		require.Equal(t, cli.StatusPass, d.Status)
+	})
+
+	t.Run("legacy tools basename warns without exposing content", func(t *testing.T) {
+		t.Parallel()
+		cfgDir := t.TempDir()
+		secret := "private legacy tool guidance"
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "SKILLS.md"), []byte(secret), 0o644))
+
+		d := (agentConfigDirChecker{dir: cfgDir}).Check(context.Background())
+		require.Equal(t, cli.StatusWarn, d.Status)
+		require.Contains(t, d.Message, "SKILLS.md")
+		require.Contains(t, d.Message, "deprecated")
+		require.NotContains(t, d.Message, secret)
+		require.Contains(t, d.FixHint, "TOOLS.md")
+		require.Contains(t, d.FixHint, "backup")
+	})
+
+	t.Run("canonical and legacy tools collision warns", func(t *testing.T) {
+		t.Parallel()
+		cfgDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(cfgDir, "slack"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "slack", "TOOLS.md"), []byte("canonical"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "slack", "SKILLS.md"), []byte("legacy"), 0o644))
+
+		d := (agentConfigDirChecker{dir: cfgDir}).Check(context.Background())
+		require.Equal(t, cli.StatusWarn, d.Status)
+		require.Contains(t, d.Message, filepath.Join("slack", "TOOLS.md"))
+		require.Contains(t, d.Message, filepath.Join("slack", "SKILLS.md"))
+		require.Contains(t, d.Message, "wins")
+	})
+
+	t.Run("present empty tools file warns about explicit clear", func(t *testing.T) {
+		t.Parallel()
+		cfgDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(cfgDir, "slack", "helper"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "slack", "helper", "TOOLS.md"), []byte(" \n"), 0o644))
+
+		d := (agentConfigDirChecker{dir: cfgDir}).Check(context.Background())
+		require.Equal(t, cli.StatusWarn, d.Status)
+		require.Contains(t, d.Message, filepath.Join("slack", "helper", "TOOLS.md"))
+		require.Contains(t, d.Message, "explicit clear")
 	})
 
 	t.Run("valid with bot subdirectory", func(t *testing.T) {

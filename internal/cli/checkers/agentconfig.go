@@ -3,6 +3,7 @@ package checkers
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,8 +109,12 @@ func (c agentConfigDirChecker) scanDir() string {
 }
 
 var validConfigFiles = map[string]bool{
-	"SOUL.md": true, "AGENTS.md": true, "SKILLS.md": true,
-	"USER.md": true, "MEMORY.md": true,
+	agentconfig.FileSoul:         true,
+	agentconfig.FileAgents:       true,
+	agentconfig.FileTools:        true,
+	agentconfig.LegacyFileSkills: true,
+	agentconfig.FileUser:         true,
+	agentconfig.FileMemory:       true,
 }
 
 // ignoredFiles are non-config files allowed in any directory without warning.
@@ -131,14 +136,7 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 	}
 
 	var warnings []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		// Platform directory (slack/, feishu/, webchat/, etc.)
-		platformDir := filepath.Join(dir, e.Name())
-		c.checkSubdir(platformDir, e.Name(), &warnings)
-	}
+	c.checkScope(dir, ".", true, entries, &warnings)
 
 	if len(warnings) == 0 {
 		return cli.Diagnostic{
@@ -153,33 +151,91 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 		Name:     c.Name(),
 		Category: c.Category(),
 		Status:   cli.StatusWarn,
-		Message:  fmt.Sprintf("Unrecognized files in agent config: %s", strings.Join(warnings, ", ")),
-		FixHint:  "Remove or relocate non-config .md files from platform subdirectories. Valid names: SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md",
+		Message:  fmt.Sprintf("Agent config migration issues: %s", strings.Join(warnings, "; ")),
+		FixHint:  "Migrate legacy SKILLS.md content to TOOLS.md, validate the effective config, then preserve the old file as a SKILLS.md.bak backup until rollback is no longer needed. Canonical names: SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md",
 	}
 }
 
-func (c agentConfigDirChecker) checkSubdir(platformDir, platformName string, warnings *[]string) {
-	entries, err := os.ReadDir(platformDir)
-	if err != nil {
-		*warnings = append(*warnings, fmt.Sprintf("cannot read %s config dir: %v", platformName, err))
-		return
-	}
+func (c agentConfigDirChecker) checkScope(scopeDir, scope string, root bool, entries []os.DirEntry, warnings *[]string) {
+	hasTools := false
+	hasLegacy := false
 	for _, e := range entries {
 		if e.IsDir() {
-			// Bot-level subdirectory — validate its contents too
-			botDir := filepath.Join(platformDir, e.Name())
-			c.checkSubdir(botDir, platformName+"/"+e.Name(), warnings)
 			continue
 		}
 		name := e.Name()
+		hasTools = hasTools || name == agentconfig.FileTools
+		hasLegacy = hasLegacy || name == agentconfig.LegacyFileSkills
 		if validConfigFiles[name] || ignoredFiles[name] {
 			continue
 		}
-		// Non-.md files or unrecognized .md files in platform/bot directories
-		if strings.HasSuffix(name, ".md") {
-			*warnings = append(*warnings, filepath.Join(platformName, name))
+		// Preserve the historical behavior of ignoring unrelated global markdown,
+		// while still validating platform and bot scopes recursively.
+		if !root && strings.HasSuffix(name, ".md") {
+			*warnings = append(*warnings, relativeConfigPath(scope, name)+" is unrecognized")
 		}
 	}
+
+	toolsPath := relativeConfigPath(scope, agentconfig.FileTools)
+	legacyPath := relativeConfigPath(scope, agentconfig.LegacyFileSkills)
+	switch {
+	case hasTools && hasLegacy:
+		*warnings = append(*warnings, toolsPath+" and "+legacyPath+" coexist; TOOLS.md wins")
+	case hasLegacy:
+		*warnings = append(*warnings, legacyPath+" uses deprecated AgentConfig tools basename")
+	}
+	if hasTools {
+		empty, err := boundedFileEmpty(filepath.Join(scopeDir, agentconfig.FileTools))
+		if err != nil {
+			*warnings = append(*warnings, "cannot inspect "+toolsPath+": "+err.Error())
+		} else if empty {
+			*warnings = append(*warnings, toolsPath+" is present-empty and acts as an explicit clear")
+		}
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		childScope := e.Name()
+		if !root {
+			childScope = filepath.Join(scope, e.Name())
+		}
+		childDir := filepath.Join(scopeDir, e.Name())
+		childEntries, err := os.ReadDir(childDir)
+		if err != nil {
+			*warnings = append(*warnings, fmt.Sprintf("cannot read %s config dir: %v", childScope, err))
+			continue
+		}
+		c.checkScope(childDir, childScope, false, childEntries, warnings)
+	}
+}
+
+func relativeConfigPath(scope, name string) string {
+	if scope == "." {
+		return name
+	}
+	return filepath.Join(scope, name)
+}
+
+func boundedFileEmpty(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return true, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, agentconfig.MaxFileChars+1))
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(data)) == "", nil
 }
 
 // agentConfigGlobalFilesChecker detects config files at the global level
