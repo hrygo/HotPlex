@@ -36,19 +36,24 @@ const waitKillTimeout = 5 * time.Second
 // forwardContext carries per-session mutable state for the event forwarding loop.
 // Ownership: exclusively owned by the single forwardEvents goroutine per session.
 // No concurrent access — all fields are read/written from that goroutine only,
-// except turnTimerFired which uses atomic.Bool for timer callback safety.
+// except turnTimerFired and terminalSent, which use atomic.Bool for timer and
+// terminal-fence callback safety.
 type forwardContext struct {
-	sessionID      string
-	workerType     worker.WorkerType
-	workerRunID    string
-	sessPlatform   string
-	sessOwner      string
-	workDir        string
-	ctx            context.Context
-	startTime      time.Time
-	turnStartTime  time.Time
-	firstEvent     bool
-	doneReceived   bool
+	sessionID     string
+	workerType    worker.WorkerType
+	workerRunID   string
+	sessPlatform  string
+	sessOwner     string
+	workDir       string
+	ctx           context.Context
+	startTime     time.Time
+	turnStartTime time.Time
+	firstEvent    bool
+	doneReceived  bool
+	// terminalSent fences duplicate Done/Error events from a worker stream and
+	// lets the exit path suppress a second synthetic error. It is atomic because
+	// the turn-timeout callback and the forwarder goroutine can race.
+	terminalSent   atomic.Bool
 	turnText       strings.Builder
 	lastError      *events.ErrorData
 	pendingError   *events.Envelope
@@ -127,6 +132,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	w := fb.worker
 	workerType := w.Type()
 	flog := b.log.With(observability.KeyTraceID, observability.TraceID(ctx))
+	var fc *forwardContext
 	defer func() {
 		if r := recover(); r != nil {
 			observability.GatewayForwarderPanics().Add(context.Background(), 1,
@@ -134,6 +140,12 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 			flog.Error("bridge: panic in forwardEvents", "session_id", sessionID,
 				"worker_type", workerType, "worker_run_id", opts.workerRunID,
 				"panic", r, "stack", string(debug.Stack()))
+			// A panic after stream consumption must still produce one visible
+			// terminal. Without this guard the client is left indefinitely in a
+			// thinking state; a later worker cleanup has no forwarder to notify it.
+			if fc != nil && b.hub != nil && !w.IsStopped() && fc.terminalSent.CompareAndSwap(false, true) {
+				b.sendError(sessionID, events.ErrCodeWorkerCrash, "worker event stream interrupted before terminal")
+			}
 		}
 	}()
 
@@ -146,7 +158,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	// worker was since reset detects the mismatch in handleWorkerExit.
 	myResetGen := fb.resetGen
 
-	fc := &forwardContext{
+	fc = &forwardContext{
 		sessionID:     sessionID,
 		workerType:    workerType,
 		workerRunID:   opts.workerRunID,
@@ -193,6 +205,9 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	if b.turnTimeout > 0 {
 		fc.turnTimer = time.AfterFunc(b.turnTimeout, func() {
 			if !fc.turnTimerFired.CompareAndSwap(false, true) {
+				return
+			}
+			if !fc.terminalSent.CompareAndSwap(false, true) {
 				return
 			}
 			flog.Warn("bridge: turn timeout exceeded, terminating worker",
@@ -242,7 +257,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	}
 
 	// Flush buffered error that never reached a retry decision point.
-	if fc.pendingError != nil {
+	if fc.pendingError != nil && fc.terminalSent.CompareAndSwap(false, true) {
 		releaseSeq := func() {}
 		canFlush := true
 		if b.collector != nil {
@@ -261,6 +276,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		}
 		fc.pendingError = nil
 	}
+	fc.pendingError = nil
 
 	b.handleWorkerExit(w, workerExitParams{
 		sessionID:      sessionID,
@@ -270,6 +286,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		doneReceived:   fc.doneReceived,
 		turnText:       fc.turnText.String(),
 		turnTextLen:    fc.turnText.Len(),
+		terminalSent:   fc.terminalSent.Load(),
 		turnTimerFired: fc.turnTimerFired.Load(),
 		sessPlatform:   fc.sessPlatform,
 		sessOwner:      fc.sessOwner,
@@ -384,6 +401,23 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 			return
 		}
 	}
+	if fc.terminalSent.Load() && !fc.turnTimerFired.Load() && isTurnStartEvent(env.Event.Type) {
+		// Some workers begin the next turn with content rather than an explicit
+		// state(running) event. A post-terminal content event is therefore the
+		// next turn boundary; reopen the terminal fence before processing it.
+		fc.doneReceived = false
+		fc.terminalSent.Store(false)
+	}
+
+	// A worker stream may emit a duplicate Done/Error (or emit Done after a
+	// stop has already produced the synthetic terminal). Claim the terminal
+	// before any stats/runtime side effects so exactly one terminal is visible.
+	// Retryable errors return above as pending and claim only when flushed.
+	if env.Event.Type == events.Done || env.Event.Type == events.Error {
+		if w.IsStopped() || !fc.terminalSent.CompareAndSwap(false, true) {
+			return
+		}
+	}
 
 	if fc.firstEvent {
 		// Safety-net: persist again on first event in case the post-launch
@@ -402,8 +436,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		fc.doneReceived = false
 		if stateData, ok := env.Event.Data.(events.StateData); ok && stateData.State == events.StateRunning {
 			fc.turnStartTime = time.Now()
+			fc.terminalSent.Store(false)
 		} else if m, ok := env.Event.Data.(map[string]any); ok && m["state"] == string(events.StateRunning) {
 			fc.turnStartTime = time.Now()
+			fc.terminalSent.Store(false)
 		}
 	}
 
@@ -465,6 +501,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
 		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(context.TODO(), sessionID, fc.lastError); shouldRetry {
 			fc.pendingError = nil
+			fc.terminalSent.Store(false)
 			// Pre-register cancel channel before launching goroutine to close
 			// the race window where CancelRetry can't find the channel.
 			cancelCh := make(chan struct{})
@@ -501,6 +538,17 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		// Turn start is now recorded by the input path (Fix D) and read on Done.
 	}
 
+}
+
+func isTurnStartEvent(kind events.Kind) bool {
+	switch kind {
+	case events.MessageStart, events.MessageDelta, events.Reasoning,
+		events.ToolCall, events.PermissionRequest, events.QuestionRequest,
+		events.ElicitationRequest:
+		return true
+	default:
+		return false
+	}
 }
 
 // finishRuntimeOnDone correlates the terminal runtime status when a Done event
@@ -833,6 +881,10 @@ func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
 	if skipOnDone && fc.doneReceived {
 		return
 	}
+	if !fc.terminalSent.CompareAndSwap(false, true) {
+		fc.pendingError = nil
+		return
+	}
 	if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
 		b.flogOf(fc).Warn("bridge: forward buffered error failed", "err", err, "session_id", fc.sessionID, "worker_type", fc.workerType)
 	}
@@ -847,6 +899,7 @@ type workerExitParams struct {
 	opts           forwardOpts
 	startTime      time.Time
 	doneReceived   bool
+	terminalSent   bool
 	turnText       string
 	turnTextLen    int
 	turnTimerFired bool
@@ -953,7 +1006,7 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// its turn (no "done" received). Skip during shutdown, SIGTERM (143),
 	// Applies to both fresh and resumed sessions — Resume() gracefully falls back
 	// to fresh Start() for workers that cannot preserve conversation history.
-	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && exitCode != 143 && exitCode != -1 && !wasStopped && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
+	fallbackAttempted := b.sm != nil && !b.closed.Load() && !p.doneReceived && !p.terminalSent && exitCode != 143 && exitCode != -1 && !wasStopped && p.opts.retryDepth < 2 && time.Since(p.startTime) < 15*time.Second
 	if fallbackAttempted && p.turnTextLen == 0 && time.Since(p.startTime) < 5*time.Second {
 		lg.Info("bridge: session files missing after resume, skipping retry",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
@@ -1014,7 +1067,10 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 	// 1. Session completed normally: "done" received with no pending turn text.
 	// 2. Worker was intentionally terminated: SIGTERM (exit 143) is always
 	//    bridge/handler/GC-initiated, never an unexpected crash.
-	if wasStopped {
+	if p.terminalSent {
+		lg.Debug("bridge: worker exit after terminal was already sent",
+			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
+	} else if wasStopped {
 		lg.Info("bridge: worker exit clean (stopped by user)",
 			"session_id", p.sessionID, "worker_type", workerType, "exit_code", exitCode)
 	} else if p.doneReceived && p.turnTextLen == 0 {

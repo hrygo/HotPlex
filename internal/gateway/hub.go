@@ -446,8 +446,10 @@ func (h *Hub) HasActiveConn(sessionID string) bool {
 }
 
 // SendToSession delivers a message to all connections subscribed to a session.
-// Control-priority messages bypass the broadcast queue.
-// afterDrain functions are called sequentially after the item is routed by Run.
+// PriorityControl is a scheduling hint, but sequence-bearing events still use
+// the ordered broadcast writer so allocation order matches client delivery
+// order. afterDrain functions are called sequentially after the item is routed
+// by Run.
 func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrain ...func()) error {
 	spanCtx, span := observability.Tracer().Start(ctx, "hub.send_to_session")
 	defer span.End()
@@ -500,11 +502,6 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 		afterDrainCallback = afterDrain[0]
 	}
 
-	if env.Priority == events.PriorityControl {
-		h.sendControlToSession(spanCtx, env)
-		return nil
-	}
-
 	// No Clone needed here: Bridge.forwardEvents already clones the envelope
 	// before calling SendToSession, so this is a bridge-owned copy. The Hub.Run
 	// goroutine reads it from the channel for routing without mutation.
@@ -524,6 +521,17 @@ func (h *Hub) SendToSession(ctx context.Context, env *events.Envelope, afterDrai
 		case <-h.ctx.Done():
 			return errors.New("gateway: broadcast channel closed")
 		}
+	}
+
+	// Control events are guaranteed-delivery messages, not an out-of-band
+	// write path. Sending them through the same queue prevents a higher-seq
+	// InputAck/State from overtaking an earlier worker event already admitted to
+	// Hub.Run (C04-double-stop).
+	if env.Priority == events.PriorityControl {
+		if h.sendBroadcast(msg) {
+			return nil
+		}
+		return errors.New("gateway: broadcast channel closed")
 	}
 
 	if isDroppable(env.Event.Type) {
