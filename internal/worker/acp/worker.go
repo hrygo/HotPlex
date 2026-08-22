@@ -192,8 +192,9 @@ type Worker struct {
 	// initResult caches the ACP initialize handshake result for agent discovery and capability checks.
 	initResult *InitializeResult
 
-	// systemPrompt holds the B/C channel agent config from SessionInfo.SystemPrompt.
-	// Injected as a prefix on the first user prompt (ACP v1 has no native system prompt).
+	// systemPrompt is retained for the optional SystemPromptUpdater contract, but
+	// ACP v1 has no native system channel. Input deliberately never copies this
+	// value into ordinary user text.
 	systemPrompt         string
 	systemPromptInjected atomic.Bool
 
@@ -297,7 +298,8 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.Mu.Unlock()
 
-	// Cache system prompt for first-input injection (ACP v1 has no native mechanism).
+	// Retain the prompt for the updater contract. ACP v1 has no native system
+	// channel, so Input must not concatenate this private value with user text.
 	sp := session.SystemPrompt
 	if len(sp) > 32*1024 {
 		w.Log.Warn("acp: system prompt exceeds 32KB, truncating",
@@ -551,10 +553,6 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 	w.mapper.Reset()
 	w.mapper.SetTurnActive()
 
-	// Inject system prompt on first user input (ACP v1 has no native system prompt).
-	if w.systemPrompt != "" && w.systemPromptInjected.CompareAndSwap(false, true) {
-		content = fmt.Sprintf("[SYSTEM INSTRUCTIONS]\n%s\n[/SYSTEM INSTRUCTIONS]\n\n%s", w.systemPrompt, content)
-	}
 	// Inject JSON Schema on first user input for structured output support.
 	if w.jsonSchema != "" && w.jsonSchemaInjected.CompareAndSwap(false, true) {
 		content = fmt.Sprintf("[JSON SCHEMA]\n%s\n[/JSON SCHEMA]\n\n%s", w.jsonSchema, content)
@@ -860,8 +858,9 @@ func (w *Worker) supportsCapability(name string) bool {
 
 // ─── UpdateSystemPrompt ──────────────────────────────────────────────────
 
-// UpdateSystemPrompt replaces the stored system prompt and resets the injection
-// flag so the next user input in the new ACP session carries the reloaded config.
+// UpdateSystemPrompt replaces the stored prompt for compatibility with the
+// bridge updater contract. ACP v1 has no native system channel, so the prompt
+// is intentionally not injected into the next user input.
 func (w *Worker) UpdateSystemPrompt(prompt string) {
 	w.Mu.Lock()
 	w.systemPrompt = prompt

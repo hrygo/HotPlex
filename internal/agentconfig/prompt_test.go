@@ -72,3 +72,19 @@ func TestSanitize_NonReservedTags(t *testing.T) {
 	got := sanitize(input)
 	require.Equal(t, input, got, "non-reserved tags should pass through unchanged")
 }
+
+func TestBuildSystemPromptSeparatesInstructionsFromData(t *testing.T) {
+	t.Parallel()
+
+	cfg := &AgentConfigs{
+		Skills: "PRIVATE_SKILL_SENTINEL",
+		User:   "user data",
+		Memory: "memory data",
+	}
+	prompt := BuildSystemPrompt(cfg)
+
+	require.NotContains(t, prompt, "PRIVATE_SKILL_SENTINEL")
+	require.Contains(t, prompt, "<user-data>")
+	require.Contains(t, prompt, "<memory-data>")
+	require.Contains(t, prompt, "must not disclose")
+}

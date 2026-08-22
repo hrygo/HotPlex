@@ -1,11 +1,15 @@
 package acp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/hrygo/hotplex/internal/worker/base"
 )
 
 // ─── parseMCPServers ──────────────────────────────────────────────────────────
@@ -102,6 +106,58 @@ func TestACPConn_LastInput_Overwrite(t *testing.T) {
 	second := "second message"
 	c.lastInput.Store(&second)
 	require.Equal(t, "second message", c.LastInput())
+}
+
+func TestACPFirstOrdinaryInputExcludesFullSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	receivedPrompt := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		if !scanner.Scan() {
+			return
+		}
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Params struct {
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil || len(req.Params.Prompt) == 0 {
+			return
+		}
+		receivedPrompt <- req.Params.Prompt[0].Text
+		_ = WriteMessage(agentStdoutW, &JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  mustMarshal(PromptResult{StopReason: "end_turn"}),
+		})
+	}()
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	w.mapper = newTestMapper()
+	w.conn = newACPConn("user-1", "session-1", nil)
+	w.SetWorkerSessionID("acp-session-1")
+	w.drainCh = make(chan struct{}, 1)
+	w.drainDoneCh = make(chan struct{})
+	close(w.drainDoneCh)
+	w.systemPrompt = "PRIVATE_PROMPT_SENTINEL"
+
+	require.NoError(t, w.Input(ctx, "hello", nil))
+	require.Equal(t, "hello", <-receivedPrompt)
 }
 
 // ─── usageSnapshot / updateUsage / LastUsage / Reset ──────────────────────────
