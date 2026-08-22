@@ -24,7 +24,7 @@ HotPlex 有五个可编辑配置槽位：
 
 `TOOLS.md` 是常驻操作指南，不是工具清单，也不是 Agent Skill。工具是否可用以当前 Worker、Gateway、MCP 或宿主实际暴露的结构化定义为准，指南不能创造工具权限或能力。
 
-Agent Skills 是独立的、按需加载的工作流包，以 `<name>/SKILL.md` 定义，必要时再读取 `references/`、`scripts/` 或 `assets/`。不要从 `TOOLS.md` 推断 Skill，也不要把 Skill metadata 或正文复制进 AgentConfig prompt。Admin API 的 `skills`、WebChat Skills、Worker `/skills` 和 AEP Skill entries 描述的是 Agent Skills，不是 `TOOLS.md` 槽位。
+Agent Skills 是独立的、按需加载的工作流包，以 `<name>/SKILL.md` 定义，必要时再读取 `references/`、`scripts/` 或 `assets/`。不要从 `TOOLS.md` 推断 Skill，也不要把 Skill metadata 或正文复制进 AgentConfig prompt。Admin API 的 `skills`、WebChat Skills、Session `/skills`、Worker 原生 Skill catalog 和 AEP Skill entries 描述的是 Agent Skills，不是 `TOOLS.md` 槽位。
 
 HotPlex 能力可能通过 Gateway command、Worker command、CLI、MCP、Admin API 或 Agent Skill 暴露；这些表面不可互相替代。查询顺序是：
 

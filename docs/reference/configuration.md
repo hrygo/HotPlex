@@ -426,9 +426,7 @@ Agent B/C 通道配置加载器。
 
 facts 是受限的**声明**，不是外部 Worker 健康或权限已执行的证明。字段范围仅包括平台、Worker 类型、作用域种类、声明的权限模式、`resume`/`streaming`/`tools`、`skills`/`mcp`/`worker` 查询面、声明的 Skill catalog 所有者，以及 allowlist Gateway 环境键名的存在性。它不包含身份值、Session/频道/线程/团队 ID、工作目录、环境变量值、凭据、动态 catalog、Skill metadata/正文或 MCP 配置。
 
-Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，HotPlex 不复制一份 catalog 到 AgentConfig。Session `/skills` 的 `callable`、`discoverable`、`unavailable` 状态是当前调用边界：只有 Worker 权威目录确认的 `callable` 才能执行；短 `/name`、显式 `/worker <name>`、结构化/WebChat 调用及 busy/crash replay 共用该判定，filesystem-only Skill 不可调用。
-
-Phase A 尚未实现 built-in registry、`hotplex skills sync`/`hotplex skills status`/`hotplex skills remove` 或 Worker-native projections；不要将这些命令或机制当作当前配置项或已上线能力。
+Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，HotPlex 不复制一份 catalog 到 AgentConfig。Session `/skills` 保留 `callable`、`discoverable`、`unavailable` 三种状态；当前 merged catalog 把 filesystem-only Skill 标为 `discoverable`，只有 Worker 权威目录确认的 `callable` 才能执行。短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 共用该判定。
 
 ---
 
@@ -455,7 +453,7 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `yaml_config_path` | string | `""` | — | 外部 YAML 配置文件路径（可选） |
 | `jobs` | []map | `[]` | — | 内联 Job 定义（可选） |
 
-**Agent 路由与验证**：处理 Cron 请求时优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时查询当前二进制的 `hotplex cron --help`，必要时再看 `hotplex cron create --help`。创建后必须用独立读取路径执行 `hotplex cron get <id|name>` 验证，不能把 Skill 文档或旧示例当作成功证据。
+**Agent 路由与验证**：处理 Cron 请求时优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时查询当前二进制的 `hotplex cron --help`，必要时再看 `hotplex cron create --help`。创建后必须用独立读取路径执行 `hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；不能把 Skill 文档或旧示例当作成功证据。
 
 ---
 

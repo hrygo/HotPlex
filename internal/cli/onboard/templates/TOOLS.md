@@ -19,7 +19,7 @@ description: "HotPlex capability routing and safety guidance"
 
 - Slack 操作使用当前暴露的 `hotplex slack` 能力；只在请求明确涉及 Slack 时调用，并先用命令帮助确认参数。
 - Feishu 操作使用 `lark-cli`，不把它当作 `hotplex-cli` 的别名。
-- Cron 使用 `hotplex cron`。创建前确认 schedule、目标平台和授权；创建后用 `hotplex cron get` 独立核对任务状态、schedule 和投递目标。二次确认失败时报告 degraded，不重复创建。
+- Cron 使用 `hotplex cron`。创建前确认 schedule、目标平台和授权；创建后用 `hotplex cron get <id|name> --json` 独立核对任务状态、schedule、platform 和 platform key。二次确认失败时报告 degraded，不重复创建。
 - 若适用任务已激活 `hotplex-cli` Agent Skill，先按其流程执行；未激活时以当前二进制的 `--help` 为事实来源，不猜测隐藏参数。
 - `status`、`doctor`、`security`、配置读取等诊断优先保持只读；Admin、服务、主机或其他特权操作需要对应的认证和明确授权。
 

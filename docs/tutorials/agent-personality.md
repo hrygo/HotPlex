@@ -113,22 +113,22 @@ mkdir -p ~/.hotplex/agent-configs
 不提供身份值、路径、环境值、凭据、动态 catalog 或 Skill 正文。事实不是 Worker 健康或权限
 已经执行的证明，Admin 预览没有运行时 facts。
 
-Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 `/skills` 都是
+Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 Skill catalog 都是
 真实 Agent Skills 的表面；`TOOLS.md` 不是 Skill catalog，META 也不会复制 catalog。当前
 Session 的状态含义是：文件系统发现但没有调用证据为 `discoverable`，Worker 权威目录确认
-可执行为 `callable`，权威目录明确排除为 `unavailable`。只有 `callable` 可调用；短
-`/name`、显式 `/worker <name>`、结构化/WebChat 调用以及 busy/crash replay 共用同一判定，
-filesystem-only Skill 不会因为存在路径而变成可调用。
+可执行为 `callable`；`unavailable` 保留给能力表面明确报告的不可用状态。只有 `callable`
+可调用；短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured
+replay 共用同一判定，filesystem-only Skill 不会因为存在路径而变成可调用。
 
 配置变更和 Skill 可见性都应在新建 Session 或 `/reset` 后重新检查，并以当前 `/skills` 状态
-为准。Phase A 尚未提供 built-in registry、`hotplex skills sync/status/remove` 或
-Worker-native projections，不要把它们当作已安装能力。
+为准。
 
 ### Cron 请求的 CLI 路由
 
 Cron 请求优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时先查询当前二进制的
 `hotplex cron --help`，必要时再看 `hotplex cron create --help`。执行 `cron create` 后，必须再执行
-`hotplex cron get <id|name>` 做独立验证；不能以 Skill 文档或命令示例代替成功证据。
+`hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；不能以
+Skill 文档或命令示例代替成功证据。
 
 ## 4. 添加用户档案（C 通道）
 

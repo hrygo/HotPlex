@@ -98,15 +98,13 @@ ls -l ~/.claude/skills
 
 ## 5. 发现不等于可调用
 
-Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 `/skills` 管理或展示的都是 Agent Skills；`TOOLS.md`（以及兼容读取的 AgentConfig `SKILLS.md`）只是常驻指导，不会变成 Skill catalog。状态含义如下：
+Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 Skill catalog 管理或展示的都是 Agent Skills；`TOOLS.md`（以及兼容读取的 AgentConfig `SKILLS.md`）只是常驻指导，不会变成 Skill catalog。状态含义如下：
 
 - `discoverable`：HotPlex 找到有效文件定义，但当前 Worker 没有确认调用路径；filesystem-only Skill 属于此类，不能调用。
 - `callable`：当前 Worker 的权威目录确认可原生执行，才允许调用。
-- `unavailable`：权威 Worker 目录明确不包含该 Skill，返回受限的 unsupported 结果。
+- `unavailable`：能力表面明确报告不可用；同样不能调用。当前 filesystem-only 且未被 Worker 确认的 Skill 保持 `discoverable`。
 
-短 `/name`、显式 `/worker <name>`、结构化/WebChat 调用和 busy/crash replay 共用当前 Session 的 callability 判定；不能用旧路径、缓存 metadata 或 `NativeInvoker` 绕过它。新建 Session 或 `/reset` 后再检查 `/skills`，因为配置和 Worker 目录证据按 Session 激活。
-
-Phase A 不包含 built-in registry、`hotplex skills sync`/`hotplex skills status`/`hotplex skills remove` 或 Worker-native projections；这些尚未上线，不能把上传成功或文件系统发现写成已完成同步。
+短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 共用当前 Session 的 callability 判定；不能用旧路径、缓存 metadata 或 `NativeInvoker` 绕过它。新建 Session 或 `/reset` 后再检查 `/skills`，因为配置和 Worker 目录证据按 Session 激活。
 
 ## 6. 修改与删除
 

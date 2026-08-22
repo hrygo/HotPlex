@@ -247,8 +247,11 @@ Run: `git commit -m "docs(agentconfig): correct self-awareness defaults"`
 **Files:**
 
 - Modify: `internal/gateway/handler.go`
+- Modify: `internal/gateway/bridge.go`
+- Modify: `internal/gateway/bridge_worker.go`
 - Modify: `internal/gateway/skill_dispatch.go`
 - Modify: `internal/gateway/worker_cmds.go`
+- Modify: `internal/gateway/bridge_worker_test.go`
 - Modify: `internal/gateway/skill_dispatch_handler_test.go`
 - Modify: `internal/gateway/native_command_contract_test.go`
 - Modify if required by shared helper coverage: `internal/gateway/skill_dispatch_test.go`

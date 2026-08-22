@@ -98,15 +98,13 @@ Runtime facts 在 Worker 已选定、Session 信息已解析后由 Gateway 构�
 
 ### Agent Skills 的发现、所有权与调用
 
-Admin API 的 `skills`、WebChat Skills、Session `/skills` 以及 Worker 的原生 `/skills` 都指向真实 Agent Skills，不是 AgentConfig 的 `TOOLS.md` 槽位。原生 Worker 负责向模型做 `name`、`description` 的 progressive disclosure 和按需加载；HotPlex 不把动态 Skill catalog 重复注入 AgentConfig prompt。
+Admin API 的 `skills`、WebChat Skills、Session `/skills` 以及 Worker 原生 Skill catalog 都指向真实 Agent Skills，不是 AgentConfig 的 `TOOLS.md` 槽位。原生 Worker 负责向模型做 `name`、`description` 的 progressive disclosure 和按需加载；HotPlex 不把动态 Skill catalog 重复注入 AgentConfig prompt。
 
-Skill 状态按当前 Session 的证据区分：文件系统找到定义但没有当前 Worker 调用证据是 `discoverable`；Worker 权威目录确认可原生执行才是 `callable`；权威目录明确排除则是 `unavailable`。只有 `callable` 可以调用。短 `/name`、显式 `/worker <name>`、结构化/WebChat 调用，以及 busy/crash replay 都复用同一个 Session callability 判定；filesystem-only Skill 永远不能绕过它变成可调用。
-
-当前 Phase A 尚未实现 built-in registry、`hotplex skills sync`/`hotplex skills status`/`hotplex skills remove` 或 Worker-native projections。不能把文件系统发现、管理列表或 `TOOLS.md` 描述当成这些能力已上线的证明。
+Skill 状态按当前 Session 的证据区分：文件系统找到定义但没有当前 Worker 调用证据是 `discoverable`；Worker 权威目录确认可原生执行才是 `callable`；`unavailable` 保留给能力表面明确报告的不可用状态。只有 `callable` 可以调用。短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 都复用同一个 Session callability 判定；filesystem-only Skill 永远不能绕过它变成可调用。
 
 ### CLI 与 Cron 路由
 
-处理 Cron 请求时，优先路由到当前 Session 实际暴露的 `hotplex-cli` Skill；Skill 不可用时，查询当前安装二进制而不是依赖旧示例：`hotplex cron --help`，再按需查看 `hotplex cron create --help`。创建后必须使用独立读取路径执行 `hotplex cron get <id|name>` 验证结果；无法调用 CLI 时应明确返回 `unsupported`/degraded。
+处理 Cron 请求时，优先路由到当前 Session 实际暴露的 `hotplex-cli` Skill；Skill 不可用时，查询当前安装二进制而不是依赖旧示例：`hotplex cron --help`，再按需查看 `hotplex cron create --help`。创建后必须使用独立读取路径执行 `hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；无法调用 CLI 时应明确返回 `unsupported`/degraded。
 
 ### 自配置事务与能力边界
 
