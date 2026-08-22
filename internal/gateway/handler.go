@@ -1007,7 +1007,7 @@ func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope
 
 func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation, handleBusy bool) error {
 	inputReceivedAt := time.Now()
-	_, err := h.sm.Get(ctx, env.SessionID)
+	si, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.log.Warn("gateway: handleInput session not found", "session_id", env.SessionID, "err", err)
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
@@ -1066,6 +1066,14 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	// The first acknowledgement means the input is durably recorded. A second
 	// acknowledgement below reports the worker-delivery outcome.
 	h.sendInputAck(ctx, env, execRecord, false)
+	// Persist the user turn immediately after durable ingress acceptance and
+	// before uncertain Worker.Input delivery. A timeout means the worker may
+	// still be processing, so waiting for the success path would leave a late
+	// assistant turn without its corresponding user turn in history.
+	if h.bridge != nil {
+		h.bridge.CaptureInbound(context.WithoutCancel(ctx), env.SessionID, env.Seq,
+			events.Input, env.Event.Data, si.Platform, si.OwnerID)
+	}
 	h.cancelRetryIfNeeded(env.SessionID)
 
 	finishOutcome := func(status execution.Status, code events.ErrorCode) {
@@ -1086,7 +1094,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	// Fence recovery may have replaced the Worker and transitioned a TERMINATED
 	// session back to RUNNING while accepting this input. Re-read state so the
 	// fresh Worker is not immediately replaced by the normal resume path below.
-	si, err := h.sm.Get(ctx, env.SessionID)
+	si, err = h.sm.Get(ctx, env.SessionID)
 	if err != nil {
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, "", env.SessionID, content)
 		finishOutcome(execution.StatusFailed, events.ErrCodeSessionNotFound)
@@ -1335,9 +1343,6 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	h.sendInputAck(ctx, env, execRecord, false)
 	h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
 	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, content)
-	if h.bridge != nil {
-		h.bridge.CaptureInbound(ctx, env.SessionID, env.Seq, events.Input, env.Event.Data, si.Platform, si.OwnerID)
-	}
 	return nil
 }
 
