@@ -16,13 +16,13 @@
 - The canonical package tree is exactly internal/skills/builtin/hotplex-cli and internal/skills/builtin/hotplex-operator. Each package uses only portable Agent Skills frontmatter fields.
 - hotplex-cli contains SKILL.md and references/cron.md, references/slack.md, references/diagnostics.md, and generated references/cli-surface.generated.md. hotplex-operator contains SKILL.md and service-lifecycle.md, install-update.md, configuration.md, and admin-audit.md under references/.
 - The repository .agents/skills/hotplex-cli tree is generated from, or checked byte-for-byte against, the embedded canonical hotplex-cli tree. It is never an independently authored copy.
-- $HOTPLEX_HOME/skills/builtin/<package-version>/<name>/ is an immutable inventory and is not a Worker native root. $HOTPLEX_HOME/state/skills/ stores receipts keyed by canonical target identity.
+- $HOTPLEX_HOME/skills/builtin/<package-version>/<name>/ is an immutable inventory and is not a Worker native root. $HOTPLEX_HOME/state/skills/ stores native projection receipts keyed by the canonical package target identity.
 - Worker native roots are under the operating-system UserHome: <UserHome>/.claude/skills and <UserHome>/.agents/skills. Inventory and receipt state are under the independent HotplexHome. Never substitute HotplexHome for UserHome.
 - Native-root writes happen only in an explicit hotplex skills sync or hotplex skills remove operation, or an explicitly requested --sync-skills lifecycle step. Gateway startup and ordinary doctor checks are read-only.
 - Worker, profile, and operation values are closed enums. An empty resolved Worker target set returns a bounded error requiring explicit --worker; it never falls back to worker.RegisteredTypes().
 - ACP has no filesystem projection target and returns a bounded unsupported result without writing. Codex and OpenCode share the canonical .agents/skills target and report all Worker aliases in one reconciliation item.
 - An approved native root may be a symlink only when canonicalization resolves it inside canonical UserHome and the corresponding approved native-root base (.claude or .agents). A package target that is itself a symlink is always a conflict.
-- Receipts include schema version, package version, profile, canonical target identity, all Worker aliases, manifest hash, and projected tree hash. Receipt writes are atomic. Update is stage → backup → new target → receipt; receipt or second-rename failure rolls back. Remove is matching receipt + unchanged tree → backup rename → receipt removal, with rollback on receipt-removal failure.
+- Native projection receipts include schema version, package version, the package manifest's declared profile, package target identity, all Worker aliases, manifest hash, and projected tree hash. A package target identity is `<canonical native root>/<package name>`, so receipt keys are per package target rather than per root. Receipt writes are atomic. Update is stage → backup → new target → receipt; receipt or second-rename failure rolls back. Remove only removes a selected native projection when its matching receipt and unchanged tree prove ownership; it never removes the content-addressed immutable inventory. Old inventory remains available for future projections and GC is outside Phase B.
 - A missing receipt, invalid receipt, changed tree, unexpected symlink, path escape, collision, or stale Worker evidence never overwrites user content and remains visible in the typed report.
 - Filesystem tests use t.TempDir() and injected paths/operations. No test writes $HOME, ~/.hotplex, ~/.claude/skills, ~/.agents/skills, the repository working tree, a real executable, or a real service directory.
 - The generator never invokes a shell or os/exec to invoke itself; it uses Go file APIs. The existing non-main branch fix/turn-integrity-init-reliability is the isolated development branch; do not create another worktree or branch.
@@ -301,6 +301,11 @@ type Item struct {
     ReasonCode    string
     BackupPath    string
 }
+
+// PackageTargetIdentity returns the canonical native-root/package identity used
+// by native projection items and receipts. It accepts only a validated manifest
+// package name (no separators or traversal) and is not the inventory path.
+func PackageTargetIdentity(canonicalNativeRoot, packageName string) string
 ~~~
 
 ~~~go
@@ -323,6 +328,7 @@ type FileSystem interface {
     RemoveAll(string) error
     EvalSymlinks(string) (string, error)
     SyncFile(string) error
+    SyncDir(string) error
 }
 
 type Reconciler struct {
@@ -339,13 +345,13 @@ func ParseWorkerType(string) (WorkerType, error)
 func (r Report) Err() error
 ~~~
 
-The production osFS implements FileSystem with os.Lstat, os.ReadDir, os.ReadFile, os.MkdirAll, os.WriteFile, os.Rename, os.Remove, os.RemoveAll, filepath.EvalSymlinks, and an explicit file-sync helper. Stable reason constants include ReasonUnsupportedWorker, ReasonCollision, ReasonDrift, ReasonInvalidReceipt, ReasonRootOutsideHome, ErrInventoryOutsideHotplexHome, ReasonReceiptWriteFailed, and ReasonUnchanged.
+The production osFS implements FileSystem with os.Lstat, os.ReadDir, os.ReadFile, os.MkdirAll, os.WriteFile, os.Rename, os.Remove, os.RemoveAll, filepath.EvalSymlinks, and explicit `SyncFile` and `SyncDir` helpers. `SyncFile` flushes temporary files before rename; `SyncDir` flushes the parent directory after every durability-relevant rename. Unix implementations open and sync the directory. Windows has no portable directory-fsync primitive in the Go standard library, so its implementation returns a typed `ErrDirSyncUnsupported`; reconciliation surfaces a failed item and rolls back rather than silently claiming stronger durability. Stable reason constants include ReasonUnsupportedWorker, ReasonCollision, ReasonDrift, ReasonInvalidReceipt, ReasonRootOutsideHome, ErrInventoryOutsideHotplexHome, ReasonReceiptWriteFailed, ReasonInventoryBlocked, ErrDirSyncUnsupported, and ReasonUnchanged.
 
-- ResolveTargets(userHome string, workerTypes []WorkerType) ([]Target, error) validates UserHome, rejects an empty target list with ErrNoWorkerTargets, rejects unknown types, records an unsupported ACP target without a write root, canonicalizes native roots, and root-deduplicates Codex/OpenCode while retaining both aliases.
+- ResolveTargets(userHome string, workerTypes []WorkerType) ([]Target, error) validates UserHome, rejects an empty target list with ErrNoWorkerTargets, rejects unknown types, records an unsupported ACP target without a write root, canonicalizes native roots, and root-deduplicates Codex/OpenCode while retaining the complete normalized alias set `[WorkerCodex, WorkerOpenCode]` even when only one shared-root alias was selected.
 - New(registry *builtin.Registry, paths Paths, fs FileSystem) (*Reconciler, error) validates absolute UserHome and HotplexHome, keeps inventory/state below HotplexHome, keeps native roots below UserHome and their approved native-root base, and performs no write.
 - Reconciler.Status(ctx context.Context, options Options) (Report, error), Sync, and Remove are the only reconciliation entry points.
 - Reconciler.ListInventory(ctx context.Context, profile builtin.Profile) ([]builtin.InstalledPackage, error) reads immutable inventory/package hashes for the later read-only HTTP/UI view; it does not require a native projection receipt.
-- Reconciler implements Runner, and Report.Err returns ErrReportFailed only when the typed report contains failed items; it does not replace or reinterpret reason codes.
+- Reconciler implements Runner, and `Report.Err` returns the bounded sentinel `ErrReportActionRequired` when any typed item has outcome `conflict`, `drift`, or `failed`; it returns nil for `unchanged` and `changed`. The typed report retains the stable reason code and full item details; `Err` never embeds paths, hashes, or secrets.
 - skills.ScanRoot(root, source string, managed bool) ([]skills.Skill, error) is the only scanner helper exposed for the Claude adapter; it scans one explicit root and never the versioned Built-in inventory.
 
 - [ ] Step 1: Add red tests for closed targets, root policy, report values, and receipt identity.
@@ -353,13 +359,15 @@ The production osFS implements FileSystem with os.Lstat, os.ReadDir, os.ReadFile
 Use a home created by t.TempDir():
 
 ~~~go
-func TestResolveTargetsDeduplicatesSharedAgentsRootAndKeepsAliases(t *testing.T) {
+func TestResolveTargetsDeduplicatesSharedAgentsRootAndKeepsAllAliases(t *testing.T) {
     userHome := t.TempDir()
-    targets, err := ResolveTargets(userHome, []WorkerType{WorkerOpenCode, WorkerCodex})
-    require.NoError(t, err)
-    require.Len(t, targets, 1)
-    require.Equal(t, []WorkerType{WorkerCodex, WorkerOpenCode}, targets[0].WorkerAliases)
-    require.Equal(t, filepath.Join(userHome, ".agents", "skills"), targets[0].CanonicalRoot)
+    for _, selected := range []WorkerType{WorkerCodex, WorkerOpenCode} {
+        targets, err := ResolveTargets(userHome, []WorkerType{selected})
+        require.NoError(t, err)
+        require.Len(t, targets, 1)
+        require.Equal(t, []WorkerType{WorkerCodex, WorkerOpenCode}, targets[0].WorkerAliases)
+        require.Equal(t, filepath.Join(userHome, ".agents", "skills"), targets[0].CanonicalRoot)
+    }
 }
 
 func TestResolveTargetsRejectsEmptyListAndACPWithoutWriting(t *testing.T) {
@@ -399,9 +407,23 @@ func TestInventorySymlinkMustResolveInsideHotplexHome(t *testing.T) {
 func TestReceiptKeyUsesCanonicalTargetIdentity(t *testing.T) {
     state := t.TempDir()
     userHome := t.TempDir()
-    first := ReceiptPath(state, filepath.Join(userHome, ".agents", "skills"))
-    second := ReceiptPath(state, filepath.Join(userHome, "projects", "..", ".agents", "skills"))
+    root := filepath.Join(userHome, ".agents", "skills")
+    equivalentRoot := filepath.Join(userHome, "nested", "..", ".agents", "skills")
+    first := ReceiptPath(state, PackageTargetIdentity(root, "hotplex-cli"))
+    second := ReceiptPath(state, PackageTargetIdentity(equivalentRoot, "hotplex-cli"))
     require.Equal(t, first, second)
+    require.NotEqual(t, first, ReceiptPath(state, PackageTargetIdentity(root, "hotplex-operator")))
+}
+
+func TestReportErrIsBoundedForActionRequiredOutcomes(t *testing.T) {
+    for _, outcome := range []string{"conflict", "drift", "failed"} {
+        report := Report{Items: []Item{{Outcome: outcome, ReasonCode: ReasonCollision}}}
+        require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+    }
+    for _, outcome := range []string{"unchanged", "changed"} {
+        report := Report{Items: []Item{{Outcome: outcome}}}
+        require.NoError(t, report.Err())
+    }
 }
 ~~~
 
@@ -417,27 +439,28 @@ Expected: compilation fails because the reconcile package, types, path resolver,
 
 - [ ] Step 3: Implement closed target resolution and canonical path policy.
 
-Implement Paths with separate UserHome and HotplexHome values. Derive inventory and receipt state only from HotplexHome. Map Claude to <user-home>/.claude/skills, Codex/OpenCode to <user-home>/.agents/skills, and ACP to an unsupported target. Sort aliases by the closed Worker value.
+Implement Paths with separate UserHome and HotplexHome values. Derive inventory and receipt state only from HotplexHome. Map Claude to <user-home>/.claude/skills, Codex/OpenCode to <user-home>/.agents/skills, and ACP to an unsupported target. Sort aliases by the closed Worker value and normalize every shared `.agents/skills` target to the complete `[WorkerCodex, WorkerOpenCode]` alias set, regardless of whether one or both aliases were requested.
 
 Canonicalize UserHome and HotplexHome independently with filepath.Abs, filepath.Clean, and filepath.EvalSymlinks. For Claude, the approved native-root base is <user-home>/.claude; for Codex/OpenCode it is <user-home>/.agents. If a native root exists as a symlink, accept it only when the resolved path remains below both canonical UserHome and its approved native-root base. If the final root does not exist, validate its nearest existing ancestor and append the missing suffix. Validate inventory ancestors against HotplexHome. Reject absolute or parent-traversal targets, and reject a package directory that is a symlink even when it resolves inside an approved root.
 
 - [ ] Step 4: Implement manifest/tree hashes and atomic receipt storage.
 
-Define the receipt fields exactly:
+Define native projection receipt fields exactly:
 
 ~~~go
 type Receipt struct {
     SchemaVersion       int
     PackageVersion      string
+    PackageName         string
     Profile             builtin.Profile
-    CanonicalTarget     string
+    CanonicalTarget     string // <canonical native root>/<package name>
     WorkerAliases       []WorkerType
     ManifestSHA256      string
     ProjectedTreeSHA256 string
 }
 ~~~
 
-Use a full SHA-256 hex digest of canonical target identity for the receipt filename under StateDir. Hash sorted relative paths, file sizes, and bytes; never include absolute paths in the tree hash. Write a temporary receipt beside the final receipt, flush it through FileSystem.SyncFile, and rename it into place. Reject malformed JSON, unexpected enum values, mismatched target identity, unsorted aliases, and hash mismatches. Inventory targets use the same canonical identity/receipt mechanism with an empty Worker alias list.
+Use a full SHA-256 hex digest of the package target identity returned by `PackageTargetIdentity(canonicalNativeRoot, packageName)` for the native receipt filename under StateDir; two packages projected into one root therefore have distinct receipts. Hash sorted relative paths, file sizes, and bytes; never include absolute paths in the tree hash. Every staged file is flushed with `SyncFile`; the completed stage directory is flushed with `SyncDir` before rename, and its parent is flushed with `SyncDir` after rename. Write a temporary receipt beside the final receipt, flush it through `FileSystem.SyncFile`, rename it into place, and call `FileSystem.SyncDir` on the receipt directory. Reject malformed JSON, unexpected enum values, mismatched package target identity, unsorted aliases, and hash mismatches. `Receipt.Profile` is copied from that package manifest's declared/minimum profile (`hotplex-cli` is `runtime`, `hotplex-operator` is `operator`), never from `Options.Profile`; an operator operation therefore does not make an existing `hotplex-cli` receipt appear to be operator-scoped. Immutable inventory uses its own versioned package identity and manifest metadata; it is not a native projection receipt and is never removed by `Remove`.
 
 - [ ] Step 5: Implement install/update/remove/status transactions.
 
@@ -446,14 +469,22 @@ Implement these transitions:
 ~~~go
 func (r *Reconciler) Sync(ctx context.Context, options Options) (Report, error) {
     // Resolve the cumulative ProfilePackageSet for options.Profile.
-    // Stage each embedded package below HotplexHome/skills/builtin/<version>/<name>.
+    // Stage and verify every selected package below
+    // HotplexHome/skills/builtin/<version>/<name> before touching native roots.
     // Verify every manifest path, file hash, size, and inventory tree hash.
-    // Publish each missing inventory package with stage -> verify -> rename -> receipt.
-    // Preserve a different, modified, invalid, or symlinked inventory package as conflict.
-    // Only after inventory publication succeeds, stage each native projection.
+    // If any inventory package is different, modified, invalid, or symlinked,
+    // report that conflict and report every native package as blocked with the
+    // stable ReasonInventoryBlocked code; leave all native projections untouched
+    // for this invocation.
+    // When every inventory package is ready (already verified or newly published),
+    // publish missing inventory packages with stage -> verify -> rename -> receipt.
+    // Any inventory publication or durability failure uses the same gate and
+    // blocks every native projection in this invocation.
+    // Only after the complete inventory set is ready, stage native projections.
     // For a matching receipt and unchanged current tree, rename old target to a
-    // versioned backup, rename stage to target, write receipt, and roll back if
-    // the second rename or receipt write fails.
+    // unique sibling backup, sync its parent, rename stage to target, sync the
+    // parent, and write a receipt whose Profile is the manifest profile. Roll
+    // back if any second rename, receipt write, or directory sync fails.
     // For collision, modified tree, invalid receipt, symlink, or escape, preserve
     // the target and return a typed conflict/drift item.
 }
@@ -461,7 +492,7 @@ func (r *Reconciler) Sync(ctx context.Context, options Options) (Report, error) 
 
 Status detects inventory state, matching/missing/invalid inventory and projection receipts, staging/backup remnants, root collisions, and Worker aliases without writing. Dry-run computes both inventory publication and native projection changes and performs zero writes. An interrupted operation that can be proven safe is recoverable drift; an ambiguous interrupted operation reports drift and preserves the backup.
 
-Status, Sync, and Remove all resolve the cumulative ProfilePackageSet, so runtime always means hotplex-cli and operator always means hotplex-cli plus hotplex-operator. Remove first removes matching, unchanged native projections and receipts, then removes matching, unchanged inventory packages and receipts using the same backup/delete/rollback transaction. A user-modified or ambiguous inventory is preserved and reported. Receipt-removal failure renames the backup back and reports failed. Dry-run performs complete inventory and projection planning and hash checks but calls no write operation.
+Status, Sync, and Remove all resolve the cumulative ProfilePackageSet, so runtime always means hotplex-cli and operator always means hotplex-cli plus hotplex-operator. `Options.Profile` selects that cumulative package set; every native receipt stores each package manifest's own declared profile. Remove only processes selected Worker native roots and their selected package targets: it requires a matching package-target receipt and unchanged projected tree, renames the native target to a unique sibling backup, then removes the receipt through a unique tombstone rename and parent-directory sync. If tombstone removal or receipt-directory sync fails, it restores the receipt and target from the backup before returning a failed item. Remove never deletes immutable inventory directories or inventory metadata; old versions remain and inventory GC is outside Phase B. Status and dry-run are strictly zero-write and never auto-recover staging, backup, or tombstone remnants; they only report proven recoverable or ambiguous interruption. Explicit sync/remove is the only recovery path and may mutate only after the matching receipt, unchanged tree, target identity, and hashes prove ownership.
 
 - [ ] Step 6: Add failure-injection tests and run green.
 
@@ -472,13 +503,18 @@ func TestDryRunLeavesHomeByteIdentical(t *testing.T) {}
 func TestSyncInitialInstallWritesInventoryProjectionAndReceipt(t *testing.T) {}
 func TestSyncPublishesInventoryBeforeNativeProjection(t *testing.T) {}
 func TestModifiedInventoryIsConflictAndBlocksProjection(t *testing.T) {}
+func TestAnyInventoryConflictBlocksEveryNativeProjection(t *testing.T) {}
 func TestDryRunDoesNotCreateInventoryOrProjection(t *testing.T) {}
 func TestSyncIsIdempotentWhenManifestAndTreeMatch(t *testing.T) {}
+func TestOperatorSyncDoesNotReclassifyCliReceiptForRuntimeStatus(t *testing.T) {}
+func TestSharedRootReceiptAndReportKeepAllWorkerAliases(t *testing.T) {}
 func TestUpdateRollsBackWhenSecondRenameFails(t *testing.T) {}
 func TestUpdateRollsBackWhenReceiptWriteFails(t *testing.T) {}
 func TestStatusReportsUnrecoverableInterruptionAndKeepsBackup(t *testing.T) {}
 func TestRemoveRequiresMatchingReceiptAndUnchangedTree(t *testing.T) {}
 func TestRemoveRollsBackWhenReceiptDeleteFails(t *testing.T) {}
+func TestRemovePreservesImmutableInventory(t *testing.T) {}
+func TestReceiptTombstoneRollbackRestoresReceipt(t *testing.T) {}
 func TestPackageSymlinkIsConflictAndNeverFollowed(t *testing.T) {}
 func TestInventoryAndReceiptNeverEnterGenericSkillScanner(t *testing.T) {}
 ~~~
@@ -624,6 +660,7 @@ func TestSkillsCommandRejectsUnknownProfileAndWorker(t *testing.T) {}
 func TestSkillsCommandACPProducesUnsupportedReportWithoutWrite(t *testing.T) {}
 func TestSkillsDryRunDoesNotChangeUserOrHotplexHome(t *testing.T) {}
 func TestSkillsJSONOutputIsReportOnly(t *testing.T) {}
+func TestSkillsCommandReturnsBoundedErrorForConflictAndDrift(t *testing.T) {}
 ~~~
 
 The JSON test decodes output into reconcile.Report and rejects human path/error prose mixed into the JSON stream.
@@ -657,7 +694,7 @@ func loadSkillsOptions(
 }
 ~~~
 
-The loader passes UserHomeDir to native-target resolution and HotplexHomeDir to inventory/state resolution. Call only Status, Sync, or Remove from each handler. Print the typed report after the operation, then return Report.Err() for failed items. This preserves report observability while giving scripts a non-zero exit code.
+The loader passes UserHomeDir to native-target resolution and HotplexHomeDir to inventory/state resolution. Call only Status, Sync, or Remove from each handler. Print the typed report after the operation, then return `Report.Err()` for any conflict, drift, or failed item; unchanged and changed reports return nil. This preserves report observability while giving scripts a bounded non-zero exit code when explicit action is required.
 
 - [ ] Step 4: Register the command and implement presentation.
 
