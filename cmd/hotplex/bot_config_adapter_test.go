@@ -101,6 +101,18 @@ func TestBotConfigAdapter_PlatformToolsConfig_CanonicalSummary(t *testing.T) {
 	require.Equal(t, &admin.AgentConfigMeta{Source: "platform", Size: len(content)}, summary.Tools)
 }
 
+func TestBotConfigAdapter_PlatformToolsConfig_PresentEmptySummary(t *testing.T) {
+	t.Parallel()
+	_, dir := newTestBotConfigAdapter(t)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "webchat"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "webchat", "TOOLS.md"), nil, 0o644))
+
+	summary := getAgentConfigSummary("webchat", "", dir)
+	require.NotNil(t, summary)
+	require.Equal(t, &admin.AgentConfigMeta{Source: "platform", Size: 0}, summary.Tools)
+}
+
 // The written platform-level file must serve as the webchat channel team
 // default via LoadForWorkspace, and be overridden per-workspace following the
 // existing precedence (issue #796 acceptance ②).

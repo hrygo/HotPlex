@@ -492,10 +492,10 @@ func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclu
 		{admin.AgentConfigUser, configs.User},
 		{admin.AgentConfigMemory, configs.Memory},
 	} {
-		if file.value == "" {
+		source := agentconfig.ResolvedSource(agentConfigDir, platform, botName, string(file.field))
+		if source == "" {
 			continue
 		}
-		source := agentconfig.ResolvedSource(agentConfigDir, platform, botName, string(file.field))
 		meta := &admin.AgentConfigMeta{
 			Source: source,
 			Size:   len(file.value),

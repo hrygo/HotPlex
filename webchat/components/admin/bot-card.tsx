@@ -112,7 +112,6 @@ export function BotCard({ bot }: BotCardProps) {
         {bot.agent_configs && (
           <div className="flex flex-wrap gap-1 justify-end">
             {Object.entries(bot.agent_configs).map(([key, meta]) => {
-              if (key === 'skills' && bot.agent_configs?.tools) return null;
               if (!meta?.source) return null;
               const label = getSourceLabel(key);
               return (

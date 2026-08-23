@@ -12,7 +12,7 @@ import (
 var embeddedAssets embed.FS
 
 //go:generate go run ../../../cmd/hotplex --internal-generate-cli-surface --output hotplex-cli/references/cli-surface.generated.md
-//go:generate go run ../../../cmd/gen-builtin-skills --canonical . --manifest-output manifest.generated.go --mirror ../../../.agents/skills/hotplex-cli
+//go:generate go run ../../../cmd/gen-builtin-skills --canonical . --manifest-output manifest.generated.go --mirror ../../../.agents/skills
 
 func readEmbeddedFile(packageName, relativePath string) ([]byte, error) {
 	return fs.ReadFile(embeddedAssets, path.Join(packageName, relativePath))

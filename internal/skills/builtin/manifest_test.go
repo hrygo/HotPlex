@@ -118,6 +118,17 @@ func TestRepositoryBuiltinSkillsMatchEmbeddedCanonicalTrees(t *testing.T) {
 	}
 }
 
+func TestGoGenerateUsesRepositoryMirrorParent(t *testing.T) {
+	t.Parallel()
+
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "assets.go"))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "--mirror ../../../.agents/skills")
+	require.NotContains(t, string(data), "--mirror ../../../.agents/skills/hotplex-cli")
+}
+
 func repositoryFilePaths(t *testing.T, root string) []string {
 	t.Helper()
 
