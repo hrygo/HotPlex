@@ -123,7 +123,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 
 	s.log.Info("cron: scheduler started", "jobs", len(s.jobs))
-	ReleaseSkillManual(s.log)
 
 	s.tickLoop.arm(s.nextTickDuration(time.Now()))
 

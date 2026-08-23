@@ -270,8 +270,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 	defer stores.close(log)
 
-	releaseDBStatsManual(log)
-
 	// Audit subsystem (issue #833 P1): construct Store + Collector + GC + Verifier
 	// when audit.enabled=true. The collector batches events and fans out to sinks.
 	// GC prunes old rows; Verifier checks hash chain integrity.
@@ -1750,15 +1748,4 @@ func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
 		return nil
 	}
 	return m
-}
-
-func releaseDBStatsManual(log *slog.Logger) {
-	dir := filepath.Join(config.HotplexHome(), "skills")
-	_ = os.MkdirAll(dir, 0o755)
-	path := filepath.Join(dir, "db-stats.md")
-	if err := os.WriteFile(path, []byte(dbutil.SkillManual()), 0o644); err != nil {
-		log.Warn("db-stats: failed to release skill manual", "path", path, "err", err)
-		return
-	}
-	log.Debug("db-stats: skill manual released", "path", path)
 }

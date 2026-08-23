@@ -67,9 +67,6 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 	gwBridge := deps.Bridge
 	registry := messaging.DefaultBotRegistry()
 
-	// Release phrases skill manual to disk for bot self-management.
-	phrases.ReleaseSkillManual(log)
-
 	for _, pt := range messaging.RegisteredTypes() {
 		var workerType, workDir string
 		var botEntries []*messaging.BotEntry
