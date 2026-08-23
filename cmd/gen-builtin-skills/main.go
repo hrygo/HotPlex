@@ -57,7 +57,7 @@ func main() {
 	var config generatorConfig
 	flag.StringVar(&config.canonicalRoot, "canonical", "internal/skills/builtin", "canonical package root")
 	flag.StringVar(&config.manifestOutput, "manifest-output", "internal/skills/builtin/manifest.generated.go", "generated manifest path")
-	flag.StringVar(&config.mirrorRoot, "mirror", ".agents/skills/hotplex-cli", "runtime skill mirror path")
+	flag.StringVar(&config.mirrorRoot, "mirror", ".agents/skills", "repository skill mirror parent")
 	flag.Parse()
 
 	if err := generate(config); err != nil {
@@ -102,8 +102,12 @@ func generate(config generatorConfig) error {
 	if err := writeAtomic(manifestOutput, renderManifest(manifests)); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
-	if err := mirrorPackage(filepath.Join(canonicalRoot, "hotplex-cli"), mirrorRoot); err != nil {
-		return fmt.Errorf("mirror hotplex-cli: %w", err)
+	for _, spec := range packageSpecs {
+		sourceRoot := filepath.Join(canonicalRoot, spec.name)
+		targetRoot := filepath.Join(mirrorRoot, spec.name)
+		if err := mirrorPackage(sourceRoot, targetRoot); err != nil {
+			return fmt.Errorf("mirror %s: %w", spec.name, err)
+		}
 	}
 	return nil
 }

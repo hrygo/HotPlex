@@ -1,9 +1,11 @@
 package builtin_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -85,24 +87,56 @@ func TestProfilePackageSetIsCumulativeAndStable(t *testing.T) {
 	require.Equal(t, []string{"hotplex-cli", "hotplex-operator"}, builtin.ProfilePackageSet(builtin.ProfileOperator))
 }
 
-func TestRepositoryRuntimeSkillMatchesEmbeddedCanonicalTree(t *testing.T) {
+func TestRepositoryBuiltinSkillsMatchEmbeddedCanonicalTrees(t *testing.T) {
 	t.Parallel()
 
 	registry, err := builtin.NewRegistry()
 	require.NoError(t, err)
-	manifest, ok := registry.Package("hotplex-cli")
-	require.True(t, ok)
 
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "../../.."))
-	repositorySkillRoot := filepath.Join(repositoryRoot, ".agents", "skills", "hotplex-cli")
 
-	for _, relativePath := range manifest.Paths() {
-		embedded, err := registry.ReadFile("hotplex-cli", relativePath)
-		require.NoError(t, err)
-		repository, err := os.ReadFile(filepath.Join(repositorySkillRoot, filepath.FromSlash(relativePath)))
-		require.NoError(t, err)
-		require.Equal(t, embedded, repository, relativePath)
+	for _, packageName := range []string{"hotplex-cli", "hotplex-operator"} {
+		packageName := packageName
+		t.Run(packageName, func(t *testing.T) {
+			t.Parallel()
+
+			manifest, exists := registry.Package(packageName)
+			require.True(t, exists)
+			repositorySkillRoot := filepath.Join(repositoryRoot, ".agents", "skills", packageName)
+			require.Equal(t, manifest.Paths(), repositoryFilePaths(t, repositorySkillRoot))
+
+			for _, relativePath := range manifest.Paths() {
+				embedded, err := registry.ReadFile(packageName, relativePath)
+				require.NoError(t, err)
+				repository, err := os.ReadFile(filepath.Join(repositorySkillRoot, filepath.FromSlash(relativePath)))
+				require.NoError(t, err)
+				require.Equal(t, embedded, repository, relativePath)
+			}
+		})
 	}
+}
+
+func repositoryFilePaths(t *testing.T, root string) []string {
+	t.Helper()
+
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relativePath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, filepath.ToSlash(relativePath))
+		return nil
+	})
+	require.NoError(t, err)
+	sort.Strings(paths)
+	return paths
 }

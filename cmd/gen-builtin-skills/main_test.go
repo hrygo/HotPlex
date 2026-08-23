@@ -20,7 +20,7 @@ func TestGenerateBuiltinSkillsUsesCanonicalBytesWithoutRegistry(t *testing.T) {
 	canonicalRoot := writeCanonicalFixture(t)
 
 	manifestOutput := filepath.Join(t.TempDir(), "manifest.generated.go")
-	mirrorRoot := filepath.Join(t.TempDir(), "hotplex-cli")
+	mirrorRoot := t.TempDir()
 	err := generate(generatorConfig{
 		canonicalRoot:  canonicalRoot,
 		manifestOutput: manifestOutput,
@@ -32,18 +32,22 @@ func TestGenerateBuiltinSkillsUsesCanonicalBytesWithoutRegistry(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(manifest), "hotplex-cli")
 	require.Contains(t, string(manifest), "hotplex-operator")
-	require.FileExists(t, filepath.Join(mirrorRoot, "SKILL.md"))
-	require.FileExists(t, filepath.Join(mirrorRoot, "references", "cron.md"))
+	require.FileExists(t, filepath.Join(mirrorRoot, "hotplex-cli", "SKILL.md"))
+	require.FileExists(t, filepath.Join(mirrorRoot, "hotplex-operator", "SKILL.md"))
 	require.NoError(t, compareDirectoryFiles(
 		filepath.Join(canonicalRoot, "hotplex-cli"),
-		mirrorRoot,
+		filepath.Join(mirrorRoot, "hotplex-cli"),
+	))
+	require.NoError(t, compareDirectoryFiles(
+		filepath.Join(canonicalRoot, "hotplex-operator"),
+		filepath.Join(mirrorRoot, "hotplex-operator"),
 	))
 
-	extraPath := filepath.Join(mirrorRoot, "extra.md")
+	extraPath := filepath.Join(mirrorRoot, "hotplex-cli", "extra.md")
 	require.NoError(t, os.WriteFile(extraPath, []byte("extra\n"), 0o644))
 	require.Error(t, compareDirectoryFiles(
 		filepath.Join(canonicalRoot, "hotplex-cli"),
-		mirrorRoot,
+		filepath.Join(mirrorRoot, "hotplex-cli"),
 	))
 	require.NoError(t, generate(generatorConfig{
 		canonicalRoot:  canonicalRoot,
@@ -52,7 +56,11 @@ func TestGenerateBuiltinSkillsUsesCanonicalBytesWithoutRegistry(t *testing.T) {
 	}))
 	require.NoError(t, compareDirectoryFiles(
 		filepath.Join(canonicalRoot, "hotplex-cli"),
-		mirrorRoot,
+		filepath.Join(mirrorRoot, "hotplex-cli"),
+	))
+	require.NoError(t, compareDirectoryFiles(
+		filepath.Join(canonicalRoot, "hotplex-operator"),
+		filepath.Join(mirrorRoot, "hotplex-operator"),
 	))
 }
 
@@ -61,7 +69,7 @@ func TestGeneratedPackageVersionTracksCanonicalContent(t *testing.T) {
 
 	canonicalRoot := writeCanonicalFixture(t)
 	manifestOutput := filepath.Join(t.TempDir(), "manifest.generated.go")
-	mirrorRoot := filepath.Join(t.TempDir(), "hotplex-cli")
+	mirrorRoot := t.TempDir()
 	config := generatorConfig{
 		canonicalRoot:  canonicalRoot,
 		manifestOutput: manifestOutput,
@@ -103,7 +111,7 @@ func TestGenerateBuiltinSkillsRejectsIncompleteCanonicalTree(t *testing.T) {
 	err := generate(generatorConfig{
 		canonicalRoot:  canonicalRoot,
 		manifestOutput: filepath.Join(t.TempDir(), "manifest.generated.go"),
-		mirrorRoot:     filepath.Join(t.TempDir(), "hotplex-cli"),
+		mirrorRoot:     t.TempDir(),
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "want 5")
@@ -147,6 +155,41 @@ func TestMirrorPackageRollsBackWhenPromoteRenameFails(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "injected promote failure")
 	require.Equal(t, []byte("old\n"), mustReadFile(t, filepath.Join(targetRoot, "SKILL.md")))
+}
+
+func TestGenerateBuiltinSkillsPreservesFailedPackageMirror(t *testing.T) {
+	canonicalRoot := writeCanonicalFixture(t)
+	mirrorRoot := t.TempDir()
+	cliTarget := filepath.Join(mirrorRoot, "hotplex-cli")
+	operatorTarget := filepath.Join(mirrorRoot, "hotplex-operator")
+	require.NoError(t, os.MkdirAll(cliTarget, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(operatorTarget, "references"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cliTarget, "stale.md"), []byte("stale cli\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(operatorTarget, "SKILL.md"), []byte("old operator\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(operatorTarget, "references", "old.md"), []byte("old reference\n"), 0o644))
+	operatorBefore, err := directoryFiles(operatorTarget)
+	require.NoError(t, err)
+
+	original := fsOps
+	t.Cleanup(func() { fsOps = original })
+	fsOps.rename = func(oldPath, newPath string) error {
+		if newPath == operatorTarget && strings.HasPrefix(filepath.Base(oldPath), ".hotplex-skill-mirror-") {
+			return errors.New("injected operator promote failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+
+	err = generate(generatorConfig{
+		canonicalRoot:  canonicalRoot,
+		manifestOutput: filepath.Join(t.TempDir(), "manifest.generated.go"),
+		mirrorRoot:     mirrorRoot,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "injected operator promote failure")
+	require.NoError(t, compareDirectoryFiles(filepath.Join(canonicalRoot, "hotplex-cli"), cliTarget))
+	operatorAfter, readErr := directoryFiles(operatorTarget)
+	require.NoError(t, readErr)
+	require.Equal(t, operatorBefore, operatorAfter)
 }
 
 func TestMirrorPackageReportsBackupCleanupFailure(t *testing.T) {
