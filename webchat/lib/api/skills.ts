@@ -16,6 +16,8 @@ export interface Skill {
   description: string;
   source: string; // "global" (home) | "project" (workspace)
   managed: boolean; // true = .agents/skills (writable); false = external read-only
+  builtin?: boolean;
+  builtin_package_version?: string;
 }
 
 export interface SkillListResponse {
@@ -28,6 +30,8 @@ export interface SkillDetail {
   description: string;
   source: string;
   managed: boolean;
+  builtin?: boolean;
+  builtin_package_version?: string;
   body?: string; // SKILL.md full text (scoped detail endpoints)
   files?: string[];
 }
@@ -37,6 +41,8 @@ export interface SkillInstallResult {
   description: string;
   source: string;
   managed: boolean;
+  builtin?: boolean;
+  builtin_package_version?: string;
   body: string;
   files: string[];
   warning?: string; // non-empty = workspace install shadows a global same-name skill

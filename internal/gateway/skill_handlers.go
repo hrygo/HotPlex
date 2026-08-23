@@ -33,6 +33,15 @@ type SkillHandlers struct {
 	log            *slog.Logger
 	auditCollector *audit.Collector // optional; nil = audit disabled
 	homeFn         func() string    // resolves global skill base dir; defaults to $HOME (injectable for tests)
+	builtinSkills  BuiltinSkillsCatalog
+}
+
+// BuiltinSkillsCatalog is the read-only embedded Agent Skills surface. The
+// gateway only consumes it for merged read endpoints; workspace CRUD remains
+// scoped to real workspace-owned files.
+type BuiltinSkillsCatalog interface {
+	List(context.Context, string) ([]skills.Skill, error)
+	Read(context.Context, string, string) (*skills.Detail, error)
 }
 
 // defaultHomeDir wraps os.UserHomeDir into a no-error signature for homeFn.
@@ -54,6 +63,9 @@ func NewSkillHandlers(locator *skills.Locator, wsStore session.UserWorkspaceStor
 
 // SetAuditCollector 注入审计收集器（nil 关闭审计，no-op）。
 func (h *SkillHandlers) SetAuditCollector(c *audit.Collector) { h.auditCollector = c }
+
+// SetBuiltinSkillsCatalog injects the embedded read-only Agent Skills view.
+func (h *SkillHandlers) SetBuiltinSkillsCatalog(c BuiltinSkillsCatalog) { h.builtinSkills = c }
 
 func (h *SkillHandlers) requireAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	uid, _, platform, err := h.auth.AuthenticateRequest(r)
@@ -116,6 +128,36 @@ func (h *SkillHandlers) ownerWorkDirs(ctx context.Context, uid string) []string 
 	return dirs
 }
 
+// mergeBuiltinSkills appends embedded skills after real global/project skills
+// and suppresses same-name built-ins. The merged result is then returned to the
+// handler so any future filtering/pagination remains based on final precedence.
+func (h *SkillHandlers) mergeBuiltinSkills(ctx context.Context, listed []skills.Skill) ([]skills.Skill, error) {
+	if h.builtinSkills == nil {
+		return listed, nil
+	}
+	builtins, err := h.builtinSkills.List(ctx, "operator")
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(listed)+len(builtins))
+	merged := make([]skills.Skill, 0, len(listed)+len(builtins))
+	for _, skill := range listed {
+		if _, ok := seen[skill.Name]; ok {
+			continue
+		}
+		seen[skill.Name] = struct{}{}
+		merged = append(merged, skill)
+	}
+	for _, skill := range builtins {
+		if _, ok := seen[skill.Name]; ok {
+			continue
+		}
+		seen[skill.Name] = struct{}{}
+		merged = append(merged, skill)
+	}
+	return merged, nil
+}
+
 // ListMerged: GET /api/skills — 合并 global + 用户所有 workspace + 外部只读（spec §5）。
 func (h *SkillHandlers) ListMerged(w http.ResponseWriter, r *http.Request) {
 	uid, _, ok := h.requireAuth(w, r)
@@ -125,6 +167,12 @@ func (h *SkillHandlers) ListMerged(w http.ResponseWriter, r *http.Request) {
 	merged, err := h.locator.ListMerged(r.Context(), h.homeDir(), h.ownerWorkDirs(r.Context(), uid))
 	if err != nil {
 		h.log.Error("skill_api: list merged", "err", err)
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
+		return
+	}
+	merged, err = h.mergeBuiltinSkills(r.Context(), merged)
+	if err != nil {
+		h.log.Error("skill_api: list builtin skills", "err", err)
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
 		return
 	}
@@ -140,6 +188,11 @@ func (h *SkillHandlers) GetMerged(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	merged, err := h.locator.ListMerged(r.Context(), h.homeDir(), h.ownerWorkDirs(r.Context(), uid))
+	if err != nil {
+		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
+		return
+	}
+	merged, err = h.mergeBuiltinSkills(r.Context(), merged)
 	if err != nil {
 		writeAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
 		return
@@ -283,6 +336,8 @@ func (h *SkillHandlers) writeSkillError(w http.ResponseWriter, err error, action
 		writeAppError(w, http.StatusBadRequest, "SKILL_INVALID_FORMAT", err.Error())
 	case errors.Is(err, skills.ErrSkillAlreadyExists):
 		writeAppError(w, http.StatusConflict, "SKILL_ALREADY_EXISTS", err.Error())
+	case errors.Is(err, skills.ErrSkillBuiltinReadonly):
+		writeAppError(w, http.StatusConflict, "SKILL_BUILTIN_READONLY", err.Error())
 	case errors.Is(err, skills.ErrSkillNotFound):
 		writeAppError(w, http.StatusNotFound, "SKILL_NOT_FOUND", err.Error())
 	default:

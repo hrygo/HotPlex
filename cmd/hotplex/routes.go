@@ -120,6 +120,9 @@ func setupRoutes(
 	if deps.SkillsLocator != nil {
 		adminAPI.SetSkillsLocator(deps.SkillsLocator)
 	}
+	if deps.BuiltinSkillsCatalog != nil {
+		adminAPI.SetBuiltinSkillsCatalog(deps.BuiltinSkillsCatalog)
+	}
 	// Operator fence decisions (#877): list fenced executions + resolve/abandon.
 	// Nil store → endpoints answer 503 instead of crashing the mux.
 	if deps.ExecutionStore != nil {
@@ -359,6 +362,9 @@ func setupRoutes(
 		// skill CRUD. Write routes (POST/DELETE) mount csrfMw for the same
 		// SameSite=None cookie CSRF reason /api/workspaces does; GETs pass through.
 		skillHandlers := gateway.NewSkillHandlers(deps.SkillsLocator, deps.WorkspaceStore, auth, log)
+		if deps.BuiltinSkillsCatalog != nil {
+			skillHandlers.SetBuiltinSkillsCatalog(deps.BuiltinSkillsCatalog)
+		}
 		if deps.AuditCollector != nil {
 			skillHandlers.SetAuditCollector(deps.AuditCollector)
 		}

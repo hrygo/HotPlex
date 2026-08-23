@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/skills"
+	"github.com/hrygo/hotplex/internal/skills/builtin"
 )
 
 func newTestAdminAPIWithSkills(t *testing.T) (*AdminAPI, *skills.Locator) {
@@ -181,4 +184,112 @@ func TestAdminAPI_SkillScopes(t *testing.T) {
 	rrPut := httptest.NewRecorder()
 	api.HandleUpdateSkill(rrPut, reqPut)
 	require.Equal(t, http.StatusForbidden, rrPut.Code)
+}
+
+func TestAdminListUserSkillShadowsBuiltinSameName(t *testing.T) {
+	api, loc := newTestAdminAPIWithSkills(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	api.SetBuiltinSkillsCatalog(builtin.NewPublicCatalog(registry))
+
+	body := "---\nname: hotplex-cli\ndescription: user override\n---\n# User\n"
+	_, err = loc.CreateText(context.Background(), skills.ScopeGlobal, home, "", "hotplex-cli", body, false)
+	require.NoError(t, err)
+
+	req := requestWithAdminContext(httptest.NewRequest("GET", "/admin/api/skills", nil), ScopeAdminRead)
+	rr := httptest.NewRecorder()
+	api.HandleListSkills(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var res struct {
+		Skills []skills.Skill `json:"skills"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &res))
+	var matches []skills.Skill
+	for _, skill := range res.Skills {
+		if skill.Name == "hotplex-cli" {
+			matches = append(matches, skill)
+		}
+	}
+	require.Len(t, matches, 1)
+	require.Equal(t, "user override", matches[0].Description)
+	require.False(t, matches[0].Builtin)
+}
+
+func TestAdminBuiltinDetailIsReadableButNotMutable(t *testing.T) {
+	api, _ := newTestAdminAPIWithSkills(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	api.SetBuiltinSkillsCatalog(builtin.NewPublicCatalog(registry))
+
+	getReq := httptest.NewRequest("GET", "/admin/api/skills/hotplex-cli", nil)
+	getReq.SetPathValue("name", "hotplex-cli")
+	getReq = requestWithAdminContext(getReq, ScopeAdminRead)
+	getRR := httptest.NewRecorder()
+	api.HandleGetSkill(getRR, getReq)
+	require.Equal(t, http.StatusOK, getRR.Code)
+	require.Contains(t, getRR.Body.String(), `"builtin":true`)
+
+	updateReq := httptest.NewRequest("PUT", "/admin/api/skills/hotplex-cli", bytes.NewBufferString(`{"body":"---\nname: hotplex-cli\ndescription: changed\n---\n"}`))
+	updateReq.SetPathValue("name", "hotplex-cli")
+	updateReq = requestWithAdminContext(updateReq, ScopeAdminWrite)
+	updateRR := httptest.NewRecorder()
+	api.HandleUpdateSkill(updateRR, updateReq)
+	require.Equal(t, http.StatusConflict, updateRR.Code)
+	require.Contains(t, updateRR.Body.String(), "SKILL_BUILTIN_READONLY")
+
+	deleteReq := httptest.NewRequest("DELETE", "/admin/api/skills/hotplex-cli", nil)
+	deleteReq.SetPathValue("name", "hotplex-cli")
+	deleteReq = requestWithAdminContext(deleteReq, ScopeAdminWrite)
+	deleteRR := httptest.NewRecorder()
+	api.HandleDeleteSkill(deleteRR, deleteReq)
+	require.Equal(t, http.StatusConflict, deleteRR.Code)
+	require.Contains(t, deleteRR.Body.String(), "SKILL_BUILTIN_READONLY")
+
+	// Creating a same-name user override remains an ordinary install path.
+	installBody := `{"name":"hotplex-cli","body":"---\nname: hotplex-cli\ndescription: override\n---\n# override"}`
+	installReq := httptest.NewRequest("POST", "/admin/api/skills", bytes.NewBufferString(installBody))
+	installReq.Header.Set("Content-Type", "application/json")
+	installReq = requestWithAdminContext(installReq, ScopeAdminWrite)
+	installRR := httptest.NewRecorder()
+	api.HandleInstallSkill(installRR, installReq)
+	require.Equal(t, http.StatusOK, installRR.Code)
+
+	updateReq = httptest.NewRequest("PUT", "/admin/api/skills/hotplex-cli", bytes.NewBufferString(`{"body":"---\nname: hotplex-cli\ndescription: updated override\n---\n"}`))
+	updateReq.SetPathValue("name", "hotplex-cli")
+	updateReq = requestWithAdminContext(updateReq, ScopeAdminWrite)
+	updateRR = httptest.NewRecorder()
+	api.HandleUpdateSkill(updateRR, updateReq)
+	require.Equal(t, http.StatusOK, updateRR.Code)
+
+	deleteReq = httptest.NewRequest("DELETE", "/admin/api/skills/hotplex-cli", nil)
+	deleteReq.SetPathValue("name", "hotplex-cli")
+	deleteReq = requestWithAdminContext(deleteReq, ScopeAdminWrite)
+	deleteRR = httptest.NewRecorder()
+	api.HandleDeleteSkill(deleteRR, deleteReq)
+	require.Equal(t, http.StatusNoContent, deleteRR.Code)
+}
+
+func TestAdminExternalSkillShadowsBuiltinOnGet(t *testing.T) {
+	api, _ := newTestAdminAPIWithSkills(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	api.SetBuiltinSkillsCatalog(builtin.NewPublicCatalog(registry))
+
+	externalPath := filepath.Join(home, ".claude", "skills", "hotplex-cli")
+	require.NoError(t, os.MkdirAll(externalPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(externalPath, "SKILL.md"), []byte("---\nname: hotplex-cli\ndescription: external override\n---\n# external\n"), 0o644))
+
+	getReq := httptest.NewRequest("GET", "/admin/api/skills/hotplex-cli", nil)
+	getReq.SetPathValue("name", "hotplex-cli")
+	getReq = requestWithAdminContext(getReq, ScopeAdminRead)
+	getRR := httptest.NewRecorder()
+	api.HandleGetSkill(getRR, getReq)
+	require.Equal(t, http.StatusNotFound, getRR.Code)
+	require.NotContains(t, getRR.Body.String(), `"builtin":true`)
 }

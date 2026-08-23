@@ -209,6 +209,9 @@ type GatewayDeps struct {
 	AuditStore     audit.Store
 	// SkillsLocator serves the skill management HTTP API (issue #910).
 	SkillsLocator *skills.Locator
+	// BuiltinSkillsCatalog serves embedded Agent Skills read metadata. It is
+	// independent of native projection/inventory state.
+	BuiltinSkillsCatalog builtin.PublicCatalog
 	// Durable ingress reliability closure (spec 2026-07-14).
 	OwnerInstanceID string
 	LeaseManager    *execution.LeaseManager
@@ -567,6 +570,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	gateway.ScanWorkspaceOverrides(ctx, stores.wsStore, log)
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
+	builtinRegistry, err := builtin.NewRegistry()
+	if err != nil {
+		skillsLocator.Close()
+		return fmt.Errorf("initialize built-in skills catalog: %w", err)
+	}
+	builtinSkillsCatalog := builtin.NewPublicCatalog(builtinRegistry)
 	if userHome, homeErr := os.UserHomeDir(); homeErr != nil {
 		log.Warn("gateway: built-in skills status skipped", "reason", "user_home_unavailable")
 	} else if statusErr := runBuiltinSkillsStatus(ctx, cfg, userHome, config.HotplexHome(), newSkillsRunner, log); statusErr != nil {
@@ -787,36 +796,37 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	mux := http.NewServeMux()
 	leaseMgr := execution.NewLeaseManager(stores.execution, ownerInstanceID, execution.DefaultLeaseConfig(), log, repairer)
 	deps := &GatewayDeps{
-		Log:             log,
-		Ctx:             ctx,
-		Config:          cfg,
-		ConfigStore:     cfgStore,
-		Hub:             hub,
-		SessionMgr:      sm,
-		EventStore:      stores.event,
-		EventCollector:  stores.collector,
-		ExecutionStore:  stores.execution,
-		Auth:            auth,
-		Handler:         handler,
-		Bridge:          bridge,
-		ConfigWatcher:   configWatcher,
-		CronScheduler:   cronScheduler,
-		CookieAuth:      cookieAuth,
-		OAuthManager:    oauthManager,
-		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
-		DB:              stores.sqlDB,
-		DBResolver:      dbResolver,
-		APIKeyStore:     stores.apiKeyStore,
-		WorkspaceStore:  stores.wsStore,
-		WriteMu:         stores.writeMu,
-		ConfigPath:      configPath,
-		DevMode:         devMode,
-		AuditCollector:  auditCollector,
-		AuditStore:      auditStore,
-		SkillsLocator:   skillsLocator,
-		OwnerInstanceID: ownerInstanceID,
-		LeaseManager:    leaseMgr,
-		Repairer:        repairer,
+		Log:                  log,
+		Ctx:                  ctx,
+		Config:               cfg,
+		ConfigStore:          cfgStore,
+		Hub:                  hub,
+		SessionMgr:           sm,
+		EventStore:           stores.event,
+		EventCollector:       stores.collector,
+		ExecutionStore:       stores.execution,
+		Auth:                 auth,
+		Handler:              handler,
+		Bridge:               bridge,
+		ConfigWatcher:        configWatcher,
+		CronScheduler:        cronScheduler,
+		CookieAuth:           cookieAuth,
+		OAuthManager:         oauthManager,
+		ChatAccessStore:      stores.chatAccessOrNew(stores.sqlDB, log),
+		DB:                   stores.sqlDB,
+		DBResolver:           dbResolver,
+		APIKeyStore:          stores.apiKeyStore,
+		WorkspaceStore:       stores.wsStore,
+		WriteMu:              stores.writeMu,
+		ConfigPath:           configPath,
+		DevMode:              devMode,
+		AuditCollector:       auditCollector,
+		AuditStore:           auditStore,
+		SkillsLocator:        skillsLocator,
+		BuiltinSkillsCatalog: builtinSkillsCatalog,
+		OwnerInstanceID:      ownerInstanceID,
+		LeaseManager:         leaseMgr,
+		Repairer:             repairer,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).

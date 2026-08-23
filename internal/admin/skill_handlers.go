@@ -2,6 +2,7 @@ package admin
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,13 +21,15 @@ const maxAdminSkillUploadSize = 20 << 20
 // 字段对齐。swag 的 --dir 不含 internal/skills、未开 --parseDependency，无法解析跨包
 // 类型，故在此定义等价形状供 swagger 注解引用。
 type skillInstallResponse struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Source      string   `json:"source"`  // "global"
-	Managed     bool     `json:"managed"` // .agents/skills 可写区
-	Body        string   `json:"body"`
-	Files       []string `json:"files"`
-	Warning     string   `json:"warning,omitempty"` // workspace 同名遮蔽全局时非空
+	Name                  string   `json:"name"`
+	Description           string   `json:"description"`
+	Source                string   `json:"source"`  // "global"
+	Managed               bool     `json:"managed"` // .agents/skills 可写区
+	Builtin               bool     `json:"builtin,omitempty"`
+	BuiltinPackageVersion string   `json:"builtin_package_version,omitempty"`
+	Body                  string   `json:"body"`
+	Files                 []string `json:"files"`
+	Warning               string   `json:"warning,omitempty"` // workspace 同名遮蔽全局时非空
 }
 
 // toSkillInstallResponse 把 skills.InstallResult 映射为本包 swagger 响应类型
@@ -34,14 +37,76 @@ type skillInstallResponse struct {
 // JSON 形状与原 InstallResult 完全一致（FilePath 为 json:"-" 不下发）。
 func toSkillInstallResponse(res *skills.InstallResult) skillInstallResponse {
 	return skillInstallResponse{
-		Name:        res.Name,
-		Description: res.Description,
-		Source:      res.Source,
-		Managed:     res.Managed,
-		Body:        res.Body,
-		Files:       res.Files,
-		Warning:     res.Warning,
+		Name:                  res.Name,
+		Description:           res.Description,
+		Source:                res.Source,
+		Managed:               res.Managed,
+		Builtin:               res.Builtin,
+		BuiltinPackageVersion: res.BuiltinPackageVersion,
+		Body:                  res.Body,
+		Files:                 res.Files,
+		Warning:               res.Warning,
 	}
+}
+
+const publicBuiltinProfile = "operator"
+
+// mergeBuiltinSkills appends embedded skills after real filesystem skills and
+// suppresses any same-name builtin. Keeping real entries first preserves the
+// existing source precedence while ensuring search and pagination operate on
+// the final merged view.
+func (a *AdminAPI) mergeBuiltinSkills(ctx context.Context, listed []skills.Skill) ([]skills.Skill, error) {
+	if a.builtinSkills == nil {
+		return listed, nil
+	}
+	builtins, err := a.builtinSkills.List(ctx, publicBuiltinProfile)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(listed)+len(builtins))
+	merged := make([]skills.Skill, 0, len(listed)+len(builtins))
+	for _, skill := range listed {
+		if _, ok := seen[skill.Name]; ok {
+			continue
+		}
+		seen[skill.Name] = struct{}{}
+		merged = append(merged, skill)
+	}
+	for _, skill := range builtins {
+		if _, ok := seen[skill.Name]; ok {
+			continue
+		}
+		seen[skill.Name] = struct{}{}
+		merged = append(merged, skill)
+	}
+	return merged, nil
+}
+
+// builtinOnly reports whether name resolves to an embedded skill and no real
+// global skill exists. A real entry always wins and is allowed ordinary CRUD.
+func (a *AdminAPI) builtinOnly(ctx context.Context, home, name string) (bool, error) {
+	if a.builtinSkills == nil {
+		return false, nil
+	}
+	if a.skillsLocator != nil && home != "" {
+		listed, err := a.skillsLocator.List(ctx, home, "")
+		if err != nil {
+			return false, err
+		}
+		for _, skill := range listed {
+			if skill.Name == name {
+				return false, nil
+			}
+		}
+	}
+	_, err := a.builtinSkills.Read(ctx, name, "")
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, skills.ErrSkillNotFound) {
+		return false, nil
+	}
+	return false, err
 }
 
 // HandleListSkills: GET /admin/api/skills — 全局 skill 列表（支持分页 page/page_size 与搜索 q）。
@@ -62,19 +127,28 @@ func (a *AdminAPI) HandleListSkills(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return
 	}
-	if a.skillsLocator == nil {
+	if a.skillsLocator == nil && a.builtinSkills == nil {
 		respondJSON(w, map[string]any{"skills": []any{}, "total": 0, "page": 1, "page_size": 10})
 		return
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		a.log.Error("admin: skills list resolve $HOME", "err", err)
-		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
-		return
+	var listed []skills.Skill
+	if a.skillsLocator != nil {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			a.log.Error("admin: skills list resolve $HOME", "err", err)
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
+			return
+		}
+		listed, err = a.skillsLocator.List(r.Context(), home, "")
+		if err != nil {
+			a.log.Error("admin: skills list", "err", err)
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
+			return
+		}
 	}
-	listed, err := a.skillsLocator.List(r.Context(), home, "")
+	listed, err := a.mergeBuiltinSkills(r.Context(), listed)
 	if err != nil {
-		a.log.Error("admin: skills list", "err", err)
+		a.log.Error("admin: builtin skills list", "err", err)
 		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "list skills failed")
 		return
 	}
@@ -211,18 +285,31 @@ func (a *AdminAPI) HandleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
 		return
 	}
-	if a.skillsLocator == nil {
-		web.WriteAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "skills not configured")
-		return
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
-		return
-	}
 	name := r.PathValue("name")
 	if name == "" {
 		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_FORMAT", "missing skill name in path")
+		return
+	}
+	home := ""
+	if a.skillsLocator != nil {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
+			return
+		}
+	}
+	builtinOnly, err := a.builtinOnly(r.Context(), home, name)
+	if err != nil {
+		writeAdminSkillError(a, w, err, "inspect")
+		return
+	}
+	if builtinOnly {
+		writeAdminSkillError(a, w, skills.ErrSkillBuiltinReadonly, "update")
+		return
+	}
+	if a.skillsLocator == nil {
+		web.WriteAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "skills not configured")
 		return
 	}
 	var req struct {
@@ -256,21 +343,53 @@ func (a *AdminAPI) HandleGetSkill(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminRead) {
 		return
 	}
-	if a.skillsLocator == nil {
+	if a.skillsLocator == nil && a.builtinSkills == nil {
 		web.WriteAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "skills not configured")
 		return
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
-		return
+	name := r.PathValue("name")
+	if a.skillsLocator != nil {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
+			return
+		}
+		d, err := a.skillsLocator.Read(r.Context(), skills.ScopeGlobal, home, name)
+		if err == nil {
+			respondJSON(w, d)
+			return
+		}
+		if !errors.Is(err, skills.ErrSkillNotFound) {
+			writeAdminSkillError(a, w, err, "read")
+			return
+		}
+		// A same-name external global skill is still a real user item and
+		// shadows the embedded catalog, even though Admin CRUD only reads
+		// managed .agents/skills details.
+		listed, listErr := a.skillsLocator.List(r.Context(), home, "")
+		if listErr != nil {
+			writeAdminSkillError(a, w, listErr, "list")
+			return
+		}
+		for _, skill := range listed {
+			if skill.Name == name {
+				writeAdminSkillError(a, w, skills.ErrSkillNotFound, "read")
+				return
+			}
+		}
 	}
-	d, err := a.skillsLocator.Read(r.Context(), skills.ScopeGlobal, home, r.PathValue("name"))
-	if err != nil {
-		writeAdminSkillError(a, w, err, "read")
-		return
+	if a.builtinSkills != nil {
+		d, err := a.builtinSkills.Read(r.Context(), name, "")
+		if err == nil {
+			respondJSON(w, d)
+			return
+		}
+		if !errors.Is(err, skills.ErrSkillNotFound) {
+			writeAdminSkillError(a, w, err, "read builtin")
+			return
+		}
 	}
-	respondJSON(w, d)
+	writeAdminSkillError(a, w, skills.ErrSkillNotFound, "read")
 }
 
 // HandleDeleteSkill: DELETE /admin/api/skills/{name} — 移除全局 skill。审计为 AuditSkillDelete。
@@ -288,16 +407,34 @@ func (a *AdminAPI) HandleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, ScopeAdminWrite) {
 		return
 	}
+	if a.skillsLocator == nil && a.builtinSkills == nil {
+		web.WriteAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "skills not configured")
+		return
+	}
+	name := r.PathValue("name")
+	home := ""
+	if a.skillsLocator != nil {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
+			return
+		}
+	}
+	builtinOnly, err := a.builtinOnly(r.Context(), home, name)
+	if err != nil {
+		writeAdminSkillError(a, w, err, "inspect")
+		return
+	}
+	if builtinOnly {
+		writeAdminSkillError(a, w, skills.ErrSkillBuiltinReadonly, "delete")
+		return
+	}
 	if a.skillsLocator == nil {
 		web.WriteAppError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "skills not configured")
 		return
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "resolve home failed")
-		return
-	}
-	if err := a.skillsLocator.Delete(r.Context(), skills.ScopeGlobal, home, r.PathValue("name")); err != nil {
+	if err := a.skillsLocator.Delete(r.Context(), skills.ScopeGlobal, home, name); err != nil {
 		writeAdminSkillError(a, w, err, "delete")
 		return
 	}
@@ -339,6 +476,8 @@ func writeAdminSkillError(a *AdminAPI, w http.ResponseWriter, err error, action 
 		web.WriteAppError(w, http.StatusBadRequest, "SKILL_INVALID_FORMAT", err.Error())
 	case errors.Is(err, skills.ErrSkillAlreadyExists):
 		web.WriteAppError(w, http.StatusConflict, "SKILL_ALREADY_EXISTS", err.Error())
+	case errors.Is(err, skills.ErrSkillBuiltinReadonly):
+		web.WriteAppError(w, http.StatusConflict, "SKILL_BUILTIN_READONLY", err.Error())
 	case errors.Is(err, skills.ErrSkillNotFound):
 		web.WriteAppError(w, http.StatusNotFound, "SKILL_NOT_FOUND", err.Error())
 	default:

@@ -14,18 +14,26 @@ import {
 import { TabPanel } from "./tab-panel";
 import { useTranslation } from "react-i18next";
 import { useResource } from "@/hooks/use-resource";
+import { skillActionState, skillBadgeKind } from "@/lib/skills-ui";
 
 // Badge color helper — managed (writable) vs external (read-only) provenance.
 function Badge({
     kind,
     label,
 }: {
-    kind: "managed" | "external";
+    kind: "builtin" | "managed" | "external";
     label: string;
 }) {
     if (kind === "managed") {
         return (
             <span className="inline-flex items-center rounded-full bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.25)] px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[rgb(16,185,129)]">
+                {label}
+            </span>
+        );
+    }
+    if (kind === "builtin") {
+        return (
+            <span className="inline-flex items-center rounded-full bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.25)] px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--accent-gold)]">
                 {label}
             </span>
         );
@@ -525,12 +533,23 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                             {s.name}
                                         </span>
                                         <Badge
-                                            kind="managed"
-                                            label={t(
-                                                "settings.skills.label.managed",
-                                                { defaultValue: "Managed" },
-                                            )}
+                                            kind={skillBadgeKind(s)}
+                                            label={
+                                                skillBadgeKind(s) === "builtin"
+                                                    ? t("settings.skills.label.builtin", {
+                                                          defaultValue: "Built-in",
+                                                      })
+                                                    : t(
+                                                          "settings.skills.label.managed",
+                                                          { defaultValue: "Managed" },
+                                                      )
+                                                }
                                         />
+                                        {s.builtin_package_version && (
+                                            <span className="text-[10px] font-mono text-[var(--text-faint)]">
+                                                {s.builtin_package_version}
+                                            </span>
+                                        )}
                                         <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--text-faint)] bg-[var(--bg-hover)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)]">
                                             workspace
                                         </span>
@@ -549,16 +568,18 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                             defaultValue: "Details",
                                         })}
                                     </button>
-                                    <button
-                                        type="button"
-                                        disabled={actionLoading === s.name}
-                                        onClick={() => setDeleteTarget(s.name)}
-                                        className="rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.2)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] transition-colors disabled:opacity-50 active:scale-95"
-                                    >
-                                        {t("settings.skills.action.delete", {
-                                            defaultValue: "Delete",
-                                        })}
-                                    </button>
+                                    {skillActionState(s).canDelete && (
+                                        <button
+                                            type="button"
+                                            disabled={actionLoading === s.name}
+                                            onClick={() => setDeleteTarget(s.name)}
+                                            className="rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.2)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] transition-colors disabled:opacity-50 active:scale-95"
+                                        >
+                                            {t("settings.skills.action.delete", {
+                                                defaultValue: "Delete",
+                                            })}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -850,7 +871,23 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
                                         <h2 className="text-lg font-display font-bold text-[var(--text-primary)]">
                                             {detailTarget}
                                         </h2>
-                                        <Badge kind="managed" label="Managed" />
+                                        <Badge
+                                            kind={detail ? skillBadgeKind(detail) : "managed"}
+                                            label={
+                                                detail && skillBadgeKind(detail) === "builtin"
+                                                    ? t("settings.skills.label.builtin", {
+                                                          defaultValue: "Built-in",
+                                                      })
+                                                    : t("settings.skills.label.managed", {
+                                                          defaultValue: "Managed",
+                                                      })
+                                            }
+                                        />
+                                        {detail?.builtin_package_version && (
+                                            <span className="text-[10px] font-mono text-[var(--text-faint)]">
+                                                {detail.builtin_package_version}
+                                            </span>
+                                        )}
                                         <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--text-faint)] bg-[var(--bg-hover)] px-2 py-0.5 rounded border border-[var(--border-subtle)]">
                                             workspace
                                         </span>
@@ -1018,15 +1055,23 @@ export function SkillsTab({ workspace }: SkillsTabProps) {
 
                             {/* Modal Footer */}
                             <div className="flex items-center justify-between border-t border-[var(--border-subtle)] pt-4 text-xs">
-                                <button
-                                    type="button"
-                                    onClick={() => handleDelete(detailTarget)}
-                                    className="rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.2)] bg-[rgba(244,63,94,0.05)] px-3.5 py-1.5 text-xs font-semibold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.15)] hover:border-[var(--accent-coral)] active:scale-95 transition-all"
-                                >
-                                    {t("common:action.delete", {
-                                        defaultValue: "Delete Skill",
-                                    })}
-                                </button>
+                                {skillActionState(detail ?? { managed: true }).canDelete ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleDelete(detailTarget)}
+                                        className="rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.2)] bg-[rgba(244,63,94,0.05)] px-3.5 py-1.5 text-xs font-semibold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.15)] hover:border-[var(--accent-coral)] active:scale-95 transition-all"
+                                    >
+                                        {t("common:action.delete", {
+                                            defaultValue: "Delete Skill",
+                                        })}
+                                    </button>
+                                ) : (
+                                    <span className="text-[11px] text-[var(--text-faint)] font-mono font-bold uppercase tracking-wider">
+                                        {t("settings.skills.label.builtin_readonly", {
+                                            defaultValue: "Built-in (Read-Only)",
+                                        })}
+                                    </span>
+                                )}
                                 <button
                                     type="button"
                                     onClick={closeDetail}

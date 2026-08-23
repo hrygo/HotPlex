@@ -101,6 +101,14 @@ type RuntimeEventNotifier interface {
 	NotifyExecutionAbandoned(ctx context.Context, sessionID, executionID string)
 }
 
+// BuiltinSkillsCatalog is the read-only embedded Agent Skills surface. It is
+// intentionally structural so AdminAPI does not depend on reconciliation or
+// on a concrete registry implementation.
+type BuiltinSkillsCatalog interface {
+	List(context.Context, string) ([]skills.Skill, error)
+	Read(context.Context, string, string) (*skills.Detail, error)
+}
+
 type DebugSessionSnapshot struct {
 	TurnCount    int
 	WorkerHealth worker.WorkerHealth
@@ -154,6 +162,7 @@ type AdminAPI struct {
 	activityService  *ActivityService         // Optional: enables /admin/activity + /admin/users/{id}/activity (issue #833)
 	auditCollector   *audit.Collector         // Optional: emits system.audit_export meta-audit rows (issue #833)
 	skillsLocator    *skills.Locator          // Optional: enables /admin/api/skills global skill management (issue #910)
+	builtinSkills    BuiltinSkillsCatalog     // Optional: embedded read-only Agent Skills
 	runtimeExec      RuntimeExecutionProvider // Optional: enables /admin/executions fence endpoints (#877); nil → 503
 	runtimeNotifier  RuntimeEventNotifier     // Optional: emits runtime.execution.failed on abandon (#877)
 }
@@ -224,6 +233,11 @@ func New(deps Deps) *AdminAPI {
 // SetSkillsLocator 注入 skill 定位器，启用 /admin/api/skills 全局 skill 管理
 // （issue #910）。nil 时 skill 端点返回 503。
 func (a *AdminAPI) SetSkillsLocator(l *skills.Locator) { a.skillsLocator = l }
+
+// SetBuiltinSkillsCatalog injects the embedded read-only Agent Skills view.
+// Built-ins are merged only into read surfaces; CRUD always targets a real
+// user-owned skill and rejects a builtin-only selection.
+func (a *AdminAPI) SetBuiltinSkillsCatalog(c BuiltinSkillsCatalog) { a.builtinSkills = c }
 
 // SetRuntimeExecution injects the execution-store provider that backs the
 // operator fence endpoints (#877). nil-safe: fence endpoints return 503 until
