@@ -3,6 +3,7 @@ package reconcile
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -244,7 +245,10 @@ func (r *Reconciler) restoreRemoved(identity, backupPath, backupContainer, recei
 		errs = append(errs, err)
 	}
 	if targetRestored && len(receiptRaw) > 0 {
-		if _, err := r.fs.Lstat(receiptPath); errors.Is(err, os.ErrNotExist) {
+		existing, readErr := r.fs.ReadFile(receiptPath)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			errs = append(errs, readErr)
+		} else if readErr != nil || !bytes.Equal(existing, receiptRaw) {
 			if err := writeRawReceiptRecovery(r.fs, filepath.Dir(receiptPath), receiptPath, receiptRaw); err != nil {
 				errs = append(errs, err)
 			}
@@ -280,15 +284,37 @@ func writeRawReceiptRecovery(fs FileSystem, stateDir, finalPath string, data []b
 	if primaryErr == nil {
 		return nil
 	}
-	if _, err := fs.Lstat(finalPath); err == nil {
-		return primaryErr
+	if info, err := fs.Lstat(finalPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.Join(primaryErr, ErrInvalidReceipt)
+		}
+		existing, readErr := fs.ReadFile(finalPath)
+		if readErr != nil {
+			return errors.Join(primaryErr, readErr)
+		}
+		if bytes.Equal(existing, data) {
+			return primaryErr
+		}
+		return errors.Join(primaryErr, forceReceiptReplacement(fs, stateDir, finalPath, data))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.Join(primaryErr, err)
 	}
+	return errors.Join(primaryErr, forceReceiptReplacement(fs, stateDir, finalPath, data))
+}
+
+func forceReceiptReplacement(fs FileSystem, stateDir, finalPath string, data []byte) (retErr error) {
 	tempPath, err := fs.CreateTemp(stateDir, ".hotplex-recovery-receipt-*", data, 0o600)
 	if err != nil {
-		return errors.Join(primaryErr, err)
+		return err
 	}
+	tempOwned := true
+	defer func() {
+		if tempOwned {
+			if cleanupErr := fs.Remove(tempPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+				retErr = errors.Join(retErr, cleanupErr)
+			}
+		}
+	}()
 	cleanupTemp := func() error {
 		cleanupErr := fs.Remove(tempPath)
 		if errors.Is(cleanupErr, os.ErrNotExist) {
@@ -297,12 +323,46 @@ func writeRawReceiptRecovery(fs FileSystem, stateDir, finalPath string, data []b
 		return cleanupErr
 	}
 	if err := fs.SyncFile(tempPath); err != nil {
-		return errors.Join(primaryErr, err, cleanupTemp())
+		return errors.Join(err, cleanupTemp())
+	}
+	backupContainer := ""
+	backupPath := ""
+	if info, statErr := fs.Lstat(finalPath); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.Join(ErrInvalidReceipt, cleanupTemp())
+		}
+		backupContainer, err = fs.MkdirTemp(stateDir, ".hotplex-receipt-recovery-backup-*")
+		if err != nil {
+			return errors.Join(err, cleanupTemp())
+		}
+		backupPath = filepath.Join(backupContainer, "receipt.json")
+		if err := fs.Rename(finalPath, backupPath); err != nil {
+			cleanupErr := fs.RemoveAll(backupContainer)
+			removeErr := fs.Remove(finalPath)
+			return errors.Join(err, cleanupErr, removeErr, cleanupTemp())
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return errors.Join(statErr, cleanupTemp())
 	}
 	if err := fs.Rename(tempPath, finalPath); err != nil {
-		return errors.Join(primaryErr, err, cleanupTemp())
+		if backupContainer != "" {
+			return errors.Join(err, cleanupTemp(), fmt.Errorf("receipt recovery backup retained at %s", backupContainer))
+		}
+		return errors.Join(err, cleanupTemp())
 	}
-	return errors.Join(primaryErr, fs.SyncDir(stateDir))
+	tempOwned = false
+	var errs []error
+	if err := fs.SyncDir(stateDir); err != nil {
+		errs = append(errs, err)
+	}
+	if backupContainer != "" {
+		if err := fs.RemoveAll(backupContainer); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		} else if err := fs.SyncDir(stateDir); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (r *Reconciler) restoreRemovedAfterCommit(identity, backupPath, backupContainer, receiptPath string, receiptRaw []byte) error {

@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -240,6 +241,42 @@ func TestRemoveFinalSyncFailureNeverLeavesReceiptWithoutTarget(t *testing.T) {
 	}
 }
 
+func TestRemoveRecoveryReplacesWrongReceiptWhenSyncDirKeepsFailing(t *testing.T) {
+	base := osFS{}
+	fs := &wrongReceiptRecoveryFS{FileSystem: base}
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	paths := testPaths(userHome, hotplexHome)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	r, err := New(registry, paths, fs)
+	require.NoError(t, err)
+	_, err = r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	manifest, ok := registry.Package("hotplex-cli")
+	require.True(t, ok)
+	target := mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)
+	receiptPath := ReceiptPath(paths.StateDir, target)
+	wantedReceipt, err := os.ReadFile(receiptPath)
+	require.NoError(t, err)
+	fs.stateDir = paths.StateDir
+	fs.receiptPath = receiptPath
+	fs.wrongReceipt = []byte("{\"wrong\":true}\n")
+	fs.mutateOnStateSync = true
+	fs.failSyncDirAfter = fs.syncDirCalls + 3
+	report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.NoError(t, fs.mutationErr)
+	actualReceipt, err := os.ReadFile(receiptPath)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(wantedReceipt, actualReceipt), "recovery must not accept the injected wrong receipt")
+	actualHash, err := treeHash(r.fs, target)
+	require.NoError(t, err)
+	receipt, err := parseReceipt(actualReceipt)
+	require.NoError(t, err)
+	require.Equal(t, actualHash, receipt.ProjectedTreeSHA256)
+}
+
 func reportBackupPaths(items []Item) []string {
 	result := make([]string, 0, len(items))
 	for _, item := range items {
@@ -248,6 +285,30 @@ func reportBackupPaths(items []Item) []string {
 		}
 	}
 	return result
+}
+
+type wrongReceiptRecoveryFS struct {
+	FileSystem
+	stateDir          string
+	receiptPath       string
+	wrongReceipt      []byte
+	mutateOnStateSync bool
+	mutationErr       error
+	mutated           bool
+	failSyncDirAfter  int
+	syncDirCalls      int
+}
+
+func (f *wrongReceiptRecoveryFS) SyncDir(path string) error {
+	f.syncDirCalls++
+	if f.mutateOnStateSync && !f.mutated && path == f.stateDir {
+		f.mutationErr = f.WriteFile(f.receiptPath, f.wrongReceipt, 0o600)
+		f.mutated = true
+	}
+	if f.failSyncDirAfter > 0 && f.syncDirCalls >= f.failSyncDirAfter {
+		return errors.New("injected continuous directory sync failure")
+	}
+	return f.FileSystem.SyncDir(path)
 }
 
 func TestPathEscapeIsRejected(t *testing.T) {

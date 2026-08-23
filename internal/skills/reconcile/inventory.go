@@ -23,17 +23,6 @@ type inventoryStatus struct {
 	err      error
 }
 
-// packageTargetIdentityOrEmpty is only used after manifests have been loaded
-// from the closed builtin registry. Invalid names must remain fail-closed; an
-// empty report target is safer than inventing a filesystem fallback path.
-func packageTargetIdentityOrEmpty(root, packageName string) string {
-	identity, err := PackageTargetIdentity(root, packageName)
-	if err != nil {
-		return ""
-	}
-	return identity
-}
-
 func (r *Reconciler) inventoryPreflight(manifests []builtin.PackageManifest) ([]inventoryStatus, error) {
 	statuses := make([]inventoryStatus, 0, len(manifests))
 	for _, manifest := range manifests {
@@ -139,8 +128,19 @@ func appendInventoryBlockedItems(report *Report, targets []Target, manifests []b
 			continue
 		}
 		for _, manifest := range manifests {
+			identity, err := PackageTargetIdentity(target.CanonicalRoot, manifest.Name)
+			if err != nil {
+				report.Items = append(report.Items, Item{
+					Target:        target.CanonicalRoot,
+					WorkerAliases: cloneWorkerAliases(target.WorkerAliases),
+					Action:        ActionInstall,
+					Outcome:       OutcomeFailed,
+					ReasonCode:    ReasonInvalidPackage,
+				})
+				continue
+			}
 			report.Items = append(report.Items, Item{
-				Target:        packageTargetIdentityOrEmpty(target.CanonicalRoot, manifest.Name),
+				Target:        identity,
 				WorkerAliases: cloneWorkerAliases(target.WorkerAliases),
 				Action:        ActionInstall,
 				Outcome:       OutcomeConflict,

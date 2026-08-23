@@ -61,7 +61,6 @@ type projectionInspection struct {
 	item       Item
 	receipt    Receipt
 	receiptRaw []byte
-	receiptOK  bool
 	owned      bool
 	treeHash   string
 }
@@ -99,7 +98,7 @@ func (r *Reconciler) inspectProjectionState(target Target, manifest builtin.Pack
 			item.Outcome = OutcomeUnchanged
 			item.ReasonCode = ReasonMissingTarget
 		}
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: receiptErr == nil}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw}, nil
 	}
 	if lstatErr != nil {
 		return projectionInspection{}, lstatErr
@@ -107,13 +106,13 @@ func (r *Reconciler) inspectProjectionState(target Target, manifest builtin.Pack
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		item.Outcome = OutcomeConflict
 		item.ReasonCode = ReasonCollision
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: receiptErr == nil}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw}, nil
 	}
 	actualHash, hashErr := treeHash(r.fs, identity)
 	if hashErr != nil {
 		item.Outcome = OutcomeConflict
 		item.ReasonCode = ReasonCollision
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: receiptErr == nil}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw}, nil
 	}
 	if receiptErr != nil {
 		item.Outcome = OutcomeConflict
@@ -126,23 +125,23 @@ func (r *Reconciler) inspectProjectionState(target Target, manifest builtin.Pack
 	if receipt.CanonicalTarget != identity || receipt.PackageName != manifest.Name || receipt.Profile != manifest.Profile || !equalAliases(receipt.WorkerAliases, target.WorkerAliases) {
 		item.Outcome = OutcomeConflict
 		item.ReasonCode = ReasonInvalidReceipt
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, treeHash: actualHash}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, treeHash: actualHash}, nil
 	}
 	if receipt.ProjectedTreeSHA256 != actualHash {
 		item.Action = ActionUpdate
 		item.Outcome = OutcomeDrift
 		item.ReasonCode = ReasonDrift
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, treeHash: actualHash}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, treeHash: actualHash}, nil
 	}
 	owned := true
 	if receiptMatches(receipt, manifest, identity, target.WorkerAliases, actualHash) {
 		item.Action = ActionNone
 		item.Outcome = OutcomeUnchanged
 		item.ReasonCode = ReasonUnchanged
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, owned: owned, treeHash: actualHash}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, owned: owned, treeHash: actualHash}, nil
 	}
 	item.Action = ActionUpdate
 	item.Outcome = OutcomeChanged
 	item.ReasonCode = ReasonChanged
-	return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, owned: owned, treeHash: actualHash}, nil
+	return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, owned: owned, treeHash: actualHash}, nil
 }

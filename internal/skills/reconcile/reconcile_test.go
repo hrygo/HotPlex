@@ -108,6 +108,16 @@ func TestPackageTargetIdentityRejectsInvalidName(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidPackageName)
 }
 
+func TestInventoryBlockedInvalidPackageReportsFailedItem(t *testing.T) {
+	report := Report{}
+	target := Target{CanonicalRoot: t.TempDir(), WorkerAliases: []WorkerType{WorkerClaude}}
+	appendInventoryBlockedItems(&report, []Target{target}, []builtin.PackageManifest{{Name: "../escape"}})
+	require.Len(t, report.Items, 1)
+	require.Equal(t, target.CanonicalRoot, report.Items[0].Target)
+	require.Equal(t, OutcomeFailed, report.Items[0].Outcome)
+	require.Equal(t, ReasonInvalidPackage, report.Items[0].ReasonCode)
+}
+
 func TestReceiptParserRejectsMalformedOwnershipFields(t *testing.T) {
 	r, _ := newTestReconciler(t)
 	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
