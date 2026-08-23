@@ -94,7 +94,9 @@ func TestNativeDispatchCoversThreeChannelsFourWorkers(t *testing.T) {
 func runMatrixNativeDispatch(t *testing.T, combo e2econtract.Combination) {
 	t.Helper()
 
-	const skillPath = "/worker/oracle-dba"
+	// Deliberately equal the filesystem locator path: provenance, not Path
+	// shape, must keep an authoritative Worker descriptor callable.
+	const skillPath = contractFSPath
 	w := &matrixNativeWorker{
 		workerType: combo.Worker,
 		descriptors: []worker.NativeCommandDescriptor{{

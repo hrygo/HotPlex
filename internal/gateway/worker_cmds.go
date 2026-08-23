@@ -328,21 +328,20 @@ func buildSkillEntriesFromCatalog(merged []worker.NativeCommandDescriptor, fsSki
 }
 
 // classifyNativeSkillCallability is the single evidence-based decision used
-// by /skills and every native Skill invocation entry point. A merged
-// filesystem-tier descriptor is discoverable but never callable; only an
-// authoritative Worker descriptor (or a future explicit adapter evidence
-// path) may be callable after a successful catalog lookup.
+// by /skills and every native Skill invocation entry point. CatalogOrigin is
+// stamped by sessionCatalogStore at the tier boundary; Path shape and other
+// provider metadata are never used as provenance evidence.
 func classifyNativeSkillCallability(
 	d worker.NativeCommandDescriptor,
-	fs skills.Skill,
-	hasFS bool,
-	w worker.Worker,
+	_ skills.Skill,
+	_ bool,
+	_ worker.Worker,
 	authoritativeOK bool,
 ) events.SkillStatus {
 	if d.Kind != worker.NativeCommandKindSkill || !authoritativeOK {
 		return events.SkillStatusDiscoverable
 	}
-	if hasFS && isFilesystemTierDescriptor(d, fs, w) {
+	if d.CatalogOrigin != worker.CatalogOriginWorker {
 		return events.SkillStatusDiscoverable
 	}
 	return events.SkillStatusCallable
@@ -380,18 +379,4 @@ func fixedCommandNamesFor(w worker.Worker) map[string]struct{} {
 		names[fc.desc.Name] = struct{}{}
 	}
 	return names
-}
-
-// isFilesystemTierDescriptor reports whether the merged descriptor is exactly
-// the filesystem-tier entry sessionCatalogStore.assemble builds for the given
-// Skill — the shape only a name the authoritative catalog did NOT claim
-// receives. Any deviation (authoritative path, mode, or turn flags) means the
-// Worker's authoritative tier contributed the entry and it is natively
-// invokable. Conservative by design: an authoritative descriptor that happens
-// to coincide is downgraded to discoverable, never the reverse.
-func isFilesystemTierDescriptor(d worker.NativeCommandDescriptor, fs skills.Skill, w worker.Worker) bool {
-	return d.Path == fs.FilePath &&
-		d.Mode == worker.NativeModeForType(w.Type()) &&
-		d.StartsTurn &&
-		d.AcceptsArgs
 }

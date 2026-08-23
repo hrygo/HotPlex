@@ -517,9 +517,9 @@ func TestSkillsListEntriesClassifyMergedCatalog(t *testing.T) {
 		// Tier 1 — fixed Gateway control command (always-on).
 		{Name: "reset", Description: "重置上下文（全新开始）", Kind: worker.NativeCommandKindControl},
 		// Tier 2 — Worker authoritative skill claiming a filesystem name.
-		{Name: "oracle-dba", Description: "DBA helper", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeTextCommand, StartsTurn: true, AcceptsArgs: true, Path: "/worker/oracle-dba"},
+		{Name: "oracle-dba", Description: "DBA helper", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeTextCommand, StartsTurn: true, AcceptsArgs: true, Path: "/worker/oracle-dba", CatalogOrigin: worker.CatalogOriginWorker},
 		// Tier 2 — Worker-only command with no filesystem counterpart.
-		{Name: "queue", Description: "queue status", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeAdvertisedCommand, StartsTurn: true},
+		{Name: "queue", Description: "queue status", Kind: worker.NativeCommandKindSkill, Mode: worker.SkillModeAdvertisedCommand, StartsTurn: true, CatalogOrigin: worker.CatalogOriginWorker},
 		// Tier 2 — Worker-advertised control command (e.g. ACP available_commands_update).
 		{Name: "tools", Description: "tool usage", Kind: worker.NativeCommandKindControl, Mode: worker.SkillModeAdvertisedCommand},
 		// Tier 3 — filesystem-only skill (filesystem-tier descriptor shape).
