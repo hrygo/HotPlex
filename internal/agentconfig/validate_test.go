@@ -7,6 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateOverridesRejectsSkillsFilename(t *testing.T) {
+	t.Parallel()
+
+	_, err := ValidateOverrides(`{"SKILLS.md":"legacy"}`)
+	require.ErrorIs(t, err, ErrUnknownConfigFile)
+}
+
 func TestValidateOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -67,14 +74,14 @@ func TestValidateOverrides(t *testing.T) {
 			want: map[string]string{"SOUL.md": "s", "AGENTS.md": "a", "TOOLS.md": "t", "USER.md": "u", "MEMORY.md": "m"},
 		},
 		{
-			name: "legacy skills key accepted during compatibility window",
-			raw:  `{"SKILLS.md":"legacy tools"}`,
-			want: map[string]string{"SKILLS.md": "legacy tools"},
+			name:    "legacy skills key rejected as unknown",
+			raw:     `{"SKILLS.md":"legacy tools"}`,
+			wantErr: ErrUnknownConfigFile,
 		},
 		{
-			name:    "canonical and legacy tools keys conflict",
+			name:    "legacy skills key remains unknown beside canonical tools",
 			raw:     `{"TOOLS.md":"new","SKILLS.md":"old"}`,
-			wantErr: ErrConflictingConfigFiles,
+			wantErr: ErrUnknownConfigFile,
 		},
 	}
 

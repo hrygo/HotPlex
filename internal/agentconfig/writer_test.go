@@ -106,7 +106,7 @@ func TestResolvedSource_NotFound(t *testing.T) {
 	require.Equal(t, "", src)
 }
 
-func TestResolvedSource_CanonicalToolsFindsLegacyFile(t *testing.T) {
+func TestResolvedSource_CanonicalToolsIgnoresLegacyFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -115,5 +115,18 @@ func TestResolvedSource_CanonicalToolsFindsLegacyFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(botDir, "SKILLS.md"), []byte("legacy"), 0o644))
 
 	src := ResolvedSource(dir, "slack", "U12345", "TOOLS.md")
-	require.Equal(t, "bot", src)
+	require.Empty(t, src)
+}
+
+func TestResolvedSource_LegacyDefaultDirectoryIgnored(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	legacyDir := filepath.Join(dir, "slack", "default")
+	require.NoError(t, os.MkdirAll(legacyDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacyDir, "TOOLS.md"), []byte("legacy"), 0o644))
+
+	source, resolvedFile := ResolvedLocation(dir, "slack", "", "TOOLS.md")
+	require.Empty(t, source)
+	require.Empty(t, resolvedFile)
 }

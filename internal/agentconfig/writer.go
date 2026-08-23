@@ -80,47 +80,40 @@ func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) e
 }
 
 // ResolvedLocation reports the effective scope and physical basename for a
-// logical config slot. The basename matters during the TOOLS.md migration:
-// callers can distinguish a canonical file from the deprecated SKILLS.md
-// alias without treating AgentConfig guidance as a real Agent Skill.
+// canonical config slot.
 func ResolvedLocation(dir, platform, botName, fileName string) (source, resolvedFile string) {
-	names := readAliases(fileName)
-	statAny := func(parent string) string {
-		for _, name := range names {
-			if _, err := os.Stat(filepath.Join(parent, name)); err == nil {
-				return name
-			}
+	canonical, known := canonicalFileName(fileName)
+	if !known || canonical != fileName {
+		return "", ""
+	}
+	statFile := func(parent string) bool {
+		if _, err := os.Stat(filepath.Join(parent, fileName)); err == nil {
+			return true
 		}
-		return ""
+		return false
 	}
 	// 1. Bot-level
 	if botName != "" && platform != "" {
-		if name := statAny(filepath.Join(dir, platform, botName)); name != "" {
-			return "bot", name
+		if statFile(filepath.Join(dir, platform, botName)) {
+			return "bot", fileName
 		}
 	}
 	// 2. Platform-level
 	if platform != "" {
-		if name := statAny(filepath.Join(dir, platform)); name != "" {
-			return "platform", name
-		}
-		// 2b. Legacy backward compat: dir/platform/default/fileName
-		if botName == "" {
-			if name := statAny(filepath.Join(dir, platform, LegacyDefaultBotName)); name != "" {
-				return "legacy", name
-			}
+		if statFile(filepath.Join(dir, platform)) {
+			return "platform", fileName
 		}
 	}
 	// 3. Global-level
-	if name := statAny(dir); name != "" {
-		return "global", name
+	if statFile(dir) {
+		return "global", fileName
 	}
 	return "", ""
 }
 
 // ResolvedSource reports which level a config file resolves from by checking
 // os.Stat at each level in priority order. Returns "bot", "platform", "global",
-// "legacy", or "" if the file is not found at any level.
+// or "" if the file is not found at any level.
 func ResolvedSource(dir, platform, botName, fileName string) string {
 	source, _ := ResolvedLocation(dir, platform, botName, fileName)
 	return source

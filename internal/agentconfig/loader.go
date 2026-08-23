@@ -17,24 +17,19 @@ import (
 // ErrInvalidBotName is returned when botName contains path traversal components.
 var ErrInvalidBotName = errors.New("agentconfig: invalid botName")
 
-// LegacyDefaultBotName is the directory name used for single-bot agent-config
-// before PR #679. Kept for backward compatibility during migration.
-const LegacyDefaultBotName = "default"
-
 const (
-	FileSoul         = "SOUL.md"
-	FileAgents       = "AGENTS.md"
-	FileTools        = "TOOLS.md"
-	LegacyFileSkills = "SKILLS.md"
-	FileUser         = "USER.md"
-	FileMemory       = "MEMORY.md"
+	FileSoul   = "SOUL.md"
+	FileAgents = "AGENTS.md"
+	FileTools  = "TOOLS.md"
+	FileUser   = "USER.md"
+	FileMemory = "MEMORY.md"
 )
 
 // AgentConfigs holds loaded content for all agent config files.
 type AgentConfigs struct {
 	Soul   string // SOUL.md   (B channel)
 	Agents string // AGENTS.md (B channel)
-	Tools  string // TOOLS.md  (B channel; SKILLS.md is a legacy read alias)
+	Tools  string // TOOLS.md  (B channel)
 	User   string // USER.md   (C channel)
 	Memory string // MEMORY.md (C channel)
 }
@@ -42,7 +37,6 @@ type AgentConfigs struct {
 type fileState struct {
 	content string
 	found   bool
-	legacy  bool
 }
 
 // MaxFileChars is the maximum character limit per file.
@@ -201,10 +195,8 @@ func ValidateExcludeList(exclude []string) []string {
 // HasGlobalFiles reports whether any config file exists at the global level (dir/<file>).
 func HasGlobalFiles(dir string) bool {
 	for _, name := range configFiles {
-		for _, candidate := range readAliases(name) {
-			if _, err := os.Stat(filepath.Join(dir, candidate)); err == nil {
-				return true
-			}
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
 		}
 	}
 	return false
@@ -236,65 +228,16 @@ func resolveFile(dir, platform, botName, fileName string) (fileState, error) {
 		if state.found {
 			return state, nil
 		}
-		// 2b. Legacy backward compat: dir/platform/default/fileName
-		// Before PR #679, single-bot mode used "default" as botName. If a user
-		// created configs under {platform}/default/ between #678 and #679, this
-		// fallback ensures they are still discovered. New deployments should use
-		// platform-level (dir/platform/fileName) instead.
-		if botName == "" {
-			state, err := readLogicalFile(filepath.Join(dir, platform, LegacyDefaultBotName), fileName)
-			if err != nil {
-				return fileState{}, err
-			}
-			if state.found {
-				slog.Warn("agentconfig: legacy default/ directory detected; move files to platform-level",
-					"platform", platform, "file", fileName)
-				return state, nil
-			}
-		}
 	}
 	// 3. Global-level: dir/fileName
 	return readLogicalFile(dir, fileName)
 }
 
 func readLogicalFile(dir, name string) (fileState, error) {
-	aliases := readAliases(name)
-	for i, candidate := range aliases {
-		state, err := readFileState(dir, candidate)
-		if err != nil {
-			return fileState{}, err
-		}
-		if !state.found {
-			continue
-		}
-		state.legacy = i > 0
-		if i == 0 && len(aliases) > 1 {
-			if _, statErr := os.Stat(filepath.Join(dir, aliases[1])); statErr == nil {
-				slog.Warn("agentconfig: canonical and legacy tools files coexist; using canonical",
-					"dir", dir, "canonical", FileTools, "legacy", LegacyFileSkills)
-			}
-		}
-		if state.legacy {
-			slog.Warn("agentconfig: legacy tools filename detected; migrate to TOOLS.md",
-				"dir", dir, "file", LegacyFileSkills)
-		}
-		return state, nil
-	}
-	return fileState{}, nil
-}
-
-func readAliases(name string) []string {
-	canonical, known := canonicalFileName(name)
-	if known && canonical == FileTools {
-		return []string{FileTools, LegacyFileSkills}
-	}
-	return []string{name}
+	return readFileState(dir, name)
 }
 
 func canonicalFileName(name string) (string, bool) {
-	if strings.EqualFold(name, LegacyFileSkills) {
-		return FileTools, true
-	}
 	for _, candidate := range configFiles {
 		if strings.EqualFold(name, candidate) {
 			return candidate, true
@@ -385,11 +328,6 @@ func (c *AgentConfigs) IsEmpty() bool {
 // The Message Channel track calls Load directly; this function is WebChat-only.
 // See design spec §5.
 func LoadForWorkspace(dir, platform string, overrides map[string]string, injectExclude ...string) (*AgentConfigs, error) {
-	if _, hasTools := overrides[FileTools]; hasTools {
-		if _, hasLegacy := overrides[LegacyFileSkills]; hasLegacy {
-			return nil, fmt.Errorf("%w: %s and %s", ErrConflictingConfigFiles, FileTools, LegacyFileSkills)
-		}
-	}
 	base, err := Load(dir, platform, "", injectExclude...)
 	if err != nil {
 		return nil, err
@@ -399,8 +337,8 @@ func LoadForWorkspace(dir, platform string, overrides map[string]string, injectE
 	return base, nil
 }
 
-// applyOverrides applies per-file overrides onto base in place. Only canonical
-// keys and the legacy Tools alias are applied; excluded files are skipped.
+// applyOverrides applies canonical per-file overrides onto base in place.
+// Excluded files are skipped.
 func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclude []string) {
 	set := func(baseName, val string, target *string) {
 		if shouldExclude(baseName, injectExclude) {
@@ -414,7 +352,7 @@ func applyOverrides(base *AgentConfigs, overrides map[string]string, injectExclu
 			set(k, v, &base.Soul)
 		case FileAgents:
 			set(k, v, &base.Agents)
-		case FileTools, LegacyFileSkills:
+		case FileTools:
 			set(k, v, &base.Tools)
 		case FileUser:
 			set(k, v, &base.User)

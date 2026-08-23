@@ -157,17 +157,17 @@ func TestLoad(t *testing.T) {
 		require.Equal(t, "Prefer native tools.", cfg.Tools)
 	})
 
-	t.Run("loads legacy skills file as tools fallback", func(t *testing.T) {
+	t.Run("ignores legacy skills file", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "SKILLS.md", "Legacy tool notes.")
 
 		cfg, err := Load(dir, "", "")
 		require.NoError(t, err)
-		require.Equal(t, "Legacy tool notes.", cfg.Tools)
+		require.Empty(t, cfg.Tools)
 	})
 
-	t.Run("canonical tools wins over legacy in same scope", func(t *testing.T) {
+	t.Run("loads canonical tools while ignoring legacy file in same scope", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "TOOLS.md", "Canonical.")
@@ -178,7 +178,7 @@ func TestLoad(t *testing.T) {
 		require.Equal(t, "Canonical.", cfg.Tools)
 	})
 
-	t.Run("empty canonical tools masks legacy in same scope", func(t *testing.T) {
+	t.Run("empty canonical tools remains empty when legacy file coexists", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "TOOLS.md", "")
@@ -189,7 +189,7 @@ func TestLoad(t *testing.T) {
 		require.Empty(t, cfg.Tools)
 	})
 
-	t.Run("bot legacy tools beats platform canonical", func(t *testing.T) {
+	t.Run("bot legacy tools is ignored in favor of platform canonical", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "slack/TOOLS.md", "Platform canonical.")
@@ -197,7 +197,17 @@ func TestLoad(t *testing.T) {
 
 		cfg, err := Load(dir, "slack", "U12345")
 		require.NoError(t, err)
-		require.Equal(t, "Bot legacy.", cfg.Tools)
+		require.Equal(t, "Platform canonical.", cfg.Tools)
+	})
+
+	t.Run("legacy default directory is ignored", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeFile(t, dir, "slack/default/TOOLS.md", "Legacy tools.")
+
+		cfg, err := Load(dir, "slack", "")
+		require.NoError(t, err)
+		require.Empty(t, cfg.Tools)
 	})
 
 	t.Run("empty bot canonical tools masks lower scopes", func(t *testing.T) {
@@ -272,6 +282,26 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "Global soul.", cfg.Soul)
 	})
+}
+
+func TestLoadIgnoresLegacySkillsFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "SKILLS.md", "legacy tools")
+
+	cfg, err := Load(dir, "", "")
+	require.NoError(t, err)
+	require.Empty(t, cfg.Tools)
+}
+
+func TestLoadIgnoresLegacyDefaultDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "slack/default/TOOLS.md", "legacy tools")
+
+	cfg, err := Load(dir, "slack", "")
+	require.NoError(t, err)
+	require.Empty(t, cfg.Tools)
 }
 
 func TestSizeLimits(t *testing.T) {
@@ -432,8 +462,8 @@ func TestShouldExclude(t *testing.T) {
 		{"no match", "SOUL.md", []string{"AGENTS.md"}, false},
 		{"multiple exclude one match", "USER.md", []string{"SOUL.md", "USER.md"}, true},
 		{"multiple exclude no match", "TOOLS.md", []string{"SOUL.md", "USER.md"}, false},
-		{"canonical tools excluded by legacy name", "TOOLS.md", []string{"SKILLS.md"}, true},
-		{"legacy tools excluded by canonical name", "SKILLS.md", []string{"TOOLS.md"}, true},
+		{"legacy name does not exclude canonical tools", "TOOLS.md", []string{"SKILLS.md"}, false},
+		{"canonical name does not recognize legacy tools", "SKILLS.md", []string{"TOOLS.md"}, false},
 	}
 
 	for _, tt := range tests {
@@ -513,14 +543,14 @@ func TestLoadWithInjectExclude(t *testing.T) {
 		require.Equal(t, "Rules.", cfg.Agents)
 	})
 
-	t.Run("either tools basename excludes the logical slot", func(t *testing.T) {
+	t.Run("legacy skills basename does not exclude tools", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "TOOLS.md", "Canonical tools.")
 
 		cfg, err := Load(dir, "", "", "SKILLS.md")
 		require.NoError(t, err)
-		require.Empty(t, cfg.Tools)
+		require.Equal(t, "Canonical tools.", cfg.Tools)
 	})
 }
 
@@ -563,14 +593,14 @@ func TestLoadForWorkspace(t *testing.T) {
 		require.Empty(t, cfg.Soul)
 	})
 
-	t.Run("legacy tools override is accepted", func(t *testing.T) {
+	t.Run("legacy tools override is ignored", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeFile(t, dir, "TOOLS.md", "team-tools")
 
 		cfg, err := LoadForWorkspace(dir, "webchat", map[string]string{"SKILLS.md": "legacy-override"})
 		require.NoError(t, err)
-		require.Equal(t, "legacy-override", cfg.Tools)
+		require.Equal(t, "team-tools", cfg.Tools)
 	})
 
 	t.Run("canonical tools override wins independently", func(t *testing.T) {

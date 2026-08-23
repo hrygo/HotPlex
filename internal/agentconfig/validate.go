@@ -9,11 +9,10 @@ import (
 
 // Sentinel errors for agent-config override validation (spec ② §10).
 var (
-	ErrInvalidConfigJSON      = errors.New("agentconfig: invalid config JSON")
-	ErrUnknownConfigFile      = errors.New("agentconfig: unknown config file")
-	ErrConfigTooLarge         = errors.New("agentconfig: config exceeds size limit")
-	ErrInvalidConfigValue     = errors.New("agentconfig: invalid config value")
-	ErrConflictingConfigFiles = errors.New("agentconfig: conflicting config files")
+	ErrInvalidConfigJSON  = errors.New("agentconfig: invalid config JSON")
+	ErrUnknownConfigFile  = errors.New("agentconfig: unknown config file")
+	ErrConfigTooLarge     = errors.New("agentconfig: config exceeds size limit")
+	ErrInvalidConfigValue = errors.New("agentconfig: invalid config value")
 )
 
 // ValidateBotName checks that name contains no path separators or traversal
@@ -45,15 +44,9 @@ func ValidateOverrides(raw string) (map[string]string, error) {
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidConfigJSON, err)
 	}
-	known := make(map[string]struct{}, len(configFiles)+1)
+	known := make(map[string]struct{}, len(configFiles))
 	for _, f := range configFiles {
 		known[f] = struct{}{}
-	}
-	known[LegacyFileSkills] = struct{}{}
-	if _, hasTools := m[FileTools]; hasTools {
-		if _, hasLegacy := m[LegacyFileSkills]; hasLegacy {
-			return nil, fmt.Errorf("%w: %s and %s", ErrConflictingConfigFiles, FileTools, LegacyFileSkills)
-		}
 	}
 	out := make(map[string]string, len(m))
 	var total int

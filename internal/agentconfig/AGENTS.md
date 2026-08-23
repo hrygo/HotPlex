@@ -33,7 +33,7 @@ agentconfig/
     U12345/
       SOUL.md          # bot-specific override
 ```
-Missing files fall through; a present-empty file explicitly clears the slot and stops fallback. Each file resolves independently. For the Tools slot only, `SKILLS.md` is a deprecated read alias; `TOOLS.md` wins when both exist in one scope.
+Missing files fall through; a present-empty file explicitly clears the slot and stops fallback. Each file resolves independently. Only the five canonical filenames are recognized.
 
 **B/C dual-channel assembly** (BuildSystemPrompt):
 - B-channel `<directives>`: `<hotplex>` (meta-cognition, always first) + `<persona>` (SOUL) + `<rules>` (AGENTS) + `<tool-guidance>` (TOOLS)
