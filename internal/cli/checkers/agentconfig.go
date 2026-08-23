@@ -61,7 +61,7 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 	}
 
 	var warnings []string
-	c.checkScope(dir, ".", true, entries, &warnings)
+	c.checkScope(dir, ".", entries, &warnings)
 
 	if len(warnings) == 0 {
 		return cli.Diagnostic{
@@ -81,7 +81,7 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 	}
 }
 
-func (c agentConfigDirChecker) checkScope(scopeDir, scope string, root bool, entries []os.DirEntry, warnings *[]string) {
+func (c agentConfigDirChecker) checkScope(scopeDir, scope string, entries []os.DirEntry, warnings *[]string) {
 	hasTools := false
 	for _, e := range entries {
 		if e.IsDir() {
@@ -92,9 +92,7 @@ func (c agentConfigDirChecker) checkScope(scopeDir, scope string, root bool, ent
 		if validConfigFiles[name] || ignoredFiles[name] {
 			continue
 		}
-		// Preserve the historical behavior of ignoring unrelated global markdown,
-		// while still validating platform and bot scopes recursively.
-		if !root && strings.HasSuffix(name, ".md") {
+		if strings.HasSuffix(name, ".md") {
 			*warnings = append(*warnings, relativeConfigPath(scope, name)+" is unrecognized")
 		}
 	}
@@ -113,17 +111,14 @@ func (c agentConfigDirChecker) checkScope(scopeDir, scope string, root bool, ent
 		if !e.IsDir() {
 			continue
 		}
-		childScope := e.Name()
-		if !root {
-			childScope = filepath.Join(scope, e.Name())
-		}
+		childScope := filepath.Join(scope, e.Name())
 		childDir := filepath.Join(scopeDir, e.Name())
 		childEntries, err := os.ReadDir(childDir)
 		if err != nil {
 			*warnings = append(*warnings, fmt.Sprintf("cannot read %s config dir: %v", childScope, err))
 			continue
 		}
-		c.checkScope(childDir, childScope, false, childEntries, warnings)
+		c.checkScope(childDir, childScope, childEntries, warnings)
 	}
 }
 

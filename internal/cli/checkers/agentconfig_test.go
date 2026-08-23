@@ -27,13 +27,19 @@ func TestAgentConfigDirChecker(t *testing.T) {
 		require.Equal(t, cli.StatusPass, d.Status)
 	})
 
-	t.Run("unsupported global markdown is ignored", func(t *testing.T) {
+	t.Run("unsupported global markdown is unrecognized", func(t *testing.T) {
 		t.Parallel()
 		cfgDir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "SKILLS.md"), []byte("unsupported"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "custom.md"), []byte("unsupported"), 0o644))
 
 		d := (agentConfigDirChecker{dir: cfgDir}).Check(context.Background())
-		require.Equal(t, cli.StatusPass, d.Status)
+		require.Equal(t, cli.StatusWarn, d.Status)
+		require.Contains(t, d.Message, "SKILLS.md")
+		require.Contains(t, d.Message, "custom.md")
+		require.Contains(t, d.Message, "unrecognized")
+		require.NotContains(t, d.Message, "deprecated")
+		require.NotContains(t, d.FixHint, "backup")
 	})
 
 	t.Run("unsupported platform markdown is unrecognized", func(t *testing.T) {
