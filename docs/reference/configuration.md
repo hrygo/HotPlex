@@ -416,7 +416,7 @@ Agent B/C 通道配置加载器。
 
 **三级 fallback**：解析优先级为 Bot（`slack/{botName}/`）→ 平台（`slack/`）→ 全局，每文件独立、命中即终止。Bot 级目录名使用 YAML 配置中 `bots[].name` 的值。键/文件缺失表示继续继承；存在但正文为空表示显式清空并停止 fallback。
 
-**Tools 兼容期**：新文件和写接口只使用 `TOOLS.md`。旧 `SKILLS.md` 暂作为同一逻辑槽位的只读别名：每个作用域先检查 `TOOLS.md`，再检查旧名；同层两者并存时 `TOOLS.md` 胜出并由 `hotplex doctor` 告警。`inject_exclude` 中两种名字等价。
+**文件契约**：AgentConfig 只识别 `SOUL.md`、`AGENTS.md`、`TOOLS.md`、`USER.md`、`MEMORY.md`；`inject_exclude` 也只匹配这五个规范槽位。配置根中的其他用户文件不参与加载，HotPlex 不会自动删除或改写它们。
 
 **与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，
 通过 `/admin/api/skills`、WebChat HTTP Skills 页面和 Worker 当前 evidence 管理，不由 `TOOLS.md`
@@ -436,6 +436,10 @@ Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，
 HotPlex 发布两个 embedded canonical package：runtime profile 只有 `hotplex-cli`，用于日常
 Cron、显式 Slack 和只读诊断；operator profile 累积包含 `hotplex-cli` 与
 `hotplex-operator`，用于服务、更新、配置、Admin 和 audit，并要求显式 operator authority。
+它们的 canonical source 分别是 `internal/skills/builtin/hotplex-cli` 与
+`internal/skills/builtin/hotplex-operator`，生成器产出 byte-identical 的
+`.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
 Public/Admin/WebChat HTTP builtins 永久可发现，不以 projection 或 receipt 存在为前提；Session
 `/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项是 `discoverable`，
 只有 projection/native advertisement 和 adapter-verified activation 才能证明 `callable`。真实
@@ -453,9 +457,8 @@ global/project/user Skill 同名时优先遮蔽 builtin，`source`
 未知 user/project Skill，collision、drift、failed item 返回非零；remove 只删除 matching
 receipt 且 unchanged-tree 能证明归属的 projection，不删除 inventory。
 
-Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 只读；Cron
-legacy compatibility helper 仍可能写入 `~/.hotplex/skills/cron.md`，它不属于 AgentConfig B 通道、
-不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update 只有显式 `--sync-skills`
+Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 只读；
+onboard/update 只有显式 `--sync-skills`
 才同步，修改后在新
 Session 或 `/reset` 才进入 Worker 的目录证据边界。未显式传 `--worker` 时，CLI 只解析已启用
 messaging platform/bot 的 effective worker targets；empty target 返回 bounded error，不回退到

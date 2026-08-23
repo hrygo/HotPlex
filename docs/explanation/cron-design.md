@@ -34,13 +34,8 @@ Cron 任务的创建不通过 CLI 手动输入 cron 表达式，而是通过 Age
 
 Cron 路由使用 embedded `hotplex-cli` canonical Skill 的短路由和 references；Skill 不可用时，
 Agent 必须查询当前二进制的 `hotplex cron --help` 与 `hotplex cron create --help`，不能依赖旧
-示例。`TOOLS.md` 只提供常驻工具使用指导，不是 Cron Skill catalog。
-
-兼容边界：`internal/cron/skill.go` 的 `ReleaseSkillManual` 仍可能在 Scheduler 启动时写入
-`~/.hotplex/skills/cron.md`，并保留 `cron-skill-manual.md` 作为 legacy compatibility artifact。
-它不属于 AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理；没有
-portable Agent Skill frontmatter，generic Skill scanner 不把它列为真实 Agent Skill。Phase C 的
-legacy manual migration 尚未交付。
+示例。具体工作流以 `<name>/SKILL.md` 及其按需 references 表达；`TOOLS.md` 只提供常驻工具
+使用指导。Scheduler 启动不会向 Skills 目录发布 flat Markdown 手册。
 
 ### 3 种调度类型
 

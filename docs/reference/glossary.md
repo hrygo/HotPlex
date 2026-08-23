@@ -24,7 +24,9 @@ HotPlex 提供的 HTTP 管理接口，默认监听 `localhost:9999`。支持 ses
 
 ### Agent Skill
 
-按需加载的可执行知识包，以 `<name>/SKILL.md` 为入口，由独立 Skills scanner、Admin API 和 WebChat Skills 页面发现与管理。Agent Skill 不属于五文件 AgentConfig，不能由 `TOOLS.md` 推断。
+按需加载的可执行知识包，以 `<name>/SKILL.md` 为入口。Admin/WebChat 的 public Skills catalog
+提供 built-in inventory 与发现，Session `/skills` 则依据当前 Worker/filesystem/native evidence；
+discoverable 不等于 callable。Agent Skill 不属于五文件 AgentConfig，不能由 `TOOLS.md` 推断。
 
 ### AgentConfig Tools
 
@@ -38,7 +40,7 @@ HotPlex 提供的 HTTP 管理接口，默认监听 `localhost:9999`。支持 ses
 
 Agent 配置的指令通道（Directives Channel），以 XML `<directives>` 标签注入 Worker 的系统提示词。内容包括 `<hotplex>`（META-COGNITION.md，始终存在且排首位）、`<persona>`（SOUL.md）、`<rules>`（AGENTS.md）和 `<tool-guidance>`（TOOLS.md）。B 通道为强制性指令，与 C 通道冲突时无条件覆盖。
 
-配置文件存放于 `~/.hotplex/agent-configs/`，按 Bot → 平台 → 全局优先级逐文件解析。缺失表示继承，present-empty 表示显式清空并终止。旧 `SKILLS.md` 仅是 Tools 槽位的临时只读兼容名。
+配置文件存放于 `~/.hotplex/agent-configs/`，按 Bot → 平台 → 全局优先级逐文件解析。缺失表示继承，present-empty 表示显式清空并终止。
 
 ### Brain
 
@@ -74,7 +76,7 @@ Agent 配置的上下文通道（Context Channel），以 XML `<context>` 标签
 
 HotPlex 的 AI-native 定时任务引擎（`internal/cron/`），支持三种调度方式：`cron`（标准 cron 表达式）、`every`（固定间隔）和 `at`（一次性执行）。任务 payload 为自然语言提示词，由 Worker 以 Agent Turn 形式执行。
 
-Cron 系统包括：timerLoop tick 引擎（`timer.go`）、并发槽 CAS 控制、SQLite 持久化（`store.go`）、YAML 批量导入（`loader.go`）、执行结果投递（`delivery.go`，按平台回传飞书卡片/Slack 消息），以及 `at` 类型指数退避重试（`retry.go`）。Cron 的技能手册通过 `go:embed` 嵌入 B 通道（`skill.go`）。
+Cron 系统包括：timerLoop tick 引擎（`timer.go`）、并发槽 CAS 控制、SQLite 持久化（`store.go`）、YAML 批量导入（`loader.go`）、执行结果投递（`delivery.go`，按平台回传飞书卡片/Slack 消息），以及 `at` 类型指数退避重试（`retry.go`）。Cron 操作流程由 `hotplex-cli` Skill 按需提供，并以当前 `hotplex cron --help` 为准。
 
 ---
 

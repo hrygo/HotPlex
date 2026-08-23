@@ -1,6 +1,6 @@
-# HotPlex Agent Context 设定文件方案 (Dual-Worker)
+# HotPlex Agent Context 设定文件方案
 
-> **实施状态**: ✅ Phase 1-4 已实现 | 🔄 Phase 5（动态能力）规划中
+> **实施状态**：严格五文件 AgentConfig 与独立 Agent Skills 架构已实现
 
 ## 1. 概述与目标
 
@@ -307,7 +307,7 @@ Step 1: 加载设定文件 (共享)
 
   加载规则:
   · 逐文件按 Bot → 平台 → 全局解析；缺失继承，present-empty 显式清空，命中后不合并
-  · Tools 槽位兼容读取旧 SKILLS.md；同层 TOOLS.md 优先并告警
+  · 只识别图中的五个规范文件名，不做别名或额外目录查找
   · frontmatter (--- 包裹的 YAML) 剥离后注入
   · 大小限制: 8K/文件, 40K/总计
   · 文件不存在 → 跳过
@@ -433,6 +433,16 @@ description: "HotPlex 工具使用指南"
 `TOOLS.md` 不是 Agent Skill catalog。真实 Skills 由独立的 `<name>/SKILL.md`
 定义、发现并按需加载；实际工具可用性以当前 Session 的结构化目录为准。
 
+两个 embedded built-in package 的唯一来源是
+`internal/skills/builtin/hotplex-cli` 与 `internal/skills/builtin/hotplex-operator`，生成器把它们
+分别镜像到 `.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator`，两侧内容必须
+byte-identical。仓库的五个 Skill portfolio 由 `hotplex-cli`、`hotplex-operator`、
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol` 组成。
+
+Admin/WebChat 的 public Skills catalog 用于 built-in inventory 与发现；Session `/skills` 以当前
+Worker/filesystem/native evidence 判定可用性。discoverable 不等于 callable；ACP 没有可推断的
+filesystem root。
+
 ### 9.4 USER.md — 用户画像 (→ C 通道)
 
 ```markdown
@@ -489,9 +499,10 @@ Phase 5: 多作用域配置 ✅
 ├── Bot → 平台 → 全局逐文件 fallback（目录布局，命中即终止）
 └── 配置重新加载（新 Session 或 /reset 生效）
 
-Phase 6: 自动维护（规划中）
-├── 用户画像自动学习 (从对话中提取偏好更新 USER.md)
-└── MEMORY.md 自动管理 (daily log 压缩)
+Phase 6: Agent Skills 分离 ✅
+├── <name>/SKILL.md progressive disclosure，不进入 AgentConfig prompt
+├── 两个 canonical built-in package → 两棵 byte-identical repository mirror
+└── public catalog 与 Session Worker/filesystem/native evidence 分离
 ```
 
 ---

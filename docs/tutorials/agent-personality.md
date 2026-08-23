@@ -102,8 +102,7 @@ mkdir -p ~/.hotplex/agent-configs
 
 `TOOLS.md` 只是常驻指导，不是 Agent Skill 列表。真实 Skills 由独立的
 `.agents/skills/<name>/SKILL.md` 定义，并通过 Admin API / WebChat Skills 页面管理、
-按需加载。旧 AgentConfig `SKILLS.md` 在兼容期仍可读取，但新配置应只创建
-`TOOLS.md`；同一目录两者并存时 `TOOLS.md` 生效，`hotplex doctor` 会报告迁移提示。
+按需加载。AgentConfig 只识别本教程列出的五个规范文件。
 
 ### Session 自我认知与 Skills 调用边界
 
@@ -138,10 +137,13 @@ global/project/user Skill
 `runtime`/`operator` profile、重复 `--worker`，并可使用 `--dry-run` 与 `--json`。UserHome
 原生根（Claude 的 `.claude/skills`、Codex/OpenCode 共享 `.agents/skills`）与
 `$HOTPLEX_HOME` 的 immutable inventory/state receipts 分离；ACP 没有可推断的 filesystem
-root。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 不写入，
-但 Cron legacy compatibility helper 仍可能写入旧 `~/.hotplex/skills/cron.md`；它不属于
-AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update
-只有显式 `--sync-skills` 才同步。
+root。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 不写入；
+onboard/update 只有显式 `--sync-skills` 才同步。
+
+两个内置包以 `internal/skills/builtin/hotplex-cli` 和
+`internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
+`.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库还包含
+`hotplex-diagnostics`、`hotplex-release` 和 `hotplex-docs-patrol`，合计五个 Skill。
 
 ### Cron 请求的 CLI 路由
 
@@ -274,7 +276,7 @@ mkdir -p ~/.hotplex/agent-configs/slack/dev-bot
 2. **内容加载**：发送 `/reset` 后提问，观察行为是否符合预期
 3. **通道优先级**：故意让 MEMORY.md 与 AGENTS.md 内容冲突，验证 Agent 以 AGENTS.md 为准
 4. **Bot 级覆盖**：在 Bot 级目录放置 SOUL.md，验证覆盖生效
-5. **迁移检查**：运行 `hotplex doctor`，确认没有旧 `SKILLS.md`、同层冲突或意外的 present-empty 文件
+5. **空文件检查**：确认 Bot/平台作用域没有意外的 present-empty 文件
 
 ---
 

@@ -54,7 +54,7 @@ agent-configs/
 - **B 通道** (`<directives>`): META-COGNITION.md + SOUL + AGENTS + TOOLS — 定义 Bot 行为和环境工具指南
 - **C 通道** (`<context>`): USER + MEMORY — 提供用户上下文
 
-`TOOLS.md` 不等于真实 Agent Skills。真实 Skills 由独立的 `SKILL.md` 包管理；旧 `SKILLS.md` 仅在迁移兼容期作为 Tools 槽位的只读别名。
+`TOOLS.md` 是常驻环境指导。真实 Agent Skills 由独立的 `<name>/SKILL.md` 包管理，不进入五文件 AgentConfig。
 
 配置热更新仅在 session 初始化或 `/reset` 时加载，运行中的 session 不受影响。
 

@@ -22,7 +22,6 @@ HotPlex 内置 AI-native Cron 调度器，支持从自然语言到自动化执�
 | Executor | `executor.go` | Worker 执行适配、Session 构造、环境注入 |
 | Delivery | `delivery.go` | 结果投递到飞书/Slack |
 | CLI routing | embedded `hotplex-cli` | Cron 的 canonical Skill route；不可用时以当前 `hotplex cron --help`/`create --help` 为准 |
-| Legacy helper | `skill.go` | `ReleaseSkillManual` 仍可能释放 `cron-skill-manual.md` 到 `~/.hotplex/skills/cron.md`；这是 legacy compatibility artifact，不是 canonical Agent Skill |
 
 ## 三种调度模式
 
@@ -248,10 +247,9 @@ timerLoop tick → collectDue → CAS 并发槽 → executeJob → Worker 执行
 ## 自然语言创建
 
 Cron 请求优先路由到当前 Session 实际暴露的 embedded `hotplex-cli` canonical Skill；不可用时
-查询当前二进制的 `hotplex cron --help` 与 `hotplex cron create --help`。`ReleaseSkillManual` 的
-旧文件只是 legacy compatibility artifact：不属于 AgentConfig B 通道、不是 canonical Agent Skill、
-不由 `hotplex skills` 管理，也没有 portable Agent Skill frontmatter。Agent 可通过自然语言识别
-调度意图：
+查询当前二进制的 `hotplex cron --help` 与 `hotplex cron create --help`。真实 Skill 只以
+`<name>/SKILL.md` 为入口，Scheduler 启动不向 Skills 目录发布 flat Markdown 手册。Agent 可通过
+自然语言识别调度意图：
 
 1. 用户发送"每天早上 9 点检查代码质量"
 2. Brain 层 Router 识别为 cron 意图

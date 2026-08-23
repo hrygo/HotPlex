@@ -68,7 +68,7 @@ HotPlex 将所有配置分为两个通道，使用 XML 嵌套表达结构性优�
 
 **文件独立性**：5 个文件（SOUL、AGENTS、TOOLS、USER、MEMORY）各自独立 fallback。文件缺失才进入下一作用域；文件存在但正文为空表示显式清空并立即终止。SOUL.md 可能在 Bot 级命中，而 AGENTS.md 可能 fallback 到全局级。这种设计允许只覆盖需要定制的部分。
 
-Tools 槽位在一个兼容 minor 版本内仍可读取旧 `SKILLS.md`：每个作用域先检查 `TOOLS.md`，再检查旧名；两者同层并存时 `TOOLS.md` 胜出并产生诊断。真实 Agent Skills 是独立领域，由 `.agents/skills/<name>/SKILL.md` 定义并按需加载，不进入 AgentConfig prompt。
+AgentConfig 只识别 `SOUL.md`、`AGENTS.md`、`TOOLS.md`、`USER.md`、`MEMORY.md`。真实 Agent Skills 是独立领域，由 `.agents/skills/<name>/SKILL.md` 定义并按需加载，不进入 AgentConfig prompt。
 
 ### META-COGNITION：go:embed 的特殊地位
 
@@ -114,19 +114,19 @@ Session `/skills` 的出现由当前 Worker/filesystem evidence 决定；filesys
 `project`，builtin 元数据只通过可选 `builtin`/`builtin_package_version` 字段表达。没有同名真实项
 时，内置项 update/delete 返回 `SKILL_BUILTIN_READONLY`；创建同名用户 override 仍走正常 Skill CRUD。
 
+两个内置包的 canonical 来源是 `internal/skills/builtin/hotplex-cli` 与
+`internal/skills/builtin/hotplex-operator`。生成器产出 byte-identical 的
+`.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 恰好包含
+`hotplex-cli`、`hotplex-operator`、`hotplex-diagnostics`、`hotplex-release`、
+`hotplex-docs-patrol` 五个 Skill。
+
 原生 Skill 同步把 UserHome 与 `$HOTPLEX_HOME` 分开：Claude 使用 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可推断的 filesystem root；immutable inventory、状态和 receipts 位于 `$HOTPLEX_HOME`。`hotplex skills status|sync|remove` 使用 runtime（`hotplex-cli`）或 operator（累积包含 `hotplex-cli` 与 `hotplex-operator`）profile，可重复传入 `--worker`，并支持 `--dry-run`/`--json`。未显式指定 worker 时只采用已启用 messaging platform/bot 的解析结果；空目标返回 bounded error，不回退到注册表。remove 只删除 receipt 与 unchanged-tree 能证明归属的 native projection，不删除 inventory。
 
-Gateway startup 的 built-in reconciliation check 与 `doctor` 的 built-in Skills checker 只读；这不
-改变 Cron legacy compatibility helper 的历史写入行为。`onboard`/`update` 只有显式 `--sync-skills`
+Gateway startup 的 built-in reconciliation check 与 `doctor` 的 built-in Skills checker 只读。
+`onboard`/`update` 只有显式 `--sync-skills`
 才同步（`update` 可用 `--skills-profile` 选择累积 profile）。同步遇到 collision、drift 或 failed
 item 以非零结果结束，也不会覆盖未知 user/project Skill；新 Session 或 `/reset` 后才重新看到新的
 Worker 目录证据。
-
-Phase C 的 legacy manual migration 尚未交付。当前 `internal/cron/skill.go` 的
-`ReleaseSkillManual` 仍可能在 Cron 启动时写入 `~/.hotplex/skills/cron.md`；这是 legacy
-compatibility artifact，不属于 AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills`
-管理。该 markdown 没有 portable Agent Skill frontmatter，generic Skill scanner 不把它列为真实
-Agent Skill；不要把它误写成 builtin sync 或 Session `/skills` 的发现证据。
 
 ### CLI 与 Cron 路由
 
@@ -190,7 +190,7 @@ inspect → explain → propose diff → request approval → validate → atomi
 - **nil**（未设置）表示"使用上级值"——fallback 到上级配置
 - **非空切片** 表示"使用此列表"——直接覆盖上级配置
 
-**匹配方式**：大小写不敏感。`SOUL.md` 和 `soul.md` 等效；兼容期内排除 `SKILLS.md` 也会排除同一 Tools 槽位。
+**匹配方式**：大小写不敏感。`SOUL.md` 和 `soul.md` 等效；只匹配五个规范槽位。
 
 **不可排除**：`META-COGNITION.md` 通过 `go:embed` 编译进二进制，始终注入，不受 `inject_exclude` 影响。
 

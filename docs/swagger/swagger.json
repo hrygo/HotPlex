@@ -667,7 +667,7 @@
                         "AdminBearerAuth": []
                     }
                 ],
-                "description": "Returns the content of a single platform-level agent config file (channel team default). SKILLS.md is a deprecated read-only alias for TOOLS.md. Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.",
+                "description": "Returns the content of a single platform-level agent config file (channel team default). Accepts only SOUL.md, AGENTS.md, TOOLS.md, USER.md, or MEMORY.md. Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.",
                 "produces": [
                     "application/json"
                 ],
@@ -694,8 +694,7 @@
                             "AGENTS.md",
                             "TOOLS.md",
                             "USER.md",
-                            "MEMORY.md",
-                            "SKILLS.md"
+                            "MEMORY.md"
                         ],
                         "type": "string",
                         "description": "Config file name",
@@ -988,7 +987,7 @@
                         "AdminBearerAuth": []
                     }
                 ],
-                "description": "Returns the content of a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). SKILLS.md is a deprecated read-only alias for TOOLS.md. Requires admin:read scope.",
+                "description": "Returns the content of a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). Requires admin:read scope.",
                 "produces": [
                     "application/json"
                 ],
@@ -1010,8 +1009,7 @@
                             "AGENTS.md",
                             "TOOLS.md",
                             "USER.md",
-                            "MEMORY.md",
-                            "SKILLS.md"
+                            "MEMORY.md"
                         ],
                         "type": "string",
                         "description": "Config file name",
@@ -2991,14 +2989,6 @@
                 },
                 "memory": {
                     "$ref": "#/definitions/admin.AgentConfigMeta"
-                },
-                "skills": {
-                    "description": "Deprecated: legacy AgentConfig basename metadata.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/admin.AgentConfigMeta"
-                        }
-                    ]
                 },
                 "soul": {
                     "$ref": "#/definitions/admin.AgentConfigMeta"

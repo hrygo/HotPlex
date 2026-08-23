@@ -33,9 +33,9 @@ description: "HotPlex 聊天命令快速参考卡片，涵盖飞书 / Slack / We
 
 ### Agent Skills 与 CLI
 
-`/skills` 展示的是真实 Agent Skills（包括 embedded `hotplex-cli` 与
-`hotplex-operator`），不是 AgentConfig 的 `TOOLS.md` 或旧 `SKILLS.md` alias。需要投影到
-Worker 原生目录时，在有权限的终端显式执行：
+Admin/WebChat 的 public Skills catalog 展示 built-in inventory 与可发现的真实 Agent Skills；
+AgentConfig 的 `TOOLS.md` 不在其中。Session `/skills` 则依据当前 Worker/filesystem/native
+evidence 展示当前会话的 Skill。需要投影到 Worker 原生目录时，在有权限的终端显式执行：
 
 ```bash
 hotplex skills status --profile runtime --worker claude_code --json
@@ -46,9 +46,7 @@ hotplex skills remove --profile runtime --worker claude_code --json
 `runtime` 与 `operator` 是累积 profile，`--worker` 可重复；UserHome 原生根和
 `$HOTPLEX_HOME` immutable inventory/state receipts 分离。Gateway startup 的 built-in
 reconciliation check、doctor 的 built-in Skills checker 和普通 onboard/update 路径不隐式同步；
-Cron legacy compatibility helper 仍可能写入旧 `~/.hotplex/skills/cron.md`，但它不属于
-AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update
-必须显式带 `--sync-skills`。empty enabled-worker target 会返回错误，不会回退到注册表。
+onboard/update 必须显式带 `--sync-skills`。empty enabled-worker target 会返回错误，不会回退到注册表。
 discoverable 不等于 callable，Session `/skills` 仍需 Worker/filesystem evidence。
 
 Cron 创建后始终独立验证：`hotplex cron get <id|name> --json`；不要只看 `cron list`。

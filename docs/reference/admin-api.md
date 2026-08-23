@@ -272,11 +272,11 @@ Bot 状态查询、配置管理和 Agent 配置文件操作端点。
 
 **GET /admin/bots/{name}/preview** — 返回该 bot 组装后的完整系统提示，包含 B 通道（directives）和 C 通道（context）内容，便于调试 Agent 人格配置。
 
-**PUT /admin/bots/{name}/config/{file}`** — 写入指定 Agent 配置文件（`SOUL.md`、`AGENTS.md`、`TOOLS.md`、`USER.md`、`MEMORY.md`）。请求体为 JSON `{"content":"..."}`。新写入不接受旧 `SKILLS.md`。
+**PUT /admin/bots/{name}/config/{file}`** — 写入指定 Agent 配置文件（`SOUL.md`、`AGENTS.md`、`TOOLS.md`、`USER.md`、`MEMORY.md`）。请求体为 JSON `{"content":"..."}`。读写端点都只接受这五个规范文件名。
 
 **GET/PUT /admin/bots/platform/{platform}/config/{file}** — 读写**平台级 channel 默认** Agent 配置文件。`{platform}` 为平台标识（如 `webchat`），绕过 messaging registry 直接寻址 `dir/{platform}/` 层，让无 bot 实例的平台（webchat team-default）获得与消息平台 bot 对等的配置编辑能力。规范文件白名单与 bot 级端点一致（`SOUL.md`/`AGENTS.md`/`TOOLS.md`/`USER.md`/`MEMORY.md`），复用 `/admin/*` 中间件鉴权（`admin:read`/`admin:write`）与审计。
 
-兼容期内，两个 GET 端点接受旧 `SKILLS.md` 作为 Tools 槽位的只读别名并在响应的 `file` 字段规范化为 `TOOLS.md`；两个 PUT 端点拒绝旧名。Bot 列表/详情的 `agent_configs.tools` 是规范元数据字段。仅当有效内容来自旧文件名时，响应还可能包含 deprecated 的 `agent_configs.skills`；它不是下文真实 Agent Skills API 的数据。
+Bot 列表与详情的 `agent_configs` 元数据只包含 `soul`、`agents`、`tools`、`user`、`memory`。
 
 ### 网关重启
 
@@ -368,13 +368,19 @@ PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQU
 
 ### Skill 管理（admin 全局）
 
-Admin 与 WebChat HTTP `/skills` 管理和展示的都是真实 Agent Skills；AgentConfig 的 `TOOLS.md`
-（旧 `SKILLS.md` 兼容名）不属于此 catalog。embedded `hotplex-cli`（runtime）与
+Admin 与 WebChat 的 public HTTP Skills catalog 管理和展示真实 Agent Skills；AgentConfig 的
+`TOOLS.md` 不属于此 catalog。embedded `hotplex-cli`（runtime）与
 `hotplex-operator`（operator）是这些 HTTP read surface 永久可发现的 builtin，发现不依赖 UserHome
 projection、`$HOTPLEX_HOME` inventory 或 receipt；Session `/skills` 仍按当前 Worker/filesystem
-evidence 决定是否出现，projection/native advertisement 才影响 callable。区别于用户自助
+evidence 决定是否出现，projection/native advertisement 才影响 callable，discoverable 不等于
+callable。ACP 没有可推断的 filesystem root。区别于用户自助
 的 `/api/workspaces/{wid}/skills/*`（见下文 WebChat 多租户端点段）：admin 端管理真实 global
 skill，用户端管理各自 project/workspace skill。
+
+两个 builtin 的 canonical source 是 `internal/skills/builtin/hotplex-cli` 与
+`internal/skills/builtin/hotplex-operator`，生成的 `.agents/skills/hotplex-cli` 和
+`.agents/skills/hotplex-operator` 是 byte-identical mirror。连同 `hotplex-diagnostics`、
+`hotplex-release`、`hotplex-docs-patrol`，仓库 portfolio 恰好包含五个 Skill。
 
 | 方法 | 路径 | Scope | 说明 |
 |------|------|-------|------|

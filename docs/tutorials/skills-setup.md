@@ -10,8 +10,16 @@ Skill 是封装了特定能力的真实 Agent Skill（含 `SKILL.md` 定义和�
 WebChat/Admin 上传 zip 包安装，也会公开两个 embedded canonical package：runtime 的
 `hotplex-cli`（Cron、显式 Slack、只读诊断）和需要显式 operator authority 的
 `hotplex-operator`（服务、更新、配置、Admin、审计）。它们与 AgentConfig 的 `TOOLS.md`
-（旧 `SKILLS.md` 只读兼容名）是两个领域；`TOOLS.md` 不会出现在 Skills catalog。完整规格见
+是两个领域；`TOOLS.md` 不会出现在 Skills catalog。完整规格见
 [Admin API Skill 管理参考](../reference/admin-api.md#skill-admin-)。
+
+两个内置包以 `internal/skills/builtin/hotplex-cli` 和
+`internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
+`.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+
+真实 Skill 只按 `<skills-root>/<name>/SKILL.md` 发现。其他既有用户文件不会被识别，HotPlex 也
+不会自动删除或改写它们；需要清理时必须由用户明确指定目标。
 
 **前置条件**：HotPlex Gateway v1.37+ 已运行，WebChat 多租户已启用。
 
@@ -101,8 +109,8 @@ receipts 分离。同步不会覆盖未知 user/project Skill；collision、drif
 
 ## 5. 发现不等于可调用
 
-Admin API 与 WebChat HTTP Skills 管理或展示的都是 Agent Skills；`TOOLS.md`（以及兼容读取的
-AgentConfig `SKILLS.md`）只是常驻指导，不会变成 Skill catalog。Session `/skills` 仍按当前
+Admin API 与 WebChat 的 public HTTP Skills catalog 管理或展示 Agent Skills；`TOOLS.md` 是
+常驻指导，不会变成 Skill catalog。Session `/skills` 仍按当前
 Worker/filesystem evidence 决定是否出现；filesystem-only 项是 `discoverable`，只有 Worker
 advertisement/adapter-verified activation 才能证明 `callable`。状态含义如下：
 
@@ -111,11 +119,6 @@ advertisement/adapter-verified activation 才能证明 `callable`。状态含义
 - `unavailable`：能力表面明确报告不可用；同样不能调用。当前 filesystem-only 且未被 Worker 确认的 Skill 保持 `discoverable`。
 
 短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 共用当前 Session 的 callability 判定；不能用旧路径、缓存 metadata 或 `NativeInvoker` 绕过它。新建 Session 或 `/reset` 后再检查 `/skills`，因为配置和 Worker 目录证据按 Session 激活。
-
-兼容边界：`internal/cron/skill.go` 的 `ReleaseSkillManual` 仍可能写入
-`~/.hotplex/skills/cron.md`。这是 legacy compatibility artifact，不属于 AgentConfig B 通道、
-不是 canonical Agent Skill，也不由 `hotplex skills` 管理；它没有 portable Agent Skill frontmatter，
-不会作为 generic Skill scanner 的真实项。
 
 ## 6. 修改与删除
 

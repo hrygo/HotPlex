@@ -158,10 +158,10 @@ func TestGeneratedCLISurfaceHasNoHiddenOrSensitiveValues(t *testing.T) {
 	require.NotRegexp(t, regexp.MustCompile(`(?m)^## .*\b(hidden|internal)\b`), text)
 }
 
-func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
+func TestCurrentDocsDescribeStrictAgentConfigAndSkillsArchitecture(t *testing.T) {
 	t.Parallel()
 
-	paths := currentDocumentationPaths()
+	paths := strictCurrentDocumentationPaths()
 	var combined strings.Builder
 	for _, path := range paths {
 		data, err := os.ReadFile(filepath.Join(repositoryRoot(t), filepath.FromSlash(path)))
@@ -171,6 +171,16 @@ func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
 	}
 	docs := combined.String()
 	for _, forbidden := range []string{
+		"SKILLS.md",
+		"platform/default/",
+		"ReleaseSkillManual",
+		"cron-skill-manual.md",
+		"legacy compatibility artifact",
+		"legacy manual migration",
+		"agent_configs.skills",
+		"skills/cron.md",
+		"skills/phrases.md",
+		"skills/db-stats.md",
 		"$(date",
 		"date -d",
 		"date -v",
@@ -183,8 +193,25 @@ func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
 		require.NotContains(t, docs, forbidden)
 	}
 	for _, required := range []string{
+		"SOUL.md",
+		"AGENTS.md",
 		"TOOLS.md",
-		"SKILLS.md",
+		"不是 Agent Skill",
+		"USER.md",
+		"MEMORY.md",
+		"Bot → 平台 → 全局",
+		"present-empty",
+		"internal/skills/builtin/hotplex-cli",
+		"internal/skills/builtin/hotplex-operator",
+		".agents/skills/hotplex-cli",
+		".agents/skills/hotplex-operator",
+		"hotplex-diagnostics",
+		"hotplex-docs-patrol",
+		"hotplex-release",
+		"不会自动删除或改写",
+		"Admin/WebChat",
+		"public Skills catalog",
+		"Session `/skills`",
 		"hotplex skills status",
 		"hotplex skills sync",
 		"hotplex skills remove",
@@ -201,8 +228,6 @@ func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
 		"SKILL_BUILTIN_READONLY",
 		"builtin_package_version",
 		"hotplex cron get <id|name> --json",
-		"Phase C",
-		"legacy manual migration",
 	} {
 		require.Contains(t, docs, required)
 	}
@@ -210,7 +235,7 @@ func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
 	require.Regexp(t, regexp.MustCompile(`(?i)ACP[^\n]{0,160}(?:no|without|没有|无)[^\n]{0,160}(?:root|filesystem|文件系统)`), docs)
 }
 
-func TestCurrentDocsNavigationAndLegacyCronBoundary(t *testing.T) {
+func TestCurrentDocsNavigationAndCronSkillBoundary(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
@@ -223,31 +248,29 @@ func TestCurrentDocsNavigationAndLegacyCronBoundary(t *testing.T) {
 	require.NotContains(t, skillsSetup, "../specs/Skill-Management-Spec.md")
 	require.Contains(t, skillsSetup, "../reference/admin-api.md")
 
-	legacyDocs := strings.Join([]string{
+	boundaryDocs := strings.Join([]string{
 		readCurrentDoc(t, root, "docs/explanation/agent-config-system.md"),
 		readCurrentDoc(t, root, "docs/explanation/cron-design.md"),
 		readCurrentDoc(t, root, "docs/guides/developer/cron-automation.md"),
 		readCurrentDoc(t, root, "docs/guides/contributor/architecture.md"),
 	}, "\n")
-	require.Contains(t, legacyDocs, "ReleaseSkillManual")
-	require.Contains(t, legacyDocs, "cron-skill-manual.md")
-	require.Contains(t, legacyDocs, "legacy compatibility artifact")
-	require.Contains(t, legacyDocs, "不是 canonical Agent Skill")
-	require.Contains(t, legacyDocs, "不属于 AgentConfig B 通道")
-	require.Contains(t, legacyDocs, "不由 `hotplex skills` 管理")
 	for _, forbidden := range []string{
-		"由独立 Skills scanner 发现",
-		"canonical Skill Manual",
-		"真实 Agent Skill：`cron-skill-manual.md`",
+		"ReleaseSkillManual",
+		"cron-skill-manual.md",
+		"legacy compatibility artifact",
+		"SKILLS.md",
 	} {
-		require.NotContains(t, legacyDocs, forbidden)
+		require.NotContains(t, boundaryDocs, forbidden)
 	}
+	require.Contains(t, boundaryDocs, "<name>/SKILL.md")
+	require.Contains(t, boundaryDocs, "hotplex-cli")
+	require.Contains(t, boundaryDocs, "TOOLS.md")
 
 	cronGuide := readCurrentDoc(t, root, "docs/guides/developer/cron-automation.md")
 	require.Contains(t, cronGuide, "hotplex-cli")
-	require.Contains(t, cronGuide, "legacy compatibility artifact")
+	require.Contains(t, cronGuide, "hotplex cron --help")
 	architecture := readCurrentDoc(t, root, "docs/guides/contributor/architecture.md")
-	require.Contains(t, architecture, "不是 AgentConfig B 通道")
+	require.Contains(t, architecture, "<name>/SKILL.md")
 }
 
 func TestCurrentDocsBFSExcludesHistoricalSpecEntrypoints(t *testing.T) {
@@ -352,16 +375,25 @@ func decodeCanonicalFrontmatter(data []byte) (canonicalFrontmatter, error) {
 	return metadata, err
 }
 
-func currentDocumentationPaths() []string {
+func strictCurrentDocumentationPaths() []string {
 	return []string{
+		"AGENTS.md",
+		"internal/agentconfig/META-COGNITION.md",
+		"docs/architecture/Agent-Config-Design.md",
 		"docs/explanation/agent-config-system.md",
 		"docs/explanation/cron-design.md",
+		"docs/guides/contributor/architecture.md",
+		"docs/guides/developer/cron-automation.md",
+		"docs/guides/enterprise/multi-tenant.md",
 		"docs/tutorials/agent-personality.md",
+		"docs/tutorials/phrases-customization.md",
 		"docs/tutorials/skills-setup.md",
 		"docs/tutorials/cron-scheduled-tasks.md",
 		"docs/guides/user/commands-cheatsheet.md",
 		"docs/reference/cli.md",
 		"docs/reference/configuration.md",
 		"docs/reference/admin-api.md",
+		"docs/reference/glossary.md",
+		"docs/swagger/swagger.json",
 	}
 }
