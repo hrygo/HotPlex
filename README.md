@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.41.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.42.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,11 +133,11 @@ HotPlex separates the place where a user talks from the agent that performs the 
 
 Worker choice can be set per bot or platform, with shared defaults for the rest of the deployment.
 
-## ✨ Latest release: v1.41.0
+## ✨ Latest release: v1.42.0
 
-- **One env var relocates the whole workspace.** `HOTPLEX_HOME` moves the default config, data, logs, PID, agent-configs, skills, worker work dirs, and the WebChat sandbox together — no more split-brain between config and state.
-- **Deliveries converge after late completions.** Worker runs that finish after a failed-delivery marker now converge the execution to its terminal state instead of leaking it.
-- **Cleaner, quieter logs.** ANSI escape sequences are stripped from worker stderr, and repetitive codexcli MCP status updates are deduplicated.
+- **Reliable turns and reconnects.** Durable turn identity, ordered event publication, bounded WebSocket initialization retries, and sequence hydration make reconnects and uncertain delivery outcomes safer.
+- **Self-aware agent sessions.** Runtime facts and native skill catalogs expose the selected worker, available tools, and callable skills consistently across the gateway, CLI, admin API, and WebChat.
+- **Managed built-in skills.** Canonical built-in packages now ship with generated references and lifecycle commands for inspection, synchronization, safe reconciliation, receipts, and rollback.
 
 See the [changelog](CHANGELOG.md) for the complete release history.
 

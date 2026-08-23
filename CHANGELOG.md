@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.42.0] - 2026-08-23
+
+### Summary
+
+v1.42.0 是一次 minor 版本更新，核心主题是 **Turn 完整性、Agent 自描述与内置 Skill 生命周期管理**。本版本将不确定投递、重连恢复和 Worker 能力展示收敛到更明确的运行时契约，并把 canonical 内置 Skill 包、生成式 CLI 参考和安全对账能力纳入正式交付面。
+
+### Added
+
+- **Gateway Core**: Turn identity and delivery hardening — 持久化 client message identity、补充 reliability capabilities 协商，并在不确定 Worker 投递后保留可恢复的 turn 记录，避免输入与运行结果脱节。
+- **Gateway Core**: Runtime facts and native skill provenance — Session 向 Worker 注入有边界的运行事实，按 Worker 类型声明 native catalog owner，并在 `/skills` 与命令分发中区分 callable、discoverable 和 unavailable 能力。
+- **Agent Config**: Canonical tools and metacognition slots — `TOOLS.md`、runtime facts 与 built-in skill provenance 形成稳定的配置/身份边界；Doctor、Admin 和 onboard 流程可识别 legacy 配置并给出迁移方向。
+- **Built-in Skills**: Canonical embedded packages — 内置 `hotplex-cli` 与 `hotplex-operator` 以生成式 manifest 和参考资料随二进制交付，支持来源查询、生命周期状态、同步、safe native-root reconciliation、receipt 校验与 rollback。
+- **CLI/WebChat**: Skill lifecycle and capability-aware UX — 新增 built-in skill 生命周期命令、CLI surface 生成与 WebChat 不可调用 Skill 的明确禁用/错误提示，避免把不支持的命令误投递给 Worker。
+
+### Changed
+
+- **Reliability**: WebSocket 初始化、Session 解析、sequence hydration 和事件发布顺序统一收紧；初始化重试有上限，旧连接或不完整状态不会静默吞掉错误或制造乱序事件。
+- **Skills**: Skill source 统一到 canonical repository portfolio；legacy flat/manual publisher 与兼容性断言不再作为运行时来源。现有自定义 Skill 应迁移到 `.agents/skills/<name>/SKILL.md`，并通过受支持的 lifecycle 命令管理。
+- **Worker UX**: 不支持的 native command 与用户可修正的 command error 现在以稳定 capability/error 分类返回，调用方可以区分“不可调用”和“执行失败”。
+
+### Fixed
+
+- **Gateway Core**: 修复 WebSocket 初始化清理阶段丢失原始错误、Session 尚未完成水化时提前放行新 turn、事件终态/序列顺序不稳定，以及投递结果在 uncertain 状态下无法追踪的问题。
+- **Worker/Skill Dispatch**: 修复 native catalog 来源漂移、unsupported capability 分类不一致，以及 WebChat 将不可调用 Skill 作为可调用命令展示的问题。
+- **Built-in Skills**: 修复 reconciliation 失败时 receipt 或状态丢失、恢复后 bytes 未验证、所有权 receipt 不一致和生命周期报告不完整等问题。
+
 ## [1.41.0] - 2026-08-13
 
 ### Summary
