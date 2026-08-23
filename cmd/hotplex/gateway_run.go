@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,6 +42,8 @@ import (
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
+	"github.com/hrygo/hotplex/internal/skills/builtin"
+	"github.com/hrygo/hotplex/internal/skills/reconcile"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/webchat"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -563,6 +566,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	gateway.ScanWorkspaceOverrides(ctx, stores.wsStore, log)
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
+	if userHome, homeErr := os.UserHomeDir(); homeErr != nil {
+		log.Warn("gateway: built-in skills status skipped", "reason", "user_home_unavailable")
+	} else if statusErr := runBuiltinSkillsStatus(ctx, cfg, userHome, config.HotplexHome(), newSkillsRunner, log); statusErr != nil {
+		log.Warn("gateway: built-in skills status unavailable", "reason", stableSkillsStatusReason(statusErr))
+	}
 
 	handler = gateway.NewHandler(gateway.HandlerDeps{
 		Log:             log,
@@ -1487,6 +1495,65 @@ func shutdownGateway(
 	serverWG.Wait()
 
 	log.Info("gateway: stopped")
+}
+
+// runBuiltinSkillsStatus performs the gateway startup reconciliation check. It
+// is intentionally status-only: no inventory publication, projection, or
+// receipt write is reachable from this seam.
+func runBuiltinSkillsStatus(
+	ctx context.Context,
+	cfg *config.Config,
+	userHome, hotplexHome string,
+	newRunner func(userHome, hotplexHome string) (reconcile.Runner, error),
+	log *slog.Logger,
+) error {
+	if cfg == nil {
+		return reconcile.ErrNoWorkerTargets
+	}
+	workers, err := parseUpdateSkillWorkerTypes(cfg.EnabledWorkerTypes())
+	if err != nil {
+		return err
+	}
+	if len(workers) == 0 {
+		return nil
+	}
+	if newRunner == nil {
+		return fmt.Errorf("skills: runner unavailable")
+	}
+	runner, err := newRunner(userHome, hotplexHome)
+	if err != nil {
+		return err
+	}
+	if runner == nil {
+		return fmt.Errorf("skills: runner unavailable")
+	}
+	report, err := runner.Status(ctx, reconcile.Options{Profile: builtin.ProfileRuntime, WorkerTypes: workers})
+	if err != nil {
+		return err
+	}
+	if reportErr := report.Err(); reportErr != nil && log != nil {
+		log.Warn("gateway: built-in skills drift", "reason", stableSkillsStatusReason(reportErr))
+	}
+	return report.Err()
+}
+
+func stableSkillsStatusReason(err error) string {
+	switch {
+	case errors.Is(err, reconcile.ErrNoWorkerTargets):
+		return reconcile.ErrNoWorkerTargets.Error()
+	case errors.Is(err, reconcile.ErrUnknownWorker):
+		return reconcile.ErrUnknownWorker.Error()
+	case errors.Is(err, reconcile.ErrUnknownProfile):
+		return reconcile.ErrUnknownProfile.Error()
+	case errors.Is(err, reconcile.ErrRootOutsideHome):
+		return reconcile.ErrRootOutsideHome.Error()
+	case errors.Is(err, reconcile.ErrInventoryOutsideHotplexHome):
+		return reconcile.ErrInventoryOutsideHotplexHome.Error()
+	case errors.Is(err, reconcile.ErrReportActionRequired):
+		return reconcile.ErrReportActionRequired.Error()
+	default:
+		return "status_unavailable"
+	}
 }
 
 // --- Config helpers ---

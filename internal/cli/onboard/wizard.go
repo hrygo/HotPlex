@@ -3,6 +3,7 @@ package onboard
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +21,8 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/service"
+	"github.com/hrygo/hotplex/internal/skills/builtin"
+	"github.com/hrygo/hotplex/internal/skills/reconcile"
 )
 
 type messagingPlatformConfig struct {
@@ -33,20 +36,25 @@ type messagingPlatformConfig struct {
 }
 
 type WizardOptions struct {
-	ConfigPath        string
-	NonInteractive    bool
-	Force             bool
-	EnableSlack       bool
-	EnableFeishu      bool
-	SlackAllowFrom    []string
-	SlackDMPolicy     string
-	SlackGroupPolicy  string
-	FeishuAllowFrom   []string
-	FeishuDMPolicy    string
-	FeishuGroupPolicy string
-	InstallService    bool
-	ServiceLevel      string
-	Version           string // injected from build ldflags via onboard.go
+	ConfigPath         string
+	NonInteractive     bool
+	Force              bool
+	EnableSlack        bool
+	EnableFeishu       bool
+	SlackAllowFrom     []string
+	SlackDMPolicy      string
+	SlackGroupPolicy   string
+	FeishuAllowFrom    []string
+	FeishuDMPolicy     string
+	FeishuGroupPolicy  string
+	InstallService     bool
+	ServiceLevel       string
+	Version            string // injected from build ldflags via onboard.go
+	SyncSkills         bool
+	SkillRunner        reconcile.Runner
+	SkillRunnerFactory func(userHome, hotplexHome string) (reconcile.Runner, error)
+	UserHomeDir        func() (string, error)
+	HotplexHomeDir     func() string
 }
 
 // ExistingConfig holds detected existing configuration state.
@@ -203,6 +211,9 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 		result.add(s)
 		result.AgentConfigNew = created
 		result.add(stepVerify(opts.ConfigPath))
+		if step, ok := stepBuiltinSkillsIfRequested(ctx, opts, opts.ConfigPath); ok {
+			result.add(step)
+		}
 		return result, nil
 	}
 
@@ -283,12 +294,163 @@ func Run(ctx context.Context, opts WizardOptions) (*WizardResult, error) {
 
 	displayStepProgress(current, totalSteps, "Verify")
 	result.add(stepVerify(opts.ConfigPath))
+	if opts.SyncSkills {
+		displayStepProgress(current+1, totalSteps+1, "Synchronize Built-in Skills")
+		if step, ok := stepBuiltinSkillsIfRequested(ctx, opts, opts.ConfigPath); ok {
+			result.add(step)
+		}
+	}
 
 	result.Action = "reconfigure"
 	return result, nil
 }
 
 func (r *WizardResult) add(s StepResult) { r.Steps = append(r.Steps, s) }
+
+func stepBuiltinSkills(ctx context.Context, opts WizardOptions, configPath string) StepResult {
+	step := StepResult{Name: "skills_sync", Status: "fail"}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		step.Detail = "config_unavailable"
+		return step
+	}
+	workerTypes, err := parseSkillWorkerTypes(cfg.EnabledWorkerTypes())
+	if err != nil {
+		step.Detail = skillErrorReason(err)
+		return step
+	}
+	if len(workerTypes) == 0 {
+		step.Detail = reconcile.ErrNoWorkerTargets.Error()
+		return step
+	}
+
+	runner := opts.SkillRunner
+	if runner == nil {
+		factory := opts.SkillRunnerFactory
+		if factory == nil {
+			factory = newBuiltinSkillRunner
+		}
+		userHomeDir := opts.UserHomeDir
+		if userHomeDir == nil {
+			userHomeDir = os.UserHomeDir
+		}
+		userHome, homeErr := userHomeDir()
+		if homeErr != nil {
+			step.Detail = "user_home_unavailable"
+			return step
+		}
+		hotplexHome := ""
+		if opts.HotplexHomeDir != nil {
+			hotplexHome = opts.HotplexHomeDir()
+		} else {
+			hotplexHome = config.HotplexHome()
+		}
+		runner, err = factory(userHome, hotplexHome)
+		if err != nil {
+			step.Detail = skillErrorReason(err)
+			return step
+		}
+	}
+	if runner == nil {
+		step.Detail = "runner_unavailable"
+		return step
+	}
+
+	options := reconcile.Options{Profile: builtin.ProfileRuntime, WorkerTypes: workerTypes}
+	report, syncErr := runner.Sync(ctx, options)
+	step.Detail = formatSkillReport(report)
+	if syncErr != nil {
+		step.Status = "fail"
+		if step.Detail == "" {
+			step.Detail = skillErrorReason(syncErr)
+		}
+		return step
+	}
+	if reportErr := report.Err(); reportErr != nil {
+		step.Status = "fail"
+		return step
+	}
+	step.Status = "pass"
+	if step.Detail == "" {
+		step.Detail = "changed"
+	}
+	return step
+}
+
+func stepBuiltinSkillsIfRequested(ctx context.Context, opts WizardOptions, configPath string) (StepResult, bool) {
+	if !opts.SyncSkills {
+		return StepResult{}, false
+	}
+	return stepBuiltinSkills(ctx, opts, configPath), true
+}
+
+func parseSkillWorkerTypes(values []string) ([]reconcile.WorkerType, error) {
+	workers := make([]reconcile.WorkerType, 0, len(values))
+	for _, value := range values {
+		worker, err := reconcile.ParseWorkerType(value)
+		if err != nil {
+			return nil, err
+		}
+		workers = append(workers, worker)
+	}
+	return workers, nil
+}
+
+func skillErrorReason(err error) string {
+	switch {
+	case errors.Is(err, reconcile.ErrNoWorkerTargets):
+		return reconcile.ErrNoWorkerTargets.Error()
+	case errors.Is(err, reconcile.ErrUnknownWorker):
+		return reconcile.ErrUnknownWorker.Error()
+	case errors.Is(err, reconcile.ErrUnknownProfile):
+		return reconcile.ErrUnknownProfile.Error()
+	case errors.Is(err, reconcile.ErrReportActionRequired):
+		return reconcile.ErrReportActionRequired.Error()
+	case errors.Is(err, reconcile.ErrRootOutsideHome):
+		return reconcile.ErrRootOutsideHome.Error()
+	case errors.Is(err, reconcile.ErrInventoryOutsideHotplexHome):
+		return reconcile.ErrInventoryOutsideHotplexHome.Error()
+	default:
+		return "skills_sync_failed"
+	}
+}
+
+func formatSkillReport(report reconcile.Report) string {
+	parts := make([]string, 0, len(report.Items))
+	for _, item := range report.Items {
+		part := fmt.Sprintf("action=%s outcome=%s reason=%s", item.Action, item.Outcome, item.ReasonCode)
+		if item.Target != "" {
+			part += " target=" + item.Target
+		}
+		if len(item.WorkerAliases) > 0 {
+			aliases := make([]string, 0, len(item.WorkerAliases))
+			for _, alias := range item.WorkerAliases {
+				aliases = append(aliases, string(alias))
+			}
+			part += " aliases=" + strings.Join(aliases, ",")
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func newBuiltinSkillRunner(userHome, hotplexHome string) (reconcile.Runner, error) {
+	registry, err := builtin.NewRegistry()
+	if err != nil {
+		return nil, err
+	}
+	return reconcile.New(registry, reconcile.Paths{
+		UserHome:     userHome,
+		HotplexHome:  hotplexHome,
+		InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
+		StateDir:     filepath.Join(hotplexHome, "state", "skills"),
+		NativeRoots: map[reconcile.WorkerType]string{
+			reconcile.WorkerClaude:   filepath.Join(userHome, ".claude", "skills"),
+			reconcile.WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
+			reconcile.WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
+		},
+	}, reconcile.NewOSFileSystem())
+}
 
 func (r *WizardResult) hasFail() bool {
 	for _, s := range r.Steps {

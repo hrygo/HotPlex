@@ -11,12 +11,32 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hrygo/hotplex/internal/cli/output"
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/service"
+	"github.com/hrygo/hotplex/internal/skills/builtin"
+	"github.com/hrygo/hotplex/internal/skills/reconcile"
 	"github.com/hrygo/hotplex/internal/updater"
 )
 
+type updateSkillsDeps struct {
+	LoadConfig     func(string) (*config.Config, error)
+	UserHomeDir    func() (string, error)
+	HotplexHomeDir func() string
+	NewRunner      func(userHome, hotplexHome string) (reconcile.Runner, error)
+}
+
+func defaultUpdateSkillsDeps() updateSkillsDeps {
+	return updateSkillsDeps{
+		LoadConfig:     config.Load,
+		UserHomeDir:    os.UserHomeDir,
+		HotplexHomeDir: config.HotplexHome,
+		NewRunner:      newSkillsRunner,
+	}
+}
+
 func newUpdateCmd() *cobra.Command {
-	var checkOnly, yes, restart bool
+	var checkOnly, yes, restart, syncSkills bool
+	var skillsProfile string
 
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -31,8 +51,16 @@ windows/amd64, windows/arm64.`,
 		Example: `  hotplex update              # Interactive update
   hotplex update --check      # Only check, don't download
   hotplex update -y           # Skip confirmation prompt
-  hotplex update --restart    # Restart service after update`,
+  hotplex update --restart    # Restart service after update
+  hotplex update --sync-skills --skills-profile runtime # Explicitly sync built-in skills`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			profile, profileErr := parseSkillsProfile(skillsProfile)
+			if profileErr != nil {
+				return profileErr
+			}
+			if !syncSkills && cmd.Flags().Changed("skills-profile") && profile != builtin.ProfileRuntime {
+				return fmt.Errorf("--skills-profile %s requires --sync-skills", profile)
+			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
 			defer cancel()
 
@@ -113,6 +141,20 @@ windows/amd64, windows/arm64.`,
 				return err
 			}
 
+			if syncSkills {
+				report, syncErr := maybeSyncSkillsAfterUpdate(ctx, true, cmd.Flags().Changed("skills-profile"), config.DefaultConfigPath(), profile, defaultUpdateSkillsDeps())
+				if outputErr := renderSkillsReport(cmd.OutOrStdout(), report, false); outputErr != nil {
+					return outputErr
+				}
+				if syncErr != nil {
+					return syncErr
+				}
+				if reportErr := report.Err(); reportErr != nil {
+					return reportErr
+				}
+				fmt.Fprintf(os.Stderr, "  %s Built-in skills synchronized\n", output.StatusSymbol("pass"))
+			}
+
 			fmt.Fprintf(os.Stderr, "  %s Updated to %s\n",
 				output.StatusSymbol("pass"), result.LatestVersion)
 
@@ -140,7 +182,76 @@ windows/amd64, windows/arm64.`,
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "only check for updates, do not download")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")
 	cmd.Flags().BoolVar(&restart, "restart", false, "restart service after successful update")
+	cmd.Flags().BoolVar(&syncSkills, "sync-skills", false, "explicitly synchronize built-in skill projections after update")
+	cmd.Flags().StringVar(&skillsProfile, "skills-profile", "runtime", "built-in skill profile (runtime or operator); requires --sync-skills for operator")
 	return cmd
+}
+
+func maybeSyncSkillsAfterUpdate(ctx context.Context, syncRequested, profileChanged bool, configPath string, profile builtin.Profile, deps updateSkillsDeps) (reconcile.Report, error) {
+	if profile != builtin.ProfileRuntime && profile != builtin.ProfileOperator {
+		return reconcile.Report{Profile: profile}, reconcile.ErrUnknownProfile
+	}
+	if !syncRequested {
+		if profileChanged && profile != builtin.ProfileRuntime {
+			return reconcile.Report{Profile: profile}, fmt.Errorf("--skills-profile %s requires --sync-skills", profile)
+		}
+		return reconcile.Report{}, nil
+	}
+	if deps.LoadConfig == nil {
+		deps.LoadConfig = config.Load
+	}
+	if deps.UserHomeDir == nil {
+		deps.UserHomeDir = os.UserHomeDir
+	}
+	if deps.HotplexHomeDir == nil {
+		deps.HotplexHomeDir = config.HotplexHome
+	}
+	if deps.NewRunner == nil {
+		deps.NewRunner = newSkillsRunner
+	}
+	report := reconcile.Report{Profile: profile}
+	cfg, err := deps.LoadConfig(configPath)
+	if err != nil {
+		return report, fmt.Errorf("load config for skills sync: %w", err)
+	}
+	if cfg == nil {
+		return report, fmt.Errorf("load config for skills sync: empty config")
+	}
+	workers, err := parseUpdateSkillWorkerTypes(cfg.EnabledWorkerTypes())
+	if err != nil {
+		return report, err
+	}
+	if len(workers) == 0 {
+		return report, reconcile.ErrNoWorkerTargets
+	}
+	userHome, err := deps.UserHomeDir()
+	if err != nil {
+		return report, fmt.Errorf("resolve user home: %w", err)
+	}
+	runner, err := deps.NewRunner(userHome, deps.HotplexHomeDir())
+	if err != nil {
+		return report, err
+	}
+	if runner == nil {
+		return report, fmt.Errorf("skills: nil runner")
+	}
+	report, err = runner.Sync(ctx, reconcile.Options{Profile: profile, WorkerTypes: workers})
+	if err != nil {
+		return report, err
+	}
+	return report, report.Err()
+}
+
+func parseUpdateSkillWorkerTypes(values []string) ([]reconcile.WorkerType, error) {
+	workers := make([]reconcile.WorkerType, 0, len(values))
+	for _, value := range values {
+		worker, err := reconcile.ParseWorkerType(value)
+		if err != nil {
+			return nil, err
+		}
+		workers = append(workers, worker)
+	}
+	return workers, nil
 }
 
 // restartAfterUpdate stops and restarts the gateway after a binary update.

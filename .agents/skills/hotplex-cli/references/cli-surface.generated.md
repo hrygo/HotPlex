@@ -108,7 +108,7 @@ Options: --force --path <string>
 ## hotplex onboard
 Interactive configuration wizard
 
-Options: --config <string> --enable-feishu --enable-slack --feishu-allow-from <stringSlice> --feishu-dm-policy <string> --feishu-group-policy <string> --force --install-service --non-interactive --service-level <string> --slack-allow-from <stringSlice> --slack-dm-policy <string> --slack-group-policy <string>
+Options: --config <string> --enable-feishu --enable-slack --feishu-allow-from <stringSlice> --feishu-dm-policy <string> --feishu-group-policy <string> --force --install-service --non-interactive --service-level <string> --slack-allow-from <stringSlice> --slack-dm-policy <string> --slack-group-policy <string> --sync-skills
 
 ## hotplex runtime
 Runtime operations: inspect and resolve fenced executions
@@ -269,7 +269,7 @@ Options: --config <string> --format <string>
 ## hotplex update
 Update hotplex to the latest version
 
-Options: --check --restart --yes
+Options: --check --restart --skills-profile <string> --sync-skills --yes
 
 ## hotplex version
 Print version information
