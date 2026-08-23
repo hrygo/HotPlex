@@ -99,7 +99,7 @@ func (a *AdminAPI) builtinOnly(ctx context.Context, home, name string) (bool, er
 			}
 		}
 	}
-	_, err := a.builtinSkills.Read(ctx, name, "")
+	_, err := a.builtinSkills.Read(ctx, publicBuiltinProfile, name)
 	if err == nil {
 		return true, nil
 	}
@@ -379,7 +379,7 @@ func (a *AdminAPI) HandleGetSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if a.builtinSkills != nil {
-		d, err := a.builtinSkills.Read(r.Context(), name, "")
+		d, err := a.builtinSkills.Read(r.Context(), publicBuiltinProfile, name)
 		if err == nil {
 			respondJSON(w, d)
 			return

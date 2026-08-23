@@ -67,7 +67,7 @@ func TestCanonicalPackagesHavePortableFrontmatterAndClosedReferences(t *testing.
 				require.Contains(t, text, "description: Use HotPlex CLI for Cron jobs, explicitly requested Slack operations, and read-only status, doctor, security, or config diagnostics. Do not use for Feishu, releases, service installation, binary updates, or Admin mutations.")
 				require.Contains(t, text, "compatibility: Requires the hotplex CLI and a runtime identity authorized for the requested operation.")
 			} else {
-				require.Contains(t, text, "description: Operate a HotPlex host: install or restart services, update binaries, change host configuration, inspect audit state, or perform Admin mutations. Use only in an explicitly authorized operator context.")
+				require.Contains(t, text, "description: \"Operate a HotPlex host: install or restart services, update binaries, change host configuration, inspect audit state, or perform Admin mutations. Use only in an explicitly authorized operator context.\"")
 				require.Contains(t, text, "compatibility: Requires local host access, the hotplex CLI, and explicit operator or Admin authority.")
 			}
 		})

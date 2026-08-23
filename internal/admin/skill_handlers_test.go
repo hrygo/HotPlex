@@ -293,3 +293,37 @@ func TestAdminExternalSkillShadowsBuiltinOnGet(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, getRR.Code)
 	require.NotContains(t, getRR.Body.String(), `"builtin":true`)
 }
+
+func TestAdminBuiltinMergeAppliesSearchAndPagination(t *testing.T) {
+	api, _ := newTestAdminAPIWithSkills(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	api.SetBuiltinSkillsCatalog(builtin.NewPublicCatalog(registry))
+
+	pageReq := requestWithAdminContext(httptest.NewRequest("GET", "/admin/api/skills?page=1&page_size=1", nil), ScopeAdminRead)
+	pageRR := httptest.NewRecorder()
+	api.HandleListSkills(pageRR, pageReq)
+	require.Equal(t, http.StatusOK, pageRR.Code)
+	var page struct {
+		Skills []skills.Skill `json:"skills"`
+		Total  int            `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(pageRR.Body.Bytes(), &page))
+	require.Equal(t, 2, page.Total)
+	require.Len(t, page.Skills, 1)
+
+	searchReq := requestWithAdminContext(httptest.NewRequest("GET", "/admin/api/skills?q=operator&page_size=1", nil), ScopeAdminRead)
+	searchRR := httptest.NewRecorder()
+	api.HandleListSkills(searchRR, searchReq)
+	require.Equal(t, http.StatusOK, searchRR.Code)
+	var search struct {
+		Skills []skills.Skill `json:"skills"`
+		Total  int            `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(searchRR.Body.Bytes(), &search))
+	require.Equal(t, 1, search.Total)
+	require.Len(t, search.Skills, 1)
+	require.Equal(t, "hotplex-operator", search.Skills[0].Name)
+}

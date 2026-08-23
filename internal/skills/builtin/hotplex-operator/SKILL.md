@@ -1,6 +1,6 @@
 ---
 name: hotplex-operator
-description: Operate a HotPlex host: install or restart services, update binaries, change host configuration, inspect audit state, or perform Admin mutations. Use only in an explicitly authorized operator context.
+description: "Operate a HotPlex host: install or restart services, update binaries, change host configuration, inspect audit state, or perform Admin mutations. Use only in an explicitly authorized operator context."
 compatibility: Requires local host access, the hotplex CLI, and explicit operator or Admin authority.
 ---
 

@@ -32,7 +32,7 @@ func TestBuiltinPublicCatalogReadsEmbeddedBodyAndReferences(t *testing.T) {
 	require.NoError(t, err)
 	catalog := builtin.NewPublicCatalog(registry)
 
-	detail, err := catalog.Read(context.Background(), "hotplex-cli", "")
+	detail, err := catalog.Read(context.Background(), string(builtin.ProfileOperator), "hotplex-cli")
 	require.NoError(t, err)
 	require.Equal(t, "hotplex-cli", detail.Name)
 	require.Contains(t, detail.Body, "name: hotplex-cli")
@@ -41,4 +41,22 @@ func TestBuiltinPublicCatalogReadsEmbeddedBodyAndReferences(t *testing.T) {
 	require.True(t, detail.Builtin)
 	require.False(t, detail.Managed)
 	require.Empty(t, detail.FilePath)
+}
+
+func TestBuiltinPublicCatalogReadHonorsProfileAndName(t *testing.T) {
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	catalog := builtin.NewPublicCatalog(registry)
+
+	_, err = catalog.Read(context.Background(), string(builtin.ProfileRuntime), "hotplex-operator")
+	require.ErrorIs(t, err, builtin.ErrSkillNotFound)
+
+	detail, err := catalog.Read(context.Background(), string(builtin.ProfileOperator), "hotplex-operator")
+	require.NoError(t, err)
+	require.Equal(t, "hotplex-operator", detail.Name)
+
+	_, err = catalog.Read(context.Background(), "unknown", "hotplex-cli")
+	require.Error(t, err)
+	_, err = catalog.Read(context.Background(), string(builtin.ProfileRuntime), "unknown")
+	require.ErrorIs(t, err, builtin.ErrSkillNotFound)
 }

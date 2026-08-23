@@ -15,10 +15,10 @@ var generatedManifests = []PackageManifest{
 	},
 	{
 		Name:    "hotplex-operator",
-		Version: "v1-023b57968edcf4b0962886b865f06ffe95f4149b720b77b731790b99cb9f44b1",
+		Version: "v1-c87fc4d2971c9a92dda8bc42c4f3451df84e0c9c814569fdf6759f30da2ea459",
 		Profile: ProfileOperator,
 		Assets: []AssetManifest{
-			{Path: "SKILL.md", Size: 1240, SHA256: "92fe9a7c4c97f20cbe99de737ab4a0a2e896a5394b7b5f09984fc7f653d8a6e6"},
+			{Path: "SKILL.md", Size: 1242, SHA256: "c14e30c0cabc817ca4a01486ebb701fb058ddcc9409205f2b6f88a793067a17b"},
 			{Path: "references/admin-audit.md", Size: 470, SHA256: "e1a42e16f58a52f0d7878301bf97aa362a938617bfd1d25e162ac1527ee744e1"},
 			{Path: "references/configuration.md", Size: 595, SHA256: "529de67d1bcbcd1af8c4e3f2c45788b926f4c91c62e377161909c1674f4cbdb8"},
 			{Path: "references/install-update.md", Size: 543, SHA256: "9486e397f23b631b69d3017c4ba5bc49fa04af78d349e0e1940c71ad2f212dac"},

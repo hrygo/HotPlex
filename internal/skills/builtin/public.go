@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/hrygo/hotplex/internal/skills"
 )
 
@@ -78,12 +80,10 @@ func (c *Catalog) List(ctx context.Context, profile string) ([]skills.Skill, err
 }
 
 // Read returns a canonical Skill detail, including the embedded SKILL.md body
-// and the complete manifest file list. For compatibility with both package
-// oriented callers and profile/name callers, first is preferred as the package
-// name; when it is not a package, second is treated as the package name. The
-// second argument is otherwise ignored, so Read(ctx, "hotplex-cli", "") is
-// the canonical form.
-func (c *Catalog) Read(ctx context.Context, first, second string) (*skills.Detail, error) {
+// and the complete manifest file list. The profile is cumulative according to
+// ProfilePackageSet; an empty profile means all canonical packages. A name
+// outside the selected profile is not readable through that profile.
+func (c *Catalog) Read(ctx context.Context, profile, name string) (*skills.Detail, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
@@ -91,13 +91,29 @@ func (c *Catalog) Read(ctx context.Context, first, second string) (*skills.Detai
 		return nil, errNilPublicRegistry
 	}
 
-	packageName := strings.TrimSpace(first)
-	if _, ok := c.registry.Package(packageName); !ok {
-		packageName = strings.TrimSpace(second)
+	profile = strings.TrimSpace(profile)
+	name = strings.TrimSpace(name)
+	var manifests []PackageManifest
+	var err error
+	if profile == "" {
+		manifests = c.registry.Packages()
+	} else {
+		manifests, err = c.registry.PackagesForProfile(Profile(profile))
+		if err != nil {
+			return nil, err
+		}
 	}
-	manifest, ok := c.registry.Package(packageName)
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrSkillNotFound, strings.TrimSpace(first))
+	var manifest PackageManifest
+	var found bool
+	for _, candidate := range manifests {
+		if candidate.Name == name {
+			manifest = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %s", ErrSkillNotFound, name)
 	}
 
 	body, err := c.registry.ReadFile(manifest.Name, "SKILL.md")
@@ -113,6 +129,11 @@ func (c *Catalog) Read(ctx context.Context, first, second string) (*skills.Detai
 		Body:  string(body),
 		Files: manifest.Paths(),
 	}, nil
+}
+
+type embeddedFrontmatter struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
 }
 
 func (c *Catalog) metadata(manifest PackageManifest) (skills.Skill, error) {
@@ -149,19 +170,12 @@ func parseEmbeddedFrontmatter(data []byte) (string, string, bool) {
 	if end < 0 {
 		return "", "", false
 	}
-	var name, description string
-	for _, line := range strings.Split(string(data[3:end+3]), "\n") {
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		switch strings.TrimSpace(key) {
-		case "name":
-			name = strings.TrimSpace(value)
-		case "description":
-			description = strings.TrimSpace(value)
-		}
+	var frontmatter embeddedFrontmatter
+	if err := yaml.Unmarshal(bytes.TrimSpace(data[3:end+3]), &frontmatter); err != nil {
+		return "", "", false
 	}
+	name := strings.TrimSpace(frontmatter.Name)
+	description := strings.TrimSpace(frontmatter.Description)
 	description = skills.CollapseSpaces(strings.ReplaceAll(description, "\n", " "))
 	if name == "" || description == "" {
 		return "", "", false

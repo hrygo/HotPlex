@@ -301,6 +301,37 @@ func TestWebChatMergedProjectSkillShadowsBuiltin(t *testing.T) {
 	require.False(t, matches[0].Builtin)
 }
 
+func TestWebChatGetMergedBuiltinAndProjectPrecedence(t *testing.T) {
+	t.Parallel()
+	sh, _, _, cookie := newSkillHandlersEnv(t)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	sh.SetBuiltinSkillsCatalog(builtin.NewPublicCatalog(registry))
+
+	builtinReq := skillReq(http.MethodGet, "/api/skills/hotplex-cli", cookie, nil, "")
+	builtinReq.SetPathValue("name", "hotplex-cli")
+	builtinRR := httptest.NewRecorder()
+	sh.GetMerged(builtinRR, builtinReq)
+	require.Equal(t, http.StatusOK, builtinRR.Code)
+	var builtinSkill skills.Skill
+	require.NoError(t, json.Unmarshal(builtinRR.Body.Bytes(), &builtinSkill))
+	require.True(t, builtinSkill.Builtin)
+
+	require.Equal(t, http.StatusOK, installWorkspace(t, sh, cookie, map[string]string{
+		"SKILL.md": "---\nname: hotplex-cli\ndescription: project get override\n---\n# override\n",
+	}, false).Code)
+	projectReq := skillReq(http.MethodGet, "/api/skills/hotplex-cli", cookie, nil, "")
+	projectReq.SetPathValue("name", "hotplex-cli")
+	projectRR := httptest.NewRecorder()
+	sh.GetMerged(projectRR, projectReq)
+	require.Equal(t, http.StatusOK, projectRR.Code)
+	var projectSkill skills.Skill
+	require.NoError(t, json.Unmarshal(projectRR.Body.Bytes(), &projectSkill))
+	require.Equal(t, skills.SourceProject, projectSkill.Source)
+	require.Equal(t, "project get override", projectSkill.Description)
+	require.False(t, projectSkill.Builtin)
+}
+
 func TestWorkspaceSkillCRUDNeverMutatesBuiltinInventory(t *testing.T) {
 	t.Parallel()
 	sh, workDir, _, cookie := newSkillHandlersEnv(t)
