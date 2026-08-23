@@ -174,6 +174,24 @@ Uninstall system service
 
 Options: --level <string>
 
+## hotplex skills
+Manage built-in agent skills
+
+## hotplex skills remove
+Remove managed built-in skill projections
+
+Options: --config <string> --dry-run --json --profile <string> --worker <stringArray>
+
+## hotplex skills status
+Inspect built-in skill inventory and projections
+
+Options: --config <string> --json --profile <string> --worker <stringArray>
+
+## hotplex skills sync
+Synchronize built-in skills to worker roots
+
+Options: --config <string> --dry-run --json --profile <string> --worker <stringArray>
+
 ## hotplex slack
 Slack messaging operations
 
