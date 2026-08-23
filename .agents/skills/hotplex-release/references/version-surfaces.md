@@ -51,3 +51,22 @@ git grep 覆盖 tracked 文件；rg 用于发现生成器和构建输入。不�
 5. 将矩阵摘要、豁免和未执行的外部动作写入报告；未解释残留时只能报告 blocked，不能说 ready/published。
 
 命中数量不是验收标准：一处未解释的旧版本足以阻断，目标版本出现在错误文件也不能证明版本面完整。
+
+## Release Notes 精确来源
+
+Release body 必须直接使用 CHANGELOG.md 中目标版本的完整区块：从 `## [target]` 标题开始，到下一个 `## [` 标题之前结束。保留 Summary、Added、Changed、Fixed、Security 等原文、顺序和日期；不得使用 GitHub 自动生成的 What's Changed、commit 摘要、PR 列表或重新改写的文案。
+
+推荐从发布 tag 的文件树提取，确保 Release 与被发布 commit 使用同一份内容：
+
+~~~bash
+tag=v1.42.0
+notes_tmp=$(mktemp)
+git show "$tag:CHANGELOG.md" | awk -v target="${tag#v}" '
+  $0 == "## [" target "]" { in_section=1 }
+  in_section && /^## \[/ && $0 != "## [" target "]" { exit }
+  in_section { print }
+' > "$notes_tmp"
+test -s "$notes_tmp"
+~~~
+
+如果 release workflow 设置了 `generate_release_notes: true`，自动生成的 body 只是临时产物；在 Release 创建后必须执行 `gh release edit "$tag" --notes-file "$notes_tmp"`，再抓取 `gh release view "$tag" --json body --jq .body | sed '$d'` 与 `$notes_tmp` 做逐字 diff。`sed '$d'` 只去除 CLI 输出附带的末尾换行，不改变 Release body。只有比较结果为空，才能报告 Release Notes 已完成；否则报告 blocked，并保留差异。
