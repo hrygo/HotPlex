@@ -17,13 +17,15 @@
 - hotplex-cli contains SKILL.md and references/cron.md, references/slack.md, references/diagnostics.md, and generated references/cli-surface.generated.md. hotplex-operator contains SKILL.md and service-lifecycle.md, install-update.md, configuration.md, and admin-audit.md under references/.
 - The repository .agents/skills/hotplex-cli tree is generated from, or checked byte-for-byte against, the embedded canonical hotplex-cli tree. It is never an independently authored copy.
 - $HOTPLEX_HOME/skills/builtin/<package-version>/<name>/ is an immutable inventory and is not a Worker native root. $HOTPLEX_HOME/state/skills/ stores receipts keyed by canonical target identity.
+- Worker native roots are under the operating-system UserHome: <UserHome>/.claude/skills and <UserHome>/.agents/skills. Inventory and receipt state are under the independent HotplexHome. Never substitute HotplexHome for UserHome.
 - Native-root writes happen only in an explicit hotplex skills sync or hotplex skills remove operation, or an explicitly requested --sync-skills lifecycle step. Gateway startup and ordinary doctor checks are read-only.
 - Worker, profile, and operation values are closed enums. An empty resolved Worker target set returns a bounded error requiring explicit --worker; it never falls back to worker.RegisteredTypes().
 - ACP has no filesystem projection target and returns a bounded unsupported result without writing. Codex and OpenCode share the canonical .agents/skills target and report all Worker aliases in one reconciliation item.
-- An approved native root may be a symlink only when canonicalization resolves it inside the configured HotPlex home. A package target that is itself a symlink is always a conflict.
+- An approved native root may be a symlink only when canonicalization resolves it inside canonical UserHome and the corresponding approved native-root base (.claude or .agents). A package target that is itself a symlink is always a conflict.
 - Receipts include schema version, package version, profile, canonical target identity, all Worker aliases, manifest hash, and projected tree hash. Receipt writes are atomic. Update is stage → backup → new target → receipt; receipt or second-rename failure rolls back. Remove is matching receipt + unchanged tree → backup rename → receipt removal, with rollback on receipt-removal failure.
 - A missing receipt, invalid receipt, changed tree, unexpected symlink, path escape, collision, or stale Worker evidence never overwrites user content and remains visible in the typed report.
 - Filesystem tests use t.TempDir() and injected paths/operations. No test writes $HOME, ~/.hotplex, ~/.claude/skills, ~/.agents/skills, the repository working tree, a real executable, or a real service directory.
+- The generator never invokes a shell or os/exec to invoke itself; it uses Go file APIs. The existing non-main branch fix/turn-integrity-init-reliability is the isolated development branch; do not create another worktree or branch.
 - Preserve existing skills.Skill.Source values (global and project), existing AgentConfig SKILLS.md compatibility, existing Admin/WebChat Agent Skills meaning, and all existing AEP SkillStatus, SkillEntry, JSON tags, SDKs, examples, and protocol fixtures.
 - Built-in provenance is optional HTTP/UI metadata (builtin and builtin_package_version) and never a new source enum. Do not add AEP fields in Phase B.
 - Native Worker progressive disclosure remains owned by Claude Code, Codex CLI, and OpenCode. HotPlex records evidence but does not duplicate their catalog in the AgentConfig prompt.
@@ -81,9 +83,10 @@
 - Produces builtin.Profile, builtin.PackageManifest, builtin.AssetManifest, and builtin.Registry.
 - builtin.NewRegistry() (*Registry, error) validates generated manifests against embedded bytes.
 - (*Registry).Packages() []PackageManifest, (*Registry).Package(name string) (PackageManifest, bool), and (*Registry).ReadFile(packageName, relativePath string) ([]byte, error) are the asset reads consumed by later tasks.
+- Produces the cumulative ProfilePackageSet: runtime contains exactly hotplex-cli; operator contains hotplex-cli followed by hotplex-operator. Registry package selection for status, sync, remove, inventory publication, and public listing always uses this set.
 - newRootCmd() *cobra.Command becomes the single root assembly used by main() and the renderer.
 - renderPublicCLISurface(root *cobra.Command) ([]byte, error) returns deterministic Markdown; it sorts command paths and flags, skips hidden commands/flags, and emits no defaults, paths, runtime values, or secrets.
-- cmd/gen-builtin-skills regenerates manifest.generated.go, copies the complete canonical hotplex-cli tree to .agents/skills/hotplex-cli, and exits non-zero on an incomplete or mismatched generated input.
+- cmd/gen-builtin-skills regenerates manifest.generated.go, copies the complete canonical hotplex-cli tree to .agents/skills/hotplex-cli, and exits non-zero on an incomplete or mismatched generated input. It scans canonical bytes with Go file APIs only, imports no builtin registry package, and never invokes shell, os/exec, or its own command.
 
 - [ ] Step 1: Add red tests for package shape, frontmatter, manifest determinism, and copy parity.
 
@@ -139,6 +142,11 @@ func TestCanonicalPackagesHavePortableFrontmatterAndClosedReferences(t *testing.
 func TestRepositoryRuntimeSkillMatchesEmbeddedCanonicalTree(t *testing.T) {
     require.Equal(t, canonicalTree(t, "hotplex-cli"), repositoryTree(t, ".agents/skills/hotplex-cli"))
 }
+
+func TestProfilePackageSetIsCumulativeAndStable(t *testing.T) {
+    require.Equal(t, []string{"hotplex-cli"}, builtin.ProfilePackageSet[builtin.ProfileRuntime])
+    require.Equal(t, []string{"hotplex-cli", "hotplex-operator"}, builtin.ProfilePackageSet[builtin.ProfileOperator])
+}
 ~~~
 
 The tests also reject a hotplex-cli description that authorizes Feishu, releases, service installation, binary updates, or Admin mutations, and reject a hotplex-operator description without explicit operator/Admin authority.
@@ -184,9 +192,14 @@ type InstalledPackage struct {
     Manifest      PackageManifest
     InventoryPath string
 }
+
+var ProfilePackageSet = map[Profile][]string{
+    ProfileRuntime:  {"hotplex-cli"},
+    ProfileOperator: {"hotplex-cli", "hotplex-operator"},
+}
 ~~~
 
-Embed only the two canonical package directories. Keep manifest.generated.go as a sorted Go literal generated from embedded package bytes. NewRegistry validates path normalization, package/profile uniqueness, file hashes, total file count, per-file size, and total package size. It rejects parent traversal, absolute paths, duplicate paths, missing generated entries, and generated entries whose hash differs from embedded bytes.
+Embed only the two canonical package directories. Keep manifest.generated.go as a sorted Go literal generated from embedded package bytes and commit that generated file in the same change as the registry source, so the first compile never depends on running a generator. NewRegistry validates path normalization, package/profile uniqueness, file hashes, total file count, per-file size, and total package size. It rejects parent traversal, absolute paths, duplicate paths, missing generated entries, and generated entries whose hash differs from embedded bytes. cmd/gen-builtin-skills has an independent bootstrap test that runs against a temporary canonical tree and proves it does not import or call the registry.
 
 - [ ] Step 4: Refactor root construction and implement the deterministic renderer.
 
@@ -204,7 +217,7 @@ func renderPublicCLISurface(root *cobra.Command) ([]byte, error) {
 }
 ~~~
 
-The internal mode writes only the requested output file and never executes a command handler. cmd/gen-builtin-skills then regenerates the manifest and copies every canonical runtime package file; it refuses to copy a partial tree.
+The internal mode writes only the requested output file and never executes a command handler. The required generation order is: run the package-main internal mode to create cli-surface.generated.md, then run cmd/gen-builtin-skills to scan existing canonical bytes, generate manifest.generated.go, and mirror the complete runtime package. cmd/gen-builtin-skills does not import the not-yet-generated builtin registry and refuses to copy a partial tree.
 
 - [ ] Step 5: Write the canonical Skill routers and references.
 
@@ -292,6 +305,7 @@ type Item struct {
 
 ~~~go
 type Paths struct {
+    UserHome     string
     HotplexHome  string
     InventoryDir string
     StateDir     string
@@ -325,12 +339,12 @@ func ParseWorkerType(string) (WorkerType, error)
 func (r Report) Err() error
 ~~~
 
-The production osFS implements FileSystem with os.Lstat, os.ReadDir, os.ReadFile, os.MkdirAll, os.WriteFile, os.Rename, os.Remove, os.RemoveAll, filepath.EvalSymlinks, and an explicit file-sync helper. Stable reason constants include ReasonUnsupportedWorker, ReasonCollision, ReasonDrift, ReasonInvalidReceipt, ReasonRootOutsideHome, ReasonReceiptWriteFailed, and ReasonUnchanged.
+The production osFS implements FileSystem with os.Lstat, os.ReadDir, os.ReadFile, os.MkdirAll, os.WriteFile, os.Rename, os.Remove, os.RemoveAll, filepath.EvalSymlinks, and an explicit file-sync helper. Stable reason constants include ReasonUnsupportedWorker, ReasonCollision, ReasonDrift, ReasonInvalidReceipt, ReasonRootOutsideHome, ErrInventoryOutsideHotplexHome, ReasonReceiptWriteFailed, and ReasonUnchanged.
 
-- ResolveTargets(home string, workerTypes []WorkerType) ([]Target, error) validates the home, rejects an empty target list with ErrNoWorkerTargets, rejects unknown types, records an unsupported ACP target without a write root, canonicalizes roots, and root-deduplicates Codex/OpenCode while retaining both aliases.
-- New(registry *builtin.Registry, paths Paths, fs FileSystem) (*Reconciler, error) validates absolute HotplexHome, inventory, state, and target containment without writing.
+- ResolveTargets(userHome string, workerTypes []WorkerType) ([]Target, error) validates UserHome, rejects an empty target list with ErrNoWorkerTargets, rejects unknown types, records an unsupported ACP target without a write root, canonicalizes native roots, and root-deduplicates Codex/OpenCode while retaining both aliases.
+- New(registry *builtin.Registry, paths Paths, fs FileSystem) (*Reconciler, error) validates absolute UserHome and HotplexHome, keeps inventory/state below HotplexHome, keeps native roots below UserHome and their approved native-root base, and performs no write.
 - Reconciler.Status(ctx context.Context, options Options) (Report, error), Sync, and Remove are the only reconciliation entry points.
-- Reconciler.ListInstalled(ctx context.Context, profile builtin.Profile) ([]builtin.InstalledPackage, error) supplies the later read-only HTTP/UI view.
+- Reconciler.ListInventory(ctx context.Context, profile builtin.Profile) ([]builtin.InstalledPackage, error) reads immutable inventory/package hashes for the later read-only HTTP/UI view; it does not require a native projection receipt.
 - Reconciler implements Runner, and Report.Err returns ErrReportFailed only when the typed report contains failed items; it does not replace or reinterpret reason codes.
 - skills.ScanRoot(root, source string, managed bool) ([]skills.Skill, error) is the only scanner helper exposed for the Claude adapter; it scans one explicit root and never the versioned Built-in inventory.
 
@@ -340,12 +354,12 @@ Use a home created by t.TempDir():
 
 ~~~go
 func TestResolveTargetsDeduplicatesSharedAgentsRootAndKeepsAliases(t *testing.T) {
-    home := t.TempDir()
-    targets, err := ResolveTargets(home, []WorkerType{WorkerOpenCode, WorkerCodex})
+    userHome := t.TempDir()
+    targets, err := ResolveTargets(userHome, []WorkerType{WorkerOpenCode, WorkerCodex})
     require.NoError(t, err)
     require.Len(t, targets, 1)
     require.Equal(t, []WorkerType{WorkerCodex, WorkerOpenCode}, targets[0].WorkerAliases)
-    require.Equal(t, filepath.Join(home, ".agents", "skills"), targets[0].CanonicalRoot)
+    require.Equal(t, filepath.Join(userHome, ".agents", "skills"), targets[0].CanonicalRoot)
 }
 
 func TestResolveTargetsRejectsEmptyListAndACPWithoutWriting(t *testing.T) {
@@ -357,18 +371,36 @@ func TestResolveTargetsRejectsEmptyListAndACPWithoutWriting(t *testing.T) {
     require.Equal(t, ReasonUnsupportedWorker, targets[0].ReasonCode)
 }
 
-func TestRootSymlinkMustResolveInsideHome(t *testing.T) {
-    home := t.TempDir()
+func TestNativeRootSymlinkMustResolveInsideUserHomeAndApprovedBase(t *testing.T) {
+    userHome := t.TempDir()
     outside := t.TempDir()
-    require.NoError(t, os.Symlink(outside, filepath.Join(home, ".claude")))
-    _, err := ResolveTargets(home, []WorkerType{WorkerClaude})
+    require.NoError(t, os.Symlink(outside, filepath.Join(userHome, ".claude")))
+    _, err := ResolveTargets(userHome, []WorkerType{WorkerClaude})
     require.ErrorIs(t, err, ErrRootOutsideHome)
+}
+
+func TestInventorySymlinkMustResolveInsideHotplexHome(t *testing.T) {
+    userHome := t.TempDir()
+    hotplexHome := t.TempDir()
+    outside := t.TempDir()
+    require.NoError(t, os.Symlink(outside, filepath.Join(hotplexHome, "skills")))
+    paths := Paths{
+        UserHome: userHome,
+        HotplexHome: hotplexHome,
+        InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
+        StateDir: filepath.Join(hotplexHome, "state", "skills"),
+    }
+    registry, err := builtin.NewRegistry()
+    require.NoError(t, err)
+    _, err = New(registry, paths, osFS{})
+    require.ErrorIs(t, err, ErrInventoryOutsideHotplexHome)
 }
 
 func TestReceiptKeyUsesCanonicalTargetIdentity(t *testing.T) {
     state := t.TempDir()
-    first := ReceiptPath(state, filepath.Join(state, "..", "home", ".agents", "skills"))
-    second := ReceiptPath(state, filepath.Join(state, "home", ".agents", "skills"))
+    userHome := t.TempDir()
+    first := ReceiptPath(state, filepath.Join(userHome, ".agents", "skills"))
+    second := ReceiptPath(state, filepath.Join(userHome, "projects", "..", ".agents", "skills"))
     require.Equal(t, first, second)
 }
 ~~~
@@ -378,16 +410,16 @@ Add assertions for action values none/install/update/remove, outcome values unch
 - [ ] Step 2: Run the red reconciliation tests.
 
 ~~~bash
-go test ./internal/skills/reconcile -run 'TestResolveTargets|TestReceiptKey|TestRootSymlink' -count=1
+go test ./internal/skills/reconcile -run 'Test.*(ResolveTargets|ReceiptKey|RootSymlink|InventorySymlink)' -count=1
 ~~~
 
 Expected: compilation fails because the reconcile package, types, path resolver, and receipt functions do not exist.
 
 - [ ] Step 3: Implement closed target resolution and canonical path policy.
 
-Implement Paths with explicit HotplexHome, InventoryDir, StateDir, and NativeRoots. Map Claude to <home>/.claude/skills, Codex/OpenCode to <home>/.agents/skills, and ACP to an unsupported target. Sort aliases by the closed Worker value.
+Implement Paths with separate UserHome and HotplexHome values. Derive inventory and receipt state only from HotplexHome. Map Claude to <user-home>/.claude/skills, Codex/OpenCode to <user-home>/.agents/skills, and ACP to an unsupported target. Sort aliases by the closed Worker value.
 
-Canonicalize the home and existing root ancestors with filepath.Abs, filepath.Clean, and filepath.EvalSymlinks. If a root exists as a symlink, accept it only when the resolved path remains below the canonical home. If the final root does not exist, validate its nearest existing ancestor and append the missing suffix. Reject absolute or parent-traversal targets, and reject a package directory that is a symlink even when it resolves inside the home.
+Canonicalize UserHome and HotplexHome independently with filepath.Abs, filepath.Clean, and filepath.EvalSymlinks. For Claude, the approved native-root base is <user-home>/.claude; for Codex/OpenCode it is <user-home>/.agents. If a native root exists as a symlink, accept it only when the resolved path remains below both canonical UserHome and its approved native-root base. If the final root does not exist, validate its nearest existing ancestor and append the missing suffix. Validate inventory ancestors against HotplexHome. Reject absolute or parent-traversal targets, and reject a package directory that is a symlink even when it resolves inside an approved root.
 
 - [ ] Step 4: Implement manifest/tree hashes and atomic receipt storage.
 
@@ -405,7 +437,7 @@ type Receipt struct {
 }
 ~~~
 
-Use a full SHA-256 hex digest of canonical target identity for the receipt filename under StateDir. Hash sorted relative paths, file sizes, and bytes; never include absolute paths in the tree hash. Write a temporary receipt beside the final receipt, flush it through FileSystem.SyncFile, and rename it into place. Reject malformed JSON, unexpected enum values, mismatched target identity, unsorted aliases, and hash mismatches.
+Use a full SHA-256 hex digest of canonical target identity for the receipt filename under StateDir. Hash sorted relative paths, file sizes, and bytes; never include absolute paths in the tree hash. Write a temporary receipt beside the final receipt, flush it through FileSystem.SyncFile, and rename it into place. Reject malformed JSON, unexpected enum values, mismatched target identity, unsorted aliases, and hash mismatches. Inventory targets use the same canonical identity/receipt mechanism with an empty Worker alias list.
 
 - [ ] Step 5: Implement install/update/remove/status transactions.
 
@@ -413,21 +445,23 @@ Implement these transitions:
 
 ~~~go
 func (r *Reconciler) Sync(ctx context.Context, options Options) (Report, error) {
-    // Validate profile and targets.
-    // Materialize each package into a sibling staging directory.
-    // Verify every manifest path, file hash, size, and tree hash.
-    // For a missing target, rename stage into place and atomically write receipt.
-    // For a matching receipt and unchanged current tree, stage the new package,
-    // rename old target to a versioned backup, rename stage to target, write receipt,
-    // and roll back if the second rename or receipt write fails.
+    // Resolve the cumulative ProfilePackageSet for options.Profile.
+    // Stage each embedded package below HotplexHome/skills/builtin/<version>/<name>.
+    // Verify every manifest path, file hash, size, and inventory tree hash.
+    // Publish each missing inventory package with stage -> verify -> rename -> receipt.
+    // Preserve a different, modified, invalid, or symlinked inventory package as conflict.
+    // Only after inventory publication succeeds, stage each native projection.
+    // For a matching receipt and unchanged current tree, rename old target to a
+    // versioned backup, rename stage to target, write receipt, and roll back if
+    // the second rename or receipt write fails.
     // For collision, modified tree, invalid receipt, symlink, or escape, preserve
     // the target and return a typed conflict/drift item.
 }
 ~~~
 
-Status detects inventory state, matching/missing/invalid receipts, staging/backup remnants, root collisions, and Worker aliases without writing. An interrupted operation that can be proven safe is recoverable drift; an ambiguous interrupted operation reports drift and preserves the backup.
+Status detects inventory state, matching/missing/invalid inventory and projection receipts, staging/backup remnants, root collisions, and Worker aliases without writing. Dry-run computes both inventory publication and native projection changes and performs zero writes. An interrupted operation that can be proven safe is recoverable drift; an ambiguous interrupted operation reports drift and preserves the backup.
 
-Remove requires a matching receipt and unchanged projected tree, renames the target to a versioned backup, atomically removes the receipt, and removes the backup only after receipt removal succeeds. Receipt-removal failure renames the backup back and reports failed. Dry-run performs complete planning and hash checks but calls no write operation.
+Status, Sync, and Remove all resolve the cumulative ProfilePackageSet, so runtime always means hotplex-cli and operator always means hotplex-cli plus hotplex-operator. Remove first removes matching, unchanged native projections and receipts, then removes matching, unchanged inventory packages and receipts using the same backup/delete/rollback transaction. A user-modified or ambiguous inventory is preserved and reported. Receipt-removal failure renames the backup back and reports failed. Dry-run performs complete inventory and projection planning and hash checks but calls no write operation.
 
 - [ ] Step 6: Add failure-injection tests and run green.
 
@@ -436,6 +470,9 @@ Implement a recordingFS test double around production osFS with deterministic fa
 ~~~go
 func TestDryRunLeavesHomeByteIdentical(t *testing.T) {}
 func TestSyncInitialInstallWritesInventoryProjectionAndReceipt(t *testing.T) {}
+func TestSyncPublishesInventoryBeforeNativeProjection(t *testing.T) {}
+func TestModifiedInventoryIsConflictAndBlocksProjection(t *testing.T) {}
+func TestDryRunDoesNotCreateInventoryOrProjection(t *testing.T) {}
 func TestSyncIsIdempotentWhenManifestAndTreeMatch(t *testing.T) {}
 func TestUpdateRollsBackWhenSecondRenameFails(t *testing.T) {}
 func TestUpdateRollsBackWhenReceiptWriteFails(t *testing.T) {}
@@ -446,7 +483,7 @@ func TestPackageSymlinkIsConflictAndNeverFollowed(t *testing.T) {}
 func TestInventoryAndReceiptNeverEnterGenericSkillScanner(t *testing.T) {}
 ~~~
 
-Every test creates home := t.TempDir(), passes explicit Paths, and snapshots the tree before and after dry-run or status.
+Every test creates separate userHome := t.TempDir() and hotplexHome := t.TempDir(), passes explicit Paths, and snapshots both trees before and after dry-run or status. No test uses a process home or repository path.
 
 ~~~bash
 gofmt -w internal/skills/reconcile internal/skills/scanner.go internal/skills/scanner_test.go
@@ -562,17 +599,18 @@ Expected: all resolver cases pass and the commit contains only the new resolver 
 
 ~~~go
 type skillsCommandDeps struct {
-    LoadConfig    func(string) (*config.Config, error)
-    HomeDir       func() string
-    NewReconciler func(string) (*reconcile.Reconciler, error)
-    Output        io.Writer
+    LoadConfig      func(string) (*config.Config, error)
+    UserHomeDir     func() string
+    HotplexHomeDir  func() string
+    NewReconciler   func(userHome, hotplexHome string) (*reconcile.Reconciler, error)
+    Output          io.Writer
 }
 
 func newSkillsCmd() *cobra.Command
 func newSkillsCmdWithDeps(deps skillsCommandDeps) *cobra.Command
 ~~~
 
-Production newSkillsCmd supplies config.Load, config.HotplexHome, builtin.NewRegistry, and explicit Paths. Tests use newSkillsCmdWithDeps and a temp-path runner.
+Production newSkillsCmd supplies config.Load, os.UserHomeDir, config.HotplexHome, builtin.NewRegistry, and explicit UserHome/HotplexHome Paths. Tests use newSkillsCmdWithDeps with separate temp userHome and hotplexHome directories. Every status, sync, and remove command passes the selected profile to the same cumulative ProfilePackageSet.
 
 The subcommands are newSkillsStatusCmd, newSkillsSyncCmd, and newSkillsRemoveCmd. --profile accepts only runtime and operator. --worker is a repeatable string-array flag converted through reconcile.ParseWorkerType. --dry-run exists on sync and remove. --json exists on all three. With no explicit --worker, the command uses Config.EnabledWorkerTypes; an empty result emits a typed bounded error requiring --worker. Human output is rendered from Report; JSON output encodes Report directly. ACP produces a failed/unsupported_worker item and performs no writes.
 
@@ -584,7 +622,7 @@ func TestSkillsSyncUsesResolvedConfigTargetsWhenWorkerFlagIsAbsent(t *testing.T)
 func TestSkillsCommandRequiresExplicitWorkerWhenResolvedSetIsEmpty(t *testing.T) {}
 func TestSkillsCommandRejectsUnknownProfileAndWorker(t *testing.T) {}
 func TestSkillsCommandACPProducesUnsupportedReportWithoutWrite(t *testing.T) {}
-func TestSkillsDryRunDoesNotChangeTempHome(t *testing.T) {}
+func TestSkillsDryRunDoesNotChangeUserOrHotplexHome(t *testing.T) {}
 func TestSkillsJSONOutputIsReportOnly(t *testing.T) {}
 ~~~
 
@@ -619,7 +657,7 @@ func loadSkillsOptions(
 }
 ~~~
 
-Call only Status, Sync, or Remove from each handler. Print the typed report after the operation, then return Report.Err() for failed items. This preserves report observability while giving scripts a non-zero exit code.
+The loader passes UserHomeDir to native-target resolution and HotplexHomeDir to inventory/state resolution. Call only Status, Sync, or Remove from each handler. Print the typed report after the operation, then return Report.Err() for failed items. This preserves report observability while giving scripts a non-zero exit code.
 
 - [ ] Step 4: Register the command and implement presentation.
 
@@ -665,7 +703,7 @@ git commit -m "feat(cli): add built-in skill lifecycle commands"
 func (w *Worker) ListInvokableSkills(ctx context.Context, workDir string) ([]worker.SkillDescriptor, error)
 ~~~
 
-Claude Worker stores an injectable homeDir func() (string, error) for tests and defaults to os.UserHomeDir in New. The provider reads only <home>/.claude/skills, uses the explicit shallow ScanRoot helper, maps Name, Description, and absolute Path, and never scans .hotplex/skills, the project root, or the Built-in inventory.
+Claude Worker stores an injectable userHomeDir func() (string, error) for tests and defaults to os.UserHomeDir in New. The provider reads only <UserHome>/.claude/skills, uses the explicit shallow ScanRoot helper, maps Name, Description, and absolute Path, and never scans HotplexHome/.hotplex/skills, the project root, or the Built-in inventory.
 
 - [ ] Step 1: Add red Claude catalog and matrix tests.
 
@@ -705,19 +743,19 @@ Add the injectable home resolver to Claude Worker while preserving constructors 
 ~~~go
 type Worker struct {
     // existing fields
-    homeDir func() (string, error)
+    userHomeDir func() (string, error)
 }
 
 func (w *Worker) nativeSkillRoot() (string, error) {
-    resolve := w.homeDir
+    resolve := w.userHomeDir
     if resolve == nil {
         resolve = os.UserHomeDir
     }
-    home, err := resolve()
+    userHome, err := resolve()
     if err != nil {
         return "", fmt.Errorf("claude: resolve home: %w", err)
     }
-    return filepath.Join(home, ".claude", "skills"), nil
+    return filepath.Join(userHome, ".claude", "skills"), nil
 }
 ~~~
 
@@ -773,7 +811,7 @@ type Runner interface {
 - Extends onboard.WizardOptions with SyncSkills bool and injectable SkillRunner reconcile.Runner. The CLI passes SyncSkills only for explicit --sync-skills; tests pass a temp-path runner.
 - Adds NewBuiltinSkillsChecker(statusFn func(context.Context) (reconcile.Report, error)) cli.Checker. The checker has no FixFunc, is read-only, and is registered under skills.
 - Adds --sync-skills to onboard and update. Onboard uses runtime profile only. Update accepts closed --skills-profile runtime|operator when --sync-skills is present; absent --sync-skills performs no native-root write.
-- Gateway startup calls read-only status after configuration/paths are resolved and logs bounded drift reason codes; it never calls Sync, Remove, or a write operation.
+- Lifecycle construction injects separate UserHomeDir and HotplexHomeDir values into reconciliation. Gateway startup calls read-only status after both paths are resolved and logs bounded drift reason codes; it never calls Sync, Remove, or a write operation.
 
 - [ ] Step 1: Add red checker and lifecycle tests.
 
@@ -865,17 +903,17 @@ BuiltinPackageVersion string
 
 ~~~go
 type PublicCatalog interface {
-    ListInstalled(context.Context, string) ([]skills.Skill, error)
-    ReadInstalled(context.Context, string, string) (*skills.Detail, error)
+    List(context.Context, string) ([]skills.Skill, error)
+    Read(context.Context, string, string) (*skills.Detail, error)
 }
 ~~~
 
-The provider reads the Built-in inventory and embedded bytes directly; it does not call user CRUD methods. It returns SourceGlobal to preserve the current source contract, Managed=false, and optional Built-in fields. Admin and WebChat handlers merge Built-ins only into read surfaces. User/project entries with the same name win; CLI reconciliation status remains the collision diagnostic source. Built-ins return a bounded read-only error from update/delete/replace paths.
+The provider combines the embedded canonical registry with the immutable HotplexHome inventory and does not require an existing Worker projection or native projection receipt for visibility. It does not call user CRUD methods. It returns SourceGlobal to preserve the current source contract, Managed=false, and optional Built-in fields. Admin and WebChat handlers merge Built-ins only into read surfaces. User/project entries with the same name win; CLI reconciliation status remains the collision diagnostic source. Built-ins return a bounded read-only error from update/delete/replace paths.
 
 - [ ] Step 1: Add red Go and TypeScript model/handler tests.
 
 ~~~go
-func TestBuiltinPublicCatalogReadsInstalledInventoryOnly(t *testing.T) {}
+func TestBuiltinPublicCatalogListsCanonicalAndInventoryWithoutProjection(t *testing.T) {}
 func TestAdminListUserSkillShadowsBuiltinSameName(t *testing.T) {}
 func TestAdminBuiltinDetailIsReadableButNotMutable(t *testing.T) {}
 func TestWebChatMergedListIncludesUniqueBuiltinAsReadOnly(t *testing.T) {}
@@ -893,9 +931,9 @@ cd webchat && pnpm exec vitest run lib/api app/components/chat/settings-modal ap
 
 Expected: compilation fails because optional fields, public catalog, handler injection, and read-only guards do not exist; the UI test fails because no Built-in badge/action guard exists.
 
-- [ ] Step 3: Implement the installed-inventory public provider.
+- [ ] Step 3: Implement the canonical/inventory public provider.
 
-Use the Task 2 inventory/receipt reader to enumerate only installed Built-in packages. Resolve package body and reference file names from the embedded registry, not from a user-writable native projection. Set optional provenance fields and preserve the existing Skill.FilePath omission from JSON.
+Enumerate the embedded ProfilePackageSet and reconcile it with immutable inventory directories under HotplexHome. A package remains discoverable when its inventory exists without any native projection or projection receipt. Resolve package body and reference file names from the embedded registry or verified immutable inventory, never from a user-writable native projection. Set optional provenance fields and preserve the existing Skill.FilePath omission from JSON.
 
 - [ ] Step 4: Merge read-only metadata without changing CRUD semantics.
 
