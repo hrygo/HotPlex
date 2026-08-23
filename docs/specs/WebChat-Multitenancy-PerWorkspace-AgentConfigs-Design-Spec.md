@@ -58,7 +58,7 @@ WebChat 会话当前 `botName=""`（`bridge_worker.go:333` 注释），走 `plat
 
 ### 2.1 目标（本 spec 范围）
 
-1. **workspace 级 agent-configs 定制**：WebChat 轨每个 workspace 拥有独立的 SOUL/AGENTS/SKILLS/USER/MEMORY 覆盖，覆盖团队默认。
+1. **workspace 级 agent-configs 定制**：WebChat 轨每个 workspace 拥有独立的 SOUL/AGENTS/TOOLS/USER/MEMORY 覆盖，覆盖团队默认。
 2. **两层继承**：团队默认（全局目录）→ workspace 自定义（DB JSON），逐文件覆盖。
 3. **双轨隔离**：Message Channel 轨（Slack/Feishu）的三级 fallback 链零改动。
 4. **META-COGNITION 不可覆盖**：Worker 身份边界由 go:embed 强制注入，workspace 无法触及。
@@ -83,7 +83,7 @@ WebChat 会话当前 `botName=""`（`bridge_worker.go:333` 注释），走 `plat
 |---|---|---|
 | 存储形式 | **DB JSON**（`agent_config_overrides` 列，spec ① 已建） | WebChat 用户经浏览器无法写服务器文件系统；spec ⑥ 前端编辑 UI 必须走 API→DB；per-workspace 隔离由 `owner_user_id` 天然保证；备份/迁移随 DB |
 | 继承语义 | **逐文件覆盖**（命中即终止） | 与现有 `resolveFile` 语义完全一致；可预测；不叠加突破 40KB 总量上限 |
-| 可覆盖范围 | **全部 5 文件**（SOUL/AGENTS/SKILLS/USER/MEMORY） | 与团队默认文件集合一致；受信用户（admin 邀请制）对自己 workspace 负责；底线由 META-COGNITION 保证 |
+| 可覆盖范围 | **全部 5 文件**（SOUL/AGENTS/TOOLS/USER/MEMORY） | 与团队默认文件集合一致；受信用户（admin 邀请制）对自己 workspace 负责；底线由 META-COGNITION 保证 |
 | 解析入口 | **新增 `LoadForWorkspace` 独立函数** | 双轨物理隔离最彻底；`Load` 零改动向后兼容；符合 spec ① §5「接口扩展而非替换」 |
 | JSON 结构 | **flat map**（文件名 → 内容） | 键即文件名，与 `resolveFile`/`injectExclude` 按文件名模型零映射成本 |
 | admin 锁定机制 | **不做**（YAGNI） | 第一版全开放；未来如需「锁定 AGENTS.md」可增量加 `locked_files` 字段 |
@@ -106,15 +106,15 @@ WebChat 会话当前 `botName=""`（`bridge_worker.go:333` 注释），走 `plat
 {
   "SOUL.md":   "你是一个资深 Go 工程师，重视简洁与可读性...",
   "AGENTS.md": "本项目使用 tab 缩进；测试用 testify/require...",
-  "SKILLS.md": "可调用 /commit、/review 等技能...",
+  "TOOLS.md":  "当前环境的工具使用指南、偏好与边界...",
   "USER.md":   "用户偏好简洁回复，中文沟通",
   "MEMORY.md": "上周讨论了 session key 改造方案..."
 }
 ```
 
-- **键**：文件名，大小写敏感，限定白名单 `{"SOUL.md","AGENTS.md","SKILLS.md","USER.md","MEMORY.md"}`（即 `loader.go:121` 的 `configFiles`）。
+- **键**：文件名，大小写敏感，规范白名单 `{"SOUL.md","AGENTS.md","TOOLS.md","USER.md","MEMORY.md"}`。兼容期内旧 `SKILLS.md` 可作为 Tools 槽位别名读取；同时出现 `TOOLS.md` 与 `SKILLS.md` 时返回冲突错误。
 - **值**：文件内容字符串。不经过 `stripFrontmatter`（DB 是用户/API 直接编辑的内容，非文件场景）；`<` 注入防护由 `BuildSystemPrompt` 的 `sanitize()` 统一执行（`prompt.go:126`）。
-- **空值语义**：`{"SOUL.md":""}` 与缺省 `SOUL.md` 键等价——该文件继承团队默认（逐文件覆盖仅对非空值生效）。
+- **空值语义**：缺省键表示继承团队默认；键存在且值为空表示显式清空该文件槽位。
 
 ### 4.3 size 约束
 
@@ -138,8 +138,8 @@ WebChat 会话当前 `botName=""`（`bridge_worker.go:333` 注释），走 `plat
 // inheritance: team defaults (from dir) → workspace overrides (DB JSON).
 //
 // Team defaults are loaded via Load with botName="" (WebChat sessions don't select
-// a bot, spec ① §2.4). Each non-empty override entry replaces the corresponding
-// team-default field. injectExclude takes highest priority: an excluded file is
+// a bot, spec ① §2.4). Each present override entry replaces the corresponding
+// team-default field, including an empty explicit-clear value. injectExclude takes highest priority: an excluded file is
 // never injected even if overridden.
 //
 // The Message Channel track continues to call Load directly; this function is
@@ -151,9 +151,9 @@ func LoadForWorkspace(dir, platform string, overrides map[string]string, injectE
 
 ```
 1. base := Load(dir, platform, "", injectExclude...)     // 团队默认，复用现有三级 fallback
-2. for file ∈ configFiles (SOUL/AGENTS/SKILLS/USER/MEMORY):
-     v := overrides[file]
-     if v != "" && !shouldExclude(file, injectExclude):
+2. for file ∈ configFiles (SOUL/AGENTS/TOOLS/USER/MEMORY):
+     v, present := overrides[file]
+     if present && !shouldExclude(file, injectExclude):
          base.<field> = v                                  // 逐文件覆盖
 3. return base
 ```
@@ -248,7 +248,7 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 `PATCH /api/workspaces/{id}` 的 `agent_config_overrides` 字段补充：
 
 1. **JSON 解析**：`json.Unmarshal([]byte(raw), &m)` 失败 → 400 `INVALID_CONFIG_JSON`。
-2. **键白名单**：遍历 `m`，键不在 `agentconfig.KnownFiles()`（`loader.go:124`）→ 400 `UNKNOWN_CONFIG_FILE`（含未知键列表）。
+2. **键白名单**：遍历 `m`，规范键不在 `agentconfig.KnownFiles()` → 400 `UNKNOWN_CONFIG_FILE`（含未知键列表）。兼容期额外接受旧 `SKILLS.md`；若与 `TOOLS.md` 同时出现则返回配置冲突。
 3. **值类型 + size**：值非 `string` → 400；单值 `len > MaxFileChars` 或总量 `sum > MaxTotalChars` → 400 `CONFIG_TOO_LARGE`。
 
 校验通过后存原始 JSON 字符串（`UpdateWorkspace` 原样存，不变）。
@@ -276,7 +276,7 @@ func ValidateOverrides(raw string) (map[string]string, error)
 - 字段是 **JSON 字符串**（嵌套 JSON），与 `Workspace.AgentConfigOverrides string` 存储一致。
 - **清除语义（两层，须区分）**：
   - **字段层级**（整个 `agent_config_overrides`）：空 JSON 对象 `"{}"` = 清除所有覆盖（全继承团队默认）；省略字段或空字符串 `""` = 不更新（保持原值，与 spec ① PATCH `if req.AgentConfigOverrides != ""` 语义一致，`workspace_handlers.go:162`）。
-  - **文件层级**（JSON 内单个键）：`{"SOUL.md":""}` 与缺省 `SOUL.md` 键等价——该文件继承团队默认（见 §4.2、§5.2，逐文件覆盖仅对非空值生效）。
+  - **文件层级**（JSON 内单个键）：缺省 `SOUL.md` 键表示继承；`{"SOUL.md":""}` 表示显式清空该槽位（见 §4.2、§5.2）。
 
 ---
 
@@ -293,7 +293,7 @@ func ValidateOverrides(raw string) (map[string]string, error)
 ### 9.2 B/C 通道约束
 
 - `BuildSystemPrompt` 的 B/C 通道组装逻辑（`prompt.go:33-83`）零改动。
-- workspace 可覆盖 B 通道文件（SOUL/AGENTS/SKILLS）与 C 通道文件（USER/MEMORY），但 B 通道「无条件覆盖 C 通道」的冲突法则由 `BuildSystemPrompt` 的 XML 结构（`<directives>` 先于 `<context>`）保证，不受 overrides 来源影响。
+- workspace 可覆盖 B 通道文件（SOUL/AGENTS/TOOLS）与 C 通道文件（USER/MEMORY），但 B 通道「无条件覆盖 C 通道」的冲突法则由 `BuildSystemPrompt` 的 XML 结构（`<directives>` 先于 `<context>`）保证，不受 overrides 来源影响。TOOLS 是工具指南，不是真实 Agent Skills catalog。
 
 ### 9.3 XML 注入防护
 
@@ -324,7 +324,7 @@ func ValidateOverrides(raw string) (map[string]string, error)
 
 | 模块 | 要点 |
 |---|---|
-| `LoadForWorkspace` | 全覆盖（5 文件全 override）/ 部分覆盖（仅 SOUL）/ 全继承（overrides 空）/ exclude 与 override 交互（exclude 优先）/ 白名单过滤（未知键忽略）/ 空值不覆盖 |
+| `LoadForWorkspace` | 全覆盖（5 文件全 override）/ 部分覆盖（仅 SOUL）/ 全继承（overrides 空）/ exclude 与 override 交互（exclude 优先）/ 白名单过滤（未知键忽略）/ 空值显式清空 / Tools 旧名兼容与双键冲突 |
 | `ValidateOverrides` | 合法 JSON / 非法 JSON / 未知键 / 值类型错误 / 单文件超 8KB / 总量超 40KB / 空字符串 |
 | `Load` 回归 | 现有三级 fallback 测试零改动通过（双轨隔离证据） |
 | `BuildSystemPrompt` | overrides 经 LoadForWorkspace 产出后，META-COGNITION 仍首位、B/C 结构正确 |
@@ -389,4 +389,4 @@ func ValidateOverrides(raw string) (map[string]string, error)
 1. **JSON 结构**：flat map（文件名 → 内容），已定（§3）。
 2. **size 上限**：复用 `MaxFileChars=8000` / `MaxTotalChars=40000`，已定。
 3. **未知键策略**：PATCH 拒绝（400），`LoadForWorkspace` 忽略（纵深防御），已定。
-4. **空值语义**：等价缺省，继承团队默认，已定。
+4. **空值语义**：缺省键继承，present-empty 显式清空，已修订。

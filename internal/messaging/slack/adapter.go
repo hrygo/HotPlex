@@ -294,27 +294,15 @@ func (a *Adapter) runSocketMode(ctx context.Context) {
 
 			attemptStart.Store(time.Now().UnixNano())
 			a.Log.Info("slack: starting socket mode", "attempt", attempt.Load())
-			if err := a.socketMode.Run(); err != nil {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(backoff.Next()):
-					a.Log.Warn("slack: socket mode error, will retry",
-						"err", err, "attempt", attempt.Load(), "conn_uptime", connUptime())
-					established.Store(0)
-					attempt.Add(1)
-					continue
-				}
-			}
-			// Run() returned without error (clean close); reset attempt counter.
-			a.Log.Info("slack: socket closed cleanly, reconnecting",
-				"attempt", attempt.Load(), "conn_uptime", connUptime())
-			established.Store(0)
-			attempt.Store(1)
+			err := a.socketMode.Run()
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff.Next()):
+				a.Log.Warn("slack: socket mode error, will retry",
+					"err", err, "attempt", attempt.Load(), "conn_uptime", connUptime())
+				established.Store(0)
+				attempt.Add(1)
 			}
 		}
 	}()

@@ -15,17 +15,17 @@ type AgentConfigFileName string
 const (
 	AgentConfigSoul   AgentConfigFileName = "SOUL.md"
 	AgentConfigAgents AgentConfigFileName = "AGENTS.md"
-	AgentConfigSkills AgentConfigFileName = "SKILLS.md"
+	AgentConfigTools  AgentConfigFileName = "TOOLS.md"
 	AgentConfigUser   AgentConfigFileName = "USER.md"
 	AgentConfigMemory AgentConfigFileName = "MEMORY.md"
 )
 
-// ValidConfigFiles is the whitelist of agent config file names accepted by
-// read/write endpoints. Entries outside this set are rejected.
+// ValidConfigFiles is the canonical whitelist accepted by AgentConfig
+// endpoints.
 var ValidConfigFiles = map[AgentConfigFileName]bool{
 	AgentConfigSoul:   true,
 	AgentConfigAgents: true,
-	AgentConfigSkills: true,
+	AgentConfigTools:  true,
 	AgentConfigUser:   true,
 	AgentConfigMemory: true,
 }
@@ -83,7 +83,7 @@ type TTSAttrs struct {
 type AgentConfigSummary struct {
 	Soul   *AgentConfigMeta `json:"soul,omitempty"`
 	Agents *AgentConfigMeta `json:"agents,omitempty"`
-	Skills *AgentConfigMeta `json:"skills,omitempty"`
+	Tools  *AgentConfigMeta `json:"tools,omitempty"`
 	User   *AgentConfigMeta `json:"user,omitempty"`
 	Memory *AgentConfigMeta `json:"memory,omitempty"`
 }
@@ -116,8 +116,7 @@ type BotConfigProvider interface {
 	// ListBotConfigs returns all registered bot configurations.
 	ListBotConfigs(ctx context.Context) ([]BotConfigEntry, error)
 
-	// GetAgentConfigFile reads a single agent config file for a bot,
-	// identified by the whitelisted file name.
+	// GetAgentConfigFile reads a single canonical agent config file for a bot.
 	GetAgentConfigFile(ctx context.Context, botName string, file AgentConfigFileName) (*AgentConfigFile, error)
 
 	// GetSystemPromptPreview returns the assembled B+C channel system prompt
@@ -147,7 +146,8 @@ type BotConfigProvider interface {
 
 	// WritePlatformAgentConfigFile writes content to a single platform-level
 	// agent config file. The platform must be recognized and the file name
-	// must appear in ValidConfigFiles. Writes serve as channel team defaults,
-	// overridden per-workspace by LoadForWorkspace's existing precedence.
+	// must appear in ValidConfigFiles.
+	// Writes serve as channel team defaults, overridden per-workspace by
+	// LoadForWorkspace's existing precedence.
 	WritePlatformAgentConfigFile(ctx context.Context, platform string, file AgentConfigFileName, content string) error
 }

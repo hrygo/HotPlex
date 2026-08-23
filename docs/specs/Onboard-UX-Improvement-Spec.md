@@ -92,7 +92,7 @@ stepServiceInstall()       ← 安装系统服务
 | `wizard.go:288` | 版本号 | `"v0.36.2"` 硬编码在 `displayBanner()`，实际版本 v1.5.4 |
 | `wizard.go:381-397` | Worker 检查 | `exec.LookPath` 只确认二进制存在，不验证功能 |
 | `wizard.go:713-749` | Agent 模板 | `O_EXCL` 写入模板（已有内容），但缺个性化引导和 3 级 fallback 说明 |
-| `agentconfig_templates.go:17` | 模板列表 | SOUL/AGENTS/SKILLS/USER/MEMORY 已有实质内容，但 USER.md 字段为空待填充 |
+| `agentconfig_templates.go:17` | 模板列表 | SOUL/AGENTS/TOOLS/USER/MEMORY 已有实质内容，但 USER.md 字段为空待填充 |
 | `wizard.go:585-612` | Verify | 只跑 environment/config/stt 三类 checker（缺少 security/dependencies/runtime） |
 | `onboard.go:65-99` | Run() 后渲染 | 已有 `CommandBox` 输出下一步，但无 Agent 个性化桥接提示 |
 | `templates.go:169-191` | YAML 生成 | 已有 `extractPlatformBlock`/`writeKeptPlatform` 保留平台块，但其他块为全量覆盖 |

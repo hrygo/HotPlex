@@ -43,6 +43,24 @@ func TestWriteFile_RejectsPathTraversal(t *testing.T) {
 	require.Contains(t, err.Error(), "path traversal not allowed")
 }
 
+func TestWriteFile_WritesCanonicalToolsFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	err := WriteFile(dir, "slack", "U12345", "TOOLS.md", "prefer native tools", 100)
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(dir, "slack", "U12345", "TOOLS.md"))
+}
+
+func TestWriteFile_RejectsLegacySkillsFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	err := WriteFile(dir, "slack", "U12345", "SKILLS.md", "legacy", 100)
+	require.ErrorIs(t, err, ErrUnknownConfigFile)
+	require.NoFileExists(t, filepath.Join(dir, "slack", "U12345", "SKILLS.md"))
+}
+
 func TestResolvedSource_BotLevel(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -86,4 +104,29 @@ func TestResolvedSource_NotFound(t *testing.T) {
 
 	src := ResolvedSource(dir, "slack", "U12345", "SOUL.md")
 	require.Equal(t, "", src)
+}
+
+func TestResolvedSource_CanonicalToolsIgnoresLegacyFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	botDir := filepath.Join(dir, "slack", "U12345")
+	require.NoError(t, os.MkdirAll(botDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(botDir, "SKILLS.md"), []byte("legacy"), 0o644))
+
+	src := ResolvedSource(dir, "slack", "U12345", "TOOLS.md")
+	require.Empty(t, src)
+}
+
+func TestResolvedSource_LegacyDefaultDirectoryIgnored(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	legacyDir := filepath.Join(dir, "slack", "default")
+	require.NoError(t, os.MkdirAll(legacyDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacyDir, "TOOLS.md"), []byte("legacy"), 0o644))
+
+	source, resolvedFile := ResolvedLocation(dir, "slack", "", "TOOLS.md")
+	require.Empty(t, source)
+	require.Empty(t, resolvedFile)
 }

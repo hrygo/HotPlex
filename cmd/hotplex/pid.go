@@ -62,8 +62,7 @@ func ensureNotRunning() error {
 	if inst.PID == os.Getpid() {
 		return nil
 	}
-	return fmt.Errorf("gateway already running (PID %d, via %s); use 'hotplex gateway stop' first",
-		inst.PID, inst.Source)
+	return gatewayAlreadyRunningError(inst)
 }
 
 type discoverySource string
@@ -82,6 +81,17 @@ type gatewayInstance struct {
 }
 
 func findRunningGateway() (*gatewayInstance, error) {
+	return findRunningGatewayWith(service.NewManager())
+}
+
+func findRunningGatewayWith(mgr service.Manager) (*gatewayInstance, error) {
+	for _, level := range []service.Level{service.LevelUser, service.LevelSystem} {
+		s, err := mgr.Status("hotplex", level)
+		if err == nil && s != nil && s.Running {
+			return &gatewayInstance{PID: s.PID, Source: sourceService, Level: level}, nil
+		}
+	}
+
 	if state, err := readGatewayState(); err == nil {
 		return &gatewayInstance{
 			PID:        state.PID,
@@ -91,15 +101,30 @@ func findRunningGateway() (*gatewayInstance, error) {
 		}, nil
 	}
 
-	mgr := service.NewManager()
-	for _, level := range []service.Level{service.LevelUser, service.LevelSystem} {
-		s, err := mgr.Status("hotplex", level)
-		if err == nil && s.Running {
-			return &gatewayInstance{PID: s.PID, Source: sourceService, Level: level}, nil
-		}
-	}
-
 	return nil, fmt.Errorf("gateway not running (no PID file and no service found)")
+}
+
+func gatewayAlreadyRunningError(inst *gatewayInstance) error {
+	if inst.Source == sourceService {
+		if inst.PID > 0 {
+			return fmt.Errorf("gateway already running as %s service (PID %d); use 'hotplex service stop --level %s' first",
+				inst.Level, inst.PID, inst.Level)
+		}
+		return fmt.Errorf("gateway is managed by the %s service, but no active process PID is available; use 'hotplex service stop --level %s' first",
+			inst.Level, inst.Level)
+	}
+	return fmt.Errorf("gateway already running (PID %d, via %s); use 'hotplex gateway stop' first",
+		inst.PID, inst.Source)
+}
+
+func gatewayStoppedMessage(inst *gatewayInstance) string {
+	if inst.Source == sourceService {
+		if inst.PID > 0 {
+			return fmt.Sprintf("gateway service stopped (level=%s, PID=%d)", inst.Level, inst.PID)
+		}
+		return fmt.Sprintf("gateway service stopped (level=%s, process PID unavailable)", inst.Level)
+	}
+	return fmt.Sprintf("gateway stopped (PID %d, %s)", inst.PID, inst.Source)
 }
 
 func stopGateway(inst *gatewayInstance) error {

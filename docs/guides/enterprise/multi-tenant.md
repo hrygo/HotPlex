@@ -34,12 +34,12 @@ Agent 配置采用 **3-level fallback** 策略，每文件独立解析，命中�
 agent-configs/
 ├── SOUL.md              # Level 3: 全局默认人格
 ├── AGENTS.md            # Level 3: 全局行为规则
-├── SKILLS.md            # Level 3: 全局技能列表
+├── TOOLS.md             # Level 3: 全局工具使用指南
 ├── slack/               # Level 2: Slack 平台覆盖
 │   ├── SOUL.md
 │   ├── AGENTS.md
-│   └── U12345/          # Level 1: Bot 级别覆盖
-│       ├── SOUL.md      # 专属于 Slack Bot U12345 的人格
+│   └── my-bot/          # Level 1: bots[].name 对应的 Bot 覆盖
+│       ├── SOUL.md      # 专属于 Slack Bot my-bot 的人格
 │       ├── USER.md      # 用户上下文（C 通道）
 │       └── MEMORY.md    # 用户记忆（C 通道）
 └── feishu/              # Level 2: Feishu 平台覆盖
@@ -48,11 +48,13 @@ agent-configs/
         └── SOUL.md
 ```
 
-**解析顺序**：`bot/<id>/` → `platform/` → `global` — 找到即停止，不会合并上层。
+**解析顺序**：`platform/<botName>/` → `platform/` → `global` — 文件缺失才继承；present-empty 显式清空并停止，不会合并层级。
 
 **B/C 双通道**：
-- **B 通道** (`<directives>`): META-COGNITION.md + SOUL + AGENTS + SKILLS — 定义 Bot 行为
+- **B 通道** (`<directives>`): META-COGNITION.md + SOUL + AGENTS + TOOLS — 定义 Bot 行为和环境工具指南
 - **C 通道** (`<context>`): USER + MEMORY — 提供用户上下文
+
+`TOOLS.md` 是常驻环境指导。真实 Agent Skills 由独立的 `<name>/SKILL.md` 包管理，不进入五文件 AgentConfig。
 
 配置热更新仅在 session 初始化或 `/reset` 时加载，运行中的 session 不受影响。
 

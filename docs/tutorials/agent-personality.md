@@ -18,7 +18,7 @@ HotPlex 通过**双通道配置系统**控制 Agent 的人格、行为规则和�
 |------|------|------|--------|
 | **B 通道 (Directives)** | `SOUL.md` | Agent 人格、语气、价值观 | **强制执行** |
 | | `AGENTS.md` | 工作规则、约束、禁止事项 | **强制执行** |
-| | `SKILLS.md` | 工具使用指南 | **强制执行** |
+| | `TOOLS.md` | 环境工具使用指南（不声明实际可用性） | **强制执行** |
 | **C 通道 (Context)** | `USER.md` | 用户档案、偏好 | 仅供参考 |
 | | `MEMORY.md` | 跨会话记忆 | 仅供参考 |
 
@@ -86,7 +86,73 @@ mkdir -p ~/.hotplex/agent-configs
 - 不确定时说"需要调查"，不猜测
 ```
 
-## 3. 添加用户档案（C 通道）
+## 3. 添加工具指南
+
+如果需要说明当前环境如何使用工具，可创建 `TOOLS.md`：
+
+```markdown
+<!-- ~/.hotplex/agent-configs/TOOLS.md -->
+
+# 工具使用指南
+
+- 执行项目检查优先使用 `make check`
+- 调用外部服务前先确认当前 Session 是否暴露相应工具
+- 不把文档中出现的命令当作工具已安装的证据
+```
+
+`TOOLS.md` 只是常驻指导，不是 Agent Skill 列表。真实 Skills 由独立的
+`.agents/skills/<name>/SKILL.md` 定义，并通过 Admin API / WebChat Skills 页面管理、
+按需加载。AgentConfig 只识别本教程列出的五个规范文件。
+
+### Session 自我认知与 Skills 调用边界
+
+实时 Session 的 system prompt 使用外层 schema v3，并可在 directives 前携带受限的
+`runtime-facts`（载荷 schema 1）。它只提供 Gateway 构建的声明性事实：平台、Worker、
+作用域种类、声明的权限/能力、查询面、Skill catalog 所有者和 allowlist 环境键名的存在性；
+不提供身份值、路径、环境值、凭据、动态 catalog 或 Skill 正文。事实不是 Worker 健康或权限
+已经执行的证明，Admin 预览没有运行时 facts。
+
+Admin API 与 WebChat HTTP Skills 是真实 Agent Skills 的 read surface；`TOOLS.md` 不是 Skill
+catalog，META 也不会复制 catalog。Session `/skills` 仍由当前 Worker/filesystem evidence
+决定。当前 Session 的状态含义是：文件系统发现但没有调用证据为 `discoverable`，Worker 权威目录确认
+可执行为 `callable`；`unavailable` 保留给能力表面明确报告的不可用状态。只有 `callable`
+可调用；短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured
+replay 共用同一判定，filesystem-only Skill 不会因为存在路径而变成可调用。
+
+配置变更和 Skill 可见性都应在新建 Session 或 `/reset` 后重新检查，并以当前 `/skills` 状态
+为准。
+
+### 内置 Skills 与显式同步
+
+`hotplex-cli`（runtime）和 `hotplex-operator`（operator，累积包含 runtime 包）是两个只读
+内置 Agent Skills。它们在 Admin/WebChat HTTP read surface 中永久可发现，即使还没有 native
+projection；Session `/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项为
+`discoverable`；只有 Worker advertisement/adapter-verified activation 才能证明 `callable`。真实
+global/project/user Skill
+同名时优先显示真实项，`source` 仍为 `global`/`project`，builtin 只作为可选元数据和版本展示。
+只有 builtin-only 对象 update/delete 才返回 `SKILL_BUILTIN_READONLY`，同名用户 override 可以
+正常创建和管理。
+
+需要投影到 Worker 原生目录时，使用 `hotplex skills status|sync|remove`，按需选择累积
+`runtime`/`operator` profile、重复 `--worker`，并可使用 `--dry-run` 与 `--json`。UserHome
+原生根（Claude 的 `.claude/skills`、Codex/OpenCode 共享 `.agents/skills`）与
+`$HOTPLEX_HOME` 的 immutable inventory/state receipts 分离；ACP 没有可推断的 filesystem
+root。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 不写入；
+onboard/update 只有显式 `--sync-skills` 才同步。
+
+两个内置包以 `internal/skills/builtin/hotplex-cli` 和
+`internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
+`.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库还包含
+`hotplex-diagnostics`、`hotplex-release` 和 `hotplex-docs-patrol`，合计五个 Skill。
+
+### Cron 请求的 CLI 路由
+
+Cron 请求优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时先查询当前二进制的
+`hotplex cron --help`，必要时再看 `hotplex cron create --help`。执行 `cron create` 后，必须再执行
+`hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；不能以
+Skill 文档或命令示例代替成功证据。
+
+## 4. 添加用户档案（C 通道）
 
 C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的规则：
 
@@ -114,7 +180,7 @@ C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的�
 - 主要开发分支：main
 ```
 
-## 4. 添加跨会话记忆
+## 5. 添加跨会话记忆
 
 `MEMORY.md` 帮助 Agent 在不同会话间保持上下文连贯：
 
@@ -142,7 +208,7 @@ C 通道文件为 Agent 提供**参考上下文**，但不会覆盖 B 通道的�
 
 > **注意**：如果 MEMORY.md 的内容与 AGENTS.md 的规则冲突，Agent 会以 AGENTS.md 为准（B 通道优先）。
 
-## 5. 按平台或 Bot 覆盖配置
+## 6. 按平台或 Bot 覆盖配置
 
 HotPlex 支持**三级 fallback**，每个文件独立解析，命中即终止：
 
@@ -152,7 +218,7 @@ HotPlex 支持**三级 fallback**，每个文件独立解析，命中即终止�
 Bot 级：~/.hotplex/agent-configs/slack/my-bot/SOUL.md
 ```
 
-Bot 级目录名使用 YAML 配置中 `bots[].name` 的值（如 `"my-bot"`），而非平台运行时 ID。单 Bot 模式无 Bot 级目录，直接使用平台级。解析顺序：Bot 级 → 平台级 → 全局级，第一个非空文件生效。
+Bot 级目录名使用 YAML 配置中 `bots[].name` 的值（如 `"my-bot"`），而非平台运行时 ID。单 Bot 模式无 Bot 级目录，直接使用平台级。解析顺序：Bot 级 → 平台级 → 全局级，第一个**存在**的文件生效；缺失表示继续继承，存在但正文为空表示显式清空并停止 fallback。
 
 ### 示例：为特定 Bot 定制人格
 
@@ -195,7 +261,7 @@ mkdir -p ~/.hotplex/agent-configs/slack/dev-bot
 > # 然后编辑 Bot 级文件
 > ```
 
-## 6. 配置限制与注意事项
+## 7. 配置限制与注意事项
 
 | 项目 | 限制 |
 |------|------|
@@ -210,6 +276,7 @@ mkdir -p ~/.hotplex/agent-configs/slack/dev-bot
 2. **内容加载**：发送 `/reset` 后提问，观察行为是否符合预期
 3. **通道优先级**：故意让 MEMORY.md 与 AGENTS.md 内容冲突，验证 Agent 以 AGENTS.md 为准
 4. **Bot 级覆盖**：在 Bot 级目录放置 SOUL.md，验证覆盖生效
+5. **空文件检查**：确认 Bot/平台作用域没有意外的 present-empty 文件
 
 ---
 

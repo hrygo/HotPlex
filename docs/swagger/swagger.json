@@ -692,7 +692,7 @@
                         "enum": [
                             "SOUL.md",
                             "AGENTS.md",
-                            "SKILLS.md",
+                            "TOOLS.md",
                             "USER.md",
                             "MEMORY.md"
                         ],
@@ -755,7 +755,7 @@
                         "enum": [
                             "SOUL.md",
                             "AGENTS.md",
-                            "SKILLS.md",
+                            "TOOLS.md",
                             "USER.md",
                             "MEMORY.md"
                         ],
@@ -987,7 +987,7 @@
                         "AdminBearerAuth": []
                     }
                 ],
-                "description": "Returns the content of a single agent config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md). Requires admin:read scope.",
+                "description": "Returns the content of a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). Requires admin:read scope.",
                 "produces": [
                     "application/json"
                 ],
@@ -1007,7 +1007,7 @@
                         "enum": [
                             "SOUL.md",
                             "AGENTS.md",
-                            "SKILLS.md",
+                            "TOOLS.md",
                             "USER.md",
                             "MEMORY.md"
                         ],
@@ -1051,7 +1051,7 @@
                         "AdminBearerAuth": []
                     }
                 ],
-                "description": "Writes content to a single agent config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md). Requires admin:write scope.",
+                "description": "Writes content to a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). Requires admin:write scope.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1071,7 +1071,7 @@
                         "enum": [
                             "SOUL.md",
                             "AGENTS.md",
-                            "SKILLS.md",
+                            "TOOLS.md",
                             "USER.md",
                             "MEMORY.md"
                         ],
@@ -2990,10 +2990,10 @@
                 "memory": {
                     "$ref": "#/definitions/admin.AgentConfigMeta"
                 },
-                "skills": {
+                "soul": {
                     "$ref": "#/definitions/admin.AgentConfigMeta"
                 },
-                "soul": {
+                "tools": {
                     "$ref": "#/definitions/admin.AgentConfigMeta"
                 },
                 "user": {
@@ -4222,6 +4222,12 @@
             "type": "object",
             "properties": {
                 "body": {
+                    "type": "string"
+                },
+                "builtin": {
+                    "type": "boolean"
+                },
+                "builtin_package_version": {
                     "type": "string"
                 },
                 "description": {

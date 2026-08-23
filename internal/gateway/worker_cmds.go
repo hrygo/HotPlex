@@ -133,7 +133,7 @@ func (h *Handler) handleSetModel(ctx context.Context, env *events.Envelope, cr w
 func (h *Handler) handleSetPermMode(ctx context.Context, env *events.Envelope, cr worker.ControlRequester, args string, extra map[string]any) error {
 	mode, err := normalizeRequestedPermissionMode(args, extra)
 	if err != nil {
-		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "invalid permission mode: %v", err)
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "%v", err)
 	}
 	if _, err := cr.SendControlRequest(ctx, "set_permission_mode", map[string]any{"mode": mode}); err != nil {
 		return h.sendErrorf(ctx, env, classifyWorkerError(err), "set permission: %v", err)
@@ -314,18 +314,10 @@ func buildSkillEntriesFromCatalog(merged []worker.NativeCommandDescriptor, fsSki
 			if fs, ok := fsByName[d.Name]; ok {
 				e.Source = fs.Source
 				e.Managed = fs.Managed
-				if authoritativeOK && !isFilesystemTierDescriptor(d, fs, w) {
-					e.Status = events.SkillStatusCallable
-				} else {
-					e.Status = events.SkillStatusDiscoverable
-				}
+				e.Status = classifyNativeSkillCallability(d, fs, true, w, authoritativeOK)
 			} else {
 				e.Source = "worker"
-				if authoritativeOK {
-					e.Status = events.SkillStatusCallable
-				} else {
-					e.Status = events.SkillStatusDiscoverable
-				}
+				e.Status = classifyNativeSkillCallability(d, skills.Skill{}, false, w, authoritativeOK)
 			}
 		default:
 			e.Status = events.SkillStatusDiscoverable
@@ -333,6 +325,26 @@ func buildSkillEntriesFromCatalog(merged []worker.NativeCommandDescriptor, fsSki
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// classifyNativeSkillCallability is the single evidence-based decision used
+// by /skills and every native Skill invocation entry point. CatalogOrigin is
+// stamped by sessionCatalogStore at the tier boundary; Path shape and other
+// provider metadata are never used as provenance evidence.
+func classifyNativeSkillCallability(
+	d worker.NativeCommandDescriptor,
+	_ skills.Skill,
+	_ bool,
+	_ worker.Worker,
+	authoritativeOK bool,
+) events.SkillStatus {
+	if d.Kind != worker.NativeCommandKindSkill || !authoritativeOK {
+		return events.SkillStatusDiscoverable
+	}
+	if d.CatalogOrigin != worker.CatalogOriginWorker {
+		return events.SkillStatusDiscoverable
+	}
+	return events.SkillStatusCallable
 }
 
 // filterCatalogDescriptors narrows merged catalog descriptors by
@@ -367,18 +379,4 @@ func fixedCommandNamesFor(w worker.Worker) map[string]struct{} {
 		names[fc.desc.Name] = struct{}{}
 	}
 	return names
-}
-
-// isFilesystemTierDescriptor reports whether the merged descriptor is exactly
-// the filesystem-tier entry sessionCatalogStore.assemble builds for the given
-// Skill — the shape only a name the authoritative catalog did NOT claim
-// receives. Any deviation (authoritative path, mode, or turn flags) means the
-// Worker's authoritative tier contributed the entry and it is natively
-// invokable. Conservative by design: an authoritative descriptor that happens
-// to coincide is downgraded to discoverable, never the reverse.
-func isFilesystemTierDescriptor(d worker.NativeCommandDescriptor, fs skills.Skill, w worker.Worker) bool {
-	return d.Path == fs.FilePath &&
-		d.Mode == worker.NativeModeForType(w.Type()) &&
-		d.StartsTurn &&
-		d.AcceptsArgs
 }

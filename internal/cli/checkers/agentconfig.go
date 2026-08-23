@@ -3,6 +3,7 @@ package checkers
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,81 +13,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 )
 
-// agentConfigSuffixChecker detects deprecated platform-suffix files
-// (e.g., SOUL.slack.md) in the agent-configs directory and suggests
-// migration to the new directory-based layout.
-type agentConfigSuffixChecker struct {
-	dir string // override for testing; defaults to config.HotplexHome()/agent-configs
-}
-
-func (c agentConfigSuffixChecker) Name() string     { return "agent.suffix_deprecated" }
-func (c agentConfigSuffixChecker) Category() string { return "agent_config" }
-
-func (c agentConfigSuffixChecker) scanDir() string {
-	if c.dir != "" {
-		return c.dir
-	}
-	return filepath.Join(config.HotplexHome(), "agent-configs")
-}
-
-func (c agentConfigSuffixChecker) Check(_ context.Context) cli.Diagnostic {
-	dir := c.scanDir()
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cli.Diagnostic{
-				Name:     c.Name(),
-				Category: c.Category(),
-				Status:   cli.StatusWarn,
-				Message:  "Agent config directory does not exist",
-				FixHint:  fmt.Sprintf("Create it: mkdir -p %s", dir),
-			}
-		}
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusWarn,
-			Message:  "Cannot read agent config directory: " + err.Error(),
-		}
-	}
-
-	platforms := agentconfig.KnownPlatforms()
-	var deprecated []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		for _, p := range platforms {
-			suffix := "." + p + ".md"
-			if strings.HasSuffix(name, suffix) {
-				deprecated = append(deprecated, name)
-			}
-		}
-	}
-
-	if len(deprecated) == 0 {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusPass,
-			Message:  "No deprecated platform-suffix files found",
-		}
-	}
-
-	return cli.Diagnostic{
-		Name:     c.Name(),
-		Category: c.Category(),
-		Status:   cli.StatusWarn,
-		Message:  fmt.Sprintf("Deprecated suffix files: %s", strings.Join(deprecated, ", ")),
-		FixHint: fmt.Sprintf("Move to directory layout:\n  mkdir -p %s/slack && mv %s %s/slack/SOUL.md",
-			dir, filepath.Join(dir, deprecated[0]), dir),
-	}
-}
-
 func init() {
-	cli.DefaultRegistry.Register(agentConfigSuffixChecker{})
 	cli.DefaultRegistry.Register(agentConfigDirChecker{})
 	cli.DefaultRegistry.Register(agentConfigGlobalFilesChecker{})
 }
@@ -108,8 +35,11 @@ func (c agentConfigDirChecker) scanDir() string {
 }
 
 var validConfigFiles = map[string]bool{
-	"SOUL.md": true, "AGENTS.md": true, "SKILLS.md": true,
-	"USER.md": true, "MEMORY.md": true,
+	agentconfig.FileSoul:   true,
+	agentconfig.FileAgents: true,
+	agentconfig.FileTools:  true,
+	agentconfig.FileUser:   true,
+	agentconfig.FileMemory: true,
 }
 
 // ignoredFiles are non-config files allowed in any directory without warning.
@@ -131,14 +61,7 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 	}
 
 	var warnings []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		// Platform directory (slack/, feishu/, webchat/, etc.)
-		platformDir := filepath.Join(dir, e.Name())
-		c.checkSubdir(platformDir, e.Name(), &warnings)
-	}
+	c.checkScope(dir, ".", entries, &warnings)
 
 	if len(warnings) == 0 {
 		return cli.Diagnostic{
@@ -153,33 +76,77 @@ func (c agentConfigDirChecker) Check(_ context.Context) cli.Diagnostic {
 		Name:     c.Name(),
 		Category: c.Category(),
 		Status:   cli.StatusWarn,
-		Message:  fmt.Sprintf("Unrecognized files in agent config: %s", strings.Join(warnings, ", ")),
-		FixHint:  "Remove or relocate non-config .md files from platform subdirectories. Valid names: SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md",
+		Message:  fmt.Sprintf("Agent config issues: %s", strings.Join(warnings, "; ")),
+		FixHint:  "Use only canonical names: SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md",
 	}
 }
 
-func (c agentConfigDirChecker) checkSubdir(platformDir, platformName string, warnings *[]string) {
-	entries, err := os.ReadDir(platformDir)
-	if err != nil {
-		*warnings = append(*warnings, fmt.Sprintf("cannot read %s config dir: %v", platformName, err))
-		return
-	}
+func (c agentConfigDirChecker) checkScope(scopeDir, scope string, entries []os.DirEntry, warnings *[]string) {
+	hasTools := false
 	for _, e := range entries {
 		if e.IsDir() {
-			// Bot-level subdirectory — validate its contents too
-			botDir := filepath.Join(platformDir, e.Name())
-			c.checkSubdir(botDir, platformName+"/"+e.Name(), warnings)
 			continue
 		}
 		name := e.Name()
+		hasTools = hasTools || name == agentconfig.FileTools
 		if validConfigFiles[name] || ignoredFiles[name] {
 			continue
 		}
-		// Non-.md files or unrecognized .md files in platform/bot directories
 		if strings.HasSuffix(name, ".md") {
-			*warnings = append(*warnings, filepath.Join(platformName, name))
+			*warnings = append(*warnings, relativeConfigPath(scope, name)+" is unrecognized")
 		}
 	}
+
+	toolsPath := relativeConfigPath(scope, agentconfig.FileTools)
+	if hasTools {
+		empty, err := boundedFileEmpty(filepath.Join(scopeDir, agentconfig.FileTools))
+		if err != nil {
+			*warnings = append(*warnings, "cannot inspect "+toolsPath+": "+err.Error())
+		} else if empty {
+			*warnings = append(*warnings, toolsPath+" is present-empty and acts as an explicit clear")
+		}
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		childScope := filepath.Join(scope, e.Name())
+		childDir := filepath.Join(scopeDir, e.Name())
+		childEntries, err := os.ReadDir(childDir)
+		if err != nil {
+			*warnings = append(*warnings, fmt.Sprintf("cannot read %s config dir: %v", childScope, err))
+			continue
+		}
+		c.checkScope(childDir, childScope, childEntries, warnings)
+	}
+}
+
+func relativeConfigPath(scope, name string) string {
+	if scope == "." {
+		return name
+	}
+	return filepath.Join(scope, name)
+}
+
+func boundedFileEmpty(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return true, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, agentconfig.MaxFileChars+1))
+	if err != nil {
+		return false, err
+	}
+	return agentconfig.EffectiveContentEmpty(string(data)), nil
 }
 
 // agentConfigGlobalFilesChecker detects config files at the global level

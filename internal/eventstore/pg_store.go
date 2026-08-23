@@ -129,7 +129,7 @@ func (t *pgEventTx) AppendTurn(ctx context.Context, turn *TurnWriteRequest) erro
 
 	var id int64
 	err := t.tx.QueryRowContext(ctx, t.sql["turns.insert"],
-		turn.SessionID, turn.Generation, turn.TurnNum, turn.Seq, turn.Role, turn.Content,
+		turn.SessionID, nullableClientMessageID(turn.ClientMessageID), turn.Generation, turn.TurnNum, turn.Seq, turn.Role, turn.Content,
 		turn.Platform, turn.UserID, turn.Model, successVal, turn.Source, turn.ToolsJSON, turn.ToolCount,
 		turn.TokensInput, turn.TokensCacheWrite, turn.TokensCacheRead, turn.TokensOut,
 		turn.DurationMs, turn.CostUSD, turn.CreatedAt,
@@ -266,10 +266,12 @@ func scanTurnsPG(rows *sql.Rows) ([]*TurnRecord, error) {
 	for rows.Next() {
 		var r TurnRecord
 		var success sql.NullBool
+		var clientMessageID sql.NullString
 		var toolsJSON sql.NullString
-		if err := rows.Scan(turnScanDest(&r, &success, &toolsJSON)...); err != nil {
+		if err := rows.Scan(turnScanDest(&r, &success, &clientMessageID, &toolsJSON)...); err != nil {
 			return nil, fmt.Errorf("eventstore: scan turn: %w", err)
 		}
+		r.ClientMessageID = clientMessageID.String
 		if success.Valid {
 			r.Success = &success.Bool
 		}

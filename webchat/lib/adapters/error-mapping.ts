@@ -22,11 +22,38 @@ const CODEX_AUTH_PATTERNS = [
     "401",
 ];
 
+const CAPABILITY_REJECTION_PATTERN =
+    /(not implemented|not supported|unsupported|not enabled)/i;
+const USER_COMMAND_VALIDATION_PATTERN =
+    /(invalid permission mode|permission mode required|model name required|ambiguous skill invocation)/i;
+
+/** Returns true when an error is an expected, user-fixable command rejection. */
+export function isExpectedCommandRejection(
+    code: string | undefined,
+    message: string | undefined,
+): boolean {
+    const msg = message || "";
+    if (code === "CONFIG_INVALID" || code === "NOT_SUPPORTED") return true;
+    // Legacy gateways may have emitted capability failures as INTERNAL_ERROR;
+    // keep protocol/version errors with similar wording as real errors.
+    if (code === "INTERNAL_ERROR" && CAPABILITY_REJECTION_PATTERN.test(msg)) {
+        return true;
+    }
+    return code === "INVALID_MESSAGE" && USER_COMMAND_VALIDATION_PATTERN.test(msg);
+}
+
 export function mapErrorToMessage(
     code: string | undefined,
     message: string | undefined,
 ): string {
     const msgLower = (message || "").toLowerCase();
+    const isFileRewindDisabled = msgLower.includes(
+        "file rewinding is not enabled",
+    );
+
+    if (isFileRewindDisabled) {
+        return "File rewind is not enabled for this worker. Use /reset or /new instead.";
+    }
 
     switch (code) {
         case "TURN_TIMEOUT":
@@ -43,6 +70,28 @@ export function mapErrorToMessage(
             return "The agent produced too much output and was terminated. Try to narrow down your request.";
         case "RESUME_RETRY":
             return `🔄 ${message || "Recovering session after unexpected crash..."}`;
+        case "INVALID_MESSAGE":
+            if (
+                msgLower.includes("invalid permission mode") ||
+                msgLower.includes("permission mode required")
+            ) {
+                return "Permission mode is required. Use /perm <mode> to choose one.";
+            }
+            if (msgLower.includes("model name required")) {
+                return "Model name is required. Use /model <model> instead.";
+            }
+            if (msgLower.includes("ambiguous skill invocation")) {
+                return "That Skill command is ambiguous. Choose a specific command and try again.";
+            }
+            return message || "The command could not be processed. Check its format and try again.";
+        case "NOT_SUPPORTED":
+            if (
+                msgLower.includes("clear:") &&
+                msgLower.includes("not implemented")
+            ) {
+                return "This worker does not support /clear. Use /reset or /new instead.";
+            }
+            return "This command is not supported by the current worker.";
         case "CODEX_ERROR": {
             if (CODEX_AUTH_PATTERNS.some((p) => msgLower.includes(p))) {
                 return "Your Codex login has expired. Please sign out and sign in again in the Codex CLI, then retry.";

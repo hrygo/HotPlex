@@ -10,7 +10,10 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   expect: { timeout: 10_000 },
-  fullyParallel: true,
+  // The chat scenarios deliberately exercise reconnect timers against one
+  // development server. Keep tests within each spec ordered so concurrent
+  // reconnect scenarios cannot starve one another and produce false failures.
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',

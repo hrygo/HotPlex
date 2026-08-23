@@ -211,9 +211,9 @@
         "label": "Agents",
         "description": "Behavior rules"
       },
-      "skills": {
-        "label": "Skills",
-        "description": "Capabilities"
+      "tools": {
+        "label": "Tools",
+        "description": "Environment-specific tool usage guidance"
       },
       "user": {
         "label": "User",
@@ -226,7 +226,7 @@
     },
     "source_labels": {
       "agents": "Rules",
-      "skills": "Skills",
+      "tools": "Tools",
       "user": "User",
       "memory": "Memory"
     },

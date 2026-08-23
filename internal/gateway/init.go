@@ -17,6 +17,13 @@ const (
 	InitAck = "init_ack"
 )
 
+var gatewayCapabilities = []string{
+	"control_stop_v1",
+	"init_retry_v2",
+	"client_message_id_v1",
+	"ordered_session_events_v1",
+}
+
 // InitData is the payload of a client → gateway init message.
 type InitData struct {
 	Version     string            `json:"version"`
@@ -55,11 +62,15 @@ type ClientCaps struct {
 
 // InitAckData is the payload of a gateway → client init_ack message.
 type InitAckData struct {
-	SessionID  string              `json:"session_id"`
-	State      events.SessionState `json:"state"`
-	ServerCaps ServerCaps          `json:"server_caps"`
-	Error      string              `json:"error,omitempty"`
-	Code       events.ErrorCode    `json:"code,omitempty"`
+	SessionID     string              `json:"session_id"`
+	State         events.SessionState `json:"state"`
+	ServerCaps    ServerCaps          `json:"server_caps"`
+	ServerVersion string              `json:"server_version,omitempty"`
+	Capabilities  []string            `json:"capabilities,omitempty"`
+	Error         string              `json:"error,omitempty"`
+	Code          events.ErrorCode    `json:"code,omitempty"`
+	Retryable     bool                `json:"retryable,omitempty"`
+	RetryAfterMS  int                 `json:"retry_after_ms,omitempty"`
 }
 
 // ServerCaps declares what the gateway / worker supports.
@@ -92,6 +103,7 @@ var (
 	ErrInitCapacityExceeded = &InitError{Code: events.ErrCodeRateLimited, Message: "capacity exceeded"}
 	ErrInitSessionNotFound  = &InitError{Code: events.ErrCodeSessionNotFound, Message: "session not found"}
 	ErrInitConfigInvalid    = &InitError{Code: events.ErrCodeConfigInvalid, Message: "invalid config"}
+	ErrInitInternal         = &InitError{Code: events.ErrCodeInternalError, Message: "internal error"}
 )
 
 // BuildInitAck builds an init_ack envelope from handshake result.
@@ -102,9 +114,10 @@ func BuildInitAck(sessionID string, state events.SessionState, wt worker.WorkerT
 		0,
 		InitAck,
 		InitAckData{
-			SessionID:  sessionID,
-			State:      state,
-			ServerCaps: DefaultServerCaps(wt),
+			SessionID:    sessionID,
+			State:        state,
+			ServerCaps:   DefaultServerCaps(wt),
+			Capabilities: append([]string(nil), gatewayCapabilities...),
 		},
 	)
 }
@@ -125,18 +138,46 @@ func StampIdentityMetadata(env *events.Envelope, si *session.SessionInfo) {
 
 // BuildInitAckError builds an init_ack error envelope.
 func BuildInitAckError(sessionID string, initErr *InitError) *events.Envelope {
+	retryable := initErrorRetryable(initErr.Code)
+	state := events.StateDeleted
+	if retryable {
+		// State=deleted is a legacy error marker. A retryable failure must not
+		// describe the durable session as deleted; clients decide from code and
+		// retryable instead.
+		state = ""
+	}
+	retryAfterMS := 0
+	if retryable {
+		retryAfterMS = 1000
+	}
 	return events.NewEnvelope(
 		aep.NewID(),
 		sessionID,
 		0,
 		InitAck,
 		InitAckData{
-			SessionID: sessionID,
-			State:     events.StateDeleted,
-			Error:     initErr.Message,
-			Code:      initErr.Code,
+			SessionID:    sessionID,
+			State:        state,
+			Error:        initErr.Message,
+			Code:         initErr.Code,
+			Retryable:    retryable,
+			RetryAfterMS: retryAfterMS,
 		},
 	)
+}
+
+func initErrorRetryable(code events.ErrorCode) bool {
+	switch code {
+	case events.ErrCodeSessionBusy,
+		events.ErrCodeInternalError,
+		events.ErrCodeRateLimited,
+		events.ErrCodeGatewayOverload,
+		events.ErrCodeReconnectRequired,
+		events.ErrCodeResumeRetry:
+		return true
+	default:
+		return false
+	}
 }
 
 // ValidateInit checks init message validity.

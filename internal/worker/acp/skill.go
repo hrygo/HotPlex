@@ -84,5 +84,8 @@ func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocat
 	if args := strings.TrimSpace(invocation.Args); args != "" {
 		command += " " + args
 	}
-	return w.Input(ctx, command, nil)
+	// Keep explicit invocation payloads intact. ACP's compatibility rules are
+	// only sent with ordinary user text because a prefix could prevent an agent
+	// from recognizing the advertised slash command.
+	return w.input(ctx, command, nil, false)
 }

@@ -1,7 +1,7 @@
 ---
 title: Agent 配置系统
 weight: 2
-description: HotPlex B/C 双通道 Agent 配置：确定性加载、冲突隔离、XML 安全与热更新时机
+description: HotPlex B/C 双通道 Agent 配置：确定性加载、冲突隔离、XML 安全与会话生效边界
 ---
 
 # Agent 配置系统
@@ -10,7 +10,7 @@ description: HotPlex B/C 双通道 Agent 配置：确定性加载、冲突隔离
 
 ## 核心问题
 
-HotPlex 是一个多租户、多平台的 AI Agent 接入层。不同用户、不同平台、不同 Bot 可能需要不同的 Agent 行为——从人格语气到工作规则到技能列表。配置系统需要解决三个核心问题：
+HotPlex 是一个多租户、多平台的 AI Agent 接入层。不同用户、不同平台、不同 Bot 可能需要不同的 Agent 行为——从人格语气、工作规则到环境工具使用指南。配置系统需要解决三个核心问题：
 
 1. **优先级冲突**：用户的偏好（"我喜欢 Python"）和工作空间规则（"本项目必须用 TypeScript"）可能矛盾。LLM 无法可靠地判断哪条指令优先。
 2. **多租户隔离**：同一个 Slack 工作空间中，不同 Bot 可能有完全不同的人格和规则。一个 Bot 的配置不能泄漏到另一个 Bot。
@@ -23,22 +23,22 @@ HotPlex 是一个多租户、多平台的 AI Agent 接入层。不同用户、�
 HotPlex 将所有配置分为两个通道，使用 XML 嵌套表达结构性优先级：
 
 ```xml
-<agent-configuration>
+<agent-configuration schema-version="3">
   <directives>
     <hotplex>  META-COGNITION.md (go:embed, 始终首位) </hotplex>
     <persona>  SOUL.md  </persona>
     <rules>    AGENTS.md </rules>
-    <skills>   SKILLS.md </skills>
+    <tool-guidance> TOOLS.md </tool-guidance>
   </directives>
   <context>
     <notice>   directives 优先声明  </notice>
-    <user>     USER.md   </user>
-    <memory>   MEMORY.md </memory>
+    <user-data><user> USER.md </user></user-data>
+    <memory-data><memory> MEMORY.md </memory></memory-data>
   </context>
 </agent-configuration>
 ```
 
-**B 通道（`<directives>`）**：行为约束，强制性。包含 Agent 的人格定位、工作规则、技能列表。声明为"核心行为准则——除非用户有明确的反向指令，否则必须严格遵守"。
+**B 通道（`<directives>`）**：行为约束，强制性。包含 Agent 的稳定元认知、人格定位、工作规则和环境工具使用指南。`TOOLS.md` 不声明实际工具存在；工具可用性以当前 Session 暴露的结构化工具目录为准。
 
 **C 通道（`<context>`）**：参考信息，辅助性。包含用户偏好、历史交互记录。附带严格的隔离声明："若 [directives] 与 [context] 冲突，以 [directives] 为准。"
 
@@ -66,7 +66,9 @@ HotPlex 将所有配置分为两个通道，使用 XML 嵌套表达结构性优�
 
 继承模式会产生"意外的部分覆盖"问题。假设全局 `AGENTS.md` 规定了 10 条规则，平台级 `AGENTS.md` 只写了 2 条。如果合并，最终只有 2 条——其余 8 条被意外丢弃。命中即终止确保每次加载的配置文件是完整的、自洽的。管理员在编写 Bot 级配置时，知道自己写的内容就是最终生效的完整配置，不需要猜测哪些全局规则会被继承。
 
-**文件独立性**：5 个文件（SOUL、AGENTS、SKILLS、USER、MEMORY）各自独立 fallback。SOUL.md 可能在 Bot 级命中，而 AGENTS.md 可能 fallback 到全局级。这种设计允许只覆盖需要定制的部分。
+**文件独立性**：5 个文件（SOUL、AGENTS、TOOLS、USER、MEMORY）各自独立 fallback。文件缺失才进入下一作用域；文件存在但正文为空表示显式清空并立即终止。SOUL.md 可能在 Bot 级命中，而 AGENTS.md 可能 fallback 到全局级。这种设计允许只覆盖需要定制的部分。
+
+AgentConfig 只识别 `SOUL.md`、`AGENTS.md`、`TOOLS.md`、`USER.md`、`MEMORY.md`。真实 Agent Skills 是独立领域，由 `.agents/skills/<name>/SKILL.md` 定义并按需加载，不进入 AgentConfig prompt。
 
 ### META-COGNITION：go:embed 的特殊地位
 
@@ -79,11 +81,72 @@ var embeddedMetacognition string
 
 这意味着：
 
-- **始终存在**：不需要任何配置文件就能工作
+- **始终存在**：即使五个外部配置文件全部缺失或为空，也会生成包含 META 的配置 prompt
 - **始终首位**：在 `<directives>` 中排在 `<persona>` 之前
 - **不可覆盖**：fallback 机制不适用于此文件，它是嵌入在代码中的
 
-META-COGNITION 定义了 Worker 的**身份边界**——明确告知 Agent "你不管理 Transport、状态和协议"，防止 Agent 试图越权操作 Gateway 的职责。这是整个系统的安全基线。
+META-COGNITION 定义 Worker 与 Gateway 的身份边界、五文件模型、Tools/Skills 区分、自配置授权事务和生效/验证语义。它不包含动态工具或 Skill catalog、凭据或内部绝对路径，是整个系统稳定的认知与安全基线。
+
+### Session Runtime Facts：schema v3 的边界
+
+实时 Worker 的 system prompt 使用外层 `<agent-configuration schema-version="3">`。有运行时事实时，Gateway 会在 `<directives>` 之前插入一个受限的
+`<runtime-facts format="application/json" schema-version="1">` 块；这里的 `schema-version="1"` 是 facts 载荷版本，不是外层 prompt schema。Admin 预览继续调用不带 facts 的 `BuildSystemPrompt`，因此不会伪造某个运行中的 Session。
+
+Runtime facts 在 Worker 已选定、Session 信息已解析后由 Gateway 构建；首次启动和 `/reset` 共用同一个注入边界。它只声明当前 Session 的有限事实：平台、Worker 类型、作用域种类、声明的权限模式、`resume`/`streaming`/`tools` 能力、`skills`/`mcp`/`worker` 查询面、Skill catalog 所有者，以及 allowlist Gateway 环境键名的存在性。
+
+这些是**声明（declared）而不是观测或强制执行证明（observed/enforced）**：它们不能证明外部 Worker 健康、权限实际生效或某个命令已经成功。载荷不包含身份值、Session/频道/线程/团队 ID、工作目录、环境变量值、凭据、动态 catalog、Skill 的 `name`/`description`/正文或 MCP 配置。Agent 不得从缺失的事实或文档推断出未暴露的能力。
+
+### Agent Skills 的发现、所有权与调用
+
+Admin API 与 WebChat HTTP Skills read surface 指向真实 Agent Skills，不是 AgentConfig 的 `TOOLS.md`
+槽位。Session `/skills` 仍由当前 Worker/filesystem evidence 决定；原生 Worker 负责向模型做
+`name`、`description` 的 progressive disclosure 和按需加载。HotPlex 不把动态 Skill catalog
+重复注入 AgentConfig prompt。
+
+Skill 状态按当前 Session 的证据区分：文件系统找到定义但没有当前 Worker 调用证据是 `discoverable`；Worker 权威目录确认可原生执行才是 `callable`；`unavailable` 保留给能力表面明确报告的不可用状态。只有 `callable` 可以调用。短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 都复用同一个 Session callability 判定；filesystem-only Skill 永远不能绕过它变成可调用。
+
+内置 Skill 是 Admin/WebChat HTTP read surface 的真实 Agent Skills 只读发现项：`hotplex-cli` 面向日常
+Cron、显式 Slack 和只读诊断，`hotplex-operator` 面向服务、更新、配置、Admin 与审计，后者需要
+显式 operator authority。它们不要求 projection、inventory 或 receipt 存在即可被这些 HTTP 列表发现；
+Session `/skills` 的出现由当前 Worker/filesystem evidence 决定；filesystem-only 项是
+`discoverable`，只有 native advertisement 和 adapter-verified activation 才能证明 `callable`。
+真实 global/project/user Skill 优先遮蔽同名内置项，`source` 仍只表示 `global` 或
+`project`，builtin 元数据只通过可选 `builtin`/`builtin_package_version` 字段表达。没有同名真实项
+时，内置项 update/delete 返回 `SKILL_BUILTIN_READONLY`；创建同名用户 override 仍走正常 Skill CRUD。
+
+两个内置包的 canonical 来源是 `internal/skills/builtin/hotplex-cli` 与
+`internal/skills/builtin/hotplex-operator`。生成器产出 byte-identical 的
+`.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 恰好包含
+`hotplex-cli`、`hotplex-operator`、`hotplex-diagnostics`、`hotplex-release`、
+`hotplex-docs-patrol` 五个 Skill。
+
+原生 Skill 同步把 UserHome 与 `$HOTPLEX_HOME` 分开：Claude 使用 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可推断的 filesystem root；immutable inventory、状态和 receipts 位于 `$HOTPLEX_HOME`。`hotplex skills status|sync|remove` 使用 runtime（`hotplex-cli`）或 operator（累积包含 `hotplex-cli` 与 `hotplex-operator`）profile，可重复传入 `--worker`，并支持 `--dry-run`/`--json`。未显式指定 worker 时只采用已启用 messaging platform/bot 的解析结果；空目标返回 bounded error，不回退到注册表。remove 只删除 receipt 与 unchanged-tree 能证明归属的 native projection，不删除 inventory。
+
+Gateway startup 的 built-in reconciliation check 与 `doctor` 的 built-in Skills checker 只读。
+`onboard`/`update` 只有显式 `--sync-skills`
+才同步（`update` 可用 `--skills-profile` 选择累积 profile）。同步遇到 collision、drift 或 failed
+item 以非零结果结束，也不会覆盖未知 user/project Skill；新 Session 或 `/reset` 后才重新看到新的
+Worker 目录证据。
+
+### CLI 与 Cron 路由
+
+处理 Cron 请求时，优先路由到当前 Session 实际暴露的 `hotplex-cli` Skill；Skill 不可用时，查询当前安装二进制而不是依赖旧示例：`hotplex cron --help`，再按需查看 `hotplex cron create --help`。创建后必须使用独立读取路径执行 `hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；无法调用 CLI 时应明确返回 `unsupported`/degraded。
+
+### 自配置事务与能力边界
+
+当用户要求 Agent 调整自身时，META 要求遵循固定事务：
+
+```
+inspect → explain → propose diff → request approval → validate → atomic apply → activate → verify
+```
+
+- 先检查当前作用域、有效来源和版本，再解释为什么需要修改；
+- 只修改用户授权的当前 Bot/Workspace 槽位，不通过 global 配置间接影响其他租户；
+- 写入前展示 diff 并获得批准，写入时执行白名单、大小、并发版本和原子性校验；
+- 激活边界是新 Session 或明确 `/reset`，随后验证有效来源和行为；
+- 当前 Worker/宿主若没有暴露受控写接口，只能给出提案，必须明确报告 `unsupported`，不能直接编辑未知路径或声称配置已经生效。
+
+因此，META 提供的是稳定的决策协议，而实际读写权限仍由 Gateway 或宿主在当前 Session **实际暴露**的类型化控制面决定。提示词本身不构成授权。
 
 ## 内部机制
 
@@ -93,10 +156,10 @@ META-COGNITION 定义了 Worker 的**身份边界**——明确告知 Agent "你
 
 ```
 1. 路径安全检查：ValidateBotName(botName)（防止路径穿越）
-2. 逐文件加载（SOUL → AGENTS → SKILLS → USER → MEMORY）：
+2. 逐文件加载（SOUL → AGENTS → TOOLS → USER → MEMORY）：
    a. 检查 injectExclude：如文件名在排除列表中，跳过加载
    b. 调用 resolveFile(dir, platform, botName, fileName)
-   c. 按三级 fallback 查找文件
+   c. 按三级 fallback 查找；缺失继续，present-empty 命中并显式清空
    d. 读取文件内容，剥离 YAML frontmatter
    e. 检查单文件大小限制（MaxFileChars = 8000 字符）
    f. 检查总量预算（MaxTotalChars = 40000 字符）
@@ -127,7 +190,7 @@ META-COGNITION 定义了 Worker 的**身份边界**——明确告知 Agent "你
 - **nil**（未设置）表示"使用上级值"——fallback 到上级配置
 - **非空切片** 表示"使用此列表"——直接覆盖上级配置
 
-**匹配方式**：大小写不敏感。`SOUL.md` 和 `soul.md` 等效。
+**匹配方式**：大小写不敏感。`SOUL.md` 和 `soul.md` 等效；只匹配五个规范槽位。
 
 **不可排除**：`META-COGNITION.md` 通过 `go:embed` 编译进二进制，始终注入，不受 `inject_exclude` 影响。
 
@@ -158,7 +221,8 @@ messaging:
 ```go
 var reservedTags = []string{
     "agent-configuration", "directives", "context", "persona",
-    "rules", "skills", "user", "memory", "hotplex", "notice",
+    "rules", "skills", "tool-guidance", "runtime-facts",
+    "user", "memory", "user-data", "memory-data", "hotplex", "notice",
 }
 ```
 
@@ -175,16 +239,16 @@ var reservedTags = []string{
    - hotplex 元认知（go:embed，始终存在）
    - <persona> 包裹 SOUL.md
    - <rules> 包裹 AGENTS.md
-   - <skills> 包裹 SKILLS.md
+   - <tool-guidance> 包裹 TOOLS.md，并声明它不是工具可用性目录
    - 外层用 <directives> 包裹并附加优先级声明
 
 2. 构建 C 通道：
    - <notice> 插入冲突隔离声明
-   - <user> 包裹 USER.md
-   - <memory> 包裹 MEMORY.md
+   - <user-data>/<user> 包裹 USER.md，明确标记为数据
+   - <memory-data>/<memory> 包裹 MEMORY.md，明确标记为数据
    - 外层用 <context> 包裹
 
-3. 外层用 <agent-configuration> 包裹全部
+3. 外层用 <agent-configuration schema-version="3"> 包裹全部；实时 Session 在 directives 前可选插入 schema 1 的 runtime facts
 ```
 
 ### Worker 注入差异

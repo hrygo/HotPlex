@@ -76,12 +76,12 @@ func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 // HandleGetAgentConfigFile reads a single agent config file for a bot.
 //
 // @Summary      Get agent config file
-// @Description  Returns the content of a single agent config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md). Requires admin:read scope.
+// @Description  Returns the content of a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). Requires admin:read scope.
 // @Tags         Admin API
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        name  path      string  true  "Bot name"
-// @Param        file  path      string  true  "Config file name"  Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Param        file  path      string  true  "Config file name"  Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md)
 // @Success      200   {object}  AgentConfigFile
 // @Failure      400   {object}  ErrorResponse  "Invalid config file name"
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:read"
@@ -274,12 +274,12 @@ func (a *AdminAPI) HandleDeleteBot(w http.ResponseWriter, r *http.Request) {
 // HandleWriteAgentConfigFile writes content to a single agent config file for a bot.
 //
 // @Summary      Write agent config file
-// @Description  Writes content to a single agent config file (SOUL.md, AGENTS.md, SKILLS.md, USER.md, MEMORY.md). Requires admin:write scope.
+// @Description  Writes content to a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). Requires admin:write scope.
 // @Tags         Admin API
 // @Accept       json
 // @Security     AdminBearerAuth
 // @Param        name  path  string                 true  "Bot name"
-// @Param        file  path  string                 true  "Config file name"  Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Param        file  path  string                 true  "Config file name"  Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md)
 // @Param        body  body  WriteAgentConfigRequest  true  "File content"
 // @Success      204   "File written"
 // @Failure      400   {object}  ErrorResponse  "Invalid config file or write failed"
@@ -332,7 +332,7 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        platform  path  string  true  "Platform identifier"  Enums(webchat,slack,feishu)
-// @Param        file      path  string  true  "Config file name"     Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Param        file      path  string  true  "Config file name"     Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md)
 // @Success      200  {object}  AgentConfigFile
 // @Failure      400  {object}  ErrorResponse  "Invalid platform or config file name"
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
@@ -374,7 +374,7 @@ func (a *AdminAPI) HandleGetPlatformAgentConfigFile(w http.ResponseWriter, r *ht
 // @Accept       json
 // @Security     AdminBearerAuth
 // @Param        platform  path  string                   true  "Platform identifier"  Enums(webchat,slack,feishu)
-// @Param        file      path  string                   true  "Config file name"     Enums(SOUL.md,AGENTS.md,SKILLS.md,USER.md,MEMORY.md)
+// @Param        file      path  string                   true  "Config file name"     Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md)
 // @Param        body      body  WriteAgentConfigRequest  true  "File content"
 // @Success      204  "File written"
 // @Failure      400  {object}  ErrorResponse  "Invalid platform/config file or write failed"

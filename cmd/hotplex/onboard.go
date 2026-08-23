@@ -17,6 +17,7 @@ import (
 
 func newOnboardCmd() *cobra.Command {
 	var nonInteractive, force bool
+	var syncSkills bool
 	var configPath string
 	var enableSlack, enableFeishu bool
 	var slackAllowFrom, feishuAllowFrom []string
@@ -32,7 +33,8 @@ func newOnboardCmd() *cobra.Command {
 
 Detects existing configuration and prompts to keep or reconfigure.
 Guides you through creating config.yaml and .env with sensible defaults.
-Supports non-interactive mode for automated deployments.`,
+Supports non-interactive mode for automated deployments.
+Use --sync-skills only when you explicitly want to write runtime skill projections.`,
 		Example: `  hotplex onboard                    # Interactive setup (detects existing config)
   hotplex onboard --force           # Overwrite existing config
   hotplex onboard --non-interactive # Auto-generate, no prompts
@@ -62,6 +64,7 @@ Supports non-interactive mode for automated deployments.`,
 				InstallService:    installService,
 				ServiceLevel:      serviceLevel,
 				Version:           versionString(),
+				SyncSkills:        syncSkills,
 			})
 			if err != nil {
 				return err
@@ -137,6 +140,7 @@ Supports non-interactive mode for automated deployments.`,
 
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "use defaults, no prompts")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing configuration")
+	cmd.Flags().BoolVar(&syncSkills, "sync-skills", false, "explicitly synchronize runtime built-in skill projections")
 	configFlag(cmd, &configPath)
 
 	cmd.Flags().BoolVar(&enableSlack, "enable-slack", false, "enable Slack in non-interactive mode (credentials in .env)")
@@ -161,7 +165,7 @@ func displayAgentConfigPanel(created []string) {
 	descriptions := map[string]string{
 		"SOUL.md":   "Agent 人格定义 — 身份、沟通风格和核心价值观",
 		"AGENTS.md": "工作区规则 — 自主行为边界、错误处理、输出风格",
-		"SKILLS.md": "工具使用指南 — 平台能力和最佳实践",
+		"TOOLS.md":  "工具使用指南 — 环境能力、边界和最佳实践",
 		"USER.md":   "用户偏好 — 你的技术背景、工作习惯和沟通偏好",
 		"MEMORY.md": "上下文记忆 — 跨会话持久化知识（自动管理）",
 	}

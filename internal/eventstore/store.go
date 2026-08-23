@@ -93,6 +93,7 @@ func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFun
 type TurnRecord struct {
 	ID               int64          `json:"id"`
 	SessionID        string         `json:"session_id"`
+	ClientMessageID  string         `json:"client_message_id,omitempty"`
 	Generation       int64          `json:"generation"`
 	TurnNum          int            `json:"turn_num"`
 	Seq              int64          `json:"seq"`
@@ -313,7 +314,7 @@ func (t *sqliteTx) AppendTurn(ctx context.Context, turn *TurnWriteRequest) error
 		}
 	}
 	_, err := t.tx.ExecContext(ctx, queries["turns.insert"],
-		turn.SessionID, turn.Generation, turn.TurnNum, turn.Seq, turn.Role, turn.Content,
+		turn.SessionID, nullableClientMessageID(turn.ClientMessageID), turn.Generation, turn.TurnNum, turn.Seq, turn.Role, turn.Content,
 		turn.Platform, turn.UserID, turn.Model, successVal, turn.Source, turn.ToolsJSON, turn.ToolCount,
 		turn.TokensInput, turn.TokensCacheWrite, turn.TokensCacheRead, turn.TokensOut,
 		turn.DurationMs, turn.CostUSD, turn.CreatedAt)
@@ -518,10 +519,12 @@ func scanTurns(rows *sql.Rows) ([]*TurnRecord, error) {
 	for rows.Next() {
 		var r TurnRecord
 		var success sql.NullInt64
+		var clientMessageID sql.NullString
 		var toolsJSON sql.NullString
-		if err := rows.Scan(turnScanDest(&r, &success, &toolsJSON)...); err != nil {
+		if err := rows.Scan(turnScanDest(&r, &success, &clientMessageID, &toolsJSON)...); err != nil {
 			return nil, fmt.Errorf("eventstore: scan turn: %w", err)
 		}
+		r.ClientMessageID = clientMessageID.String
 		if success.Valid {
 			s := success.Int64 == 1
 			r.Success = &s

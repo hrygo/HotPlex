@@ -18,6 +18,18 @@ const (
 	NativeCommandKindControl NativeCommandKind = "control"
 )
 
+// CatalogOrigin identifies which trusted catalog tier contributed a merged
+// descriptor. It is an internal Gateway evidence marker, not a wire field.
+// The zero value is intentionally unknown and must fail closed.
+type CatalogOrigin string
+
+const (
+	CatalogOriginUnknown    CatalogOrigin = ""
+	CatalogOriginGateway    CatalogOrigin = "gateway"
+	CatalogOriginWorker     CatalogOrigin = "worker"
+	CatalogOriginFilesystem CatalogOrigin = "filesystem"
+)
+
 // NativeCommandDescriptor is the unified Worker-side description of a native
 // command. It is the canonical catalog entry consumed by the Gateway router
 // and the platform command menus; it never exposes Worker internals on the
@@ -31,6 +43,10 @@ type NativeCommandDescriptor struct {
 	StartsTurn  bool
 	AcceptsArgs bool
 	Path        string
+	// CatalogOrigin is stamped by the Gateway while merging tiers. Provider
+	// values are never trusted as evidence; the field is deliberately omitted
+	// from all external event/AEP models.
+	CatalogOrigin CatalogOrigin `json:"-"`
 }
 
 // NativeCommandInvocation is the canonical invocation for a resolved native

@@ -36,9 +36,12 @@ func TestDedup_Sweep_ExpiresEntries(t *testing.T) {
 func TestDedup_Sweep_PartialExpiry(t *testing.T) {
 	t.Parallel()
 
-	d := NewDedup(100, 1*time.Millisecond)
+	d := NewDedup(100, 50*time.Millisecond)
 	d.TryRecord("id1")
-	time.Sleep(20 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		d.Sweep()
+		return d.Len() == 0
+	}, 200*time.Millisecond, time.Millisecond)
 	d.TryRecord("id2")
 
 	d.Sweep()

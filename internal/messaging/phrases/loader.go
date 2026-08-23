@@ -2,7 +2,6 @@ package phrases
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -56,19 +55,6 @@ func Load(dir, platform, botName string) (*Phrases, error) {
 			path:   filepath.Join(dir, platform, botName, "PHRASES.md"),
 			weight: WeightBot,
 		})
-	} else if platform != "" {
-		// Legacy backward compat: before PR #679, single-bot mode used "default"
-		// as botName. If a user created phrases under {platform}/default/ between
-		// #678 and #679, this fallback ensures they are still discovered.
-		legacyPath := filepath.Join(dir, platform, agentconfig.LegacyDefaultBotName, "PHRASES.md")
-		if _, err := os.Stat(legacyPath); err == nil {
-			slog.Warn("phrases: legacy default/ directory detected; move files to platform-level",
-				"platform", platform)
-			levels = append(levels, loadLevel{
-				path:   legacyPath,
-				weight: WeightBot,
-			})
-		}
 	}
 
 	// Collect external entries by category.

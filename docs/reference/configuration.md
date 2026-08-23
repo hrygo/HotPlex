@@ -23,6 +23,7 @@ description: "HotPlex Worker Gateway 所有配置项的权威参考，覆盖配�
    - [pool — 资源池](#36-pool--资源池)
    - [worker — Worker 运行时](#37-worker--worker-运行时)
    - [agent_config — Agent 人格与上下文](#38-agent_config--agent-人格与上下文)
+   - [agent_config runtime facts](#381-agent_config-runtime-facts)
    - [skills — Skills 发现](#39-skills--skills-发现)
    - [cron — 定时任务调度器](#310-cron--定时任务调度器)
    - [webhook — GitHub Webhook 接收器](#3101-webhook--github-webhook-接收器)
@@ -409,11 +410,59 @@ Agent B/C 通道配置加载器。
 | `config_dir` | string | `~/.hotplex/agent-configs` | `HOTPLEX_AGENT_CONFIG_DIR` | 配置文件根目录。支持 `~` 和 `${VAR}` 展开 |
 | `inject_exclude` | []string | `[]` | — | 全局默认排除列表。列出的配置文件（如 `SOUL.md`、`MEMORY.md`）不会被加载和注入。平台级和 Bot 级可覆盖。`META-COGNITION.md` 始终注入（go:embed），不可排除 |
 
-**B 通道**（`<directives>`）：`META-COGNITION.md`（go:embed，始终首位）+ `SOUL.md` + `AGENTS.md` + `SKILLS.md`
+**B 通道**（`<directives>`）：`META-COGNITION.md`（go:embed，始终首位）+ `SOUL.md` + `AGENTS.md` + `TOOLS.md`。`TOOLS.md` 注入 `<tool-guidance>`，只描述环境工具的使用方式、偏好和边界，不声明工具实际存在。
 
 **C 通道**（`<context>`）：`USER.md` + `MEMORY.md`
 
-**三级 fallback**：全局 → 平台（slack/） → Bot（slack/{botName}/），每文件独立解析，命中即终止。Bot 级目录名使用 YAML 配置中 `bots[].name` 的值。
+**三级 fallback**：解析优先级为 Bot（`slack/{botName}/`）→ 平台（`slack/`）→ 全局，每文件独立、命中即终止。Bot 级目录名使用 YAML 配置中 `bots[].name` 的值。键/文件缺失表示继续继承；存在但正文为空表示显式清空并停止 fallback。
+
+**文件契约**：AgentConfig 只识别 `SOUL.md`、`AGENTS.md`、`TOOLS.md`、`USER.md`、`MEMORY.md`；`inject_exclude` 也只匹配这五个规范槽位。配置根中的其他用户文件不参与加载，HotPlex 不会自动删除或改写它们。
+
+**与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，
+通过 `/admin/api/skills`、WebChat HTTP Skills 页面和 Worker 当前 evidence 管理，不由 `TOOLS.md`
+派生，也不会把 Skill catalog 或正文常驻注入 AgentConfig prompt。Session `/skills` 仍按当前
+Worker/filesystem evidence 决定是否出现；文件系统发现不代表当前 Session 可调用。
+
+#### 3.8.1 agent_config runtime facts
+
+实时 AgentConfig prompt 的外层版本为 `<agent-configuration schema-version="3">`。Worker 已选定且 Session 信息已解析后，Gateway 可在 `<directives>` 前插入 `<runtime-facts format="application/json" schema-version="1">`；内层 schema 1 是 facts 载荷版本，不能与外层 prompt schema 混淆。新 Session 和 `/reset` 使用同一构建路径，Admin 预览使用 runtime-neutral 的 `BuildSystemPrompt`，不伪造运行时事实。
+
+facts 是受限的**声明**，不是外部 Worker 健康或权限已执行的证明。字段范围仅包括平台、Worker 类型、作用域种类、声明的权限模式、`resume`/`streaming`/`tools`、`skills`/`mcp`/`worker` 查询面、声明的 Skill catalog 所有者，以及 allowlist Gateway 环境键名的存在性。它不包含身份值、Session/频道/线程/团队 ID、工作目录、环境变量值、凭据、动态 catalog、Skill metadata/正文或 MCP 配置。
+
+Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，HotPlex 不复制一份 catalog 到 AgentConfig。Session `/skills` 保留 `callable`、`discoverable`、`unavailable` 三种状态；当前 merged catalog 把 filesystem-only Skill 标为 `discoverable`，只有 Worker 权威目录确认的 `callable` 才能执行。短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 共用该判定。
+
+#### 3.8.2 Built-in Skill inventory 与 native projection
+
+HotPlex 发布两个 embedded canonical package：runtime profile 只有 `hotplex-cli`，用于日常
+Cron、显式 Slack 和只读诊断；operator profile 累积包含 `hotplex-cli` 与
+`hotplex-operator`，用于服务、更新、配置、Admin 和 audit，并要求显式 operator authority。
+它们的 canonical source 分别是 `internal/skills/builtin/hotplex-cli` 与
+`internal/skills/builtin/hotplex-operator`，生成器产出 byte-identical 的
+`.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+Public/Admin/WebChat HTTP builtins 永久可发现，不以 projection 或 receipt 存在为前提；Session
+`/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项是 `discoverable`，
+只有 projection/native advertisement 和 adapter-verified activation 才能证明 `callable`。真实
+global/project/user Skill 同名时优先遮蔽 builtin，`source`
+仍只使用 `global`/`project`，builtin 通过可选 `builtin`、`builtin_package_version` 元数据
+表达。builtin-only update/delete 返回 `SKILL_BUILTIN_READONLY`，同名用户 override 可正常
+创建和管理。
+
+显式同步命令为 `hotplex skills status|sync|remove`，支持累积 `runtime`/`operator` profile、
+重复 `--worker`、`--dry-run` 和 `--json`。Worker native roots 位于 UserHome：Claude 是
+`<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`；ACP 没有可
+推断 filesystem root，typed unsupported 且不写文件。immutable inventory 位于
+`$HOTPLEX_HOME/skills/builtin/<version>/<name>`，状态和 receipts 也位于
+`$HOTPLEX_HOME`，与 UserHome 原生 projection 分离。status/--dry-run 严格零写；同步不会覆盖
+未知 user/project Skill，collision、drift、failed item 返回非零；remove 只删除 matching
+receipt 且 unchanged-tree 能证明归属的 projection，不删除 inventory。
+
+Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 只读；
+onboard/update 只有显式 `--sync-skills`
+才同步，修改后在新
+Session 或 `/reset` 才进入 Worker 的目录证据边界。未显式传 `--worker` 时，CLI 只解析已启用
+messaging platform/bot 的 effective worker targets；empty target 返回 bounded error，不回退到
+RegisteredTypes。
 
 ---
 
@@ -439,6 +488,8 @@ AI-native 定时任务引擎：自然语言 prompt 作为 payload，结果投递
 | `tick_interval_sec` | int | `60` | — | 调度器 tick 间隔（秒） |
 | `yaml_config_path` | string | `""` | — | 外部 YAML 配置文件路径（可选） |
 | `jobs` | []map | `[]` | — | 内联 Job 定义（可选） |
+
+**Agent 路由与验证**：处理 Cron 请求时优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时查询当前二进制的 `hotplex cron --help`，必要时再看 `hotplex cron create --help`。创建后必须用独立读取路径执行 `hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；不能把 Skill 文档或旧示例当作成功证据。
 
 ---
 

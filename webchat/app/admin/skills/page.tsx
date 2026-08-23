@@ -14,13 +14,21 @@ import type { AdminSkill, AdminSkillDetail } from '@/lib/api/admin-skills';
 import { useResource } from '@/hooks/use-resource';
 import { LoadingState, ErrorState, EmptyState } from '@/components/admin/resource-states';
 import { useTranslation } from 'react-i18next';
+import { skillActionState, skillBadgeKind } from '@/lib/skills-ui';
 
-function Badge({ kind }: { kind: 'managed' | 'external' }) {
+function Badge({ kind }: { kind: 'builtin' | 'managed' | 'external' }) {
   const { t } = useTranslation();
   if (kind === 'managed') {
     return (
       <span className="inline-flex items-center rounded-full bg-[rgba(16,185,129,0.1)] border border-[rgba(16,185,129,0.25)] px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[rgb(16,185,129)]">
         {t('admin:skills.label.managed', { defaultValue: 'Managed' })}
+      </span>
+    );
+  }
+  if (kind === 'builtin') {
+    return (
+      <span className="inline-flex items-center rounded-full bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.25)] px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--accent-gold)]">
+        {t('admin:skills.label.builtin', { defaultValue: 'Built-in' })}
       </span>
     );
   }
@@ -229,7 +237,7 @@ export default function AdminSkillsPage() {
   };
 
   const handleSaveEdit = async () => {
-    if (!detailModal) return;
+    if (!detailModal || !skillActionState(detailModal).canEdit) return;
     try {
       setSavingEdit(true);
       const updated = await updateAdminSkill(detailModal.name, editBody);
@@ -244,7 +252,8 @@ export default function AdminSkillsPage() {
     }
   };
 
-  const handleDelete = async (name: string) => {
+  const handleDelete = async (name: string, builtin = false) => {
+    if (builtin) return;
     const ok = await confirm(
       t('admin:skills.confirm.delete_title', { defaultValue: 'Delete Skill' }),
       t('admin:skills.confirm.delete_body', { name, defaultValue: `Delete skill "${name}"? This removes it from the global skills directory and cannot be undone.` }),
@@ -407,7 +416,12 @@ export default function AdminSkillsPage() {
                       <span className="truncate text-xs font-bold text-[var(--text-primary)] hover:text-[var(--accent-gold)] transition-colors">
                         {s.name}
                       </span>
-                      <Badge kind={s.managed ? 'managed' : 'external'} />
+                      <Badge kind={skillBadgeKind(s)} />
+                      {s.builtin_package_version && (
+                        <span className="text-[10px] font-mono text-[var(--text-faint)]">
+                          {s.builtin_package_version}
+                        </span>
+                      )}
                       <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--text-faint)] bg-[var(--bg-hover)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)]">
                         {s.source}
                       </span>
@@ -421,10 +435,10 @@ export default function AdminSkillsPage() {
                     >
                       {t('admin:skills.action.view', { defaultValue: 'View' })}
                     </button>
-                    {s.managed && (
+                    {skillActionState(s).canDelete && (
                       <button
                         disabled={actionLoading === s.name}
-                        onClick={() => handleDelete(s.name)}
+                        onClick={() => handleDelete(s.name, s.builtin === true)}
                         className="rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.2)] px-2.5 py-1 text-xs font-semibold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.08)] transition-colors disabled:opacity-50"
                       >
                         {t('common:action.delete', { defaultValue: 'Delete' })}
@@ -706,7 +720,12 @@ export default function AdminSkillsPage() {
                     <div className="min-w-0 flex-1 pr-4">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         <h2 className="text-lg font-display font-bold text-[var(--text-primary)]">{detailModal.name}</h2>
-                        <Badge kind={detailModal.managed ? 'managed' : 'external'} />
+                        <Badge kind={skillBadgeKind(detailModal)} />
+                        {detailModal.builtin_package_version && (
+                          <span className="text-[10px] font-mono text-[var(--text-faint)]">
+                            {detailModal.builtin_package_version}
+                          </span>
+                        )}
                         <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--text-faint)] bg-[var(--bg-hover)] px-2 py-0.5 rounded border border-[var(--border-subtle)]">
                           {detailModal.source}
                         </span>
@@ -735,7 +754,7 @@ export default function AdminSkillsPage() {
                         <span>{t('common:action.copy', { defaultValue: 'Copy' })}</span>
                       </button>
 
-                      {detailModal.managed && (
+                      {skillActionState(detailModal).canEdit && (
                         <button
                           onClick={() => setIsEditing(!isEditing)}
                           className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border px-2.5 py-1 text-xs font-semibold transition-all active:scale-95 ${
@@ -843,15 +862,19 @@ export default function AdminSkillsPage() {
 
                   {/* Footer */}
                   <div className="flex items-center justify-between border-t border-[var(--border-subtle)] pt-4 text-xs">
-                    {detailModal.managed ? (
+                    {skillActionState(detailModal).canDelete ? (
                       <button
-                        onClick={() => handleDelete(detailModal.name)}
+                        onClick={() => handleDelete(detailModal.name, detailModal.builtin === true)}
                         className="rounded-[var(--radius-sm)] border border-[rgba(244,63,94,0.2)] bg-[rgba(244,63,94,0.05)] px-3.5 py-1.5 text-xs font-semibold text-[var(--accent-coral)] hover:bg-[rgba(244,63,94,0.15)] hover:border-[var(--accent-coral)] active:scale-95 transition-all"
                       >
                         {t('common:action.delete', { defaultValue: 'Delete Skill' })}
                       </button>
                     ) : (
-                      <span className="text-[11px] text-[var(--text-faint)] font-mono font-bold uppercase tracking-wider">External skill (Read-Only)</span>
+                      <span className="text-[11px] text-[var(--text-faint)] font-mono font-bold uppercase tracking-wider">
+                        {detailModal.builtin === true
+                          ? t('admin:skills.label.builtin_readonly', { defaultValue: 'Built-in (Read-Only)' })
+                          : t('admin:skills.label.external', { defaultValue: 'External skill (Read-Only)' })}
+                      </span>
                     )}
 
                     <div className="flex items-center gap-2">
@@ -891,5 +914,4 @@ export default function AdminSkillsPage() {
     </div>
   );
 }
-
 

@@ -124,6 +124,231 @@ describe("BrowserHotPlexClient connection handoff", () => {
         socket.finishClose();
     });
 
+    it("records advertised gateway capabilities without requiring them from old servers", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-capabilities");
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-capabilities"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "running",
+                    server_version: "v1.test",
+                    capabilities: ["control_stop_v1"],
+                },
+            },
+        });
+
+        await connect;
+        const introspect = client as unknown as {
+            capabilities: ReadonlySet<string>;
+            serverVersion: string | null;
+        };
+        expect(introspect.capabilities.has("control_stop_v1")).toBe(true);
+        expect(introspect.serverVersion).toBe("v1.test");
+        client.disconnect();
+        socket.finishClose();
+    });
+
+    it("does not recursively reconnect when init reports a missing session", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+            reconnect: { enabled: true, maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1 },
+        });
+
+        const connect = client.connect("session-init-missing");
+        void connect.catch(() => undefined);
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-missing"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "deleted",
+                    error: "session not found",
+                    code: ErrorCode.SessionNotFound,
+                },
+            },
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+        expect(client.connected).toBe(false);
+        expect(client.connecting).toBe(false);
+
+        client.disconnect();
+        socket.finishClose();
+    });
+
+    it("does not accept a legacy deleted init acknowledgement as connected", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-init-deleted");
+        void connect.catch(() => undefined);
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-deleted"),
+            event: {
+                type: EventKind.InitAck,
+                data: { state: "deleted" },
+            },
+        });
+
+        await Promise.resolve();
+        expect(client.connected).toBe(false);
+        expect(client.connecting).toBe(false);
+
+        client.disconnect();
+        socket.finishClose();
+    });
+
+    it("clears reconnecting when the reconnect attempt budget is exhausted", () => {
+        vi.useFakeTimers();
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+            reconnect: { enabled: true, maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1 },
+        });
+        const internal = client as unknown as {
+            reconnectAttempt: number;
+            _reconnecting: boolean;
+            _scheduleReconnect(): void;
+        };
+        internal.reconnectAttempt = 1;
+        internal._reconnecting = true;
+
+        internal._scheduleReconnect();
+
+        expect(client.reconnecting).toBe(false);
+        client.disconnect();
+    });
+
+    it("preserves the gateway code and message when init fails", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-init-error");
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-error"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "deleted",
+                    error: "session no longer exists",
+                    code: ErrorCode.SessionNotFound,
+                },
+            },
+        });
+
+        await expect(connect).rejects.toMatchObject({
+            code: ErrorCode.SessionNotFound,
+            message: "session no longer exists",
+        });
+    });
+
+    it("does not let disconnect cleanup overwrite a gateway init error", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-init-internal-error");
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-internal-error"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "running",
+                    error: "gateway unavailable",
+                    code: ErrorCode.InternalError,
+                },
+            },
+        });
+
+        // Cleanup is allowed to run after the handshake error, but it must not
+        // replace the already-settled gateway error with "Client disconnected".
+        client.disconnect();
+        await expect(connect).rejects.toMatchObject({
+            code: ErrorCode.InternalError,
+            message: "gateway unavailable",
+        });
+    });
+
+    it("routes retryable init errors through bounded reconnect", async () => {
+        vi.useFakeTimers();
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+            reconnect: { enabled: true, maxAttempts: 2, baseDelayMs: 10, maxDelayMs: 10 },
+        });
+
+        const connect = client.connect("session-init-retryable");
+        void connect.catch(() => undefined);
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-init-retryable"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "running",
+                    error: "temporarily unavailable",
+                    code: ErrorCode.InternalError,
+                    retryable: true,
+                    retry_after_ms: 10,
+                },
+            },
+        });
+
+        await Promise.resolve();
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+        socket.finishClose();
+        await vi.advanceTimersByTimeAsync(9);
+        expect(ControlledWebSocket.instances).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ControlledWebSocket.instances).toHaveLength(2);
+
+        const retrySocket = ControlledWebSocket.instances[1];
+        retrySocket.open();
+        retrySocket.message(initAck("session-init-retryable"));
+        await Promise.resolve();
+        expect(client.connected).toBe(true);
+
+        client.disconnect();
+        retrySocket.finishClose();
+    });
+
     it("does not let a rejected cross-session connect corrupt the active target", async () => {
         vi.stubGlobal("WebSocket", ControlledWebSocket);
         const client = new BrowserHotPlexClient({

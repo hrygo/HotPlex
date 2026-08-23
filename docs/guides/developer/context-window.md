@@ -97,13 +97,13 @@ Agent 配置通过 B/C 双通道注入，每个通道都消耗 context window：
 - `META-COGNITION.md`（go:embed，始终存在且排首位）
 - `SOUL.md`（人格定义）
 - `AGENTS.md`（行为规则）
-- `SKILLS.md`（技能列表）
+- `TOOLS.md`（环境工具使用指南；不包含真实 Skill 正文）
 
 **C 通道（`<context>`）**—— 上下文信息：
 - `USER.md`（用户信息）
 - `MEMORY.md`（跨会话记忆）
 
-三级 fallback 机制（全局 → 平台 → Bot）意味着配置文件越多，token 消耗越大。`/context` 返回的 `categories` 中可以查看各类配置的具体 token 占用。
+三级 fallback 每个逻辑槽位只选择一个有效文件，不会把多个层级合并。token 消耗取决于五个有效槽位的正文与 META，而不是磁盘上存在多少 fallback 文件。`/context` 返回的 `categories` 中可以查看各类配置的具体 token 占用。
 
 ### Token 预算规划
 

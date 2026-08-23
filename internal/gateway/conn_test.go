@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -221,6 +222,282 @@ func TestBuildInitAckError(t *testing.T) {
 	require.Equal(t, "sess_test", ack.SessionID)
 	require.Equal(t, events.StateDeleted, ack.Event.Data.(InitAckData).State)
 	require.Equal(t, "invalid token", ack.Event.Data.(InitAckData).Error)
+}
+
+func TestBuildInitAckInternalErrorIsRetryableWithoutDeletedLifecycle(t *testing.T) {
+	t.Parallel()
+
+	ack := BuildInitAckError("sess_internal", &InitError{
+		Code:    events.ErrCodeInternalError,
+		Message: "temporarily unavailable",
+	})
+	data := ack.Event.Data.(InitAckData)
+	require.True(t, data.Retryable)
+	require.NotEqual(t, events.StateDeleted, data.State)
+
+	raw, err := aep.EncodeJSON(ack)
+	require.NoError(t, err)
+	var wire struct {
+		Event struct {
+			Data struct {
+				State     events.SessionState `json:"state"`
+				Retryable bool                `json:"retryable"`
+			} `json:"data"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	require.True(t, wire.Event.Data.Retryable)
+	require.NotEqual(t, events.StateDeleted, wire.Event.Data.State)
+}
+
+type initLifecycleSM struct {
+	created      atomic.Bool
+	deleted      atomic.Bool
+	transitioned atomic.Int32
+	info         *session.SessionInfo
+}
+
+type recordingSeqHydrator struct {
+	latest int64
+	err    error
+	onCall func()
+}
+
+func (m *recordingSeqHydrator) LatestSeq(_ context.Context, _ string) (int64, error) {
+	if m.onCall != nil {
+		m.onCall()
+	}
+	return m.latest, m.err
+}
+
+func (m *initLifecycleSM) Get(_ context.Context, _ string) (*session.SessionInfo, error) {
+	if m.deleted.Load() {
+		return nil, session.ErrSessionNotFound
+	}
+	if !m.created.Load() && m.info == nil {
+		return nil, session.ErrSessionNotFound
+	}
+	if m.info == nil {
+		return nil, session.ErrSessionNotFound
+	}
+	return m.info, nil
+}
+
+func (*initLifecycleSM) GetWorker(string) worker.Worker { return nil }
+
+func (m *initLifecycleSM) Transition(_ context.Context, _ string, _ events.SessionState) error {
+	m.transitioned.Add(1)
+	return nil
+}
+
+func (m *initLifecycleSM) CreateWithBot(_ context.Context, id, userID, _ string, _ string, wt worker.WorkerType, _ []string, _ string, _ map[string]string, workspaceID, workDir, title, clientKey string) (*session.SessionInfo, error) {
+	m.created.Store(true)
+	m.deleted.Store(false)
+	m.info = &session.SessionInfo{
+		ID:          id,
+		UserID:      userID,
+		WorkerType:  wt,
+		State:       events.StateCreated,
+		WorkspaceID: workspaceID,
+		WorkDir:     workDir,
+		Title:       title,
+		ClientKey:   clientKey,
+	}
+	return m.info, nil
+}
+
+func (m *initLifecycleSM) DeletePhysical(context.Context, string) error {
+	m.deleted.Store(true)
+	m.info = nil
+	return nil
+}
+
+// hydrationGateStarter models the production SessionStarter boundary while
+// keeping the old one-step StartSession path available to prove the ordering
+// regression. The gate-aware methods create the durable record first and only
+// emit the worker/state event from StartSessionAfterHydration.
+type hydrationGateStarter struct {
+	sm            *initLifecycleSM
+	hub           *Hub
+	startCalled   atomic.Bool
+	firstStateSeq atomic.Int64
+}
+
+func (s *hydrationGateStarter) CreateSession(ctx context.Context, p worker.SessionStartParams) (*session.SessionInfo, error) {
+	return s.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkspaceID, p.WorkDir, p.Title, p.ClientKey)
+}
+
+func (s *hydrationGateStarter) StartSessionAfterHydration(ctx context.Context, p worker.SessionStartParams) error {
+	s.startCalled.Store(true)
+	if s.sm.info == nil {
+		return session.ErrSessionNotFound
+	}
+	s.sm.info.State = events.StateRunning
+	state := events.NewEnvelope(aep.NewID(), p.ID, 0, events.State, events.StateData{State: events.StateRunning})
+	if err := s.hub.SendToSession(ctx, state); err != nil {
+		return err
+	}
+	s.firstStateSeq.Store(state.Seq)
+	return nil
+}
+
+func (s *hydrationGateStarter) StartSession(ctx context.Context, p worker.SessionStartParams) error {
+	if _, err := s.CreateSession(ctx, p); err != nil {
+		return err
+	}
+	return s.StartSessionAfterHydration(ctx, p)
+}
+
+func (*hydrationGateStarter) ResumeSession(context.Context, string, string) error { return nil }
+
+func (*hydrationGateStarter) SwitchWorkDir(context.Context, string, string) (*SwitchWorkDirResult, error) {
+	return nil, nil
+}
+
+func (*hydrationGateStarter) GetWorkspaceByID(context.Context, string) (*session.Workspace, error) {
+	return nil, session.ErrSessionNotFound
+}
+
+func TestInitMissingAndDeletedSessionsHydrateBeforeProductionStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		sessionID string
+		info      *session.SessionInfo
+	}{
+		{name: "missing", sessionID: "missing-gated", info: nil},
+		{name: "deleted", sessionID: "deleted-gated", info: &session.SessionInfo{
+			ID:         "deleted-gated",
+			UserID:     "user-init",
+			WorkerType: worker.TypeClaudeCode,
+			State:      events.StateDeleted,
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHub(t)
+			client, server := newTestWSConnPair(t)
+			defer client.Close()
+			defer server.Close()
+
+			sm := &initLifecycleSM{info: tt.info}
+			if tt.info == nil {
+				sm.info = nil
+			} else {
+				sm.created.Store(true)
+			}
+			starter := &hydrationGateStarter{sm: sm, hub: h}
+			var hydratedBeforeStart atomic.Bool
+			h.SetSeqSessionExists(func(string) bool {
+				return sm.created.Load() && !sm.deleted.Load()
+			})
+			h.SetSeqHydrator(&recordingSeqHydrator{latest: 100, onCall: func() {
+				hydratedBeforeStart.Store(!starter.startCalled.Load())
+			}})
+
+			c := newConn(h, server, "", starter)
+			defer c.Close()
+			c.userID = "user-init"
+			env := &events.Envelope{SessionID: tt.sessionID}
+			initData := InitData{WorkerType: worker.TypeClaudeCode, Config: InitConfig{WorkDir: safeTestWorkDir}}
+
+			_, si, err := c.resolveSession(env, initData, sm)
+			require.NoError(t, err)
+			require.NotNil(t, si)
+			require.True(t, hydratedBeforeStart.Load(), "worker/state start must follow sequence hydration")
+			require.Greater(t, starter.firstStateSeq.Load(), int64(100), "first visible state must use hydrated sequence")
+		})
+	}
+}
+
+func TestInitHydrationFailureDoesNotStartProductionWorkerOrEmitState(t *testing.T) {
+	h := newTestHub(t)
+	client, server := newTestWSConnPair(t)
+	defer client.Close()
+	defer server.Close()
+
+	sm := &initLifecycleSM{}
+	starter := &hydrationGateStarter{sm: sm, hub: h}
+	h.SetSeqSessionExists(func(string) bool {
+		return sm.created.Load() && !sm.deleted.Load()
+	})
+	h.SetSeqHydrator(&recordingSeqHydrator{err: errors.New("event store unavailable")})
+
+	c := newConn(h, server, "", starter)
+	defer c.Close()
+	c.userID = "user-init"
+	env := &events.Envelope{SessionID: "failed-gated"}
+	initData := InitData{WorkerType: worker.TypeClaudeCode, Config: InitConfig{WorkDir: safeTestWorkDir}}
+
+	_, _, err := c.resolveSession(env, initData, sm)
+	require.Error(t, err)
+	require.False(t, starter.startCalled.Load(), "hydration failure must not start a worker")
+	require.Zero(t, starter.firstStateSeq.Load(), "hydration failure must not emit a state sequence")
+	require.True(t, sm.deleted.Load(), "hydration failure must remove the prepared durable session")
+}
+
+func TestInitCreatesMissingSessionBeforeSeqHydration(t *testing.T) {
+	h := newTestHub(t)
+	client, server := newTestWSConnPair(t)
+	defer client.Close()
+	defer server.Close()
+
+	sm := &initLifecycleSM{}
+	var hydratedAfterCreate atomic.Bool
+	h.SetSeqSessionExists(func(string) bool { return sm.created.Load() })
+	h.SetSeqHydrator(&recordingSeqHydrator{latest: 0, onCall: func() {
+		hydratedAfterCreate.Store(sm.created.Load())
+	}})
+
+	c := newConn(h, server, "", nil)
+	defer c.Close()
+	c.userID = "user-init"
+	env := &events.Envelope{SessionID: "missing-client-key"}
+	initData := InitData{WorkerType: worker.TypeClaudeCode, Config: InitConfig{WorkDir: safeTestWorkDir}}
+
+	_, si, err := c.resolveSession(env, initData, sm)
+	require.NoError(t, err)
+	require.NotNil(t, si)
+	require.True(t, sm.created.Load())
+	require.True(t, hydratedAfterCreate.Load(), "sequence hydration must observe the created durable session")
+}
+
+func TestInitHydrationFailureDoesNotEmitCleanupSeq(t *testing.T) {
+	h := newTestHub(t)
+	client, server := newTestWSConnPair(t)
+	defer client.Close()
+	defer server.Close()
+
+	const sessionID = "sess-init-hydration-failure"
+	sm := &initLifecycleSM{info: &session.SessionInfo{
+		ID:         sessionID,
+		UserID:     "user-init",
+		WorkerType: worker.TypeClaudeCode,
+		State:      events.StateRunning,
+	}}
+	h.SetSeqSessionExists(func(string) bool { return true })
+	h.SetSeqHydrator(&recordingSeqHydrator{err: errors.New("event store unavailable")})
+
+	c := newConn(h, server, "", nil)
+	c.userID = "user-init"
+	done := make(chan struct{})
+	go func() {
+		c.ReadPump(nil, sm, nil)
+		close(done)
+	}()
+
+	resp, err := sendWSInit(client, makeInitEnvelope(sessionID, string(worker.TypeClaudeCode)))
+	require.NoError(t, err)
+	require.Contains(t, string(resp), `"type":"init_ack"`)
+	require.Contains(t, string(resp), `"code":"INTERNAL_ERROR"`)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadPump did not finish after init hydration failure")
+	}
+	require.Zero(t, sm.transitioned.Load(), "failed init must not emit cleanup lifecycle transition")
+	require.Zero(t, h.NextSeqPeek(sessionID), "failed init must not allocate a cleanup sequence")
 }
 
 type resumeCheckStarter struct {

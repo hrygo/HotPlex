@@ -27,7 +27,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     switch (key) {
       case 'soul': return t('admin:bots.config_files.soul.label', { defaultValue: 'Soul' });
       case 'agents': return t('admin:bots.config_files.agents.label', { defaultValue: 'Agents' });
-      case 'skills': return t('admin:bots.config_files.skills.label', { defaultValue: 'Skills' });
+      case 'tools': return t('admin:bots.config_files.tools.label', { defaultValue: 'Tools' });
       case 'user': return t('admin:bots.config_files.user.label', { defaultValue: 'User' });
       case 'memory': return t('admin:bots.config_files.memory.label', { defaultValue: 'Memory' });
       default: return key;
@@ -38,7 +38,7 @@ export function ChannelConfigEditor({ platform }: { platform: string }) {
     switch (key) {
       case 'soul': return t('admin:bots.config_files.soul.description', { defaultValue: 'Persona & identity' });
       case 'agents': return t('admin:bots.config_files.agents.description', { defaultValue: 'Behavior rules' });
-      case 'skills': return t('admin:bots.config_files.skills.description', { defaultValue: 'Capabilities' });
+      case 'tools': return t('admin:bots.config_files.tools.description', { defaultValue: 'Tool usage guidance' });
       case 'user': return t('admin:bots.config_files.user.description', { defaultValue: 'User preferences' });
       case 'memory': return t('admin:bots.config_files.memory.description', { defaultValue: 'Persistent context' });
       default: return '';

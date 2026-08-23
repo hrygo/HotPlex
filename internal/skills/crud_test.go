@@ -309,6 +309,8 @@ func TestLocator_ListWorkspaceInstalled_OnlyWorkspaceManaged(t *testing.T) {
 	require.Equal(t, "my-skill", got[0].Name)
 	require.True(t, got[0].Managed)
 	require.Equal(t, SourceProject, got[0].Source)
+	require.Equal(t, "SKILL.md", filepath.Base(got[0].FilePath))
+	require.Contains(t, got[0].FilePath, filepath.Join(".agents", "skills"))
 }
 
 func TestLocator_ListWorkspaceInstalled_ExcludesOtherWorkspace(t *testing.T) {

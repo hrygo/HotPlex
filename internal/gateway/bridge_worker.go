@@ -37,6 +37,7 @@ type workerLaunchParams struct {
 	wt                 worker.WorkerType
 	workerInfo         worker.SessionInfo
 	platform           string
+	scope              agentconfig.RuntimeScopeKind
 	botID              string
 	botName            string
 	forwardOpts        *forwardOpts
@@ -87,7 +88,8 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		return nil, fmt.Errorf("bridge: attach worker: %w", err)
 	}
 
-	b.injectAgentConfig(&params.workerInfo, params.platform, params.botName, params.botID, params.injectExclude, params.workspaceOverrides)
+	facts := buildRuntimeFacts(w, params.workerInfo, params.platform, params.scope)
+	b.injectAgentConfig(&params.workerInfo, facts, params.platform, params.botName, params.botID, params.injectExclude, params.workspaceOverrides)
 
 	if err := startFn(params.ctx, w, params.workerInfo); err != nil {
 		b.sm.DetachWorker(sid)
@@ -380,6 +382,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 		wt:                 si.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           si.Platform,
+		scope:              runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName),
 		botID:              si.BotID,
 		botName:            si.BotName,
 		forwardOpts:        &forwardOpts{workDir: p.workDir},
@@ -424,7 +427,7 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 			replay.Content = p.lastInput
 		}
 		b.log.Info("bridge: re-delivering input to fresh worker", "session_id", p.sessionID, "content_len", len(replay.Content), "skill", replay.Skill != nil)
-		if err := b.deliverInputReplay(context.Background(), w, replay); err != nil {
+		if err := b.deliverInputReplayForSession(context.Background(), p.sessionID, w, replay); err != nil {
 			b.log.Warn("bridge: input re-delivery failed", "session_id", p.sessionID, "err", err)
 		}
 	}
@@ -589,7 +592,7 @@ func (b *Bridge) warnOverrideDegrade(workspaceID, msg string, err error) {
 // Parameter order note: botName (YAML config name, e.g. "my-bot") comes before
 // botID (platform runtime ID, e.g. "U12345") because botName is the primary key
 // for agent-config path resolution, while botID is only used for logging.
-func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, botID string, injectExclude []string, workspaceOverrides map[string]string) {
+func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, facts agentconfig.RuntimeFacts, platform, botName, botID string, injectExclude []string, workspaceOverrides map[string]string) {
 	if b.agentConfigDir == "" {
 		return
 	}
@@ -619,13 +622,7 @@ func (b *Bridge) injectAgentConfig(info *worker.SessionInfo, platform, botName, 
 		}
 		return
 	}
-	if configs.IsEmpty() {
-		b.log.Warn("bridge: agent config empty, no files found",
-			"dir", b.agentConfigDir, "platform", platform, "bot_name", botName, "bot_id", botID)
-		return
-	}
-
-	if prompt := agentconfig.BuildSystemPrompt(configs); prompt != "" {
+	if prompt := agentconfig.BuildSystemPromptWithRuntime(configs, facts); prompt != "" {
 		info.SystemPrompt = prompt
 		b.log.Info("bridge: agent config injected", "prompt_len", len(prompt), "platform", platform, "bot_name", botName, "bot_id", botID)
 	} else {

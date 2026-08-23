@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { mapErrorToMessage } from "./error-mapping";
+import {
+    isExpectedCommandRejection,
+    mapErrorToMessage,
+} from "./error-mapping";
 
 describe("mapErrorToMessage", () => {
     it.each([
@@ -39,6 +42,21 @@ describe("mapErrorToMessage", () => {
             "RESUME_RETRY",
             "Recovering session...",
             "🔄 Recovering session...",
+        ],
+        [
+            "NOT_SUPPORTED",
+            "clear: worker: not implemented",
+            "This worker does not support /clear. Use /reset or /new instead.",
+        ],
+        [
+            "NOT_SUPPORTED",
+            "rewind: claudecode: rewind: control: request failed: File rewinding is not enabled.",
+            "File rewind is not enabled for this worker. Use /reset or /new instead.",
+        ],
+        [
+            "INVALID_MESSAGE",
+            "invalid permission mode: permission mode required",
+            "Permission mode is required. Use /perm <mode> to choose one.",
         ],
     ])(
         "maps known code %s to its friendly message",
@@ -79,6 +97,60 @@ describe("mapErrorToMessage", () => {
             expect(mapErrorToMessage("CODEX_ERROR", "something else broke")).toBe(
                 "Codex error: something else broke",
             );
+        });
+    });
+
+    describe("NOT_SUPPORTED", () => {
+        it("maps an unsupported command to a generic actionable message", () => {
+            expect(mapErrorToMessage("NOT_SUPPORTED", "compact: unavailable")).toBe(
+                "This command is not supported by the current worker.",
+            );
+        });
+
+        it("maps a legacy internal error for a disabled capability", () => {
+            expect(
+                mapErrorToMessage(
+                    "INTERNAL_ERROR",
+                    "rewind: claudecode: rewind: control: request failed: File rewinding is not enabled.",
+                ),
+            ).toBe(
+                "File rewind is not enabled for this worker. Use /reset or /new instead.",
+            );
+        });
+    });
+
+    describe("INVALID_MESSAGE", () => {
+        it("maps missing model arguments to an actionable command hint", () => {
+            expect(mapErrorToMessage("INVALID_MESSAGE", "model name required")).toBe(
+                "Model name is required. Use /model <model> instead.",
+            );
+        });
+
+        it("maps ambiguous Skill input without exposing parser details", () => {
+            expect(
+                mapErrorToMessage("INVALID_MESSAGE", "ambiguous Skill invocation"),
+            ).toBe("That Skill command is ambiguous. Choose a specific command and try again.");
+        });
+    });
+
+    describe("isExpectedCommandRejection", () => {
+        it.each([
+            ["CONFIG_INVALID", "command rejected"],
+            ["NOT_SUPPORTED", "command unavailable"],
+            ["INVALID_MESSAGE", "invalid permission mode: permission mode required"],
+            ["INVALID_MESSAGE", "model name required"],
+            ["INVALID_MESSAGE", "ambiguous Skill invocation"],
+            ["INTERNAL_ERROR", "rewind: file rewinding is not enabled"],
+        ])("recognizes user-fixable command error %s", (code, message) => {
+            expect(isExpectedCommandRejection(code, message)).toBe(true);
+        });
+
+        it("keeps malformed protocol errors as errors", () => {
+            expect(isExpectedCommandRejection("INVALID_MESSAGE", "malformed input data")).toBe(false);
+        });
+
+        it("keeps unsupported protocol versions as errors", () => {
+            expect(isExpectedCommandRejection("VERSION_MISMATCH", "unsupported version")).toBe(false);
         });
     });
 

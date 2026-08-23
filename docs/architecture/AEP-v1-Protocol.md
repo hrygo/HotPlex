@@ -161,12 +161,18 @@ title: Agent Event Protocol (AEP) v1
       "supports_ping": true,
       "max_frame_size": 32768,
       "modalities": ["text", "code"]
-    }
+    },
+    "capabilities": [
+      "control_stop_v1",
+      "init_retry_v2",
+      "client_message_id_v1",
+      "ordered_session_events_v1"
+    ]
   }
 }
 ```
 
-**错误响应**（state 设为 `deleted`，包含 error + code）：
+**错误响应**（旧错误响应可将 state 设为 `deleted`，并包含 error + code）：
 
 ```json
 {
@@ -186,8 +192,14 @@ title: Agent Event Protocol (AEP) v1
 | `session_id` | 是 | 分配或恢复的 session ID |
 | `state` | 是 | Session 当前状态（错误时为 `deleted`） |
 | `server_caps` | 是 | Gateway 能力声明 |
+| `server_version` | 否 | Gateway 构建版本；仅在运行时能够提供可信构建版本时发送，用于诊断，不替代能力判断 |
+| `capabilities` | 否 | Gateway 支持的可选行为集合；旧客户端忽略 |
 | `error` | 否 | 错误描述（仅错误响应） |
 | `code` | 否 | 错误码（仅错误响应） |
+| `retryable` | 否 | 错误是否允许客户端按有界策略重试 |
+| `retry_after_ms` | 否 | 建议的最短重试等待时间（毫秒） |
+
+兼容性规则：新 Gateway 对可重试错误可省略/置空 `state`，并返回 `retryable: true`；客户端必须优先依据 `code` 与 `retryable`，不能仅依据 `state` 判断。旧客户端仍可解析 `state=deleted` 的非重试错误。
 
 **server_caps 字段**：
 
@@ -203,6 +215,15 @@ title: Agent Event Protocol (AEP) v1
 | `max_turns` | 最大对话轮次（可选） |
 | `modalities` | 支持的模态（如 `["text", "code"]`） |
 | `tools` | 可用工具列表（可选） |
+
+**Gateway capability negotiation**：
+
+- `control_stop_v1`：支持 stop 控制及对应终态确认。
+- `init_retry_v2`：支持带 `retryable` / `retry_after_ms` 的初始化错误。
+- `client_message_id_v1`：输入事件的 Envelope `id` 作为稳定 `client_message_id`，并在 `input.ack` 与持久化历史中回显。
+- `ordered_session_events_v1`：带 `seq` 的 session 事件按会话顺序发送。
+
+`server_version` 和 `capabilities` 均为可选增量字段。客户端不得因为旧服务端省略它们而拒绝连接；只有依赖某项能力的行为才应检查对应 capability，并提供明确降级或兼容提示。
 
 ---
 
@@ -222,6 +243,10 @@ title: Agent Event Protocol (AEP) v1
 |------|------|------|
 | `content` | 是 | 用户输入内容 |
 | `metadata` | 否 | 自定义元数据（如来源标识、上下文信息等） |
+
+输入 Envelope 的 `id` 是该用户 turn 的稳定 `client_message_id`。客户端在重连或显式重试前不得为同一未知投递结果生成新的 ID；Gateway 在 `input.ack.client_message_id` 和可用的持久化历史记录中回显该值。这样客户端可优先按身份合并 optimistic user message 与 durable history；只有旧服务端没有回显身份时，才退回 role+content 签名匹配。
+
+`input.ack.status` 的 `unknown` 表示投递结果不确定，不表示用户输入不存在。客户端应保留 optimistic user message 并标注 unknown，等待历史回显或用户显式重试；自动重发可能产生重复副作用。
 
 Session 状态为 `running` 时，拒绝 input，返回 `error`（`SESSION_BUSY`）。
 

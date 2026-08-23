@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -196,6 +197,81 @@ func TestInputExecution_DeliveredAckAfterWorkerAccepts(t *testing.T) {
 	w.AssertExpectations(t)
 }
 
+func TestInputExecution_HardWorkerFailureDoesNotCaptureUserTurn(t *testing.T) {
+	t.Parallel()
+
+	execStore := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
+	bridge, turnStore := newBridgeWithCollector(t)
+	hub := newTestHub(t)
+	bridge.hub = hub
+	bridge.sm = new(mockInputSM)
+	hub.JoinPlatformSession("s-exec", &mockPlatformConn{})
+
+	sm := bridge.sm.(*mockInputSM)
+	w := new(mockWorkerForHandler)
+	sm.On("Get", "s-exec").Return(&session.SessionInfo{State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
+	sm.On("GetWorker", "s-exec").Return(w).Maybe()
+	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	w.On("Input", mock.Anything, "hello", mock.Anything).Return(errors.New("worker rejected input"))
+
+	h := &Handler{
+		log:             testLogger(t),
+		hub:             hub,
+		sm:              sm,
+		bridge:          bridge,
+		executionStore:  execStore,
+		ownerInstanceID: "gw-test",
+	}
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.Error(t, h.handleInput(context.Background(), env))
+	require.NoError(t, bridge.collector.Close())
+	turns, err := turnStore.QueryLatestTurns(context.Background(), "s-exec", 10)
+	if errors.Is(err, eventstore.ErrNotFound) {
+		return
+	}
+	require.NoError(t, err)
+	require.Empty(t, turns, "a hard Worker.Input failure must not leave an unmatched user turn")
+}
+
+func TestInputExecution_SuccessCapturesUserTurnOnce(t *testing.T) {
+	t.Parallel()
+
+	execStore := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
+	bridge, turnStore := newBridgeWithCollector(t)
+	hub := newTestHub(t)
+	bridge.hub = hub
+	bridge.sm = new(mockInputSM)
+	hub.JoinPlatformSession("s-exec", &mockPlatformConn{})
+
+	sm := bridge.sm.(*mockInputSM)
+	w := new(mockWorkerForHandler)
+	sm.On("Get", "s-exec").Return(&session.SessionInfo{State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
+	sm.On("GetWorker", "s-exec").Return(w).Maybe()
+	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
+
+	h := &Handler{
+		log:             testLogger(t),
+		hub:             hub,
+		sm:              sm,
+		bridge:          bridge,
+		executionStore:  execStore,
+		ownerInstanceID: "gw-test",
+	}
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.NoError(t, h.handleInput(context.Background(), env))
+	require.NoError(t, bridge.collector.Close())
+	turns, err := turnStore.QueryLatestTurns(context.Background(), "s-exec", 10)
+	require.NoError(t, err)
+	require.Len(t, turns, 1, "successful delivery must capture exactly one user turn")
+	require.Equal(t, eventstore.RoleUser, turns[0].Role)
+	require.Equal(t, 1, turns[0].TurnNum, "first user turn must keep its turn number")
+}
+
 func TestAcceptInputExecution_UsesAttachedWorkerRunID(t *testing.T) {
 	t.Parallel()
 	store := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
@@ -380,6 +456,85 @@ func TestInputExecution_TimeoutBecomesUnknown(t *testing.T) {
 	require.Equal(t, 1, calls)
 	sm.AssertExpectations(t)
 	w.AssertExpectations(t)
+}
+
+func TestInputExecution_TimeoutStillCapturesInboundTurn(t *testing.T) {
+	t.Parallel()
+
+	execStore := &fakeExecutionStore{record: testExecutionRecord(execution.StatusAccepted)}
+	bridge, turnStore := newBridgeWithCollector(t)
+	hub := newTestHub(t)
+	bridge.hub = hub
+	hub.seqGen.Init("s-exec", 0)
+	hub.seqGen.MarkHydrated("s-exec")
+	hub.JoinPlatformSession("s-exec", &mockPlatformConn{})
+
+	sm := new(mockInputSM)
+	w := new(mockWorkerForHandler)
+	sm.On("Get", "s-exec").Return(&session.SessionInfo{
+		State:    events.StateRunning,
+		Platform: "webchat",
+	}, nil).Maybe()
+	sm.On("GetWorker", "s-exec").Return(w).Maybe()
+	bridge.sm = sm
+	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+
+	allowAssistant := make(chan struct{})
+	assistantDone := make(chan struct{})
+	timeoutErr := &worker.WorkerError{Kind: worker.ErrKindTimeout, Message: "worker response timed out"}
+	w.On("Input", mock.Anything, "hello", mock.Anything).Return(timeoutErr).Run(func(mock.Arguments) {
+		go func() {
+			<-allowAssistant
+			fc := &forwardContext{
+				sessionID:     "s-exec",
+				workerType:    worker.TypeClaudeCode,
+				sessPlatform:  "webchat",
+				firstEvent:    true,
+				turnStartTime: time.Now(),
+			}
+			bridge.processForwardedEvent(
+				events.NewEnvelope("assistant-message", "s-exec", 0, events.Message,
+					map[string]any{"content": "assistant response"}),
+				w, forwardOpts{}, fc,
+			)
+			bridge.processForwardedEvent(
+				events.NewEnvelope("assistant-done", "s-exec", 0, events.Done,
+					events.DoneData{Success: true}),
+				w, forwardOpts{}, fc,
+			)
+			close(assistantDone)
+		}()
+	})
+
+	h := &Handler{
+		log:             testLogger(t),
+		hub:             hub,
+		sm:              sm,
+		bridge:          bridge,
+		executionStore:  execStore,
+		ownerInstanceID: "gw-test",
+	}
+	env := inputEnvelope("s-exec", "hello")
+	env.ID = "evt-client-1"
+
+	require.NoError(t, h.handleInput(context.Background(), env))
+	close(allowAssistant)
+	select {
+	case <-assistantDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for assistant events")
+	}
+
+	require.NoError(t, bridge.collector.Close())
+	turns, err := turnStore.QueryLatestTurns(context.Background(), "s-exec", 10)
+	require.NoError(t, err)
+	require.Len(t, turns, 2, "timeout delivery must retain both sides of the exchange")
+	require.Equal(t, eventstore.RoleUser, turns[0].Role)
+	require.Equal(t, "hello", turns[0].Content)
+	require.Equal(t, "evt-client-1", turns[0].ClientMessageID)
+	require.Equal(t, eventstore.RoleAssistant, turns[1].Role)
+	require.Equal(t, "assistant response", turns[1].Content)
+	require.Equal(t, turns[0].Generation, turns[1].Generation)
 }
 
 // TestInputExecution_AckReflectsIntendedStatusWhenSetStatusFails guards the

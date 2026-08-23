@@ -18,6 +18,8 @@ export interface AdminSkill {
   description: string;
   source: string; // "global" (home)
   managed: boolean;
+  builtin?: boolean;
+  builtin_package_version?: string;
 }
 
 export interface AdminSkillListResponse {
@@ -32,6 +34,8 @@ export interface AdminSkillDetail {
   description: string;
   source: string;
   managed: boolean;
+  builtin?: boolean;
+  builtin_package_version?: string;
   body: string;
   files: string[];
 }

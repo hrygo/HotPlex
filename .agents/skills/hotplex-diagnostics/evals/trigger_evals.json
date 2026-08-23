@@ -1,0 +1,30 @@
+{
+  "skill_name": "hotplex-diagnostics",
+  "trigger_evals": [
+    {
+      "query": "检查 Gateway 为什么 Worker 在运行但用户收不到增量反馈",
+      "should_trigger": true,
+      "reason": "Deep feedback-chain diagnosis"
+    },
+    {
+      "query": "分析这个 Session 的 Worker、Gateway 和平台日志，定位卡住的根因",
+      "should_trigger": true,
+      "reason": "Cross-layer runtime diagnosis"
+    },
+    {
+      "query": "运行 hotplex status 看服务是否存活",
+      "should_trigger": false,
+      "reason": "Ordinary read-only CLI check belongs to hotplex-cli"
+    },
+    {
+      "query": "更新 HotPlex 二进制并重启服务",
+      "should_trigger": false,
+      "reason": "Host mutation belongs to hotplex-operator"
+    },
+    {
+      "query": "创建 HotPlex v2.0.0 的 GitHub Release",
+      "should_trigger": false,
+      "reason": "Version publication belongs to hotplex-release"
+    }
+  ]
+}

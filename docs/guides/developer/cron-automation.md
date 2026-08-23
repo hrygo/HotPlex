@@ -21,7 +21,7 @@ HotPlex 内置 AI-native Cron 调度器，支持从自然语言到自动化执�
 | Store | `store.go` | SQLite 持久化 |
 | Executor | `executor.go` | Worker 执行适配、Session 构造、环境注入 |
 | Delivery | `delivery.go` | 结果投递到飞书/Slack |
-| Skill Manual | `skill.go` | `go:embed cron-skill-manual.md` 注入 B 通道 |
+| CLI routing | embedded `hotplex-cli` | Cron 的 canonical Skill route；不可用时以当前 `hotplex cron --help`/`create --help` 为准 |
 
 ## 三种调度模式
 
@@ -35,6 +35,8 @@ hotplex cron create \
   --schedule "cron:0 9 * * 1-5" \
   -m "生成本日 standup 报告" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 | 字段 | 允许值 | 特殊字符 |
@@ -55,11 +57,13 @@ hotplex cron create \
   --schedule "every:30m" \
   -m "检查系统健康状态" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 ### at 一次性延迟任务
 
-指定精确时间执行一次，支持指数退避重试：
+指定精确时间执行一次，支持绝对 RFC3339 或 parser 接受的 `at:+10m` 相对形式，并支持指数退避重试：
 
 ```bash
 hotplex cron create \
@@ -67,6 +71,8 @@ hotplex cron create \
   --schedule "at:2026-05-15T09:00:00+08:00" \
   -m "验证生产环境部署是否成功" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 ## 常见自动化模式
@@ -83,6 +89,8 @@ hotplex cron create \
 3. 运行 golangci-lint
 4. go vuln check 检查安全漏洞" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 ### 部署后验证
@@ -96,6 +104,8 @@ hotplex cron create \
 2. 检查最近 5 分钟的错误日志
 3. 验证数据库连接正常" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 ### 带生命周期的提醒
@@ -108,6 +118,8 @@ hotplex cron create \
   --bot-id "$BOT_ID" --owner-id "$USER_ID" \
   --max-runs 8 \
   --expires-at "2026-05-11T18:00:00+08:00"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 任务在执行 8 次或到达过期时间后自动停止（以先到者为准）。
@@ -147,6 +159,8 @@ hotplex cron create \
   -m "检查代码质量" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID" \
   --allowed-tools "read_file,grep,glob"
+
+hotplex cron get <JOB_ID> --json
 ```
 
 ## 监控 Cron 任务
@@ -181,6 +195,8 @@ hotplex cron create \
   -m "清理过期的临时文件和缓存" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID" \
   --silent
+
+hotplex cron get <JOB_ID> --json
 ```
 
 Silent 模式下任务正常执行，但不发送消息卡片到飞书/Slack。
@@ -230,7 +246,10 @@ timerLoop tick → collectDue → CAS 并发槽 → executeJob → Worker 执行
 
 ## 自然语言创建
 
-Cron 功能通过 `go:embed cron-skill-manual.md` 注入 Agent 的 B 通道。Agent 自身了解 cron 的完整用法，可通过自然语言识别调度意图：
+Cron 请求优先路由到当前 Session 实际暴露的 embedded `hotplex-cli` canonical Skill；不可用时
+查询当前二进制的 `hotplex cron --help` 与 `hotplex cron create --help`。真实 Skill 只以
+`<name>/SKILL.md` 为入口，Scheduler 启动不向 Skills 目录发布 flat Markdown 手册。Agent 可通过
+自然语言识别调度意图：
 
 1. 用户发送"每天早上 9 点检查代码质量"
 2. Brain 层 Router 识别为 cron 意图

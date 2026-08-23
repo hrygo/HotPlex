@@ -1,6 +1,9 @@
 package gateway
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -73,4 +76,102 @@ func resolveSkillInvocation(content string, catalog []skills.Skill) (worker.Nati
 		}
 	}
 	return worker.NativeCommandInvocation{}, false, nil
+}
+
+// nativeSkillCatalog adapts the merged session catalog to the existing
+// compact/canonical slash parser. The descriptor slice is the source of
+// truth; filesystem skills are already represented in it by
+// sessionCatalogStore.assemble, so parsing cannot accidentally promote a
+// filesystem-only entry into a callable invocation.
+func nativeSkillCatalog(descriptors []worker.NativeCommandDescriptor) []skills.Skill {
+	catalog := make([]skills.Skill, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor.Kind != worker.NativeCommandKindSkill || descriptor.Name == "" {
+			continue
+		}
+		catalog = append(catalog, skills.Skill{
+			Name:        descriptor.Name,
+			Description: descriptor.Description,
+			FilePath:    descriptor.Path,
+		})
+	}
+	return catalog
+}
+
+// resolveNativeSkillInvocation parses a slash input against the merged
+// session catalog and returns the exact descriptor selected by the parser.
+// The caller must still run classifyNativeSkillCallability before dispatch;
+// this function only resolves syntax and name precedence.
+func resolveNativeSkillInvocation(content string, descriptors []worker.NativeCommandDescriptor) (worker.NativeCommandInvocation, bool, error) {
+	parsed, matched, err := skills.ParseInvocation(content, nativeSkillCatalog(descriptors))
+	if err != nil || !matched {
+		return worker.NativeCommandInvocation{}, matched, err
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.Kind == worker.NativeCommandKindSkill && descriptor.Name == parsed.Name {
+			return worker.NativeCommandInvocation{
+				Name: parsed.Name,
+				Args: parsed.Args,
+				Path: descriptor.Path,
+				Mode: descriptor.Mode,
+			}, true, nil
+		}
+	}
+	return worker.NativeCommandInvocation{}, false, nil
+}
+
+// nativeSkillNotSupportedError is intentionally bounded: callers expose the
+// worker-independent sentinel as NOT_SUPPORTED while retaining only the
+// selected Skill name for remediation. Paths and catalog payloads never enter
+// the user-facing error.
+func nativeSkillNotSupportedError(name string) error {
+	return fmt.Errorf("%w: Skill %q is discoverable but not callable by the current Worker", worker.ErrSkillNotSupported, strings.TrimSpace(name))
+}
+
+// revalidatedNativeInvocation checks a stashed/structured invocation against
+// the current merged session catalog. Invocation metadata is only a
+// correlation hint: the current descriptor supplies the authoritative path
+// and mode, and filesystem-only entries remain discoverable-only. Both Skill
+// entries and Worker-advertised starts-turn commands can be stashed by the
+// explicit /worker path; Gateway fixed commands are never replayable here.
+func revalidatedNativeInvocation(
+	invocation worker.NativeCommandInvocation,
+	descriptors []worker.NativeCommandDescriptor,
+	fsSkills []skills.Skill,
+	w worker.Worker,
+	authoritativeOK bool,
+) (worker.NativeCommandInvocation, error) {
+	var descriptor *worker.NativeCommandDescriptor
+	for i := range descriptors {
+		if descriptors[i].Name == invocation.Name {
+			descriptor = &descriptors[i]
+			break
+		}
+	}
+	if descriptor == nil {
+		return worker.NativeCommandInvocation{}, nativeSkillNotSupportedError(invocation.Name)
+	}
+
+	if _, fixed := fixedCommandNamesFor(w)[descriptor.Name]; fixed {
+		return worker.NativeCommandInvocation{}, nativeSkillNotSupportedError(descriptor.Name)
+	}
+	if descriptor.Kind == worker.NativeCommandKindSkill {
+		fsByName := make(map[string]skills.Skill, len(fsSkills))
+		for _, skill := range fsSkills {
+			fsByName[skill.Name] = skill
+		}
+		fs, hasFS := fsByName[descriptor.Name]
+		status := classifyNativeSkillCallability(*descriptor, fs, hasFS, w, authoritativeOK)
+		if status != events.SkillStatusCallable {
+			return worker.NativeCommandInvocation{}, nativeSkillNotSupportedError(descriptor.Name)
+		}
+	} else if descriptor.Kind != worker.NativeCommandKindControl || !authoritativeOK {
+		return worker.NativeCommandInvocation{}, nativeSkillNotSupportedError(descriptor.Name)
+	}
+
+	resolved := invocation
+	resolved.Name = descriptor.Name
+	resolved.Path = descriptor.Path
+	resolved.Mode = descriptor.Mode
+	return resolved, nil
 }

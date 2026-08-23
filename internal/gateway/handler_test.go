@@ -1336,6 +1336,7 @@ func newBridgeWithCollector(t *testing.T) (*Bridge, *eventstore.SQLiteStore) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS turns (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id TEXT NOT NULL,
+		client_message_id TEXT,
 		generation INTEGER NOT NULL DEFAULT 1,
 		turn_num INTEGER NOT NULL,
 		seq INTEGER NOT NULL DEFAULT 0,

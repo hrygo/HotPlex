@@ -84,7 +84,7 @@ func newGatewayStopCmd() *cobra.Command {
 			if err := stopGateway(inst); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "  %s gateway stopped (PID %d, %s)\n", output.Green("✓"), inst.PID, inst.Source)
+			fmt.Fprintf(os.Stderr, "  %s %s\n", output.Green("✓"), gatewayStoppedMessage(inst))
 			if pid := cleanupWebchatOrphan(); pid > 0 {
 				fmt.Fprintf(os.Stderr, "  %s webchat cleaned up (PID %d)\n", output.Green("✓"), pid)
 			}

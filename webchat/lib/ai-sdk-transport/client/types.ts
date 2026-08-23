@@ -312,8 +312,12 @@ export interface InitAckData {
   session_id: string;
   state: SessionState;
   server_caps: ServerCaps;
+  server_version?: string;
+  capabilities?: string[];
   error?: string;
   code?: ErrorCode;
+  retryable?: boolean;
+  retry_after_ms?: number;
 }
 
 export interface ServerCaps {

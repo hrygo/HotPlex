@@ -37,7 +37,7 @@ config.yaml:
     config_dir: ~/.hotplex/agent-configs
 ```
 
-- `Load(dir, platform, botID)` 加载 5 个文件（SOUL/AGENTS/SKILLS/USER/MEMORY），全量组装，无法按文件跳过
+- `Load(dir, platform, botID)` 加载 5 个文件（SOUL/AGENTS/TOOLS/USER/MEMORY），全量组装，无法按文件跳过
 - `META-COGNITION.md` 始终注入（`go:embed`），不可配置
 - 唯一开关是 `enabled: false`
 

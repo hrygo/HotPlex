@@ -22,8 +22,9 @@ const (
 //   - ErrSkillAlreadyExists → 409 SKILL_ALREADY_EXISTS
 //   - ErrSkillNotFound      → 404 SKILL_NOT_FOUND
 var (
-	ErrSkillAlreadyExists = errors.New("skill: already exists")
-	ErrSkillNotFound      = errors.New("skill: not found")
+	ErrSkillAlreadyExists   = errors.New("skill: already exists")
+	ErrSkillNotFound        = errors.New("skill: not found")
+	ErrSkillBuiltinReadonly = errors.New("skill: builtin is read-only")
 )
 
 // Detail 是单个 skill 的完整内容（spec §3.2）。

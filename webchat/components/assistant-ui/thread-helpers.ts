@@ -1,4 +1,4 @@
-import type { ContextUsageData, TurnSessionStats } from "@/lib/ai-sdk-transport/client/types";
+import type { ContextUsageData, SkillEntry, TurnSessionStats } from "@/lib/ai-sdk-transport/client/types";
 
 // assistant-ui ThreadMessage doesn't expose status/metadata in public types.
 // Centralize the extension access here to avoid scattered as-any casts.
@@ -8,6 +8,7 @@ export interface ThreadMessageExtension {
     custom?: {
       contextUsage?: ContextUsageData;
       turnSummary?: TurnSessionStats;
+      skillsList?: SkillEntry[];
       progress?: 'thinking' | 'accepted';
     };
   };

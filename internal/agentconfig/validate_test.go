@@ -7,6 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidateOverridesRejectsSkillsFilename(t *testing.T) {
+	t.Parallel()
+
+	_, err := ValidateOverrides(`{"SKILLS.md":"legacy"}`)
+	require.ErrorIs(t, err, ErrUnknownConfigFile)
+}
+
 func TestValidateOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -63,8 +70,18 @@ func TestValidateOverrides(t *testing.T) {
 		},
 		{
 			name: "all five known files accepted",
-			raw:  `{"SOUL.md":"s","AGENTS.md":"a","SKILLS.md":"k","USER.md":"u","MEMORY.md":"m"}`,
-			want: map[string]string{"SOUL.md": "s", "AGENTS.md": "a", "SKILLS.md": "k", "USER.md": "u", "MEMORY.md": "m"},
+			raw:  `{"SOUL.md":"s","AGENTS.md":"a","TOOLS.md":"t","USER.md":"u","MEMORY.md":"m"}`,
+			want: map[string]string{"SOUL.md": "s", "AGENTS.md": "a", "TOOLS.md": "t", "USER.md": "u", "MEMORY.md": "m"},
+		},
+		{
+			name:    "legacy skills key rejected as unknown",
+			raw:     `{"SKILLS.md":"legacy tools"}`,
+			wantErr: ErrUnknownConfigFile,
+		},
+		{
+			name:    "legacy skills key remains unknown beside canonical tools",
+			raw:     `{"TOOLS.md":"new","SKILLS.md":"old"}`,
+			wantErr: ErrUnknownConfigFile,
 		},
 	}
 

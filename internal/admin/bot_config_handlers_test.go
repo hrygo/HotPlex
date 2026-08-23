@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockBotConfigProvider implements BotConfigProvider for handler tests. Only
-// the platform-level (channel team-default) methods carry configurable
-// behavior; the bot CRUD methods return zero values — they are out of scope
-// for the channel-default endpoint tests.
+// mockBotConfigProvider implements BotConfigProvider for AgentConfig handler
+// tests and records both bot-level and platform-level calls.
 type mockBotConfigProvider struct {
-	getFn   func(ctx context.Context, platform string, file AgentConfigFileName) (*AgentConfigFile, error)
-	writeFn func(ctx context.Context, platform string, file AgentConfigFileName, content string) error
+	getFn      func(ctx context.Context, platform string, file AgentConfigFileName) (*AgentConfigFile, error)
+	writeFn    func(ctx context.Context, platform string, file AgentConfigFileName, content string) error
+	botGetFn   func(ctx context.Context, botName string, file AgentConfigFileName) (*AgentConfigFile, error)
+	botWriteFn func(ctx context.Context, botName string, file AgentConfigFileName, content string) error
 
 	// Recorded call args for assertion.
 	gotPlatform string
@@ -32,8 +32,13 @@ func (m *mockBotConfigProvider) GetBotConfig(context.Context, string) (*BotConfi
 func (m *mockBotConfigProvider) ListBotConfigs(context.Context) ([]BotConfigEntry, error) {
 	return nil, nil
 }
-func (m *mockBotConfigProvider) GetAgentConfigFile(context.Context, string, AgentConfigFileName) (*AgentConfigFile, error) {
-	return nil, nil
+func (m *mockBotConfigProvider) GetAgentConfigFile(ctx context.Context, botName string, file AgentConfigFileName) (*AgentConfigFile, error) {
+	m.gotPlatform = botName
+	m.gotFile = file
+	if m.botGetFn != nil {
+		return m.botGetFn(ctx, botName, file)
+	}
+	return &AgentConfigFile{Content: "bot config", Source: "bot", Size: 10, File: string(file)}, nil
 }
 func (m *mockBotConfigProvider) GetSystemPromptPreview(context.Context, string) (string, error) {
 	return "", nil
@@ -45,7 +50,13 @@ func (m *mockBotConfigProvider) CreateBot(context.Context, string, *BotConfigAtt
 	return nil
 }
 func (m *mockBotConfigProvider) DeleteBot(context.Context, string) error { return nil }
-func (m *mockBotConfigProvider) WriteAgentConfigFile(context.Context, string, AgentConfigFileName, string) error {
+func (m *mockBotConfigProvider) WriteAgentConfigFile(ctx context.Context, botName string, file AgentConfigFileName, content string) error {
+	m.gotPlatform = botName
+	m.gotFile = file
+	m.gotContent = content
+	if m.botWriteFn != nil {
+		return m.botWriteFn(ctx, botName, file, content)
+	}
 	return nil
 }
 
@@ -90,6 +101,71 @@ func newPlatformRequest(t *testing.T, method, platform, file, scope string, body
 	return httptest.NewRecorder(), r
 }
 
+func newBotAgentConfigRequest(t *testing.T, method, botName, file, scope string, body []byte) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	var r *http.Request
+	path := "/admin/bots/" + botName + "/config/" + file
+	if body == nil {
+		r = httptest.NewRequest(method, path, nil)
+	} else {
+		r = httptest.NewRequest(method, path, bytes.NewReader(body))
+	}
+	if scope != "" {
+		r = withScope(r, scope)
+	}
+	r.SetPathValue("name", botName)
+	r.SetPathValue("file", file)
+	return httptest.NewRecorder(), r
+}
+
+func TestAgentConfigSummary_SerializesCanonicalToolsField(t *testing.T) {
+	t.Parallel()
+
+	entry := BotConfigEntry{
+		AgentConfigs: &AgentConfigSummary{
+			Tools: &AgentConfigMeta{Source: "bot", Size: 12},
+		},
+	}
+	data, err := json.Marshal(entry)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"","platform":"","bot_id":"","status":"","agent_configs":{"tools":{"source":"bot","size":12}}}`, string(data))
+	require.NotContains(t, string(data), `"skills"`)
+}
+
+func TestHandleAgentConfigFile_AcceptsCanonicalTools(t *testing.T) {
+	t.Parallel()
+	prov := &mockBotConfigProvider{}
+	api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
+
+	wGet, rGet := newBotAgentConfigRequest(t, http.MethodGet, "helper", "TOOLS.md", ScopeAdminRead, nil)
+	api.HandleGetAgentConfigFile(wGet, rGet)
+	require.Equal(t, http.StatusOK, wGet.Code, "body=%q", wGet.Body.String())
+	require.Equal(t, AgentConfigTools, prov.gotFile)
+
+	body := []byte(`{"content":"tool guidance"}`)
+	wPut, rPut := newBotAgentConfigRequest(t, http.MethodPut, "helper", "TOOLS.md", ScopeAdminWrite, body)
+	api.HandleWriteAgentConfigFile(wPut, rPut)
+	require.Equal(t, http.StatusNoContent, wPut.Code, "body=%q", wPut.Body.String())
+	require.Equal(t, AgentConfigTools, prov.gotFile)
+	require.Equal(t, "tool guidance", prov.gotContent)
+}
+
+func TestHandleAgentConfigFile_RejectsSkillsAlias(t *testing.T) {
+	t.Parallel()
+	prov := &mockBotConfigProvider{}
+	api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
+
+	wGet, rGet := newBotAgentConfigRequest(t, http.MethodGet, "helper", "SKILLS.md", ScopeAdminRead, nil)
+	api.HandleGetAgentConfigFile(wGet, rGet)
+	require.Equal(t, http.StatusBadRequest, wGet.Code, "body=%q", wGet.Body.String())
+	require.Empty(t, prov.gotFile, "provider must not be consulted for unknown reads")
+
+	wPut, rPut := newBotAgentConfigRequest(t, http.MethodPut, "helper", "SKILLS.md", ScopeAdminWrite, []byte(`{"content":"legacy"}`))
+	api.HandleWriteAgentConfigFile(wPut, rPut)
+	require.Equal(t, http.StatusBadRequest, wPut.Code)
+	require.Empty(t, prov.gotContent, "provider must not be consulted for unknown writes")
+}
+
 func TestHandleGetPlatformAgentConfigFile_Success(t *testing.T) {
 	t.Parallel()
 	prov := &mockBotConfigProvider{}
@@ -125,6 +201,23 @@ func TestHandleWritePlatformAgentConfigFile_Success(t *testing.T) {
 	require.Equal(t, AgentConfigSoul, prov.gotFile)
 }
 
+func TestHandlePlatformAgentConfigFile_RejectsSkillsAlias(t *testing.T) {
+	t.Parallel()
+	prov := &mockBotConfigProvider{}
+	api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
+
+	wGet, rGet := newPlatformRequest(t, http.MethodGet, "webchat", "SKILLS.md", ScopeAdminRead, nil)
+	api.HandleGetPlatformAgentConfigFile(wGet, rGet)
+	require.Equal(t, http.StatusBadRequest, wGet.Code, "body=%q", wGet.Body.String())
+	require.Empty(t, prov.gotFile, "provider must not be consulted for unknown reads")
+
+	body := []byte(`{"content":"webchat tool guidance"}`)
+	wPut, rPut := newPlatformRequest(t, http.MethodPut, "webchat", "SKILLS.md", ScopeAdminWrite, body)
+	api.HandleWritePlatformAgentConfigFile(wPut, rPut)
+	require.Equal(t, http.StatusBadRequest, wPut.Code, "body=%q", wPut.Body.String())
+	require.Empty(t, prov.gotContent, "provider must not be consulted for unknown writes")
+}
+
 // TestHandlePlatformAgentConfigFile_Rejections covers input validation and
 // authorization boundaries that must hold before the provider is consulted.
 func TestHandlePlatformAgentConfigFile_Rejections(t *testing.T) {
@@ -144,6 +237,7 @@ func TestHandlePlatformAgentConfigFile_Rejections(t *testing.T) {
 		{"get no scope", http.MethodGet, "", "webchat", "SOUL.md", http.StatusForbidden},
 		{"put invalid platform", http.MethodPut, ScopeAdminWrite, "telegram", "SOUL.md", http.StatusBadRequest},
 		{"put invalid file", http.MethodPut, ScopeAdminWrite, "webchat", "README.md", http.StatusBadRequest},
+		{"put legacy tools alias", http.MethodPut, ScopeAdminWrite, "webchat", "SKILLS.md", http.StatusBadRequest},
 		{"put no scope", http.MethodPut, "", "webchat", "SOUL.md", http.StatusForbidden},
 	}
 

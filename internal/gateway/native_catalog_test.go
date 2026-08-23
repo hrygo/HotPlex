@@ -13,6 +13,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/skills"
 	"github.com/hrygo/hotplex/internal/worker"
+	"github.com/hrygo/hotplex/pkg/events"
 )
 
 // nativeCatalogTestWorker is a minimal worker.Worker that also exposes the
@@ -131,6 +132,83 @@ func TestNativeCatalogMergePrecedence(t *testing.T) {
 	oracle := byName["oracle-dba"]
 	require.Equal(t, "/worker/oracle-dba", oracle.Path)
 	require.Equal(t, worker.NativeCommandKindSkill, oracle.Kind)
+}
+
+func TestNativeCatalogStampsTierOriginsAndSamePathWorkerIsCallable(t *testing.T) {
+	t.Parallel()
+
+	const sharedPath = "/home/.claude/skills/oracle-dba/SKILL.md"
+	locator := &nativeCatalogTestLocator{skills: []skills.Skill{
+		{Name: "oracle-dba", Description: "filesystem copy", FilePath: sharedPath},
+		{Name: "filesystem-only", Description: "filesystem only", FilePath: "/home/.claude/skills/filesystem-only/SKILL.md"},
+	}}
+	store := newTestCatalogStore(t, locator)
+	w := &nativeCatalogTestWorker{
+		fakeWorker: &fakeWorker{workerType: worker.TypeClaudeCode},
+		descriptors: []worker.NativeCommandDescriptor{{
+			Name:        "oracle-dba",
+			Description: "worker copy",
+			Kind:        worker.NativeCommandKindSkill,
+			Mode:        worker.SkillModeTextCommand,
+			StartsTurn:  true,
+			AcceptsArgs: true,
+			Path:        sharedPath,
+		}},
+	}
+
+	merged, err := store.Lookup(context.Background(), "s1", "/work", w, 1)
+	require.NoError(t, err)
+	byName := descriptorsByName(merged)
+	require.Equal(t, worker.CatalogOriginGateway, byName["reset"].CatalogOrigin)
+	require.Equal(t, worker.CatalogOriginWorker, byName["oracle-dba"].CatalogOrigin)
+	require.Equal(t, worker.CatalogOriginFilesystem, byName["filesystem-only"].CatalogOrigin)
+
+	entries := buildSkillEntriesFromCatalog(merged, locator.skills, w, true)
+	byEntry := make(map[string]events.SkillEntry, len(entries))
+	for _, entry := range entries {
+		byEntry[entry.Name] = entry
+	}
+	require.Equal(t, events.SkillStatusCallable, byEntry["oracle-dba"].Status,
+		"authoritative Claude evidence remains callable even when Path equals filesystem discovery")
+	require.Equal(t, events.SkillStatusDiscoverable, byEntry["filesystem-only"].Status)
+}
+
+func TestNativeCatalogUnknownOriginFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	w := &nativeCatalogTestWorker{fakeWorker: &fakeWorker{workerType: worker.TypeClaudeCode}}
+	status := classifyNativeSkillCallability(worker.NativeCommandDescriptor{
+		Name:        "unknown-origin",
+		Kind:        worker.NativeCommandKindSkill,
+		Mode:        worker.SkillModeTextCommand,
+		StartsTurn:  true,
+		AcceptsArgs: true,
+		Path:        "/worker/unknown-origin",
+	}, skills.Skill{}, false, w, true)
+	require.Equal(t, events.SkillStatusDiscoverable, status)
+}
+
+func TestNativeCatalogErrorSamePathRemainsDiscoverable(t *testing.T) {
+	t.Parallel()
+
+	const sharedPath = "/home/.claude/skills/oracle-dba/SKILL.md"
+	store := newTestCatalogStore(t, &nativeCatalogTestLocator{skills: []skills.Skill{
+		{Name: "oracle-dba", FilePath: sharedPath},
+	}})
+	w := &nativeCatalogTestWorker{
+		fakeWorker:  &fakeWorker{workerType: worker.TypeClaudeCode},
+		providerErr: errors.New("catalog unavailable"),
+	}
+	merged, err := store.Lookup(context.Background(), "s1", "/work", w, 1)
+	require.Error(t, err)
+	byName := descriptorsByName(merged)
+	require.Equal(t, worker.CatalogOriginFilesystem, byName["oracle-dba"].CatalogOrigin)
+	entries := buildSkillEntriesFromCatalog(merged, []skills.Skill{{Name: "oracle-dba", FilePath: sharedPath}}, w, false)
+	byEntry := make(map[string]events.SkillEntry, len(entries))
+	for _, entry := range entries {
+		byEntry[entry.Name] = entry
+	}
+	require.Equal(t, events.SkillStatusDiscoverable, byEntry["oracle-dba"].Status)
 }
 
 func TestNativeCatalogCapabilityConditions(t *testing.T) {

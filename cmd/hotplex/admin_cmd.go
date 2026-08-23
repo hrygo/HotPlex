@@ -111,6 +111,6 @@ func runAdminCreate(cmd *cobra.Command, _ []string) error {
 	if err := userStore.CreateUser(context.Background(), u, time.Now().Unix()); err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "created %s user %q (id=%s)\n", role, username, u.ID)
+	_, _ = fmt.Fprintf(os.Stdout, "created %s user %q (id=%s) [db=%s]\n", role, username, u.ID, cfg.DB.Driver)
 	return nil
 }

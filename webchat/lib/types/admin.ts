@@ -39,7 +39,7 @@ export interface BotConfigAttrs {
 export interface AgentConfigSummary {
   soul?: AgentConfigMeta;
   agents?: AgentConfigMeta;
-  skills?: AgentConfigMeta;
+  tools?: AgentConfigMeta;
   user?: AgentConfigMeta;
   memory?: AgentConfigMeta;
 }

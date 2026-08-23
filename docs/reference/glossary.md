@@ -22,15 +22,25 @@ AEP 事件分为三个方向：C→S（客户端到服务端，如 `init`、`inp
 
 HotPlex 提供的 HTTP 管理接口，默认监听 `localhost:9999`。支持 session 管理、配置查询、诊断端点等运维操作。通过 Token 认证和细粒度 Scope 授权（如 `session:read`、`config:write`）控制访问权限。
 
+### Agent Skill
+
+按需加载的可执行知识包，以 `<name>/SKILL.md` 为入口。Admin/WebChat 的 public Skills catalog
+提供 built-in inventory 与发现，Session `/skills` 则依据当前 Worker/filesystem/native evidence；
+discoverable 不等于 callable。Agent Skill 不属于五文件 AgentConfig，不能由 `TOOLS.md` 推断。
+
+### AgentConfig Tools
+
+五文件 AgentConfig 中的 `TOOLS.md` 逻辑槽位，用于常驻注入环境特有的工具使用指南、偏好和边界。它不声明工具实际存在，也不是 Agent Skill catalog；实际能力以当前 Session 的结构化工具目录为准。
+
 ---
 
 ## B
 
 ### B 通道 (B Channel)
 
-Agent 配置的指令通道（Directives Channel），以 XML `<directives>` 标签注入 Worker 的系统提示词。内容包括 `<hotplex>`（META-COGNITION.md，始终存在且排首位）、`<persona>`（SOUL.md）、`<rules>`（AGENTS.md）和 `<skills>`（SKILLS.md）。B 通道为强制性指令，与 C 通道冲突时无条件覆盖。
+Agent 配置的指令通道（Directives Channel），以 XML `<directives>` 标签注入 Worker 的系统提示词。内容包括 `<hotplex>`（META-COGNITION.md，始终存在且排首位）、`<persona>`（SOUL.md）、`<rules>`（AGENTS.md）和 `<tool-guidance>`（TOOLS.md）。B 通道为强制性指令，与 C 通道冲突时无条件覆盖。
 
-配置文件存放于 `~/.hotplex/agent-configs/`，通过三级 fallback 加载：全局 → 平台（`slack/`）→ Bot（`slack/U12345/`），每文件独立解析，命中即终止。
+配置文件存放于 `~/.hotplex/agent-configs/`，按 Bot → 平台 → 全局优先级逐文件解析。缺失表示继承，present-empty 表示显式清空并终止。
 
 ### Brain
 
@@ -66,7 +76,7 @@ Agent 配置的上下文通道（Context Channel），以 XML `<context>` 标签
 
 HotPlex 的 AI-native 定时任务引擎（`internal/cron/`），支持三种调度方式：`cron`（标准 cron 表达式）、`every`（固定间隔）和 `at`（一次性执行）。任务 payload 为自然语言提示词，由 Worker 以 Agent Turn 形式执行。
 
-Cron 系统包括：timerLoop tick 引擎（`timer.go`）、并发槽 CAS 控制、SQLite 持久化（`store.go`）、YAML 批量导入（`loader.go`）、执行结果投递（`delivery.go`，按平台回传飞书卡片/Slack 消息），以及 `at` 类型指数退避重试（`retry.go`）。Cron 的技能手册通过 `go:embed` 嵌入 B 通道（`skill.go`）。
+Cron 系统包括：timerLoop tick 引擎（`timer.go`）、并发槽 CAS 控制、SQLite 持久化（`store.go`）、YAML 批量导入（`loader.go`）、执行结果投递（`delivery.go`，按平台回传飞书卡片/Slack 消息），以及 `at` 类型指数退避重试（`retry.go`）。Cron 操作流程由 `hotplex-cli` Skill 按需提供，并以当前 `hotplex cron --help` 为准。
 
 ---
 

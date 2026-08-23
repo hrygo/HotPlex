@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -78,8 +79,32 @@ func TestHandleSetPermMode_ForwardsCanonicalModeFromBothEntryPoints(t *testing.T
 	}
 }
 
+func TestHandleSetPermMode_MissingModeUsesSingleValidationPrefix(t *testing.T) {
+	t.Parallel()
+	h := &Handler{}
+	env := &events.Envelope{SessionID: "sess-perm"}
+
+	err := h.handleSetPermMode(t.Context(), env, &permissionModeRecorder{}, "", nil)
+	require.EqualError(t, err, "INVALID_MESSAGE: invalid permission mode: permission mode required")
+}
+
 func TestClassifyWorkerError_PermissionModeUnsupported(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, events.ErrCodeNotSupported, classifyWorkerError(worker.ErrNotImplemented))
 	require.Equal(t, events.ErrCodeNotSupported, classifyWorkerError(worker.ErrSkillNotSupported))
+}
+
+func TestClassifyWorkerError_CapabilityRejectionMessages(t *testing.T) {
+	t.Parallel()
+	for _, message := range []string{
+		"claudecode: rewind: control: request failed: File rewinding is not enabled.",
+		"codexcli: set_model not supported",
+		"acp: unsupported control request: compact",
+	} {
+		t.Run(message, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, events.ErrCodeNotSupported, classifyWorkerError(errors.New(message)))
+		})
+	}
+	require.NotEqual(t, events.ErrCodeNotSupported, classifyWorkerError(errors.New("worker process not started")))
 }

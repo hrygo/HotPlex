@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +27,6 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/hrygo/hotplex/internal/admin"
-	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/assets"
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/audit/sinks"
@@ -41,6 +42,8 @@ import (
 	"github.com/hrygo/hotplex/internal/security"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/skills"
+	"github.com/hrygo/hotplex/internal/skills/builtin"
+	"github.com/hrygo/hotplex/internal/skills/reconcile"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/webchat"
 	"github.com/hrygo/hotplex/internal/worker"
@@ -205,6 +208,9 @@ type GatewayDeps struct {
 	AuditStore     audit.Store
 	// SkillsLocator serves the skill management HTTP API (issue #910).
 	SkillsLocator *skills.Locator
+	// BuiltinSkillsCatalog serves embedded Agent Skills read metadata. It is
+	// independent of native projection/inventory state.
+	BuiltinSkillsCatalog builtin.PublicCatalog
 	// Durable ingress reliability closure (spec 2026-07-14).
 	OwnerInstanceID string
 	LeaseManager    *execution.LeaseManager
@@ -263,8 +269,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		return err
 	}
 	defer stores.close(log)
-
-	releaseDBStatsManual(log)
 
 	// Audit subsystem (issue #833 P1): construct Store + Collector + GC + Verifier
 	// when audit.enabled=true. The collector batches events and fans out to sinks.
@@ -531,7 +535,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	agentConfigDir := ""
 	if cfg.AgentConfig.Enabled {
 		agentConfigDir = cfg.AgentConfig.ConfigDir
-		warnDeprecatedSuffixFiles(agentConfigDir, log)
 		log.Debug("config: agent config resolved", "dir", agentConfigDir)
 	}
 
@@ -563,6 +566,17 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	gateway.ScanWorkspaceOverrides(ctx, stores.wsStore, log)
 
 	skillsLocator := skills.NewLocator(log, cfg.Skills.CacheTTL)
+	builtinRegistry, err := builtin.NewRegistry()
+	if err != nil {
+		skillsLocator.Close()
+		return fmt.Errorf("initialize built-in skills catalog: %w", err)
+	}
+	builtinSkillsCatalog := builtin.NewPublicCatalog(builtinRegistry)
+	if userHome, homeErr := os.UserHomeDir(); homeErr != nil {
+		log.Warn("gateway: built-in skills status skipped", "reason", "user_home_unavailable")
+	} else if statusErr := runBuiltinSkillsStatus(ctx, cfg, userHome, config.HotplexHome(), newSkillsRunner, log); statusErr != nil {
+		log.Warn("gateway: built-in skills status unavailable", "reason", stableSkillsStatusReason(statusErr))
+	}
 
 	handler = gateway.NewHandler(gateway.HandlerDeps{
 		Log:             log,
@@ -778,36 +792,37 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	mux := http.NewServeMux()
 	leaseMgr := execution.NewLeaseManager(stores.execution, ownerInstanceID, execution.DefaultLeaseConfig(), log, repairer)
 	deps := &GatewayDeps{
-		Log:             log,
-		Ctx:             ctx,
-		Config:          cfg,
-		ConfigStore:     cfgStore,
-		Hub:             hub,
-		SessionMgr:      sm,
-		EventStore:      stores.event,
-		EventCollector:  stores.collector,
-		ExecutionStore:  stores.execution,
-		Auth:            auth,
-		Handler:         handler,
-		Bridge:          bridge,
-		ConfigWatcher:   configWatcher,
-		CronScheduler:   cronScheduler,
-		CookieAuth:      cookieAuth,
-		OAuthManager:    oauthManager,
-		ChatAccessStore: stores.chatAccessOrNew(stores.sqlDB, log),
-		DB:              stores.sqlDB,
-		DBResolver:      dbResolver,
-		APIKeyStore:     stores.apiKeyStore,
-		WorkspaceStore:  stores.wsStore,
-		WriteMu:         stores.writeMu,
-		ConfigPath:      configPath,
-		DevMode:         devMode,
-		AuditCollector:  auditCollector,
-		AuditStore:      auditStore,
-		SkillsLocator:   skillsLocator,
-		OwnerInstanceID: ownerInstanceID,
-		LeaseManager:    leaseMgr,
-		Repairer:        repairer,
+		Log:                  log,
+		Ctx:                  ctx,
+		Config:               cfg,
+		ConfigStore:          cfgStore,
+		Hub:                  hub,
+		SessionMgr:           sm,
+		EventStore:           stores.event,
+		EventCollector:       stores.collector,
+		ExecutionStore:       stores.execution,
+		Auth:                 auth,
+		Handler:              handler,
+		Bridge:               bridge,
+		ConfigWatcher:        configWatcher,
+		CronScheduler:        cronScheduler,
+		CookieAuth:           cookieAuth,
+		OAuthManager:         oauthManager,
+		ChatAccessStore:      stores.chatAccessOrNew(stores.sqlDB, log),
+		DB:                   stores.sqlDB,
+		DBResolver:           dbResolver,
+		APIKeyStore:          stores.apiKeyStore,
+		WorkspaceStore:       stores.wsStore,
+		WriteMu:              stores.writeMu,
+		ConfigPath:           configPath,
+		DevMode:              devMode,
+		AuditCollector:       auditCollector,
+		AuditStore:           auditStore,
+		SkillsLocator:        skillsLocator,
+		BuiltinSkillsCatalog: builtinSkillsCatalog,
+		OwnerInstanceID:      ownerInstanceID,
+		LeaseManager:         leaseMgr,
+		Repairer:             repairer,
 	}
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
@@ -1489,6 +1504,113 @@ func shutdownGateway(
 	log.Info("gateway: stopped")
 }
 
+// runBuiltinSkillsStatus performs the gateway startup reconciliation check. It
+// is intentionally status-only: no inventory publication, projection, or
+// receipt write is reachable from this seam.
+func runBuiltinSkillsStatus(
+	ctx context.Context,
+	cfg *config.Config,
+	userHome, hotplexHome string,
+	newRunner func(userHome, hotplexHome string) (reconcile.Runner, error),
+	log *slog.Logger,
+) error {
+	if cfg == nil {
+		return reconcile.ErrNoWorkerTargets
+	}
+	workers, err := parseReconcileWorkerTypes(cfg.EnabledWorkerTypes())
+	if err != nil {
+		return err
+	}
+	if len(workers) == 0 {
+		return nil
+	}
+	if newRunner == nil {
+		return fmt.Errorf("skills: runner unavailable")
+	}
+	runner, err := newRunner(userHome, hotplexHome)
+	if err != nil {
+		return err
+	}
+	if runner == nil {
+		return fmt.Errorf("skills: runner unavailable")
+	}
+	report, err := runner.Status(ctx, reconcile.Options{Profile: builtin.ProfileRuntime, WorkerTypes: workers})
+	if err != nil {
+		return err
+	}
+	if report.Err() != nil {
+		if log != nil {
+			log.Warn("gateway: built-in skills drift", "reasons", builtinSkillsDiagnosticReasons(report))
+		}
+		return nil
+	}
+	return nil
+}
+
+func stableSkillsStatusReason(err error) string {
+	switch {
+	case errors.Is(err, reconcile.ErrNoWorkerTargets):
+		return "no_worker_targets"
+	case errors.Is(err, reconcile.ErrUnknownWorker):
+		return "unknown_worker"
+	case errors.Is(err, reconcile.ErrUnknownProfile):
+		return "unknown_profile"
+	case errors.Is(err, reconcile.ErrRootOutsideHome):
+		return "root_outside_home"
+	case errors.Is(err, reconcile.ErrInventoryOutsideHotplexHome):
+		return "inventory_outside_hotplex_home"
+	case errors.Is(err, reconcile.ErrInvalidReceipt):
+		return "invalid_receipt"
+	case errors.Is(err, reconcile.ErrReceiptWriteFailed):
+		return "receipt_write_failed"
+	case errors.Is(err, reconcile.ErrInvalidPackageName):
+		return "invalid_package"
+	case errors.Is(err, reconcile.ErrReportActionRequired):
+		return "action_required"
+	default:
+		return "status_unavailable"
+	}
+}
+
+var builtinSkillsDiagnosticReasonSet = map[string]struct{}{
+	reconcile.ReasonMissingTarget:      {},
+	reconcile.ReasonDrift:              {},
+	reconcile.ReasonCollision:          {},
+	reconcile.ReasonInvalidReceipt:     {},
+	reconcile.ReasonRootOutsideHome:    {},
+	reconcile.ReasonReceiptWriteFailed: {},
+	reconcile.ReasonInventoryBlocked:   {},
+	reconcile.ReasonRollbackFailed:     {},
+	reconcile.ReasonUnsupportedWorker:  {},
+	reconcile.ReasonMissingReceipt:     {},
+	reconcile.ReasonInvalidPackage:     {},
+	reconcile.ReasonUnchanged:          {},
+	reconcile.ReasonChanged:            {},
+}
+
+func builtinSkillsDiagnosticReasons(report reconcile.Report) string {
+	reasons := make(map[string]struct{})
+	for _, item := range report.Items {
+		switch item.Outcome {
+		case reconcile.OutcomeConflict, reconcile.OutcomeDrift, reconcile.OutcomeFailed:
+			if _, ok := builtinSkillsDiagnosticReasonSet[item.ReasonCode]; ok {
+				reasons[item.ReasonCode] = struct{}{}
+			} else {
+				reasons[reconcile.ReasonDrift] = struct{}{}
+			}
+		}
+	}
+	if len(reasons) == 0 {
+		reasons[reconcile.ReasonDrift] = struct{}{}
+	}
+	values := make([]string, 0, len(reasons))
+	for reason := range reasons {
+		values = append(values, reason)
+	}
+	sort.Strings(values)
+	return strings.Join(values, ",")
+}
+
 // --- Config helpers ---
 
 func loadConfig(configPath string, devMode bool) (*config.Config, error) {
@@ -1540,24 +1662,6 @@ func loadEnvFile(dir string) {
 	}
 	if loaded > 0 {
 		fmt.Fprintf(os.Stderr, "  env loaded %d vars from %s\n", loaded, envPath)
-	}
-}
-
-func warnDeprecatedSuffixFiles(dir string, log *slog.Logger) {
-	if dir == "" {
-		return
-	}
-	platforms := agentconfig.KnownPlatforms()
-	bases := []string{"SOUL", "AGENTS", "SKILLS", "USER", "MEMORY"}
-	for _, p := range platforms {
-		for _, b := range bases {
-			suffix := b + "." + p + ".md"
-			if _, err := os.Stat(filepath.Join(dir, suffix)); err == nil {
-				log.Warn("agent-config: deprecated suffix file found; use directory-based layout instead",
-					"file", suffix,
-					"migration", "move to "+p+"/"+b+".md")
-			}
-		}
 	}
 }
 
@@ -1644,15 +1748,4 @@ func buildAgentConfigExclude(cfg *config.Config) map[string][]string {
 		return nil
 	}
 	return m
-}
-
-func releaseDBStatsManual(log *slog.Logger) {
-	dir := filepath.Join(config.HotplexHome(), "skills")
-	_ = os.MkdirAll(dir, 0o755)
-	path := filepath.Join(dir, "db-stats.md")
-	if err := os.WriteFile(path, []byte(dbutil.SkillManual()), 0o644); err != nil {
-		log.Warn("db-stats: failed to release skill manual", "path", path, "err", err)
-		return
-	}
-	log.Debug("db-stats: skill manual released", "path", path)
 }

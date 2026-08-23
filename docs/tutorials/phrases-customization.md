@@ -92,7 +92,7 @@ mkdir -p ~/.hotplex/phrases
 - 任务完成，喝茶去了 ☕
 ```
 
-重启 gateway 生效：`hotplex gateway restart`
+重启服务生效：`hotplex service restart`
 
 此时所有 Bot 的 `greetings` 和 `closings` 池使用你的自定义条目（默认值被排除），其余 category 仍使用内置默认。
 
@@ -150,17 +150,18 @@ mkdir -p ~/.hotplex/phrases/feishu/ou_xxxxxxx
 
 每次请求随机展示 2 条不同的 persona 状态（系统自动去重）。
 
-## 实操 4：让 Bot 自行管理话术
+## 实操 4：请求 Agent 辅助修改话术
 
-Bot 通过 B 通道技能手册（`~/.hotplex/skills/phrases.md`）了解完整规范。你可以直接让 Bot 自己修改话术：
+Phrases 是普通产品配置，不是 Agent Skill。你可以让 Agent 按本文的路径和格式协助修改：
 
 > "帮我把飞书 Bot 的问候语换成更活泼的风格"
 
-Bot 会读取技能手册，然后修改对应的 PHRASES.md 文件。你只需执行 `hotplex gateway restart` 即可生效。
+Agent 应先读取目标 `PHRASES.md`、说明最小变更和影响范围，并在获得文件写入授权后修改。
+随后执行 `hotplex service restart` 使其生效；服务重启属于 host mutation，也需要明确授权。
 
 ## 注意事项
 
-- **生效方式**：修改后需要重启 gateway（`hotplex gateway restart`），Phrases 不支持热更新
+- **生效方式**：修改后需要重启服务（`hotplex service restart`），Phrases 不支持热更新
 - **路径安全**：Bot ID 中的 `/` 和 `..` 会被拒绝，防止路径穿越
 - **部分覆盖**：只为某些 category 提供条目不会影响其他 category 的默认值
 - **空文件**：PHRASES.md 可以是空的，此时该级别的所有 category 不提供条目

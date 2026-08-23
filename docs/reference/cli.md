@@ -6,7 +6,7 @@ description: HotPlex 命令行工具所有命令和标志的详尽参考文档
 
 # HotPlex CLI 完整参考
 
-HotPlex CLI（`hotplex`）是 HotPlex Worker Gateway 的统一管理工具，基于 [cobra](https://github.com/spf13/cobra) 构建。本文档覆盖所有命令、子命令及其标志。
+HotPlex CLI（`hotplex`）是 HotPlex Worker Gateway 的统一管理工具，基于 [cobra](https://github.com/spf13/cobra) 构建。本文档说明决策、安全和生命周期语义；完整的 public command/flag surface 由 [generated CLI surface source](https://github.com/hrygo/hotplex/blob/main/internal/skills/builtin/hotplex-cli/references/cli-surface.generated.md) 从当前 Cobra tree 生成，默认值、路径和可用性以已安装二进制的 `--help` 为准。
 
 > **`--config` 默认值**：以下表格中的默认 `$HOTPLEX_HOME/config.yaml` 表示未显式传入 `--config` 时的解析结果——设置 `HOTPLEX_HOME` 环境变量后整个 workspace（配置文件、数据、日志、PID）随之迁移；未设置时回退 `$HOTPLEX_HOME/config.yaml`。
 
@@ -70,6 +70,10 @@ hotplex
 │   └── react             # 表情反应
 │       ├── add           # 添加反应
 │       └── remove        # 移除反应
+├── skills           # embedded Skill inventory/projection 生命周期
+│   ├── status       # 只读检查
+│   ├── sync         # 显式同步
+│   └── remove       # 删除有 receipt 证明归属的 projection
 └── cron             # 定时任务管理
     ├── create       # 创建任务
     ├── list         # 列出任务
@@ -205,7 +209,7 @@ hotplex version --format json
 ```bash
 hotplex doctor                     # 运行所有检查
 hotplex doctor -v                  # 详细输出
-hotplex doctor --fix               # 自动修复问题
+hotplex doctor --fix               # 仅运行其他 checker 的受支持修复；built-in Skills checker 始终只读
 hotplex doctor -C security         # 仅运行安全检查
 hotplex doctor --json              # JSON 输出（用于脚本集成）
 ```
@@ -213,7 +217,7 @@ hotplex doctor --json              # JSON 输出（用于脚本集成）
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
 |------|--------|------|--------|------|
 | `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
-| `--fix` | | `bool` | `false` | 自动修复可修复的问题 |
+| `--fix` | | `bool` | `false` | 请求其他 checker 修复；built-in Skills drift checker 没有 FixFunc，不会写入 |
 | `--verbose` | `-v` | `bool` | `false` | 显示详细信息 |
 | `--json` | | `bool` | `false` | JSON 格式输出 |
 | `--category` | `-C` | `string` | | 仅检查指定类别：`environment`、`config`、`dependencies`、`security`、`runtime`、`messaging`、`stt`、`tts`、`agent_config`、`worker` |
@@ -404,6 +408,7 @@ hotplex onboard                                    # 交互式向导
 hotplex onboard --force                            # 覆盖已有配置
 hotplex onboard --non-interactive                  # 自动生成，不提示
 hotplex onboard --enable-slack --enable-feishu     # 启用所有平台
+hotplex onboard --non-interactive --sync-skills     # 配置完成后显式同步 runtime Skills
 hotplex onboard --non-interactive \
   --enable-slack \
   --slack-allow-from U12345,U67890 \
@@ -425,6 +430,7 @@ hotplex onboard --non-interactive \
 | `--feishu-group-policy` | `string` | `allowlist` | 飞书群组策略：`open`、`allowlist`、`disabled` |
 | `--install-service` | `bool` | `false` | 在非交互模式下同时安装为系统服务 |
 | `--service-level` | `string` | `user` | 服务级别：`user` 或 `system`（配合 `--install-service`） |
+| `--sync-skills` | `bool` | `false` | 配置完成后显式同步 runtime built-in Skills；无此 flag 不同步 |
 
 ---
 
@@ -461,6 +467,10 @@ hotplex install --force                # 强制重新安装
 
 > **注意**：Windows 下运行时二进制文件被锁定，请使用 `scripts/install.ps1` 替代。
 
+`--check` 与 `--sync-skills` 互斥；只传 `--skills-profile`（即使是 `runtime`）而没有
+`--sync-skills` 也会返回 usage error。用户取消真实更新时不会同步 Skills；替换成功后会先
+报告新 binary，再执行一次同步，失败时不会声称同步成功。
+
 **示例**：
 
 ```bash
@@ -468,6 +478,7 @@ hotplex update              # 交互式更新（带确认提示）
 hotplex update --check      # 仅检查，不下载
 hotplex update -y           # 跳过确认提示
 hotplex update --restart    # 更新后自动重启 Gateway
+hotplex update --sync-skills --skills-profile runtime  # 更新后显式同步 runtime Skills
 ```
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
@@ -475,6 +486,8 @@ hotplex update --restart    # 更新后自动重启 Gateway
 | `--check` | | `bool` | `false` | 仅检查更新可用性，不下载 |
 | `--yes` | `-y` | `bool` | `false` | 跳过确认提示 |
 | `--restart` | | `bool` | `false` | 更新成功后自动重启 Gateway |
+| `--sync-skills` | | `bool` | `false` | 二进制替换成功后、重启前显式同步 Skills |
+| `--skills-profile` | | `string` | `runtime` | 累积 profile：`runtime` 或 `operator`；仅与 `--sync-skills` 一起使用 |
 
 ---
 
@@ -809,7 +822,9 @@ hotplex slack react remove --channel D0AQJ5CLZN0 --ts 1777797319.120439 --emoji 
 
 ## Cron 定时任务
 
-定时任务命令直接操作本地 SQLite 数据库。CRUD 命令无需 Gateway 运行，但 `trigger` 需要通过 Admin API 通信。
+定时任务命令直接操作本地 SQLite 数据库。CRUD 命令无需 Gateway 运行，但 `trigger` 需要通过 Admin API 通信。每个 create 示例都必须捕获返回 ID 并独立执行
+`hotplex cron get <id|name> --json`；list/history 不能替代验证。更多安全路由见
+[hotplex-cli Cron reference source](https://github.com/hrygo/hotplex/blob/main/internal/skills/builtin/hotplex-cli/references/cron.md)。
 
 **调度表达式格式**：
 
@@ -818,6 +833,7 @@ hotplex slack react remove --channel D0AQJ5CLZN0 --ts 1777797319.120439 --emoji 
 | `cron:<expression>` | `cron:*/5 * * * *` | 标准 cron 表达式 |
 | `every:<duration>` | `every:30m` | 固定间隔（最小 1m） |
 | `at:<timestamp>` | `at:2026-01-01T00:00:00Z` | 一次性执行（ISO-8601） |
+| `at:+<duration>` | `at:+10m` | 从现在起的相对一次性执行（1m–72h） |
 
 ### `hotplex cron create`
 
@@ -833,6 +849,8 @@ hotplex cron create \
   -m "检查系统健康状态" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID"
 
+hotplex cron get <JOB_ID> --json
+
 # 带生命周期限制的周期任务
 hotplex cron create \
   --name "remind" \
@@ -841,6 +859,8 @@ hotplex cron create \
   --bot-id "$BOT_ID" --owner-id "$USER_ID" \
   --max-runs 6 --expires-at "2026-05-11T00:00:00+08:00"
 
+hotplex cron get <JOB_ID> --json
+
 # 静默一次性任务（不回传结果）
 hotplex cron create \
   --name "cleanup" \
@@ -848,6 +868,8 @@ hotplex cron create \
   -m "清理过期数据" \
   --bot-id "$BOT_ID" --owner-id "$USER_ID" \
   --delete-after-run --silent
+
+hotplex cron get <JOB_ID> --json
 ```
 
 | 标志 | 短标志 | 类型 | 默认值 | 必填 | 说明 |
@@ -1003,6 +1025,39 @@ hotplex cron history daily-health --json
 
 ---
 
+## Built-in Skill 生命周期
+
+### `hotplex skills status|sync|remove`
+
+三个命令共享 closed profile 和 worker 解析：`runtime` 只包含 `hotplex-cli`，`operator`
+累积包含 `hotplex-cli` 与 `hotplex-operator`。`--worker` 可重复，支持 `--json`；`sync` 和
+`remove` 另支持 `--dry-run`。完整 flags 见 [generated CLI surface source](https://github.com/hrygo/hotplex/blob/main/internal/skills/builtin/hotplex-cli/references/cli-surface.generated.md)。
+
+```bash
+hotplex skills status --profile runtime --worker claude_code --json
+hotplex skills sync --profile runtime --worker claude_code --dry-run
+hotplex skills remove --profile runtime --worker claude_code --json
+```
+
+不显式传 `--worker` 时，命令只解析已启用 Slack/Feishu/Yuanxin platform/bot 的 effective
+worker targets；empty target 返回 bounded error，不回退 RegisteredTypes。Claude 的 native root
+是 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可
+推断 filesystem root。`$HOTPLEX_HOME/skills/builtin/<version>/<name>` 是 immutable inventory，
+状态和 receipts 也位于 `$HOTPLEX_HOME`，与 UserHome projection 分离。
+
+`status` 和 `--dry-run` 零写；sync 不覆盖未知 user/project Skill，collision、drift、failed
+均以非零返回。remove 只删除 matching receipt 且 unchanged-tree 能证明归属的 projection，
+不删除 inventory。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills
+checker 只读；onboard/update 只有显式 `--sync-skills` 才同步。Admin/WebChat 的 public Skills
+catalog 永久展示内置 inventory；Session `/skills` 仍按当前 Worker/filesystem/native evidence
+决定是否出现，discoverable 不等于 callable。
+真实同名 user/project Skill 优先，builtin-only update/delete 返回 `SKILL_BUILTIN_READONLY`。
+
+两个 built-in 的 canonical source 是 `internal/skills/builtin/hotplex-cli` 与
+`internal/skills/builtin/hotplex-operator`；生成的 `.agents/skills/hotplex-cli` 和
+`.agents/skills/hotplex-operator` mirror 必须 byte-identical。仓库 portfolio 另含
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+
 ## Admin 账号管理
 
 用户与账号管理命令。用于 WebChat 多租户部署的 bootstrap admin 创建等场景（v1.29.1+）。
@@ -1097,9 +1152,12 @@ hotplex update -y --restart
 hotplex cron create --name "health" --schedule "cron:0 9 * * 1-5" \
   -m "检查系统健康" --bot-id "$BOT" --owner-id "$OWNER"
 
+# 使用返回的 ID 独立核验（不要用 list 代替）
+hotplex cron get <JOB_ID> --json
+
 # 查看状态
 hotplex cron list --enabled
-hotplex cron get health
+hotplex cron get health --json
 
 # 手动触发
 hotplex cron trigger health

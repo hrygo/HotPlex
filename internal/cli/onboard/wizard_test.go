@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/cli/checkers"
+	"github.com/hrygo/hotplex/internal/skills/builtin"
+	"github.com/hrygo/hotplex/internal/skills/reconcile"
 )
 
 func TestStepEnvPreCheck(t *testing.T) {
@@ -256,6 +258,74 @@ func TestPromptChoice(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestOnboardDoesNotSyncWithoutExplicitFlag(t *testing.T) {
+	t.Parallel()
+	runner := &wizardSkillRunner{}
+	step, ok := stepBuiltinSkillsIfRequested(context.Background(), WizardOptions{SkillRunner: runner}, "")
+	require.False(t, ok)
+	require.Empty(t, step)
+	require.Zero(t, runner.syncCalls)
+}
+
+func TestOnboardExplicitSyncUsesRuntimeProfileOnly(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("messaging:\n  slack:\n    enabled: true\n    worker_type: claude_code\n"), 0o600))
+	runner := &wizardSkillRunner{}
+	step, ok := stepBuiltinSkillsIfRequested(context.Background(), WizardOptions{
+		SyncSkills:  true,
+		SkillRunner: runner,
+	}, configPath)
+	require.True(t, ok)
+	require.Equal(t, "pass", step.Status)
+	require.Equal(t, 1, runner.syncCalls)
+	require.Equal(t, builtin.ProfileRuntime, runner.options.Profile)
+	require.Equal(t, []reconcile.WorkerType{reconcile.WorkerClaude}, runner.options.WorkerTypes)
+}
+
+func TestOnboardReportsTypedSyncOutcomeAndRoots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("messaging:\n  slack:\n    enabled: true\n    worker_type: claude_code\n"), 0o600))
+	runner := &wizardSkillRunner{report: reconcile.Report{Profile: builtin.ProfileRuntime, Items: []reconcile.Item{{
+		Target:        "/tmp/native-root",
+		WorkerAliases: []reconcile.WorkerType{reconcile.WorkerClaude},
+		Action:        reconcile.ActionInstall,
+		Outcome:       reconcile.OutcomeChanged,
+		ReasonCode:    reconcile.ReasonChanged,
+	}}}}
+	step, ok := stepBuiltinSkillsIfRequested(context.Background(), WizardOptions{SyncSkills: true, SkillRunner: runner}, configPath)
+	require.True(t, ok)
+	require.Equal(t, "pass", step.Status)
+	require.Contains(t, step.Detail, "target=/tmp/native-root")
+	require.Contains(t, step.Detail, "aliases=claude_code")
+}
+
+type wizardSkillRunner struct {
+	syncCalls int
+	options   reconcile.Options
+	report    reconcile.Report
+}
+
+func (r *wizardSkillRunner) Status(context.Context, reconcile.Options) (reconcile.Report, error) {
+	return reconcile.Report{}, nil
+}
+
+func (r *wizardSkillRunner) Sync(_ context.Context, options reconcile.Options) (reconcile.Report, error) {
+	r.syncCalls++
+	r.options = options
+	if r.report.Profile == "" {
+		r.report.Profile = options.Profile
+	}
+	return r.report, nil
+}
+
+func (r *wizardSkillRunner) Remove(context.Context, reconcile.Options) (reconcile.Report, error) {
+	return reconcile.Report{}, nil
 }
 
 func TestPromptYesNo(t *testing.T) {

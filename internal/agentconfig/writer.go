@@ -37,6 +37,10 @@ func ResolveFilePath(dir, platform, botName, fileName string) (string, error) {
 // It validates that content size does not exceed maxBytes, creates a temp
 // file in the same directory, writes content, then renames to the target path.
 func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) error {
+	canonical, known := canonicalFileName(fileName)
+	if !known || canonical != fileName {
+		return fmt.Errorf("%w: %q", ErrUnknownConfigFile, fileName)
+	}
 	if len(content) > maxBytes {
 		return fmt.Errorf("agentconfig: content size %d exceeds limit %d", len(content), maxBytes)
 	}
@@ -75,35 +79,42 @@ func WriteFile(dir, platform, botName, fileName, content string, maxBytes int) e
 	return nil
 }
 
-// ResolvedSource reports which level a config file resolves from by checking
-// os.Stat at each level in priority order. Returns "bot", "platform", "global",
-// or "" if the file is not found at any level.
-func ResolvedSource(dir, platform, botName, fileName string) string {
+// ResolvedLocation reports the effective scope and physical basename for a
+// canonical config slot.
+func ResolvedLocation(dir, platform, botName, fileName string) (source, resolvedFile string) {
+	canonical, known := canonicalFileName(fileName)
+	if !known || canonical != fileName {
+		return "", ""
+	}
+	statFile := func(parent string) bool {
+		if _, err := os.Stat(filepath.Join(parent, fileName)); err == nil {
+			return true
+		}
+		return false
+	}
 	// 1. Bot-level
 	if botName != "" && platform != "" {
-		p := filepath.Join(dir, platform, botName, fileName)
-		if _, err := os.Stat(p); err == nil {
-			return "bot"
+		if statFile(filepath.Join(dir, platform, botName)) {
+			return "bot", fileName
 		}
 	}
 	// 2. Platform-level
 	if platform != "" {
-		p := filepath.Join(dir, platform, fileName)
-		if _, err := os.Stat(p); err == nil {
-			return "platform"
-		}
-		// 2b. Legacy backward compat: dir/platform/default/fileName
-		if botName == "" {
-			p := filepath.Join(dir, platform, LegacyDefaultBotName, fileName)
-			if _, err := os.Stat(p); err == nil {
-				return "legacy"
-			}
+		if statFile(filepath.Join(dir, platform)) {
+			return "platform", fileName
 		}
 	}
 	// 3. Global-level
-	p := filepath.Join(dir, fileName)
-	if _, err := os.Stat(p); err == nil {
-		return "global"
+	if statFile(dir) {
+		return "global", fileName
 	}
-	return ""
+	return "", ""
+}
+
+// ResolvedSource reports which level a config file resolves from by checking
+// os.Stat at each level in priority order. Returns "bot", "platform", "global",
+// or "" if the file is not found at any level.
+func ResolvedSource(dir, platform, botName, fileName string) string {
+	source, _ := ResolvedLocation(dir, platform, botName, fileName)
+	return source
 }

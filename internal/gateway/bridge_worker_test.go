@@ -231,7 +231,7 @@ func (w *replayNativeWorker) InvokeNativeCommand(_ context.Context, invocation w
 	return nil
 }
 
-func TestDeliverInputReplayUsesNativeInvokerWhenAvailable(t *testing.T) {
+func TestDeliverInputReplayRequiresSessionValidation(t *testing.T) {
 	t.Parallel()
 
 	b := &Bridge{log: testLogger(t)}
@@ -241,8 +241,9 @@ func TestDeliverInputReplayUsesNativeInvokerWhenAvailable(t *testing.T) {
 		Skill:   &worker.NativeCommandInvocation{Name: "oracle-dba", Args: "10.102.78.1"},
 	}
 
-	require.NoError(t, b.deliverInputReplay(t.Context(), w, replay))
-	require.Equal(t, *replay.Skill, w.invoked)
+	err := b.deliverInputReplay(t.Context(), w, replay)
+	require.ErrorIs(t, err, worker.ErrSkillNotSupported)
+	require.Empty(t, w.invoked)
 	w.AssertNotCalled(t, "Input", mock.Anything, mock.Anything, mock.Anything)
 }
 

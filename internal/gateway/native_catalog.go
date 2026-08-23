@@ -134,7 +134,9 @@ func (s *sessionCatalogStore) assemble(ctx context.Context, sessionID, workDir s
 		if fc.requires != nil && !fc.requires(w) {
 			continue
 		}
-		merged = append(merged, fc.desc)
+		descriptor := fc.desc
+		descriptor.CatalogOrigin = worker.CatalogOriginGateway
+		merged = append(merged, descriptor)
 		seen[fc.desc.Name] = struct{}{}
 	}
 
@@ -155,6 +157,11 @@ func (s *sessionCatalogStore) assemble(ctx context.Context, sessionID, workDir s
 				if _, dup := seen[d.Name]; dup {
 					continue
 				}
+				// Provider metadata is not evidence of its own trust tier. The
+				// assembly boundary stamps every successful authoritative entry
+				// as Worker-owned, preventing a provider or stale Path shape from
+				// masquerading as a filesystem-only descriptor.
+				d.CatalogOrigin = worker.CatalogOriginWorker
 				merged = append(merged, d)
 				seen[d.Name] = struct{}{}
 			}
@@ -183,13 +190,14 @@ func (s *sessionCatalogStore) assemble(ctx context.Context, sessionID, workDir s
 					continue
 				}
 				merged = append(merged, worker.NativeCommandDescriptor{
-					Name:        sk.Name,
-					Description: sk.Description,
-					Kind:        worker.NativeCommandKindSkill,
-					Mode:        mode,
-					StartsTurn:  true,
-					AcceptsArgs: true,
-					Path:        sk.FilePath,
+					Name:          sk.Name,
+					Description:   sk.Description,
+					Kind:          worker.NativeCommandKindSkill,
+					Mode:          mode,
+					StartsTurn:    true,
+					AcceptsArgs:   true,
+					Path:          sk.FilePath,
+					CatalogOrigin: worker.CatalogOriginFilesystem,
 				})
 				seen[sk.Name] = struct{}{}
 			}

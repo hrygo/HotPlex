@@ -54,6 +54,20 @@ log:
 
 ---
 
+### Dev 本机覆盖（config-dev.local.yaml）
+
+`configs/config-dev.local.yaml` 命中 gitignore 规则 `*.local.yaml`，用于本机专属覆盖（如把 dev 栈固定到本地 PostgreSQL），不影响仓库默认行为——文件不存在时一切照旧（SQLite）。
+
+`scripts/dev.sh` 解析顺序：**显式 `$CONFIG` > `config-dev.local.yaml`（存在时）> `config-dev.yaml`**。`./scripts/dev.sh config` 输出最终解析路径。
+
+CLI 需与 dev 网关操作同一数据库时：
+
+```bash
+hotplex admin create --config "$(./scripts/dev.sh config)" --username admin
+```
+
+---
+
 ## 完整字段参考
 
 > **默认值列**为 `config.yaml` 的值（即实际生效的 base 值）。括号内标注代码 `Default()` 的原始值，仅当两者不同时显示。

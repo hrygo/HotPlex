@@ -1,36 +1,20 @@
 ---
-version: 2
-description: "User profile and preferences"
+version: 3
+description: "User-provided background and preferences"
 ---
 
 # USER.md - 用户画像
 
+此文件只记录用户主动提供、并希望跨会话参考的背景和偏好。请替换下面的占位内容；不要把运行时能力、凭据、内部路径或未经确认的事实写入这里。
+
 ## 技术背景
 
-<!-- 填写你的信息，帮助 agent 适配你的专业水平。示例值供参考，替换为你的实际情况 -->
+- 主要语言：<!-- 例如 Go、Python；填写用户实际使用的内容 -->
+- 常用框架/工具：<!-- 填写用户实际使用的内容 -->
+- 专业背景：<!-- 填写有助于调整解释深度的内容 -->
 
-- **主要语言**：Go
-- **框架**：Gin, gRPC
-- **基础设施**：Docker, Kubernetes
+## 工作与沟通偏好
 
-## 工作偏好
-
-- 提交风格：原子提交 + Conventional Commits
-- 反馈风格：代码审查格式（指出问题 + 给出建议）
-- 不要过度解释基础概念
-
-## 沟通偏好
-
-- 保持简洁——不要总结已完成的工作
-- 代码用 file:line 格式引用
-- 解释技术决策的 WHY
-- 不确定时直接说"需要调查"
-
-## 配置层级
-
-此文件支持 3 级 fallback，高优先级完整替换低优先级：
-- 全局级：~/.hotplex/agent-configs/USER.md（本文件）
-- 平台级：~/.hotplex/agent-configs/slack/USER.md
-- Bot 级：~/.hotplex/agent-configs/slack/<botName>/USER.md
-
-使用 `hotplex-setup` skill 进行交互式个性化配置。修改后对新会话生效。
+- 交付风格：<!-- 例如偏好原子提交、代码审查或简洁摘要 -->
+- 解释深度：<!-- 例如需要背景说明或直接给结论 -->
+- 语言与格式：<!-- 填写用户偏好的语言、引用和格式 -->

@@ -46,7 +46,10 @@ import { TODO_TOOLS } from "@/lib/tool-categories";
 import { useMetrics } from "@/lib/hooks/useMetrics";
 import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
-import { mapErrorToMessage } from "@/lib/adapters/error-mapping";
+import {
+    isExpectedCommandRejection,
+    mapErrorToMessage,
+} from "@/lib/adapters/error-mapping";
 import { logger } from "@/lib/logger";
 import i18n from "@/lib/i18n/config";
 import type {
@@ -67,6 +70,7 @@ import type {
     ToolSummaryPart,
     ContextUsagePart,
     TurnSummaryPart,
+    SkillListPart,
     MessagePart,
 } from "@/lib/types/message-parts";
 import type { HotPlexMessage } from "@/lib/types/message";
@@ -101,6 +105,7 @@ export type {
     ToolSummaryPart,
     ContextUsagePart,
     TurnSummaryPart,
+    SkillListPart,
     MessagePart,
 };
 
@@ -189,13 +194,15 @@ export function isGatewayCommandAck(
 export function convertToThreadMessage(
     message: HotPlexMessage,
 ): ThreadMessageLike {
-    // Filter out ToolSummaryPart, ContextUsagePart, and TurnSummaryPart — not recognized by assistant-ui's ThreadMessageLike type
+    // Filter out custom card parts — they are rendered from message metadata,
+    // not passed into assistant-ui's ThreadMessageLike content union.
     const parts = message.parts ?? [];
     const content = parts.filter(
         (p): p is TextPart | ReasoningPart | ToolCallPart =>
             p.type !== "tool-summary" &&
             p.type !== "context-usage" &&
-            p.type !== "turn-summary",
+            p.type !== "turn-summary" &&
+            p.type !== "skill-list",
     );
 
     const role = (message.role as string) === "user" ? "user" : "assistant";
@@ -208,6 +215,10 @@ export function convertToThreadMessage(
     // Extract turn summary data for card rendering
     const turnSummaryPart = parts.find(
         (p): p is TurnSummaryPart => p.type === "turn-summary",
+    );
+
+    const skillListPart = parts.find(
+        (p): p is SkillListPart => p.type === "skill-list",
     );
 
     // Extended ThreadMessageLike for HotPlex-specific metadata
@@ -226,7 +237,14 @@ export function convertToThreadMessage(
                 ...(turnSummaryPart
                     ? { turnSummary: turnSummaryPart.data }
                     : {}),
+                ...(skillListPart ? { skillsList: skillListPart.skills } : {}),
                 ...(message.progress ? { progress: message.progress } : {}),
+                ...(message.clientMessageId
+                    ? { clientMessageId: message.clientMessageId }
+                    : {}),
+                ...(message.deliveryStatus
+                    ? { deliveryStatus: message.deliveryStatus }
+                    : {}),
             },
         } satisfies Record<string, unknown>,
     } as ThreadMessageLike & {
@@ -289,7 +307,34 @@ function historyToMessages(records: ConversationRecord[]): HotPlexMessage[] {
             .filter((p): p is TextPart | ToolSummaryPart => p !== null),
         createdAt: m.createdAt,
         status: "complete" as const,
+        clientMessageId: m.clientMessageId,
+        deliveryStatus: m.deliveryStatus,
     }));
+}
+
+/**
+ * Reconcile live optimistic messages with authoritative history by the stable
+ * client identity. Durable history wins, while an optimistic user turn whose
+ * delivery is still unknown remains visible until history proves its outcome.
+ */
+export function reconcileMessagesByClientMessageId(
+    liveMessages: HotPlexMessage[],
+    historyMessages: HotPlexMessage[],
+): HotPlexMessage[] {
+    const seenClientMessageIds = new Set<string>();
+    const history = historyMessages.filter((message) => {
+        if (message.role !== "user" || !message.clientMessageId) return true;
+        if (seenClientMessageIds.has(message.clientMessageId)) return false;
+        seenClientMessageIds.add(message.clientMessageId);
+        return true;
+    });
+    const liveOnly = liveMessages.filter(
+        (message) =>
+            message.role !== "user" ||
+            !message.clientMessageId ||
+            !seenClientMessageIds.has(message.clientMessageId),
+    );
+    return [...history, ...liveOnly];
 }
 
 // ============================================================================
@@ -481,7 +526,9 @@ export function useHotPlexRuntime({
                                 return "";
                             })
                             .join("");
-                    // Merge server messages with live messages (dedup by ID and content signature)
+                    // Stable client identity wins over content signatures. The
+                    // signature fallback remains for older gateways that do not
+                    // persist client_message_id yet.
                     setMessages((prev) => {
                         const serverIds = new Set(
                             serverMessages.map((m) => m.id),
@@ -491,9 +538,10 @@ export function useHotPlexRuntime({
                                 (m) => `${m.role}:${extractText(m.parts)}`,
                             ),
                         );
-                        const liveOnly = prev.filter((m) => {
+                        const identityMerged =
+                            reconcileMessagesByClientMessageId(prev, serverMessages);
+                        const liveOnly = identityMerged.filter((m) => {
                             if (serverIds.has(m.id)) return false;
-                            // Also dedup by role+content for user messages (live ID vs server ID)
                             const sig = `${m.role}:${extractText(m.parts)}`;
                             return !serverSigs.has(sig);
                         });
@@ -1153,9 +1201,14 @@ export function useHotPlexRuntime({
             );
             const isTerminated =
                 (data?.code as string) === "SESSION_TERMINATED";
-            // CONFIG_INVALID is a user-command rejection (e.g. /cd on a
-            // workspace-bound session), not a runtime fault — warn, don't error.
-            const isConfigInvalid = (data?.code as string) === "CONFIG_INVALID";
+            // User-fixable command rejections (invalid args, unsupported
+            // capabilities, or legacy capability errors) are expected input
+            // outcomes, not runtime faults — warn, don't error.
+            const isExpectedCommandRejectionError = isExpectedCommandRejection(
+                data?.code,
+                data?.message,
+            );
+            const isNotSupported = (data?.code as string) === "NOT_SUPPORTED";
 
             // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
             if (isBusy) {
@@ -1260,12 +1313,18 @@ export function useHotPlexRuntime({
                         details: data.details,
                         eventId: env?.id,
                     });
-                } else if (isConfigInvalid) {
-                    logger.warn("RuntimeAdapter", "Command rejected", {
-                        code: data.code,
-                        message: data.message,
-                        eventId: env?.id,
-                    });
+                } else if (isExpectedCommandRejectionError) {
+                    logger.warn(
+                        "RuntimeAdapter",
+                        isNotSupported
+                            ? "Command not supported"
+                            : "Command rejected",
+                        {
+                            code: data.code,
+                            message: data.message,
+                            eventId: env?.id,
+                        },
+                    );
                 } else {
                     logger.error("RuntimeAdapter", "Error received", {
                         code: data.code || "unknown",
@@ -1511,6 +1570,28 @@ export function useHotPlexRuntime({
             ) {
                 return;
             }
+            if (
+                data.status === "delivered" ||
+                data.status === "unknown" ||
+                data.status === "failed"
+            ) {
+                const deliveryStatus: "delivered" | "unknown" | "failed" =
+                    data.status === "delivered"
+                        ? "delivered"
+                        : data.status === "unknown"
+                          ? "unknown"
+                          : "failed";
+                setMessages((prev) =>
+                    prev.map((message) =>
+                        message.clientMessageId === data.client_message_id
+                            ? {
+                                  ...message,
+                                  deliveryStatus,
+                              }
+                            : message,
+                    ),
+                );
+            }
             if (queuedDispatch && matchesQueuedDispatch) {
                 if (data.status === "delivered") {
                     const wasUnknown = queuedDispatch.outcomeUnknown === true;
@@ -1553,6 +1634,10 @@ export function useHotPlexRuntime({
                     const pendingAssistantID = pendingAssistantIdRef.current;
                     const activeAssistantID = activeAssistantIdRef.current;
                     const commandText = activeTurnInputRef.current;
+                    const isSkillsCommand = commandText
+                        ?.trim()
+                        .toLowerCase()
+                        .startsWith("/skills");
                     pendingAssistantIdRef.current = null;
                     activeAssistantIdRef.current = null;
                     activeInputMessageIdRef.current = null;
@@ -1577,10 +1662,15 @@ export function useHotPlexRuntime({
                             );
                             if (pendingIndex !== -1) {
                                 const next = [...prev];
+                                const hasSkillList = next[pendingIndex].parts.some(
+                                    (part) => part.type === "skill-list",
+                                );
                                 next[pendingIndex] = {
                                     ...next[pendingIndex],
                                     progress: undefined,
-                                    parts: [confirmation],
+                                    parts: isSkillsCommand && hasSkillList
+                                        ? next[pendingIndex].parts
+                                        : [confirmation],
                                     status: "complete",
                                 };
                                 return next;
@@ -1593,6 +1683,14 @@ export function useHotPlexRuntime({
                         }
                         // Done beat the ack and removed the placeholder →
                         // append the confirmation so the turn is still visible.
+                        const lastMessage = prev[prev.length - 1];
+                        if (
+                            isSkillsCommand &&
+                            lastMessage?.role === "assistant" &&
+                            lastMessage.parts.some((part) => part.type === "skill-list")
+                        ) {
+                            return prev;
+                        }
                         return [
                             ...prev,
                             {
@@ -1755,6 +1853,29 @@ export function useHotPlexRuntime({
             skillsFetchedRef.current = true;
             const entries = data?.skills ?? [];
             onSkillsChangeRef.current?.(entries);
+            const isSkillsCommand = activeTurnInputRef.current
+                ?.trim()
+                .toLowerCase()
+                .startsWith("/skills");
+            if (!isSkillsCommand) return;
+
+            setMessages((prev) => {
+                const lastMessage = prev[prev.length - 1];
+                if (lastMessage?.role !== "assistant") return prev;
+                const parts = lastMessage.parts.filter(
+                    (part) => part.type !== "skill-list",
+                );
+                return [
+                    ...prev.slice(0, -1),
+                    {
+                        ...lastMessage,
+                        parts: [
+                            ...parts,
+                            { type: "skill-list" as const, skills: entries },
+                        ],
+                    },
+                ];
+            });
         };
         client.on("skillsList", handleSkillsList);
 
@@ -2026,12 +2147,15 @@ export function useHotPlexRuntime({
             const localId =
                 queueItemId ??
                 `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const clientMessageId = client.createClientMessageId();
             const userMessage: HotPlexMessage = {
                 id: `user-${localId}`,
                 role: "user",
+                clientMessageId,
                 parts: [{ type: "text", text: textContent }],
                 createdAt: new Date(),
                 status: "complete",
+                deliveryStatus: "pending",
             };
             const assistantID = `assistant-local-${localId}`;
             const pendingAssistant = createPendingAssistantMessage(
@@ -2158,20 +2282,35 @@ export function useHotPlexRuntime({
 
             // Send to HotPlex gateway with error handling
             try {
-                const clientMessageId = client.sendInput(textContent);
-                activeInputMessageIdRef.current = clientMessageId;
+                const sentClientMessageId = client.sendInput(
+                    textContent,
+                    clientMessageId,
+                );
+                activeInputMessageIdRef.current = sentClientMessageId;
+                // Keep the optimistic record correlated even if a caller
+                // supplies a transport implementation that normalizes IDs.
+                setMessages((prev) =>
+                    prev.map((message) =>
+                        message.id === userMessage.id
+                            ? {
+                                  ...message,
+                                  clientMessageId: sentClientMessageId,
+                              }
+                            : message,
+                    ),
+                );
                 const activeQueueDispatch = activeQueueDispatchRef.current;
                 if (
                     queueItemId &&
                     activeQueueDispatch?.itemId === queueItemId &&
                     activeQueueDispatch.sessionId === sessionIdRef.current
                 ) {
-                    activeQueueDispatch.clientMessageId = clientMessageId;
+                    activeQueueDispatch.clientMessageId = sentClientMessageId;
                     if (
                         !queueStore.attachClientMessageId(
                             activeQueueDispatch.sessionId,
                             queueItemId,
-                            clientMessageId,
+                            sentClientMessageId,
                         )
                     ) {
                         failActiveQueueDispatchRef.current(
@@ -2181,7 +2320,7 @@ export function useHotPlexRuntime({
                         throw new Error("Queue dispatch correlation was lost");
                     }
                 }
-                return clientMessageId;
+                return sentClientMessageId;
             } catch (err) {
                 rollbackOptimisticInput();
                 throw err;

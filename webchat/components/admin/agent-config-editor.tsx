@@ -4,31 +4,16 @@ import { useState, useCallback, useEffect } from 'react';
 import { updateWorkspace, type Workspace } from '@/lib/api/workspaces';
 import { MarkdownText } from '@/components/assistant-ui/MarkdownText';
 import { AgentConfigFileList, CONFIG_FILES } from './agent-config-file-list';
+import {
+  agentConfigOverridesEqual,
+  hasAgentConfigOverride,
+  prepareAgentConfigOverrides,
+} from '@/lib/agent-config-overrides';
 
 const MAX_FILE_CHARS = 8000;
 
 type OverridesMap = Record<string, string>;
 type ViewMode = 'edit' | 'split' | 'preview';
-
-// Empty/whitespace-only values are dropped so the override map only carries
-// real overrides — an absent key means "inherit team default" (matches the
-// backend ValidateOverrides semantics and keeps the override badge honest).
-function removeEmpty(map: OverridesMap): OverridesMap {
-  const out: OverridesMap = {};
-  for (const [k, v] of Object.entries(map)) {
-    if (v && v.trim()) out[k] = v;
-  }
-  return out;
-}
-
-function overridesEqual(a: OverridesMap, b: OverridesMap): boolean {
-  const ca = removeEmpty(a);
-  const cb = removeEmpty(b);
-  const ka = Object.keys(ca);
-  const kb = Object.keys(cb);
-  if (ka.length !== kb.length) return false;
-  return ka.every((k) => ca[k] === cb[k]);
-}
 
 export function AgentConfigEditor({
   workspaceId,
@@ -39,8 +24,9 @@ export function AgentConfigEditor({
   overrides: OverridesMap;
   onSaved?: (ws: Workspace) => void;
 }) {
-  const [map, setMap] = useState<OverridesMap>(overrides ?? {});
-  const [saved, setSaved] = useState<OverridesMap>(overrides ?? {});
+  const initial = prepareAgentConfigOverrides(overrides ?? {});
+  const [map, setMap] = useState<OverridesMap>(initial);
+  const [saved, setSaved] = useState<OverridesMap>(initial);
   const [activeKey, setActiveKey] = useState<string>('soul');
   const [viewMode, setViewMode] = useState<ViewMode>('edit');
   const [saving, setSaving] = useState(false);
@@ -48,10 +34,10 @@ export function AgentConfigEditor({
 
   const activeDef = CONFIG_FILES.find((f) => f.key === activeKey) ?? CONFIG_FILES[0];
   const content = map[activeDef.file] ?? '';
-  const dirty = !overridesEqual(map, saved);
+  const dirty = !agentConfigOverridesEqual(map, saved);
   const charCount = content.length;
   const charWarning = charCount > MAX_FILE_CHARS;
-  const hasOverride = !!(content && content.trim());
+  const hasOverride = hasAgentConfigOverride(map, activeDef.file);
 
   const setContent = useCallback(
     (v: string) => {
@@ -71,7 +57,7 @@ export function AgentConfigEditor({
   };
 
   const handleSave = async () => {
-    const cleaned = removeEmpty(map);
+    const cleaned = prepareAgentConfigOverrides(map);
     setSaving(true);
     setMessage(null);
     try {
@@ -115,7 +101,7 @@ export function AgentConfigEditor({
       <div className="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-elevated)]/20 border border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-gold)] animate-pulse" />
         <span>
-          Overrides stack on top of team defaults. Changes apply to{' '}
+          Overrides replace team defaults; an empty override explicitly clears a slot. Changes apply to{' '}
           <span className="text-[var(--text-secondary)] font-bold">new sessions</span> only.
         </span>
       </div>
@@ -249,7 +235,9 @@ export function AgentConfigEditor({
                   <MarkdownText text={content} />
                 ) : (
                   <p className="text-xs text-[var(--text-faint)] font-mono">
-                    No content to preview. This file inherits the default settings.
+                    {hasOverride
+                      ? 'This slot is explicitly cleared.'
+                      : 'No content to preview. This file inherits the default settings.'}
                   </p>
                 )}
               </div>

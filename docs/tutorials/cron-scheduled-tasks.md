@@ -1,268 +1,111 @@
 ---
 title: 定时任务 (Cron) 教程
 weight: 4
-description: 用自然语言调度 AI 任务 —— HotPlex AI-native 定时系统完全指南
+description: 用自然语言调度 AI 任务 —— HotPlex AI-native 定时系统使用指南
 ---
 
 # 定时任务 (Cron) 教程
 
-HotPlex 内置 AI-native 定时任务系统。载荷是自然语言 Prompt，由 Worker 执行（等同一次 AI 对话），结果自动回传到创建者的平台（飞书卡片 / Slack 消息）。
+HotPlex Cron 把自然语言 Prompt 交给 Worker 在计划时间执行。完整命令和
+当前 flags 以 `hotplex cron --help`、`hotplex cron create --help` 为准；本页只
+保留决策、安全和验证要点。
 
-**前置条件**：HotPlex Gateway 已运行（`hotplex gateway start`），已接入 Slack 或飞书。
+## 1. 选择 schedule
 
-## 1. 创建你的第一个定时任务
+`--schedule` 使用 `kind:value` 形式：
 
-创建一个每 5 分钟执行一次的健康检查任务：
+| 形式 | 例子 | 适用场景 |
+|------|------|----------|
+| `cron:<expression>` | `cron:0 9 * * 1-5` | 周期性 cron 表达式 |
+| `every:<duration>` | `every:30m` | 固定间隔（至少 1 分钟） |
+| `at:<RFC3339>` | `at:2030-01-01T00:00:00Z` | 固定时间的一次性任务 |
+| `at:+<duration>` | `at:+10m` | 从现在起的安全相对延迟 |
 
-```bash
-hotplex cron create \
-  --name "quick-health" \
-  --schedule "every:5m" \
-  -m "检查系统健康状态，汇总异常事件" \
-  --bot-id "$GATEWAY_BOT_ID" \
-  --bot-name "$GATEWAY_BOT_NAME" \
-  --owner-id "$GATEWAY_USER_ID"
-```
+不要用 shell-specific 日期算术；直接使用可移植的 RFC3339 占位时间，或使用 parser
+支持的 `at:+duration`。
 
-> 环境变量 `GATEWAY_BOT_ID`、`GATEWAY_BOT_NAME` 和 `GATEWAY_USER_ID` 在 Worker 进程中自动注入，直接使用即可。
+## 2. 创建隔离的周期任务
 
-创建成功后，CLI 返回任务 ID。从此刻起，Worker 每 5 分钟执行一次 Prompt，结果发送到你的 Slack/飞书。
-
-**验证**：`hotplex cron list` 查看任务是否出现，状态为 enabled。
-
-## 2. 三种调度类型
-
-HotPlex 支持三种 schedule 格式，通过 `kind:value` 前缀区分：
-
-### cron — 标准 cron 表达式
-
-5 域格式：`分 时 日 月 周`。适合固定时间点的周期任务。
+周期任务应显式提供生命周期约束。以下示例也展示 `--timeout`、`--allowed-tools`
+和 `--silent` 的位置；占位符不会被 HotPlex 当作真实凭据：
 
 ```bash
-# 工作日每天早上 9 点
 hotplex cron create \
-  --name "weekday-morning" \
-  --schedule "cron:0 9 * * 1-5" \
-  -m "生成本日工作简报" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID"
-
-# 每 15 分钟
-hotplex cron create \
-  --name "frequent-check" \
-  --schedule "cron:*/15 * * * *" \
-  -m "检查服务指标是否正常" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID"
-
-# 每周一上午 10 点
-hotplex cron create \
-  --name "weekly-review" \
-  --schedule "cron:0 10 * * 1" \
-  -m "汇总上周数据并生成周报" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID"
-```
-
-### every — 固定间隔
-
-从上次执行完成后开始计时，最低 1 分钟。适合监控类任务。
-
-```bash
-# 每 30 分钟
---schedule "every:30m"
-
-# 每 2 小时
---schedule "every:2h"
-
-# 每 6 小时
---schedule "every:6h"
-```
-
-### at — 一次性定时
-
-指定精确时间戳（ISO-8601），执行一次后自动 disable。适合延迟提醒、定时触发。
-
-```bash
-# 指定精确时间
-hotplex cron create \
-  --name "deploy-check" \
-  --schedule "at:2026-05-12T09:00:00+08:00" \
-  -m "检查部署状态，如有异常立即报告" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID"
-
-# 动态计算（Linux: date -d，macOS: date -v）
---schedule "at:$(date -d '+30 minutes' +%Y-%m-%dT%H:%M:%S+08:00)"
-```
-
-## 3. 生命周期管理
-
-### 限制执行次数
-
-`--max-runs` 让任务成功执行 N 次后自动 disable：
-
-```bash
-# 30 分钟一次，最多执行 6 次后停止
-hotplex cron create \
-  --name "hydration-remind" \
+  --name "health-check" \
   --schedule "every:30m" \
-  -m "提醒用户喝水" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID" \
-  --max-runs 6
+  --message "Read the current gateway health and report only actionable failures." \
+  --bot-id "<BOT_ID>" \
+  --owner-id "<OWNER_ID>" \
+  --max-runs 10 \
+  --expires-at "2030-01-01T00:00:00Z" \
+  --timeout 120 \
+  --allowed-tools "status,logs" \
+  --platform cron \
+  --silent
 ```
 
-### 设置过期时间
-
-`--expires-at` 在指定时间后自动 disable：
+CLI 返回任务 ID 后，必须使用独立的 JSON 读取路径核对状态、schedule、platform
+和 platform key；不能把 `cron list` 当作成功证据：
 
 ```bash
-# 24 小时后自动停止
+hotplex cron get <JOB_ID> --json
+```
+
+## 3. 创建一次性延迟任务
+
+`at:+10m` 是 parser 接受的相对形式；配合 `--delete-after-run` 和
+`--max-retries` 可表达一次性清理与有限重试：
+
+```bash
 hotplex cron create \
-  --name "temp-monitor" \
-  --schedule "every:10m" \
-  -m "监控服务状态" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID" \
-  --expires-at "2026-05-11T00:00:00+08:00"
+  --name "one-shot-health-check" \
+  --schedule "at:+10m" \
+  --message "Read the current gateway health and report the result." \
+  --bot-id "<BOT_ID>" \
+  --owner-id "<OWNER_ID>" \
+  --platform cron \
+  --delete-after-run \
+  --max-retries 2
 ```
 
-两者可组合使用，任一条件满足即停止。
-
-## 4. 一次性延迟任务
-
-`at` 类型配合 `--delete-after-run` 实现真正的即发即弃：
+随后再次独立读取返回的 ID：
 
 ```bash
-# 1 小时后执行，完成后自动删除任务
+hotplex cron get <JOB_ID> --json
+```
+
+## 4. Attach 到已有 Session
+
+只有请求明确要求复用已有 Session 时才使用 `--attach`。执行环境必须已经提供
+`GATEWAY_SESSION_ID`；bot/owner 身份按当前 CLI 的 `GATEWAY_*` 解析规则提供，
+不要把真实环境值写入 Prompt。attached one-shot 可使用 `at:+duration`：
+
+```bash
 hotplex cron create \
-  --name "deploy-check" \
-  --schedule "at:$(date -v+1H +%Y-%m-%dT%H:%M:%S+08:00)" \
-  -m "检查部署状态" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID" \
-  --delete-after-run
+  --attach \
+  --name "attached-health-check" \
+  --message "Read the current gateway health." \
+  --schedule "at:+10m"
 ```
 
-失败时自动重试（指数退避：1min -> 5min -> 25min）：
+同样使用返回 ID 做独立验证：
 
 ```bash
-# 失败最多重试 3 次
-hotplex cron create \
-  --name "deploy-check" \
-  --schedule "at:$(date -v+1H +%Y-%m-%dT%H:%M:%S+08:00)" \
-  -m "检查部署状态" \
-  --bot-id "$GATEWAY_BOT_ID" --owner-id "$GATEWAY_USER_ID" \
-  --delete-after-run --max-retries 3
+hotplex cron get <JOB_ID> --json
 ```
 
-其他选项：`--timeout 120`（超时秒数，默认使用调度器配置（默认 5 分钟），可通过此参数覆盖）、`--silent`（静默，不投递结果）。
+Attached recurring job 可以使用 `every:<duration>`，但必须在当前 help/validator
+确认下同时提供 `--max-runs` 与 `--expires-at`。attached job 不接受 cron expression。
 
-## 5. 查看与管理
+## 5. 生命周期与安全检查
 
-### 列出所有任务
-
-```bash
-# 表格形式
-hotplex cron list
-
-# JSON 格式（适合脚本处理）
-hotplex cron list --json
-
-# 只看启用的
-hotplex cron list --enabled
-```
-
-### 查看任务详情
-
-```bash
-# 按 ID 或名称查找
-hotplex cron get daily-health
-hotplex cron get cj_abc123
-```
-
-### 更新任务
-
-仅修改指定字段，未指定的保持不变：
-
-```bash
-# 修改调度时间
-hotplex cron update daily-health --schedule "cron:0 10 * * 1-5"
-
-# 禁用任务（不删除，可随时重新启用）
-hotplex cron update daily-health --enabled=false
-
-# 修改 Prompt
-hotplex cron update monitor -m "新的检查内容"
-```
-
-### 手动触发
-
-无需等待调度，立即执行一次（需要 Gateway 运行中）：
-
-```bash
-hotplex cron trigger daily-health
-```
-
-### 查看执行历史
-
-每次执行的详细记录：状态、耗时、成本、模型、时间：
-
-```bash
-hotplex cron history daily-health
-
-# JSON 格式
-hotplex cron history daily-health --json
-```
-
-### 删除任务
-
-```bash
-hotplex cron delete daily-health
-```
-
-## 6. AI-native 用法
-
-这是 HotPlex 的杀手级特性：**在对话中用自然语言创建定时任务**。
-
-在 Slack 或飞书中对 Bot 说：
-
-- "每天早上 9 点检查系统健康状态" -- Bot 自动创建 `cron:0 9 * * *` 任务
-- "30 分钟后提醒我检查部署" -- Bot 自动创建 `at:` 一次性任务
-- "每隔 2 小时巡检一次服务指标" -- Bot 自动创建 `every:2h` 任务
-- "每天提醒我喝水，一共提醒 6 次就行" -- Bot 自动加上 `--max-runs 6`
-
-HotPlex 的 Brain 意图识别会解析自然语言中的时间表达和频率意图，自动选择合适的 schedule 类型并组装 CLI 命令执行。你不需要手动拼命令，直接说就行。
-
-## 7. 多 Bot 场景
-
-当同一平台配置了多个 Bot 时，定时任务需要指定 `--bot-name` 来确保使用正确的 Agent 配置（SOUL.md、AGENTS.md 等）：
-
-```bash
-# 多 Bot 场景：指定 bot-name 确保加载正确的 agent config
-hotplex cron create \
-  --name "daily-review" \
-  --schedule "cron:0 9 * * 1-5" \
-  -m "生成本日代码审查报告" \
-  --bot-id "$GATEWAY_BOT_ID" \
-  --bot-name "$GATEWAY_BOT_NAME" \
-  --owner-id "$GATEWAY_USER_ID"
-```
-
-如果不指定 `--bot-name`，任务会回退到平台级 Agent 配置（跳过 Bot 级查找）。单 Bot 场景下无需指定。
-
-## 参数速查
-
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| `--name` | 是 | 唯一标识 |
-| `--schedule` | 是 | 调度表达式（`cron:` / `every:` / `at:`） |
-| `-m` | 是 | Prompt，最大 4KB |
-| `--bot-id` | 是 | 取自 `$GATEWAY_BOT_ID` |
-| `--bot-name` | 否 | Bot 的 YAML 配置名（用于 Agent Config 路径解析），取自 `$GATEWAY_BOT_NAME`。多 Bot 场景下建议填写，确保任务加载正确的 Bot 级配置 |
-| `--owner-id` | 是 | 取自 `$GATEWAY_USER_ID` |
-| `--timeout` | 否 | 单次超时秒数，默认使用调度器配置（默认 5 分钟），可通过此参数覆盖 |
-| `--max-runs` | 否 | 成功 N 次后自动 disable |
-| `--expires-at` | 否 | 过期时间（RFC3339） |
-| `--delete-after-run` | 否 | 执行后自动删除 |
-| `--max-retries` | 否 | 失败重试次数，默认 0 |
-| `--silent` | 否 | 静默模式，不投递结果 |
-| `--work-dir` | 否 | 工作目录，取自 `$GATEWAY_WORK_DIR` |
-
----
-
-**下一步**：了解 [Agent 配置](../reference/configuration.md) 或探索 [Slack 集成](./slack-integration.md)。
+- `--max-runs` 限制周期任务的成功执行次数，`--expires-at` 使用 RFC3339 绝对时间；
+  两者可以同时指定。
+- `--delete-after-run` 只用于明确要删除的一次性任务；`--silent` 抑制结果投递，
+  不会跳过任务执行。
+- `--timeout` 以秒为单位；`--allowed-tools` 是逗号分隔的工具名，按当前 Worker
+  能力与授权选择最小集合。
+- 创建前检查 `hotplex cron create --help`，创建后总是执行独立
+  `hotplex cron get <id|name> --json`；`list`、`history`、`trigger` 不能替代这一步。
+- `delete`、`trigger`、更新投递目标或扩大工具权限都属于有副作用的操作，必须得到
+  明确授权。无法调用当前 CLI 时应报告 `unsupported`/degraded，不要声称任务已创建。

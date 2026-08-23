@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
     convertToThreadMessage,
     isGatewayCommandAck,
+    reconcileMessagesByClientMessageId,
 } from "./hotplex-runtime-adapter";
+import type { HotPlexMessage } from "@/lib/types/message";
 
 describe("convertToThreadMessage", () => {
     it("preserves local progress in assistant-ui custom metadata", () => {
@@ -17,6 +19,32 @@ describe("convertToThreadMessage", () => {
         }) as { metadata?: { custom?: { progress?: string } } };
 
         expect(message.metadata?.custom?.progress).toBe("thinking");
+    });
+
+    it("keeps a skills result in custom metadata for the structured card", () => {
+        const message = convertToThreadMessage({
+            id: "assistant-skills-1",
+            role: "assistant",
+            parts: [
+                {
+                    type: "skill-list",
+                    skills: [
+                        {
+                            name: "api-designer",
+                            description: "Design APIs",
+                            source: "global",
+                            status: "discoverable",
+                        },
+                    ],
+                },
+            ],
+            createdAt: new Date(0),
+            status: "complete",
+        }) as { metadata?: { custom?: { skillsList?: Array<{ name: string }> } } };
+
+        expect(message.metadata?.custom?.skillsList).toEqual([
+            expect.objectContaining({ name: "api-designer" }),
+        ]);
     });
 });
 
@@ -52,5 +80,35 @@ describe("isGatewayCommandAck", () => {
                 status: "unknown",
             }),
         ).toBe(false);
+    });
+});
+
+describe("reconcileMessagesByClientMessageId", () => {
+    it("reconciles optimistic and durable user turns by client_message_id", () => {
+        const optimistic = {
+            id: "user-local-1",
+            role: "user",
+            clientMessageId: "cm_1",
+            parts: [{ type: "text", text: "same content" }],
+            createdAt: new Date(1),
+            status: "complete",
+            deliveryStatus: "unknown",
+        } as HotPlexMessage;
+        const durable = {
+            id: "turn:42:user",
+            role: "user",
+            clientMessageId: "cm_1",
+            parts: [{ type: "text", text: "same content" }],
+            createdAt: new Date(2),
+            status: "complete",
+            deliveryStatus: "delivered",
+        } as HotPlexMessage;
+
+        const merged = reconcileMessagesByClientMessageId(
+            [optimistic],
+            [durable],
+        );
+        expect(merged.filter((message) => message.role === "user")).toHaveLength(1);
+        expect(merged[0]?.id).toBe("turn:42:user");
     });
 });

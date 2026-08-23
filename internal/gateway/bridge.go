@@ -115,6 +115,9 @@ type Bridge struct {
 	// SetCatalogInvalidator because the Handler (which owns the catalog
 	// generation map) is built after the Bridge. Nil disables invalidation.
 	catalogInvalidate func(sessionID string)
+	// replayValidate is injected by Handler so session-aware crash replay can
+	// revalidate structured native invocations before they reach the Worker.
+	replayValidate func(context.Context, string, worker.Worker, worker.InputReplay) (worker.InputReplay, error)
 }
 
 type workerRunBinding struct {
@@ -267,6 +270,12 @@ func (b *Bridge) SetCatalogInvalidator(fn func(sessionID string)) {
 	b.catalogInvalidate = fn
 }
 
+// SetReplayValidator registers the callback used by session-aware crash and
+// resume replay. The Handler owns the merged catalog and its generation.
+func (b *Bridge) SetReplayValidator(fn func(context.Context, string, worker.Worker, worker.InputReplay) (worker.InputReplay, error)) {
+	b.replayValidate = fn
+}
+
 // BufferPending appends a busy-supplement for the fallback path (worker lacks
 // mid-turn support). Called from Handler's SESSION_BUSY branch.
 func (b *Bridge) BufferPending(sessionID string, env *events.Envelope, content string) bool {
@@ -398,19 +407,16 @@ func (b *Bridge) StopPendingReplays() {
 	b.ClearAllPending()
 }
 
-// StartSession creates a new session and starts a worker.
+// StartSession creates a durable session, hydrates its sequence counter, and
+// starts a worker. The hydration barrier is inside the bridge so non-WebSocket
+// callers cannot start a worker before the first event sequence is safe.
 func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) error {
 	if b.closed.Load() {
 		return fmt.Errorf("bridge: rejecting new session during shutdown")
 	}
-
-	// Validate and expand workDir for all callers.
-	if p.WorkDir != "" {
-		expanded, err := validateAndExpandWorkDir(p.WorkDir)
-		if err != nil {
-			return fmt.Errorf("bridge: invalid work dir: %w", err)
-		}
-		p.WorkDir = expanded
+	p, err := normalizeSessionStartParams(p)
+	if err != nil {
+		return err
 	}
 
 	observability.SessionStartAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
@@ -419,14 +425,78 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		observability.SessionStartDuration().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType))))
 	}()
 
-	// Create the session with its final workspace identity in one persistence
-	// operation so the create audit and runtime surfaces share the same AgentID.
-	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkspaceID, p.WorkDir, p.Title, p.ClientKey)
+	si, err := b.CreateSession(ctx, p)
 	if err != nil {
 		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "create_failed")))
-		return fmt.Errorf("bridge: create session: %w", err)
+		return err
 	}
 
+	if err := b.hub.EnsureSeqHydrated(p.ID); err != nil {
+		if cleanupErr := b.sm.DeletePhysical(context.Background(), p.ID); cleanupErr != nil {
+			return fmt.Errorf("bridge: hydrate session sequence: %w (cleanup failed: %w)", err, cleanupErr)
+		}
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "hydration_failed")))
+		return fmt.Errorf("bridge: hydrate session sequence: %w", err)
+	}
+
+	if err := b.startPreparedSession(ctx, p, si); err != nil {
+		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "start_failed")))
+		return err
+	}
+	return nil
+}
+
+// CreateSession persists a CREATED session without attaching a worker. Conn
+// uses this half of SessionInitGate before calling Hub.EnsureSeqHydrated.
+func (b *Bridge) CreateSession(ctx context.Context, p worker.SessionStartParams) (*session.SessionInfo, error) {
+	if b.closed.Load() {
+		return nil, fmt.Errorf("bridge: rejecting new session during shutdown")
+	}
+	p, err := normalizeSessionStartParams(p)
+	if err != nil {
+		return nil, err
+	}
+	si, err := b.sm.CreateWithBot(ctx, p.ID, p.UserID, p.BotID, p.BotName, p.WorkerType, p.AllowedTools, p.Platform, p.PlatformKey, p.WorkspaceID, p.WorkDir, p.Title, p.ClientKey)
+	if err != nil {
+		return nil, fmt.Errorf("bridge: create session: %w", err)
+	}
+	return si, nil
+}
+
+// StartSessionAfterHydration starts a worker for an already durable CREATED
+// session. It is the second half of SessionInitGate and must only be called
+// after Hub.EnsureSeqHydrated has succeeded.
+func (b *Bridge) StartSessionAfterHydration(ctx context.Context, p worker.SessionStartParams) error {
+	if b.closed.Load() {
+		return fmt.Errorf("bridge: rejecting new session during shutdown")
+	}
+	p, err := normalizeSessionStartParams(p)
+	if err != nil {
+		return err
+	}
+	si, err := b.sm.Get(ctx, p.ID)
+	if err != nil {
+		return fmt.Errorf("bridge: get prepared session: %w", err)
+	}
+	if si.State != events.StateCreated {
+		return fmt.Errorf("bridge: prepared session %s is %s", p.ID, si.State)
+	}
+	return b.startPreparedSession(ctx, p, si)
+}
+
+func normalizeSessionStartParams(p worker.SessionStartParams) (worker.SessionStartParams, error) {
+	if p.WorkDir == "" {
+		return p, nil
+	}
+	expanded, err := validateAndExpandWorkDir(p.WorkDir)
+	if err != nil {
+		return p, fmt.Errorf("bridge: invalid work dir: %w", err)
+	}
+	p.WorkDir = expanded
+	return p, nil
+}
+
+func (b *Bridge) startPreparedSession(ctx context.Context, p worker.SessionStartParams, si *session.SessionInfo) error {
 	workerInfo := b.prepareWorkerInfo(p.ID, p.UserID, p.WorkDir, si)
 
 	// Inject cron-specific env vars (e.g. admin API creds) only for cron sessions.
@@ -445,6 +515,7 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 		wt:                 p.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           p.Platform,
+		scope:              runtimeScopeForSession(p.WorkspaceID, p.BotID, p.BotName),
 		botID:              p.BotID,
 		botName:            p.BotName,
 		forwardOpts:        &forwardOpts{workDir: p.WorkDir},
@@ -466,7 +537,6 @@ func (b *Bridge) StartSession(ctx context.Context, p worker.SessionStartParams) 
 			_ = b.sm.Delete(context.Background(), p.ID)
 		},
 	); err != nil {
-		observability.SessionStartErrors().Add(ctx, 1, metric.WithAttributes(attribute.String("worker_type", string(p.WorkerType)), attribute.String("error_type", "start_failed")))
 		return err
 	}
 
@@ -564,6 +634,7 @@ func (b *Bridge) StartFreshWorker(ctx context.Context, sessionID string) (string
 		wt:                 si.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           si.Platform,
+		scope:              runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName),
 		botID:              si.BotID,
 		botName:            si.BotName,
 		forwardOpts:        &opts,
@@ -655,6 +726,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		wt:                 si.WorkerType,
 		workerInfo:         workerInfo,
 		platform:           si.Platform,
+		scope:              runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName),
 		botID:              si.BotID,
 		botName:            si.BotName,
 		forwardOpts:        &opts,
@@ -706,7 +778,7 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		b.log.Info("bridge: re-delivering pending input to resumed worker",
 			"session_id", id, "content_len", len(pendingReplay.Content),
 			"skill", pendingReplay.Skill != nil)
-		if err := b.deliverInputReplay(ctx, w, pendingReplay); err != nil {
+		if err := b.deliverInputReplayForSession(ctx, id, w, pendingReplay); err != nil {
 			b.log.Warn("bridge: pending input re-delivery failed",
 				"session_id", id, "err", err)
 		}
@@ -890,8 +962,11 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	// Reload agent config so the worker's next session picks up file changes.
 	if si, err := b.sm.Get(ctx, sessionID); err == nil {
 		if su, ok := w.(worker.SystemPromptUpdater); ok {
-			info := &worker.SessionInfo{SystemPrompt: ""}
-			b.injectAgentConfig(info, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(ctx, si.WorkspaceID))
+			info := b.buildWorkerInfo(si.ID, si.UserID, si.WorkDir, si)
+			injectSlackEnv(&info, si.PlatformKey)
+			info.Env = injectGatewayContext(info.Env, si.Platform, si.BotID, si.BotName, si.UserID, si.PlatformKey, si.ID, si.WorkDir)
+			facts := buildRuntimeFacts(w, info, si.Platform, runtimeScopeForSession(si.WorkspaceID, si.BotID, si.BotName))
+			b.injectAgentConfig(&info, facts, si.Platform, si.BotName, si.BotID, nil, b.resolveWorkspaceOverrides(ctx, si.WorkspaceID))
 			if info.SystemPrompt != "" {
 				su.UpdateSystemPrompt(info.SystemPrompt)
 				b.log.Info("bridge: reset reloaded agent config",
@@ -1194,6 +1269,26 @@ func sanitizeLastInput(input string) string {
 }
 
 func (b *Bridge) deliverInputReplay(ctx context.Context, w worker.Worker, replay worker.InputReplay) error {
+	// This legacy low-level helper has no session identity and therefore cannot
+	// establish catalog authority. Keep it fail-closed for structured replay;
+	// production paths must call deliverInputReplayForSession.
+	if replay.Skill != nil {
+		return fmt.Errorf("%w: session-aware native replay validation required", worker.ErrSkillNotSupported)
+	}
+	return b.deliverInputReplayForSession(ctx, "", w, replay)
+}
+
+func (b *Bridge) deliverInputReplayForSession(ctx context.Context, sessionID string, w worker.Worker, replay worker.InputReplay) error {
+	if replay.Skill != nil && sessionID != "" {
+		if b.replayValidate == nil {
+			return fmt.Errorf("%w: native replay validation unavailable", worker.ErrSkillNotSupported)
+		}
+		validated, err := b.replayValidate(ctx, sessionID, w, replay)
+		if err != nil {
+			return err
+		}
+		replay = validated
+	}
 	if replay.Skill == nil {
 		if replay.Content == "" {
 			return nil

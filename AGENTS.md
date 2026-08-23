@@ -141,11 +141,13 @@ gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | {state, commit_
   - `<hotplex>` = `META-COGNITION.md`（go:embed，强制注入首位，不可排除）
   - `<persona>` = `SOUL.md`
   - `<rules>` = `AGENTS.md`
-  - `<skills>` = `SKILLS.md`
+  - `<tool-guidance>` = `TOOLS.md`
 - **C 通道**（`<context>`，可被 B 通道覆盖）：
   - `<user>` = `USER.md`
   - `<memory>` = `MEMORY.md`
-- 三级 fallback：全局 → 平台（slack/）→ Bot（slack/<botName>/），每文件独立解析，命中即终止
+- 三级 fallback：Bot（slack/<botName>/）→ 平台（slack/）→ 全局，每文件独立解析；缺失才继承，present-empty 显式清空并终止
+- AgentConfig 只识别 `SOUL.md` / `AGENTS.md` / `TOOLS.md` / `USER.md` / `MEMORY.md`；Agent Skill 仅以 `.agents/skills/<name>/SKILL.md` 为入口，`TOOLS.md` 只承载常驻环境指导
+- 内置 Skill canonical 来源为 `internal/skills/builtin/hotplex-cli` 与 `internal/skills/builtin/hotplex-operator`，生成的 `.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` 必须 byte-identical；仓库 portfolio 还包含 `hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`
 - 配置热更新：仅在 session 初始化或 `/reset` 时加载，运行中修改不立即生效
 
 ### 配置陷阱（高发反直觉点）
@@ -157,8 +159,9 @@ gh api repos/hrygo/hotplex/pulls/{N}/reviews --jq 'max_by(.id) | {state, commit_
   3. `HOTPLEX_MESSAGING_FEISHU_WORKER_TYPE`（env 平台级，`.env:74`，env 覆盖 YAML）
   4. `messaging.worker_type`（YAML 共享默认，`configs/config.yaml:276`）
   5. 编译默认 `claude_code`（`config_defaults.go:127`）
-- **`inject_exclude` 边界**（`internal/agentconfig/loader.go:106`）：5 个可排除文件 `SOUL.md` / `AGENTS.md` / `SKILLS.md` / `USER.md` / `MEMORY.md`；`META-COGNITION.md` 是 `go:embed` **强制注入首位，无法被排除**（Worker 身份边界）。3 级 fallback：bot > platform > global；nil 继承父级，`[]string{}` 显式清空。
+- **`inject_exclude` 边界**：5 个可排除槽位 `SOUL.md` / `AGENTS.md` / `TOOLS.md` / `USER.md` / `MEMORY.md`。`META-COGNITION.md` 是 `go:embed` **强制注入首位，无法被排除**（Worker 身份边界）。3 级 fallback：bot > platform > global；nil 继承父级，`[]string{}` 显式清空。
 - **dev YAML vs home YAML**: `configs/config-dev.yaml` 通过 `inherits: config.yaml` 覆盖基础，是 dev-only 覆盖层；`~/.hotplex/config.yaml` 是运行实例配置（影响服务安装路径）。两者**独立**，不互通。
+- **dev 数据库真源**: dev 栈 DB 不依赖 repo `.env` 的 `HOTPLEX_DB_*`（该机制仍受支持但本机已停用）。本机 PG 固化在 gitignored `configs/config-dev.local.yaml`；`scripts/dev.sh` 解析顺序 = 显式 `$CONFIG` > `config-dev.local.yaml`（存在时）> `config-dev.yaml`。任何进程要操作 dev 栈数据库必须 `--config "$(./scripts/dev.sh config)"`（admin 系子命令仅支持长格式 `--config`，gateway 支持 `-c`），否则会按默认链路落到 `~/.hotplex/data/hotplex.db`（SQLite）造成双库分裂——症状是 webchat 一直提示创建管理员（bootstrap-status 查的是网关实际连接的库）。`hotplex admin create` 成功输出带 `[db=<driver>]` 可直接核对写入目标。
 - **Admin 后台双通道鉴权**（issue #788）：`/admin/*`（Bearer+scope，`AdminAPI.Middleware`）与 `/api/admin/*`（cookie session，`UserAdminHandlers.requireAdmin`）是**两套独立 handler**，不是同一端点的两种认证。`/admin/*` 的 `Middleware` 支持 cookie fallback——无 Bearer 时回落 chat session cookie（校验 `role==admin && status==active`，注入全 scope），使内嵌 webchat admin 免另填 admin token；远程运维仍走 Bearer。SetCookieFallback 在 `routes.go` lap 创建后注入，nil 时回 Bearer-only。Admin 写操作（POST/PUT/PATCH/DELETE）由 middleware 级 `admin_audit` slog 统一记录（动作枚举 `internal/admin/audit.go`，actor=uid 或 `admin-token`）；`/api/admin/*` 写操作在各 handler 成功路径显式调用 `AdminAudit`。
 - **`log.file` 文件日志 + 轮转**（`cmd/hotplex/gateway_run.go:buildLogWriter`）：`log.file.enabled` **默认 false**（仅写 stderr，行为不变）。启用后日志经 lumberjack 轮转写入文件（默认 `~/.hotplex/logs/gateway.log`，可 `log.file.path` 覆盖）。前台/TTY 模式同时 tee 到 stderr 便于调试；**daemon/service 模式 stderr 非 TTY 时自动抑制**，避免 daemon 已把 stderr 重定向到同名文件导致双写。`log.file.*` 全部为 **static**（改路径/轮转参数需重启，运行时重建 lumberjack writer 不安全）。`HOTPLEX_HOME` 环境变量覆盖 `config.HotplexHome()` 解析的默认根目录（主要供测试与非标准安装路径）；同时决定默认配置文件路径 `DefaultConfigPath()` = `$HOTPLEX_HOME/config.yaml`（未设置时 `~/.hotplex/config.yaml`）——设置后整个 workspace（配置+数据+日志+PID）整体迁移。
 
@@ -197,4 +200,3 @@ Slack（send-message / upload-file / bookmark / react 等）与 Cron（create / 
 - PostgreSQL 支持已实现（`db.driver: "postgres"`），SQLite 仍为默认
 - ACP 适配器已实现（JSON-RPC 2.0 over stdio）
 - Windows 自更新不支持（exe 运行时被锁，使用 `scripts/install.ps1` 替代）
-

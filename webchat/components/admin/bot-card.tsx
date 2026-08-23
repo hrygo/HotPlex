@@ -30,7 +30,8 @@ export function BotCard({ bot }: BotCardProps) {
   const getSourceLabel = (key: string) => {
     switch (key) {
       case 'agents': return t('admin:bots.source_labels.agents', { defaultValue: 'Rules' });
-      case 'skills': return t('admin:bots.source_labels.skills', { defaultValue: 'Skills' });
+      case 'tools':
+      case 'skills': return t('admin:bots.source_labels.tools', { defaultValue: 'Tools' });
       case 'user': return t('admin:bots.source_labels.user', { defaultValue: 'User' });
       case 'memory': return t('admin:bots.source_labels.memory', { defaultValue: 'Memory' });
       default: return key;

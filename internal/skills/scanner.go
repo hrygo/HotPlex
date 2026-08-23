@@ -2,6 +2,7 @@ package skills
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,16 @@ type skillFrontmatter struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 }
+
+// ScanRoot bounds the metadata read from a native Worker root. These limits
+// keep a malformed or unexpectedly large directory from becoming an
+// unbounded prompt/catalog input while preserving the existing shallow scan.
+const (
+	maxScanRootEntries      = 500
+	maxScanNameRunes        = 64
+	maxScanDescriptionRunes = 1024
+	maxFrontmatterDescRunes = 120
+)
 
 // scanDirs scans all skill directories and returns deduplicated skills.
 // Order: global dirs first, then project dirs (project overrides global by name).
@@ -91,8 +102,22 @@ func scanWorkspaceInstalled(workDir string) []Skill {
 // scanDir reads all .md files from a single skill directory.
 // Skips symlink files to avoid duplicates from linked directories.
 func scanDir(dir, source string, managed bool) ([]Skill, error) {
+	return scanDirContext(context.Background(), dir, source, managed)
+}
+
+func scanDirContext(ctx context.Context, dir, source string, managed bool) ([]Skill, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	fi, err := os.Lstat(dir)
-	if err != nil || !fi.IsDir() {
+	if err != nil {
+		return nil, fmt.Errorf("skill root: %w", err)
+	}
+	if !fi.IsDir() {
 		return nil, fmt.Errorf("not a directory: %s", dir)
 	}
 
@@ -101,8 +126,14 @@ func scanDir(dir, source string, managed bool) ([]Skill, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(entries) > maxScanRootEntries {
+		return nil, fmt.Errorf("skill root contains too many entries: %d > %d", len(entries), maxScanRootEntries)
+	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fullPath := filepath.Join(dir, entry.Name())
 
 		// Skip symlinks — .agents is often a symlink to .claude
@@ -113,7 +144,13 @@ func scanDir(dir, source string, managed bool) ([]Skill, error) {
 		if entry.IsDir() {
 			// Subdirectory: look for SKILL.md or skill.md
 			for _, name := range []string{"SKILL.md", "skill.md"} {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				candidate := filepath.Join(fullPath, name)
+				if isSymlink(candidate) {
+					continue
+				}
 				if s := parseSkillFile(candidate, source, managed); s != nil {
 					result = append(result, *s)
 					break
@@ -126,6 +163,24 @@ func scanDir(dir, source string, managed bool) ([]Skill, error) {
 		}
 	}
 	return result, nil
+}
+
+// ScanRoot scans one explicitly supplied native skill root. It is deliberately
+// shallow: each child directory contributes only its SKILL.md/skill.md, and
+// symlink files/directories are ignored. Built-in inventory callers must pass
+// an approved native root explicitly; this helper never discovers inventory.
+func ScanRoot(root, source string, managed bool) ([]Skill, error) {
+	return ScanRootContext(context.Background(), root, source, managed)
+}
+
+// ScanRootContext is the context-aware form of ScanRoot. It scans exactly one
+// supplied root, shallowly, and checks cancellation before and between every
+// child entry. Symlink files/directories are ignored by the underlying scan.
+func ScanRootContext(ctx context.Context, root, source string, managed bool) ([]Skill, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, fmt.Errorf("empty skill root")
+	}
+	return scanDirContext(ctx, root, source, managed)
 }
 
 // isSymlink returns true if the path is a symbolic link.
@@ -153,11 +208,15 @@ func parseSkillFile(path, source string, managed bool) *Skill {
 	if fm.Name == "" {
 		return nil
 	}
+	if len([]rune(fm.Name)) > maxScanNameRunes {
+		return nil
+	}
 
 	desc := strings.TrimSpace(fm.Description)
 	// Unfold YAML folded/scalar blocks
 	desc = strings.ReplaceAll(desc, "\n", " ")
 	desc = CollapseSpaces(desc)
+	desc = boundDescription(desc, maxScanDescriptionRunes)
 
 	return &Skill{
 		Name:        fm.Name,
@@ -184,12 +243,22 @@ func ParseFrontmatter(path string) (name, description string, ok bool) {
 	desc := strings.TrimSpace(fm.Description)
 	desc = strings.ReplaceAll(desc, "\n", " ")
 	desc = CollapseSpaces(desc)
-
-	if len([]rune(desc)) > 120 {
-		runes := []rune(desc)
-		desc = string(runes[:117]) + "..."
-	}
+	desc = boundDescription(desc, maxFrontmatterDescRunes)
 	return fm.Name, desc, true
+}
+
+func boundDescription(description string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(description)
+	if len(runes) <= limit {
+		return description
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 // extractFrontmatter extracts and parses YAML frontmatter from markdown content.
