@@ -25,7 +25,9 @@ readonly ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly BIN_NAME="hotplex"
 readonly BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/bin}"
 readonly LOG_DIR="${LOG_DIR:-${ROOT_DIR}/logs}"
-readonly CONFIG="${CONFIG:-${ROOT_DIR}/configs/config-dev.yaml}"
+# Config precedence: explicit $CONFIG > machine-local overlay (gitignored) > base dev config.
+readonly DEV_LOCAL_CONFIG="${ROOT_DIR}/configs/config-dev.local.yaml"
+readonly CONFIG="${CONFIG:-$([[ -f "$DEV_LOCAL_CONFIG" ]] && echo "$DEV_LOCAL_CONFIG" || echo "${ROOT_DIR}/configs/config-dev.yaml")}"
 
 readonly GATEWAY_PID="${HOME}/.hotplex/.pids/gateway.pid"
 readonly GATEWAY_LOG="${LOG_DIR}/hotplex.log"
@@ -235,6 +237,11 @@ tail_gateway() {
     fi
 }
 
+start_all() {
+    start_gateway
+    start_webchat
+}
+
 # ── WebChat ────────────────────────────────────────────────────────────────────
 
 webchat_running() {
@@ -290,6 +297,11 @@ stop_webchat() {
     kill_port "$WEBCHAT_PORT" "webchat (port)"
 }
 
+stop_all() {
+    stop_webchat
+    stop_gateway
+}
+
 status_webchat() {
     if webchat_running; then
         echo -e "${GREEN}🟢 Web-chat running${NC} (PID $(read_pid "$WEBCHAT_PID")) → http://localhost:$WEBCHAT_PORT"
@@ -329,6 +341,11 @@ tail_webchat() {
     fi
 }
 
+tail_all() {
+    err "tail requires a single service: gateway | webchat"
+    exit 1
+}
+
 # ── Dispatch ────────────────────────────────────────────────────────────────────
 
 CMD=${1:-}; SVC=${2:-all}
@@ -339,7 +356,10 @@ case "$CMD" in
     status) status_"$SVC" ;;
     logs)   logs_"$SVC" ;;
     tail)   tail_"$SVC" ;;
-    *)      echo "Usage: $0 <start|stop|status|logs|tail> [gateway|webchat|all]"
+    config) echo "$CONFIG" ;;
+    *)      echo "Usage: $0 <start|stop|status|logs|tail|config> [gateway|webchat|all]"
+            echo ""
+            echo "  config          Print the resolved dev config path"
             echo ""
             echo "  This script manages the LOCAL DEV environment only."
             echo "  Production deployments do not use this script."

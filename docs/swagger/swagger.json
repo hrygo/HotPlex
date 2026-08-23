@@ -667,7 +667,7 @@
                         "AdminBearerAuth": []
                     }
                 ],
-                "description": "Returns the content of a single platform-level agent config file (channel team default). Accepts only SOUL.md, AGENTS.md, TOOLS.md, USER.md, or MEMORY.md. Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.",
+                "description": "Returns the content of a single platform-level agent config file (channel team default). Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.",
                 "produces": [
                     "application/json"
                 ],

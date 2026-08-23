@@ -78,7 +78,11 @@ func newStatusCmd() *cobra.Command {
 				case sourcePID:
 					fmt.Fprintf(os.Stderr, "gateway: running (PID %d)\n", inst.PID)
 				case sourceService:
-					fmt.Fprintf(os.Stderr, "gateway: running as service (%s, PID %d)\n", inst.Level, inst.PID)
+					if inst.PID > 0 {
+						fmt.Fprintf(os.Stderr, "gateway: running as service (level=%s, PID=%d)\n", inst.Level, inst.PID)
+					} else {
+						fmt.Fprintf(os.Stderr, "gateway: service-managed (level=%s, process PID unavailable)\n", inst.Level)
+					}
 				}
 				fmt.Fprintf(os.Stderr, "  health: %s → %s\n", healthURL, info.Health)
 			}
