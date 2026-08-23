@@ -114,6 +114,9 @@ func scanDir(dir, source string, managed bool) ([]Skill, error) {
 			// Subdirectory: look for SKILL.md or skill.md
 			for _, name := range []string{"SKILL.md", "skill.md"} {
 				candidate := filepath.Join(fullPath, name)
+				if isSymlink(candidate) {
+					continue
+				}
 				if s := parseSkillFile(candidate, source, managed); s != nil {
 					result = append(result, *s)
 					break
@@ -126,6 +129,17 @@ func scanDir(dir, source string, managed bool) ([]Skill, error) {
 		}
 	}
 	return result, nil
+}
+
+// ScanRoot scans one explicitly supplied native skill root. It is deliberately
+// shallow: each child directory contributes only its SKILL.md/skill.md, and
+// symlink files/directories are ignored. Built-in inventory callers must pass
+// an approved native root explicitly; this helper never discovers inventory.
+func ScanRoot(root, source string, managed bool) ([]Skill, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, fmt.Errorf("empty skill root")
+	}
+	return scanDir(root, source, managed)
 }
 
 // isSymlink returns true if the path is a symbolic link.
