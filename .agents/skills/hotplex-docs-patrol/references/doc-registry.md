@@ -28,7 +28,7 @@ WebSocket hub、AEP 事件分发、Session-Worker 生命周期编排。
 
 ## Session Management (`internal/session/`)
 
-5 状态机、SQLite 持久化、UUIDv5 确定性 ID、全局+每用户配额。
+Session 生命周期、持久化、确定性 ID 与资源配额。
 
 → `explanation/session-lifecycle.md` — 状态机设计（必须与代码同步）
 → `guides/developer/session-management.md` — 开发者操作指南
@@ -98,6 +98,23 @@ B/C 通道配置加载、BuildSystemPrompt、三级 fallback、XML 安全。
 → `explanation/agent-config-system.md` — 配置系统原理
 → `tutorials/agent-personality.md` — Agent 人格定制
 → `reference/configuration.md` — 配置参考
+
+**影响规则**：文件契约、scope 解析或 prompt 注入变化 → 原理+人格教程+配置参考；
+Admin/WebChat 编辑表面变化 → 同步检查 `reference/admin-api.md`。
+
+---
+
+## Agent Skills (`internal/skills/`, `.agents/skills/`)
+
+Skill 发现、目录契约、内置包、Worker 投影与仓库内维护 Skill。
+
+→ `tutorials/skills-setup.md` — 用户发现与使用
+→ `reference/cli.md` — `hotplex skills` 命令
+→ `reference/admin-api.md` — 管理端 Skill 目录与状态
+→ `explanation/agent-config-system.md` — 与 AgentConfig 的边界
+
+**影响规则**：发现或 callable 语义变化 → 教程+Admin API；CLI 同步/移除语义变化 →
+CLI 参考；内置 portfolio 或 prompt 边界变化 → 教程+AgentConfig 原理。
 
 ---
 

@@ -1,0 +1,30 @@
+{
+  "skill_name": "hotplex-docs-patrol",
+  "trigger_evals": [
+    {
+      "query": "检查这批 Gateway 和 AgentConfig 代码变更影响了哪些当前文档并精准维护",
+      "should_trigger": true,
+      "reason": "Code-to-document impact patrol"
+    },
+    {
+      "query": "从上次 baseline 开始检查 HotPlex 文档是否因合并的 PR 而过时",
+      "should_trigger": true,
+      "reason": "Baseline-driven documentation maintenance"
+    },
+    {
+      "query": "润色 README 的第一段文字",
+      "should_trigger": false,
+      "reason": "Ordinary copy editing is not a change-driven patrol"
+    },
+    {
+      "query": "发布 HotPlex v2.0.0 并创建 GitHub Release",
+      "should_trigger": false,
+      "reason": "Version publication belongs to hotplex-release"
+    },
+    {
+      "query": "分析运行中的 Gateway 为什么响应卡住",
+      "should_trigger": false,
+      "reason": "Runtime diagnosis belongs to hotplex-diagnostics"
+    }
+  ]
+}
