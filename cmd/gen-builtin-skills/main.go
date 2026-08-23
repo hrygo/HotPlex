@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -95,6 +96,7 @@ func generate(config generatorConfig) error {
 			name:    spec.name,
 			profile: spec.profile,
 			assets:  assets,
+			version: packageVersion(assets),
 		})
 	}
 	if err := writeAtomic(manifestOutput, renderManifest(manifests)); err != nil {
@@ -153,6 +155,7 @@ type generatedPackage struct {
 	name    string
 	profile string
 	assets  []assetRecord
+	version string
 }
 
 func scanPackage(packageRoot string) ([]assetRecord, error) {
@@ -204,6 +207,30 @@ func scanPackage(packageRoot string) ([]assetRecord, error) {
 	return assets, nil
 }
 
+func packageVersion(assets []assetRecord) string {
+	sortedAssets := append([]assetRecord(nil), assets...)
+	sort.Slice(sortedAssets, func(i, j int) bool {
+		if sortedAssets[i].path != sortedAssets[j].path {
+			return sortedAssets[i].path < sortedAssets[j].path
+		}
+		if sortedAssets[i].size != sortedAssets[j].size {
+			return sortedAssets[i].size < sortedAssets[j].size
+		}
+		return sortedAssets[i].sha256 < sortedAssets[j].sha256
+	})
+
+	hasher := sha256.New()
+	for _, asset := range sortedAssets {
+		_, _ = hasher.Write([]byte(asset.path))
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(strconv.FormatInt(asset.size, 10)))
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(asset.sha256))
+		_, _ = hasher.Write([]byte{0})
+	}
+	return "v1-" + hex.EncodeToString(hasher.Sum(nil))
+}
+
 func renderManifest(packages []generatedPackage) []byte {
 	var out strings.Builder
 	out.WriteString("package builtin\n\n")
@@ -212,7 +239,9 @@ func renderManifest(packages []generatedPackage) []byte {
 		out.WriteString("\t{\n")
 		out.WriteString("\t\tName:    ")
 		out.WriteString(strconv.Quote(pkg.name))
-		out.WriteString(",\n\t\tVersion: \"1\",\n\t\tProfile: Profile")
+		out.WriteString(",\n\t\tVersion: ")
+		out.WriteString(strconv.Quote(pkg.version))
+		out.WriteString(",\n\t\tProfile: Profile")
 		if pkg.profile == "runtime" {
 			out.WriteString("Runtime")
 		} else {
@@ -234,7 +263,19 @@ func renderManifest(packages []generatedPackage) []byte {
 	return []byte(out.String())
 }
 
-func mirrorPackage(sourceRoot, targetRoot string) error {
+type fileOps struct {
+	rename    func(string, string) error
+	remove    func(string) error
+	removeAll func(string) error
+}
+
+var fsOps = fileOps{
+	rename:    os.Rename,
+	remove:    os.Remove,
+	removeAll: os.RemoveAll,
+}
+
+func mirrorPackage(sourceRoot, targetRoot string) (err error) {
 	parent := filepath.Dir(targetRoot)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
@@ -243,26 +284,16 @@ func mirrorPackage(sourceRoot, targetRoot string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(stage) }()
+	defer func() {
+		if cleanupErr := removeIfExists(stage); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("cleanup mirror stage %q: %w", stage, cleanupErr))
+		}
+	}()
 
 	if err := copyTree(sourceRoot, stage); err != nil {
 		return err
 	}
-	backup := targetRoot + ".backup"
-	_ = os.RemoveAll(backup)
-	if _, err := os.Stat(targetRoot); err == nil {
-		if err := os.Rename(targetRoot, backup); err != nil {
-			return err
-		}
-	}
-	if err := os.Rename(stage, targetRoot); err != nil {
-		if _, backupErr := os.Stat(backup); backupErr == nil {
-			_ = os.Rename(backup, targetRoot)
-		}
-		return err
-	}
-	_ = os.RemoveAll(backup)
-	return nil
+	return replacePath(stage, targetRoot)
 }
 
 func copyTree(sourceRoot, targetRoot string) error {
@@ -292,7 +323,7 @@ func copyTree(sourceRoot, targetRoot string) error {
 	})
 }
 
-func writeAtomic(targetPath string, data []byte) error {
+func writeAtomic(targetPath string, data []byte) (err error) {
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return err
 	}
@@ -301,17 +332,119 @@ func writeAtomic(targetPath string, data []byte) error {
 		return err
 	}
 	tempName := temp.Name()
-	defer func() { _ = os.Remove(tempName) }()
+	defer func() {
+		if cleanupErr := removeIfExists(tempName); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("cleanup generated file %q: %w", tempName, cleanupErr))
+		}
+	}()
 	if _, err := temp.Write(data); err != nil {
-		_ = temp.Close()
-		return err
+		return errors.Join(err, temp.Close())
 	}
 	if err := temp.Chmod(0o644); err != nil {
-		_ = temp.Close()
-		return err
+		return errors.Join(err, temp.Close())
 	}
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempName, targetPath)
+	return replacePath(tempName, targetPath)
+}
+
+func replacePath(stagedPath, targetPath string) error {
+	targetExists, err := pathExists(targetPath)
+	if err != nil {
+		return err
+	}
+	if !targetExists {
+		return fsOps.rename(stagedPath, targetPath)
+	}
+
+	parent := filepath.Dir(targetPath)
+	backupPath, err := createSiblingPlaceholder(parent, ".hotplex-backup-"+filepath.Base(targetPath)+"-")
+	if err != nil {
+		return fmt.Errorf("create unique backup for %q: %w", targetPath, err)
+	}
+	if err := fsOps.rename(targetPath, backupPath); err != nil {
+		return fmt.Errorf("move existing %q to backup: %w", targetPath, err)
+	}
+
+	if err := fsOps.rename(stagedPath, targetPath); err != nil {
+		rollbackErr := fsOps.rename(backupPath, targetPath)
+		if rollbackErr != nil {
+			return errors.Join(
+				fmt.Errorf("promote staged %q: %w", stagedPath, err),
+				fmt.Errorf("rollback %q: %w", targetPath, rollbackErr),
+			)
+		}
+		return fmt.Errorf("promote staged %q: %w", stagedPath, err)
+	}
+
+	if err := removeIfExists(backupPath); err != nil {
+		return errors.Join(
+			fmt.Errorf("cleanup backup %q: %w", backupPath, err),
+			rollbackReplacement(targetPath, backupPath),
+		)
+	}
+	return nil
+}
+
+func rollbackReplacement(targetPath, backupPath string) error {
+	displacedPath, err := createSiblingPlaceholder(filepath.Dir(targetPath), ".hotplex-displaced-"+filepath.Base(targetPath)+"-")
+	if err != nil {
+		return fmt.Errorf("stage promoted %q for rollback: %w", targetPath, err)
+	}
+	if err := fsOps.rename(targetPath, displacedPath); err != nil {
+		return fmt.Errorf("move promoted %q for rollback: %w", targetPath, err)
+	}
+	if err := fsOps.rename(backupPath, targetPath); err != nil {
+		restoreNewErr := fsOps.rename(displacedPath, targetPath)
+		rollbackErrors := []error{fmt.Errorf("restore backup %q: %w", backupPath, err)}
+		if restoreNewErr != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore promoted target %q: %w", targetPath, restoreNewErr))
+		}
+		return errors.Join(rollbackErrors...)
+	}
+	if err := removeIfExists(displacedPath); err != nil {
+		return fmt.Errorf("cleanup displaced target %q: %w", displacedPath, err)
+	}
+	return nil
+}
+
+func createSiblingPlaceholder(parent, prefix string) (string, error) {
+	placeholder, err := os.CreateTemp(parent, prefix)
+	if err != nil {
+		return "", err
+	}
+	placeholderPath := placeholder.Name()
+	if err := placeholder.Close(); err != nil {
+		removeErr := fsOps.remove(placeholderPath)
+		closeErrors := []error{fmt.Errorf("close placeholder %q: %w", placeholderPath, err)}
+		if removeErr != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("cleanup placeholder %q: %w", placeholderPath, removeErr))
+		}
+		return "", errors.Join(closeErrors...)
+	}
+	if err := fsOps.remove(placeholderPath); err != nil {
+		return "", fmt.Errorf("remove placeholder %q: %w", placeholderPath, err)
+	}
+	return placeholderPath, nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+func removeIfExists(path string) error {
+	err := fsOps.removeAll(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }

@@ -54,6 +54,7 @@ func TestCanonicalPackagesHavePortableFrontmatterAndClosedReferences(t *testing.
 			manifest, ok := registry.Package(tc.name)
 			require.True(t, ok)
 			require.Equal(t, tc.profile, manifest.Profile)
+			require.Regexp(t, "^v1-[0-9a-f]{64}$", manifest.Version)
 			require.ElementsMatch(t, tc.files, manifest.Paths())
 
 			body, err := registry.ReadFile(tc.name, "SKILL.md")

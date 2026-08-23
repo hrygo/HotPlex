@@ -80,7 +80,7 @@ func renderPublicCLISurface(root *cobra.Command) ([]byte, error) {
 		}
 		out.WriteString("\n\n")
 	}
-	return []byte(strings.TrimSuffix(out.String(), "\n")), nil
+	return []byte(strings.TrimRight(out.String(), "\n") + "\n"), nil
 }
 
 func publicPurpose(command *cobra.Command) string {
@@ -150,7 +150,7 @@ func publicFlags(command *cobra.Command) []*pflag.Flag {
 			return
 		}
 		set.VisitAll(func(flag *pflag.Flag) {
-			if flag.Hidden || isSensitiveOrPathFlag(flag.Name) {
+			if flag.Hidden {
 				return
 			}
 			byName[flag.Name] = flag
@@ -168,23 +168,6 @@ func publicFlags(command *cobra.Command) []*pflag.Flag {
 		return flags[i].Name < flags[j].Name
 	})
 	return flags
-}
-
-func isSensitiveOrPathFlag(name string) bool {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return true
-	}
-	for _, fragment := range []string{
-		"config", "file", "output", "path", "dir", "workdir",
-		"token", "secret", "password", "credential", "cookie",
-		"auth", "environment", "env", "home", "root", "socket", "key",
-	} {
-		if strings.Contains(name, fragment) {
-			return true
-		}
-	}
-	return false
 }
 
 func commandPath(command *cobra.Command) string {

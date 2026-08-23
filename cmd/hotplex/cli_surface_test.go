@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,22 +16,29 @@ func TestRenderPublicCLISurfaceFiltersHiddenAndSensitiveValues(t *testing.T) {
 
 	root := newRootCmd()
 	root.AddCommand(&cobra.Command{Use: "hidden-internal", Hidden: true})
-	root.PersistentFlags().String("secret-token", "", "secret value")
+	root.PersistentFlags().String("secret-token", "example-secret", "secret value")
 
 	rendered, err := renderPublicCLISurface(root)
 	require.NoError(t, err)
 	text := string(rendered)
 	require.Contains(t, text, "hotplex cron create")
 	require.Contains(t, text, "--schedule")
+	require.Contains(t, text, "hotplex config validate")
+	require.Contains(t, text, "--config <string>")
+	require.Contains(t, text, "hotplex slack upload-file")
+	require.Contains(t, text, "--file <string>")
+	require.Contains(t, text, "hotplex slack download-file")
+	require.Contains(t, text, "--output <string>")
+	require.Contains(t, text, "--secret-token <string>")
 	require.NotContains(t, text, "hidden-internal")
-	require.NotContains(t, text, "secret-token")
+	require.NotContains(t, text, "example-secret")
 	require.NotContains(t, text, "v1.41.0")
 	require.NotContains(t, text, "~/.hotplex")
 	require.NotContains(t, text, "/Users/")
 	require.NotContains(t, text, "GATEWAY_")
 }
 
-func TestRenderPublicCLISurfaceIsDeterministicAndSkipsPathFlags(t *testing.T) {
+func TestRenderPublicCLISurfaceIsDeterministicAndPreservesPublicFlagNames(t *testing.T) {
 	t.Parallel()
 
 	root := newRootCmd()
@@ -39,12 +47,13 @@ func TestRenderPublicCLISurfaceIsDeterministicAndSkipsPathFlags(t *testing.T) {
 	second, err := renderPublicCLISurface(root)
 	require.NoError(t, err)
 	require.Equal(t, first, second)
-	require.NotContains(t, first, "--config")
-	require.NotContains(t, first, "--file")
-	require.NotContains(t, first, "--output")
-	require.NotContains(t, first, "--path")
-	require.NotContains(t, first, string(filepath.Separator))
 	rendered := string(first)
+	require.Contains(t, rendered, "--config <string>")
+	require.Contains(t, rendered, "--file <string>")
+	require.Contains(t, rendered, "--output <string>")
+	require.Contains(t, rendered, "--path <string>")
+	require.True(t, bytes.HasSuffix(first, []byte("\n")))
+	require.False(t, bytes.HasSuffix(first, []byte("\n\n")))
 	require.True(t, strings.Index(rendered, "hotplex cron create") < strings.Index(rendered, "hotplex slack"))
 }
 

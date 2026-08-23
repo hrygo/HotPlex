@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -148,6 +149,9 @@ func validateManifests(manifests map[string]PackageManifest) error {
 		if manifest.Version == "" {
 			return fmt.Errorf("builtin: package %q has empty version", name)
 		}
+		if want := packageVersion(manifest.Assets); manifest.Version != want {
+			return fmt.Errorf("builtin: package %q version %q, want %q", name, manifest.Version, want)
+		}
 
 		embeddedPaths, err := embeddedPackagePaths(name)
 		if err != nil {
@@ -187,4 +191,28 @@ func validateManifests(manifests map[string]PackageManifest) error {
 func cloneManifest(manifest PackageManifest) PackageManifest {
 	manifest.Assets = append([]AssetManifest(nil), manifest.Assets...)
 	return manifest
+}
+
+func packageVersion(assets []AssetManifest) string {
+	sortedAssets := append([]AssetManifest(nil), assets...)
+	sort.Slice(sortedAssets, func(i, j int) bool {
+		if sortedAssets[i].Path != sortedAssets[j].Path {
+			return sortedAssets[i].Path < sortedAssets[j].Path
+		}
+		if sortedAssets[i].Size != sortedAssets[j].Size {
+			return sortedAssets[i].Size < sortedAssets[j].Size
+		}
+		return sortedAssets[i].SHA256 < sortedAssets[j].SHA256
+	})
+
+	hasher := sha256.New()
+	for _, asset := range sortedAssets {
+		_, _ = hasher.Write([]byte(asset.Path))
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(strconv.FormatInt(asset.Size, 10)))
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(asset.SHA256))
+		_, _ = hasher.Write([]byte{0})
+	}
+	return "v1-" + hex.EncodeToString(hasher.Sum(nil))
 }
