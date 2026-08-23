@@ -30,6 +30,7 @@ import (
 var _ worker.Worker = (*Worker)(nil)
 var _ worker.WorkerCommander = (*Worker)(nil)
 var _ worker.SkillInvoker = (*Worker)(nil)
+var _ worker.SkillCatalogProvider = (*Worker)(nil)
 var _ worker.PermissionCeilingReporter = (*Worker)(nil)
 var _ worker.MidTurnInjector = (*Worker)(nil)
 var _ base.MetadataHandler = (*Worker)(nil)
@@ -137,8 +138,9 @@ type Worker struct {
 	*base.BaseWorker
 
 	sessionID   string
-	projectDir  string             // original working directory for the worker process
-	origSession worker.SessionInfo // first Start's session info, reused by ResetContext
+	projectDir  string                 // original working directory for the worker process
+	userHomeDir func() (string, error) // injectable native Skill root boundary
+	origSession worker.SessionInfo     // first Start's session info, reused by ResetContext
 
 	// turnMu serializes the active-turn boundary with mid-turn stdin writes.
 	// readOutput clears turnActive before publishing Done, so InjectMidTurn can
@@ -176,7 +178,8 @@ type Worker struct {
 // New creates a new Claude Code worker.
 func New() *Worker {
 	return &Worker{
-		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		BaseWorker:  base.NewBaseWorker(slog.Default(), nil),
+		userHomeDir: os.UserHomeDir,
 	}
 }
 
