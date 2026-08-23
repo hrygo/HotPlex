@@ -418,7 +418,10 @@ Agent B/C 通道配置加载器。
 
 **Tools 兼容期**：新文件和写接口只使用 `TOOLS.md`。旧 `SKILLS.md` 暂作为同一逻辑槽位的只读别名：每个作用域先检查 `TOOLS.md`，再检查旧名；同层两者并存时 `TOOLS.md` 胜出并由 `hotplex doctor` 告警。`inject_exclude` 中两种名字等价。
 
-**与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，通过 `/admin/api/skills`、WebChat Skills 页面和 Worker `/skills` 能力管理，不由 `TOOLS.md` 派生，也不会把 Skill catalog 或正文常驻注入 AgentConfig prompt。文件系统发现不代表当前 Session 可调用。
+**与 Agent Skills 的边界**：真实 Skills 由 `.agents/skills/<name>/SKILL.md` 等 Skill 根目录发现，
+通过 `/admin/api/skills`、WebChat HTTP Skills 页面和 Worker 当前 evidence 管理，不由 `TOOLS.md`
+派生，也不会把 Skill catalog 或正文常驻注入 AgentConfig prompt。Session `/skills` 仍按当前
+Worker/filesystem evidence 决定是否出现；文件系统发现不代表当前 Session 可调用。
 
 #### 3.8.1 agent_config runtime facts
 
@@ -433,8 +436,10 @@ Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，
 HotPlex 发布两个 embedded canonical package：runtime profile 只有 `hotplex-cli`，用于日常
 Cron、显式 Slack 和只读诊断；operator profile 累积包含 `hotplex-cli` 与
 `hotplex-operator`，用于服务、更新、配置、Admin 和 audit，并要求显式 operator authority。
-Public/Admin/WebChat builtins 永久可发现，不以 projection 或 receipt 存在为前提；projection
-只影响 Worker 是否 callable。真实 global/project/user Skill 同名时优先遮蔽 builtin，`source`
+Public/Admin/WebChat HTTP builtins 永久可发现，不以 projection 或 receipt 存在为前提；Session
+`/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项是 `discoverable`，
+只有 projection/native advertisement 和 adapter-verified activation 才能证明 `callable`。真实
+global/project/user Skill 同名时优先遮蔽 builtin，`source`
 仍只使用 `global`/`project`，builtin 通过可选 `builtin`、`builtin_package_version` 元数据
 表达。builtin-only update/delete 返回 `SKILL_BUILTIN_READONLY`，同名用户 override 可正常
 创建和管理。
@@ -448,7 +453,10 @@ Public/Admin/WebChat builtins 永久可发现，不以 projection 或 receipt �
 未知 user/project Skill，collision、drift、failed item 返回非零；remove 只删除 matching
 receipt 且 unchanged-tree 能证明归属的 projection，不删除 inventory。
 
-Gateway startup 与 doctor 只读；onboard/update 只有显式 `--sync-skills` 才同步，修改后在新
+Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 只读；Cron
+legacy compatibility helper 仍可能写入 `~/.hotplex/skills/cron.md`，它不属于 AgentConfig B 通道、
+不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update 只有显式 `--sync-skills`
+才同步，修改后在新
 Session 或 `/reset` 才进入 Worker 的目录证据边界。未显式传 `--worker` 时，CLI 只解析已启用
 messaging platform/bot 的 effective worker targets；empty target 返回 bounded error，不回退到
 RegisteredTypes。

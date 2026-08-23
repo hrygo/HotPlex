@@ -32,6 +32,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [飞书集成](tutorials/feishu-integration.md)   | 开发者      | 15 min |
 | [AI 人格定制](tutorials/agent-personality.md) | 开发者      | 10 min |
 | [Bot 话术定制](tutorials/phrases-customization.md) | 开发者      | 10 min |
+| [Skill 配置](tutorials/skills-setup.md)         | 开发者/管理员 | 10 min |
 | [定时任务](tutorials/cron-scheduled-tasks.md) | 开发者/用户 | 10 min |
 
 ## 指南
@@ -93,7 +94,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 
 | 参考                                               | 说明                                         |
 | -------------------------------------------------- | -------------------------------------------- |
-| [CLI 命令参考](reference/cli.md)                   | 全部 38 个 CLI 子命令和参数                  |
+| [CLI 命令参考](reference/cli.md)                   | public command/flag surface 与已安装 `--help` 为权威 |
 | [配置参考](reference/configuration.md)             | 全部 14 个配置段的字段级文档                 |
 | [Admin API 参考](reference/admin-api.md)           | 管理端点、Scope 权限、请求/响应格式          |
 | [API 控制台](reference/api-console.html)           | 交互式 Scalar 控制台，可在线测试所有端点     |

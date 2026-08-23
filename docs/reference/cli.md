@@ -1047,8 +1047,11 @@ worker targets；empty target 返回 bounded error，不回退 RegisteredTypes�
 
 `status` 和 `--dry-run` 零写；sync 不覆盖未知 user/project Skill，collision、drift、failed
 均以非零返回。remove 只删除 matching receipt 且 unchanged-tree 能证明归属的 projection，
-不删除 inventory。Gateway startup/doctor 只读，onboard/update 只有显式 `--sync-skills` 才同步。
-内置 Skills 在 Admin/WebChat/Worker `/skills` 永久可发现，但 discoverable 不等于 callable；
+不删除 inventory。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills
+checker 只读；Cron legacy compatibility helper 仍可能写入旧 `~/.hotplex/skills/cron.md`，它不
+属于 AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update
+只有显式 `--sync-skills` 才同步。内置 Skills 在 Admin/WebChat HTTP read surface 永久可发现；
+Session `/skills` 仍按当前 Worker/filesystem evidence 决定是否出现，discoverable 不等于 callable。
 真实同名 user/project Skill 优先，builtin-only update/delete 返回 `SKILL_BUILTIN_READONLY`。
 
 ## Admin 账号管理

@@ -113,9 +113,9 @@ mkdir -p ~/.hotplex/agent-configs
 不提供身份值、路径、环境值、凭据、动态 catalog 或 Skill 正文。事实不是 Worker 健康或权限
 已经执行的证明，Admin 预览没有运行时 facts。
 
-Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 Skill catalog 都是
-真实 Agent Skills 的表面；`TOOLS.md` 不是 Skill catalog，META 也不会复制 catalog。当前
-Session 的状态含义是：文件系统发现但没有调用证据为 `discoverable`，Worker 权威目录确认
+Admin API 与 WebChat HTTP Skills 是真实 Agent Skills 的 read surface；`TOOLS.md` 不是 Skill
+catalog，META 也不会复制 catalog。Session `/skills` 仍由当前 Worker/filesystem evidence
+决定。当前 Session 的状态含义是：文件系统发现但没有调用证据为 `discoverable`，Worker 权威目录确认
 可执行为 `callable`；`unavailable` 保留给能力表面明确报告的不可用状态。只有 `callable`
 可调用；短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured
 replay 共用同一判定，filesystem-only Skill 不会因为存在路径而变成可调用。
@@ -126,8 +126,10 @@ replay 共用同一判定，filesystem-only Skill 不会因为存在路径而变
 ### 内置 Skills 与显式同步
 
 `hotplex-cli`（runtime）和 `hotplex-operator`（operator，累积包含 runtime 包）是两个只读
-内置 Agent Skills。它们在 Admin/WebChat/Worker `/skills` 中永久可发现，即使还没有 native
-projection；是否 callable 仍由当前 Worker 的权威目录决定。真实 global/project/user Skill
+内置 Agent Skills。它们在 Admin/WebChat HTTP read surface 中永久可发现，即使还没有 native
+projection；Session `/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项为
+`discoverable`；只有 Worker advertisement/adapter-verified activation 才能证明 `callable`。真实
+global/project/user Skill
 同名时优先显示真实项，`source` 仍为 `global`/`project`，builtin 只作为可选元数据和版本展示。
 只有 builtin-only 对象 update/delete 才返回 `SKILL_BUILTIN_READONLY`，同名用户 override 可以
 正常创建和管理。
@@ -136,7 +138,10 @@ projection；是否 callable 仍由当前 Worker 的权威目录决定。真实 
 `runtime`/`operator` profile、重复 `--worker`，并可使用 `--dry-run` 与 `--json`。UserHome
 原生根（Claude 的 `.claude/skills`、Codex/OpenCode 共享 `.agents/skills`）与
 `$HOTPLEX_HOME` 的 immutable inventory/state receipts 分离；ACP 没有可推断的 filesystem
-root。Gateway startup 与 doctor 不写入，onboard/update 只有显式 `--sync-skills` 才同步。
+root。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 不写入，
+但 Cron legacy compatibility helper 仍可能写入旧 `~/.hotplex/skills/cron.md`；它不属于
+AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update
+只有显式 `--sync-skills` 才同步。
 
 ### Cron 请求的 CLI 路由
 

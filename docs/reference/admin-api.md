@@ -368,10 +368,11 @@ PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQU
 
 ### Skill 管理（admin 全局）
 
-Admin/WebChat/Worker `/skills` 管理和展示的都是真实 Agent Skills；AgentConfig 的 `TOOLS.md`
+Admin 与 WebChat HTTP `/skills` 管理和展示的都是真实 Agent Skills；AgentConfig 的 `TOOLS.md`
 （旧 `SKILLS.md` 兼容名）不属于此 catalog。embedded `hotplex-cli`（runtime）与
-`hotplex-operator`（operator）是永久可发现的 builtin，发现不依赖 UserHome projection、
-`$HOTPLEX_HOME` inventory 或 receipt；projection 只决定 Worker 是否 callable。区别于用户自助
+`hotplex-operator`（operator）是这些 HTTP read surface 永久可发现的 builtin，发现不依赖 UserHome
+projection、`$HOTPLEX_HOME` inventory 或 receipt；Session `/skills` 仍按当前 Worker/filesystem
+evidence 决定是否出现，projection/native advertisement 才影响 callable。区别于用户自助
 的 `/api/workspaces/{wid}/skills/*`（见下文 WebChat 多租户端点段）：admin 端管理真实 global
 skill，用户端管理各自 project/workspace skill。
 
@@ -383,7 +384,7 @@ skill，用户端管理各自 project/workspace skill。
 | PUT | `/admin/api/skills/{name}` | `admin:write` | 在线更新 `SKILL.md` 全文（JSON `{"body":"..."}`，区别于 POST 的 zip 上传） |
 | DELETE | `/admin/api/skills/{name}` | `admin:write` | 删除全局 skill |
 
-**GET /admin/api/skills** — 合并扫描真实 global/project 项与 embedded builtins；真实项优先遮蔽
+**GET /admin/api/skills** — 合并扫描真实 global/external 项与 embedded builtins；真实项优先遮蔽
 同名 builtin，builtin 项 `managed:false`、`builtin:true`，并带可选
 `builtin_package_version`。`source` 仍只为 `global` 或 `project`，builtin 身份只由独立的
 `builtin` 字段表达。
@@ -476,17 +477,17 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 
 **Workspace Skill 管理（spec #910）**：
 
-每个 workspace 可管理自己的 skill（安装到 `<work_dir>/.agents/skills`）。鉴权与 workspace CRUD 一致（API Key 优先 / Cookie 兜底），写操作额外校验 owner 归属（`ws.OwnerUserID != uid && !isAdmin` → `403 WORKSPACE_FORBIDDEN`）。另提供脱离 workspace 的合并查询：`/api/skills` 返回 `全局 + 当前用户所有 workspace + 外部只读 + embedded builtin` 的合并列表（每用户视图）；同名真实项优先遮蔽 builtin，搜索、过滤和分页在合并后执行。
+每个 workspace 可管理自己的 skill（安装到 `<work_dir>/.agents/skills`）。鉴权与 workspace CRUD 一致（API Key 优先 / Cookie 兜底），写操作额外校验 owner 归属（`ws.OwnerUserID != uid && !isAdmin` → `403 WORKSPACE_FORBIDDEN`）。另提供脱离 workspace 的合并查询：`/api/skills` 返回 `全局 + 当前用户所有 workspace + 外部只读 + embedded builtin` 的合并列表（每用户视图）；同名真实项优先遮蔽 builtin。
 
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
 | GET | `/api/skills` | API Key / Cookie | 合并列表：全局 + 我的 workspace + 外部只读 + builtin（带 `managed`/`builtin`/版本标注） |
-| GET | `/api/skills/{name}` | API Key / Cookie | 合并列表中该 skill 的元信息或 builtin detail（真实项优先） |
+| GET | `/api/skills/{name}` | API Key / Cookie | 合并列表中该 skill 的 metadata（真实项优先；不返回 builtin body/files） |
 | POST | `/api/workspaces/{wid}/skills` | owner | zip 上传安装 workspace skill（`?replace=true` 覆盖） |
 | GET | `/api/workspaces/{wid}/skills/{name}` | owner | workspace scope skill 详情（含 `body` + `files`） |
 | DELETE | `/api/workspaces/{wid}/skills/{name}` | owner | 删除 workspace skill |
 
-> ⚠️ **同名遮蔽（spec §3.3 B6）**：workspace 安装与全局或 builtin 同名的 skill 时**允许安装但返回 `warning`**（`shadows global skill '<name>'`）——workspace skill 在合并列表中覆盖全局/builtin 生效，UI 须显式提示。builtin 不注入 workspace-only 管理列表；真实 workspace override 可照常 update/delete。
+> ⚠️ **同名遮蔽（spec §3.3 B6）**：workspace 安装与真实 global managed skill 同名时**允许安装但返回 `warning`**（`shadows global skill '<name>'`）——workspace skill 在合并列表中覆盖 global 生效，UI 须显式提示。仅与 builtin 同名时允许创建 override，但当前不会产生该 global-shadow warning；builtin 不注入 workspace-only 管理列表，真实 workspace override 可照常 update/delete。
 
 > 🛡️ **审计**：workspace skill 写操作（POST/DELETE）由 handler 显式写入 tamper-evident `user_activity`（`action` = `skill.install` / `skill.delete`，`resource_type` = `skill`，`platform` = `webchat`），与 `/api/admin/*` 写操作一致；读操作不审计。
 

@@ -44,9 +44,12 @@ hotplex skills remove --profile runtime --worker claude_code --json
 ```
 
 `runtime` 与 `operator` 是累积 profile，`--worker` 可重复；UserHome 原生根和
-`$HOTPLEX_HOME` immutable inventory/state receipts 分离。Gateway startup、doctor 和普通
-onboard/update 路径不隐式同步；onboard/update 必须显式带 `--sync-skills`。empty enabled-worker
-target 会返回错误，不会回退到注册表。discoverable 不等于 callable，调用仍需 Worker 证据。
+`$HOTPLEX_HOME` immutable inventory/state receipts 分离。Gateway startup 的 built-in
+reconciliation check、doctor 的 built-in Skills checker 和普通 onboard/update 路径不隐式同步；
+Cron legacy compatibility helper 仍可能写入旧 `~/.hotplex/skills/cron.md`，但它不属于
+AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理。onboard/update
+必须显式带 `--sync-skills`。empty enabled-worker target 会返回错误，不会回退到注册表。
+discoverable 不等于 callable，Session `/skills` 仍需 Worker/filesystem evidence。
 
 Cron 创建后始终独立验证：`hotplex cron get <id|name> --json`；不要只看 `cron list`。
 

@@ -138,8 +138,6 @@ func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
 		"date -d",
 		"date -v",
 		"date +",
-		"cron-skill-manual.md",
-		"~/.hotplex/skills/cron.md",
 		"必须建立软链",
 		"启动时自动同步",
 		"source: builtin",
@@ -175,11 +173,105 @@ func TestDocsDescribeInventoryProjectionAndExplicitSync(t *testing.T) {
 	require.Regexp(t, regexp.MustCompile(`(?i)ACP[^\n]{0,160}(?:no|without|没有|无)[^\n]{0,160}(?:root|filesystem|文件系统)`), docs)
 }
 
+func TestCurrentDocsNavigationAndLegacyCronBoundary(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	index := readCurrentDoc(t, root, "docs/index.md")
+	require.Contains(t, index, "tutorials/skills-setup.md")
+	require.NotContains(t, index, "全部 38 个 CLI")
+	require.Contains(t, index, "public command/flag surface")
+
+	skillsSetup := readCurrentDoc(t, root, "docs/tutorials/skills-setup.md")
+	require.NotContains(t, skillsSetup, "../specs/Skill-Management-Spec.md")
+	require.Contains(t, skillsSetup, "../reference/admin-api.md")
+
+	legacyDocs := strings.Join([]string{
+		readCurrentDoc(t, root, "docs/explanation/agent-config-system.md"),
+		readCurrentDoc(t, root, "docs/explanation/cron-design.md"),
+		readCurrentDoc(t, root, "docs/guides/developer/cron-automation.md"),
+		readCurrentDoc(t, root, "docs/guides/contributor/architecture.md"),
+	}, "\n")
+	require.Contains(t, legacyDocs, "ReleaseSkillManual")
+	require.Contains(t, legacyDocs, "cron-skill-manual.md")
+	require.Contains(t, legacyDocs, "legacy compatibility artifact")
+	require.Contains(t, legacyDocs, "不是 canonical Agent Skill")
+	require.Contains(t, legacyDocs, "不属于 AgentConfig B 通道")
+	require.Contains(t, legacyDocs, "不由 `hotplex skills` 管理")
+	for _, forbidden := range []string{
+		"由独立 Skills scanner 发现",
+		"canonical Skill Manual",
+		"真实 Agent Skill：`cron-skill-manual.md`",
+	} {
+		require.NotContains(t, legacyDocs, forbidden)
+	}
+
+	cronGuide := readCurrentDoc(t, root, "docs/guides/developer/cron-automation.md")
+	require.Contains(t, cronGuide, "hotplex-cli")
+	require.Contains(t, cronGuide, "legacy compatibility artifact")
+	architecture := readCurrentDoc(t, root, "docs/guides/contributor/architecture.md")
+	require.Contains(t, architecture, "不是 AgentConfig B 通道")
+}
+
+func TestCurrentDocsBFSExcludesHistoricalSpecEntrypoints(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(repositoryRoot(t), "docs")
+	reachable := map[string]struct{}{"index.md": {}}
+	queue := []string{"index.md"}
+	linkPattern := regexp.MustCompile(`\]\(([^)]+)\)`)
+	for len(queue) > 0 {
+		relative := queue[0]
+		queue = queue[1:]
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		require.NoError(t, err, relative)
+		for _, match := range linkPattern.FindAllStringSubmatch(string(data), -1) {
+			destination := strings.SplitN(strings.SplitN(strings.TrimSpace(match[1]), "#", 2)[0], "?", 2)[0]
+			if destination == "" || strings.HasPrefix(destination, "http://") || strings.HasPrefix(destination, "https://") || strings.HasPrefix(destination, "mailto:") || !strings.HasSuffix(destination, ".md") {
+				continue
+			}
+			candidate := filepath.Clean(filepath.Join(filepath.Dir(filepath.Join(root, filepath.FromSlash(relative))), filepath.FromSlash(destination)))
+			relativeCandidate, err := filepath.Rel(root, candidate)
+			require.NoError(t, err)
+			if strings.HasPrefix(relativeCandidate, ".."+string(filepath.Separator)) || relativeCandidate == ".." {
+				continue
+			}
+			if _, err := os.Stat(candidate); err != nil {
+				continue
+			}
+			canonical := filepath.ToSlash(relativeCandidate)
+			if _, exists := reachable[canonical]; !exists {
+				reachable[canonical] = struct{}{}
+				queue = append(queue, canonical)
+			}
+		}
+	}
+
+	require.Len(t, reachable, 58)
+	for _, historical := range []string{
+		"specs/ACP-Worker-Spec.md",
+		"specs/Admin-Workspace-PermissionMode-Management-Spec.md",
+		"specs/Skill-Management-Spec.md",
+		"specs/Workspace-Permission-Mode-Admin-Only-Revision-Spec.md",
+		"specs/Workspace-Permission-Mode-Spec.md",
+	} {
+		_, found := reachable[historical]
+		require.False(t, found, historical)
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "../../.."))
+}
+
+func readCurrentDoc(t *testing.T, root, relativePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relativePath)))
+	require.NoError(t, err, relativePath)
+	return string(data)
 }
 
 func splitFrontmatter(data []byte) ([]byte, []byte, bool) {

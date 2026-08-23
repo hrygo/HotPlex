@@ -200,7 +200,7 @@ type Worker interface {
 | `schedule.go` | 三种调度：cron 表达式 / every 固定间隔 / at 一次性 |
 | `executor.go` | Worker 执行适配：构造 session、注入环境变量 |
 | `delivery.go` | 结果投递：按 platform 回传飞书卡片/Slack 消息 |
-| `skill.go` | go:embed cron-skill-manual.md → B 通道技能手册 |
+| `skill.go` | legacy `go:embed`/`ReleaseSkillManual` compatibility artifact；不是 AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理 |
 
 ### 6. brain/ — LLM 编排层
 

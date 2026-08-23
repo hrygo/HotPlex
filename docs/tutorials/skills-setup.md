@@ -11,7 +11,7 @@ WebChat/Admin 上传 zip 包安装，也会公开两个 embedded canonical packa
 `hotplex-cli`（Cron、显式 Slack、只读诊断）和需要显式 operator authority 的
 `hotplex-operator`（服务、更新、配置、Admin、审计）。它们与 AgentConfig 的 `TOOLS.md`
 （旧 `SKILLS.md` 只读兼容名）是两个领域；`TOOLS.md` 不会出现在 Skills catalog。完整规格见
-[Skill-Management-Spec](../specs/Skill-Management-Spec.md)。
+[Admin API Skill 管理参考](../reference/admin-api.md#skill-admin-)。
 
 **前置条件**：HotPlex Gateway v1.37+ 已运行，WebChat 多租户已启用。
 
@@ -101,7 +101,10 @@ receipts 分离。同步不会覆盖未知 user/project Skill；collision、drif
 
 ## 5. 发现不等于可调用
 
-Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 Skill catalog 管理或展示的都是 Agent Skills；`TOOLS.md`（以及兼容读取的 AgentConfig `SKILLS.md`）只是常驻指导，不会变成 Skill catalog。状态含义如下：
+Admin API 与 WebChat HTTP Skills 管理或展示的都是 Agent Skills；`TOOLS.md`（以及兼容读取的
+AgentConfig `SKILLS.md`）只是常驻指导，不会变成 Skill catalog。Session `/skills` 仍按当前
+Worker/filesystem evidence 决定是否出现；filesystem-only 项是 `discoverable`，只有 Worker
+advertisement/adapter-verified activation 才能证明 `callable`。状态含义如下：
 
 - `discoverable`：HotPlex 找到有效文件定义，但当前 Worker 没有确认调用路径；filesystem-only Skill 属于此类，不能调用。
 - `callable`：当前 Worker 的权威目录确认可原生执行，才允许调用。
@@ -109,13 +112,18 @@ Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 Sk
 
 短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 共用当前 Session 的 callability 判定；不能用旧路径、缓存 metadata 或 `NativeInvoker` 绕过它。新建 Session 或 `/reset` 后再检查 `/skills`，因为配置和 Worker 目录证据按 Session 激活。
 
+兼容边界：`internal/cron/skill.go` 的 `ReleaseSkillManual` 仍可能写入
+`~/.hotplex/skills/cron.md`。这是 legacy compatibility artifact，不属于 AgentConfig B 通道、
+不是 canonical Agent Skill，也不由 `hotplex skills` 管理；它没有 portable Agent Skill frontmatter，
+不会作为 generic Skill scanner 的真实项。
+
 ## 6. 修改与删除
 
 - **修改真实 skill** 有两种方式：① 在线编辑——在 skill 详情的「Body」标签页直接改写
   `SKILL.md` 全文并保存（对应 `PUT /admin/api/skills/{name}`，仅真实 managed skill 可改）；
   ② 重新打包 zip 上传覆盖（勾选「覆盖同名」）。真实 global/project/user 项目按当前权限
   正常 update/delete。
-- **内置 skill** 永久可发现但不可直接 CRUD；builtin-only 对象 update/delete 返回
+- **内置 skill** 在 Admin/WebChat HTTP read surface 永久可发现，但不可直接 CRUD；builtin-only 对象 update/delete 返回
   `SKILL_BUILTIN_READONLY`。创建同名用户 override 会优先遮蔽内置项，并按真实 skill 正常管理。
 - Worker projection 的 remove 与 Skills API 的删除是不同操作：前者只处理 receipt 证明归属
   且 tree 未改变的 native 文件，不删除 `$HOTPLEX_HOME` inventory。

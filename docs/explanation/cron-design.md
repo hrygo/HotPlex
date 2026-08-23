@@ -36,6 +36,12 @@ Cron 路由使用 embedded `hotplex-cli` canonical Skill 的短路由和 referen
 Agent 必须查询当前二进制的 `hotplex cron --help` 与 `hotplex cron create --help`，不能依赖旧
 示例。`TOOLS.md` 只提供常驻工具使用指导，不是 Cron Skill catalog。
 
+兼容边界：`internal/cron/skill.go` 的 `ReleaseSkillManual` 仍可能在 Scheduler 启动时写入
+`~/.hotplex/skills/cron.md`，并保留 `cron-skill-manual.md` 作为 legacy compatibility artifact。
+它不属于 AgentConfig B 通道、不是 canonical Agent Skill，也不由 `hotplex skills` 管理；没有
+portable Agent Skill frontmatter，generic Skill scanner 不把它列为真实 Agent Skill。Phase C 的
+legacy manual migration 尚未交付。
+
 ### 3 种调度类型
 
 Cron 支持三种调度语义，覆盖从定时循环到一次性触发的全部场景；`ScheduleAt` 同时接受
