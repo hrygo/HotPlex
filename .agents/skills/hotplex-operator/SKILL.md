@@ -6,16 +6,15 @@ compatibility: Requires local host access, the hotplex CLI, and explicit operato
 
 # HotPlex operator
 
-Use this Skill only for an explicitly authorized host or Admin operation. Read
-the narrow reference required for the request, confirm the installed binary
-with hotplex <domain> --help, and state the side effect before executing it.
+Use this Skill only for an explicitly authorized host or Admin operation.
+Before a mutation, inspect the installed command's `--help`, identify the
+target and impact, and confirm the request authorizes that exact side effect.
 
 - Service lifecycle: [references/service-lifecycle.md](references/service-lifecycle.md)
 - Installation and updates: [references/install-update.md](references/install-update.md)
-- Host configuration: [references/configuration.md](references/configuration.md)
+- Host configuration and built-in Skill reconciliation: [references/configuration.md](references/configuration.md)
 - Admin and audit operations: [references/admin-audit.md](references/admin-audit.md)
-- Built-in Skill sync and removal: use the authorized operator command and
-  verify its status report; this is not a runtime Skill operation.
 
-Do not infer authorization from a diagnostic request. Preserve backups and
-report verification results without exposing credentials or private metadata.
+Do not infer mutation authority from diagnosis, installation intent from a
+configuration request, or restart authority from an update check. Report the
+result and remaining risk without exposing credentials or private metadata.

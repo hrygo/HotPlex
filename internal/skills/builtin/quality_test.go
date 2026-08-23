@@ -2,6 +2,7 @@ package builtin_test
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -101,6 +102,42 @@ func TestBuiltinDescriptionsHavePositiveAndNegativeBoundaries(t *testing.T) {
 			t.Fatalf("unclassified canonical package %q", manifest.Name)
 		}
 	}
+}
+
+func TestOperatorSkillConsolidatesSetupAndUpdateWorkflows(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	t.Run("duplicate skills are removed", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoDirExists(t, filepath.Join(root, ".agents", "skills", "hotplex-setup"))
+		require.NoDirExists(t, filepath.Join(root, ".agents", "skills", "hotplex-update"))
+	})
+
+	t.Run("operator uses supported primitives", func(t *testing.T) {
+		t.Parallel()
+
+		operator := readDirectoryTree(t, filepath.Join(root, "internal", "skills", "builtin", "hotplex-operator"))
+		for _, prohibited := range []string{
+			"curl -fsSL",
+			"| bash",
+			"cp -f ./bin/hotplex",
+			"sleep 2",
+			"git checkout <previous",
+		} {
+			require.NotContains(t, operator, prohibited)
+		}
+		for _, requiredCommand := range []string{
+			"hotplex onboard",
+			"hotplex doctor",
+			"hotplex update",
+			"hotplex service restart",
+			"hotplex skills status",
+		} {
+			require.Contains(t, operator, requiredCommand)
+		}
+	})
 }
 
 func TestGeneratedCLISurfaceHasNoHiddenOrSensitiveValues(t *testing.T) {
@@ -272,6 +309,27 @@ func readCurrentDoc(t *testing.T, root, relativePath string) string {
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relativePath)))
 	require.NoError(t, err, relativePath)
 	return string(data)
+}
+
+func readDirectoryTree(t *testing.T, root string) string {
+	t.Helper()
+	var combined strings.Builder
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		combined.Write(data)
+		combined.WriteByte('\n')
+		return nil
+	}))
+	return combined.String()
 }
 
 func splitFrontmatter(data []byte) ([]byte, []byte, bool) {
