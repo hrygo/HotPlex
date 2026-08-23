@@ -255,10 +255,10 @@ func TestRemoveRecoveryReplacesWrongReceiptWhenSyncDirKeepsFailing(t *testing.T)
 	manifest, ok := registry.Package("hotplex-cli")
 	require.True(t, ok)
 	target := mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)
-	receiptPath := ReceiptPath(paths.StateDir, target)
+	receiptPath := ReceiptPath(r.paths.StateDir, target)
 	wantedReceipt, err := os.ReadFile(receiptPath)
 	require.NoError(t, err)
-	fs.stateDir = paths.StateDir
+	fs.stateDir = r.paths.StateDir
 	fs.receiptPath = receiptPath
 	fs.wrongReceipt = []byte("{\"wrong\":true}\n")
 	fs.mutateOnStateSync = true
@@ -277,6 +277,48 @@ func TestRemoveRecoveryReplacesWrongReceiptWhenSyncDirKeepsFailing(t *testing.T)
 	require.Equal(t, actualHash, receipt.ProjectedTreeSHA256)
 }
 
+func TestRemoveRecoveryPreservesReceiptWhenBackupRenameFails(t *testing.T) {
+	base := osFS{}
+	fs := &wrongReceiptRecoveryFS{FileSystem: base}
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	paths := testPaths(userHome, hotplexHome)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	r, err := New(registry, paths, fs)
+	require.NoError(t, err)
+	_, err = r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	manifest, ok := registry.Package("hotplex-cli")
+	require.True(t, ok)
+	target := mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)
+	receiptPath := ReceiptPath(r.paths.StateDir, target)
+	beforeTarget := snapshotTree(t, target)
+	fs.stateDir = r.paths.StateDir
+	fs.receiptPath = receiptPath
+	fs.wrongReceipt = []byte("{\"wrong\":true}\n")
+	fs.mutateOnStateSync = true
+	fs.failSyncDirAfter = fs.syncDirCalls + 3
+	fs.failRenameContains = ".hotplex-receipt-recovery-backup-"
+	report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.NoError(t, fs.mutationErr)
+	actualReceipt, err := os.ReadFile(receiptPath)
+	require.NoError(t, err)
+	require.Equal(t, fs.wrongReceipt, actualReceipt, "failed backup rename must preserve the existing receipt")
+	require.Equal(t, beforeTarget, snapshotTree(t, target))
+	entries, err := os.ReadDir(paths.StateDir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		require.NotContains(t, entry.Name(), ".hotplex-receipt-recovery-backup-")
+		require.NotContains(t, entry.Name(), ".hotplex-recovery-receipt-")
+	}
+	status, err := r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, status.Err(), ErrReportActionRequired)
+	require.Contains(t, reportReasons(status.Items), ReasonInvalidReceipt)
+}
+
 func reportBackupPaths(items []Item) []string {
 	result := make([]string, 0, len(items))
 	for _, item := range items {
@@ -289,14 +331,15 @@ func reportBackupPaths(items []Item) []string {
 
 type wrongReceiptRecoveryFS struct {
 	FileSystem
-	stateDir          string
-	receiptPath       string
-	wrongReceipt      []byte
-	mutateOnStateSync bool
-	mutationErr       error
-	mutated           bool
-	failSyncDirAfter  int
-	syncDirCalls      int
+	stateDir           string
+	receiptPath        string
+	wrongReceipt       []byte
+	mutateOnStateSync  bool
+	mutationErr        error
+	mutated            bool
+	failSyncDirAfter   int
+	syncDirCalls       int
+	failRenameContains string
 }
 
 func (f *wrongReceiptRecoveryFS) SyncDir(path string) error {
@@ -309,6 +352,13 @@ func (f *wrongReceiptRecoveryFS) SyncDir(path string) error {
 		return errors.New("injected continuous directory sync failure")
 	}
 	return f.FileSystem.SyncDir(path)
+}
+
+func (f *wrongReceiptRecoveryFS) Rename(oldPath, newPath string) error {
+	if f.failRenameContains != "" && strings.Contains(newPath, f.failRenameContains) {
+		return errors.New("injected receipt backup rename failure")
+	}
+	return f.FileSystem.Rename(oldPath, newPath)
 }
 
 func TestPathEscapeIsRejected(t *testing.T) {

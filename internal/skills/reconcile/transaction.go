@@ -338,8 +338,7 @@ func forceReceiptReplacement(fs FileSystem, stateDir, finalPath string, data []b
 		backupPath = filepath.Join(backupContainer, "receipt.json")
 		if err := fs.Rename(finalPath, backupPath); err != nil {
 			cleanupErr := fs.RemoveAll(backupContainer)
-			removeErr := fs.Remove(finalPath)
-			return errors.Join(err, cleanupErr, removeErr, cleanupTemp())
+			return errors.Join(err, cleanupErr, cleanupTemp())
 		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return errors.Join(statErr, cleanupTemp())
