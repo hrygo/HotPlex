@@ -105,15 +105,14 @@ func (a *botConfigAdapter) GetAgentConfigFile(ctx context.Context, botName strin
 		return nil, fmt.Errorf("load agent config: %w", err)
 	}
 
-	canonicalFile := canonicalAgentConfigFile(file)
-	content := getConfigField(configs, canonicalFile)
-	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, agentConfigBotName(botName), string(canonicalFile))
+	content := getConfigField(configs, file)
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, agentConfigBotName(botName), string(file))
 
 	return &admin.AgentConfigFile{
 		Content: content,
 		Source:  source,
 		Size:    len(content),
-		File:    string(canonicalFile),
+		File:    string(file),
 	}, nil
 }
 
@@ -303,15 +302,14 @@ func (a *botConfigAdapter) GetPlatformAgentConfigFile(ctx context.Context, platf
 		return nil, fmt.Errorf("load platform agent config: %w", err)
 	}
 
-	canonicalFile := canonicalAgentConfigFile(file)
-	content := getConfigField(configs, canonicalFile)
-	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, "", string(canonicalFile))
+	content := getConfigField(configs, file)
+	source := agentconfig.ResolvedSource(a.agentConfigDir, platform, "", string(file))
 
 	return &admin.AgentConfigFile{
 		Content: content,
 		Source:  source,
 		Size:    len(content),
-		File:    string(canonicalFile),
+		File:    string(file),
 	}, nil
 }
 
@@ -497,7 +495,7 @@ func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclu
 		if file.value == "" {
 			continue
 		}
-		source, resolvedFile := agentconfig.ResolvedLocation(agentConfigDir, platform, botName, string(file.field))
+		source := agentconfig.ResolvedSource(agentConfigDir, platform, botName, string(file.field))
 		meta := &admin.AgentConfigMeta{
 			Source: source,
 			Size:   len(file.value),
@@ -509,9 +507,6 @@ func getAgentConfigSummary(platform, botName, agentConfigDir string, injectExclu
 			summary.Agents = meta
 		case admin.AgentConfigTools:
 			summary.Tools = meta
-			if resolvedFile == agentconfig.LegacyFileSkills {
-				summary.LegacySkills = meta
-			}
 		case admin.AgentConfigUser:
 			summary.User = meta
 		case admin.AgentConfigMemory:
@@ -530,7 +525,7 @@ func getConfigField(configs *agentconfig.AgentConfigs, file admin.AgentConfigFil
 		return configs.Soul
 	case admin.AgentConfigAgents:
 		return configs.Agents
-	case admin.AgentConfigTools, admin.AgentConfigLegacySkills:
+	case admin.AgentConfigTools:
 		return configs.Tools
 	case admin.AgentConfigUser:
 		return configs.User
@@ -539,13 +534,6 @@ func getConfigField(configs *agentconfig.AgentConfigs, file admin.AgentConfigFil
 	default:
 		return ""
 	}
-}
-
-func canonicalAgentConfigFile(file admin.AgentConfigFileName) admin.AgentConfigFileName {
-	if file == admin.AgentConfigLegacySkills {
-		return admin.AgentConfigTools
-	}
-	return file
 }
 
 // writeConfig atomically writes the config to disk: marshal YAML, write to a

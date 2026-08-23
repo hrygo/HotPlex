@@ -27,7 +27,6 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/hrygo/hotplex/internal/admin"
-	"github.com/hrygo/hotplex/internal/agentconfig"
 	"github.com/hrygo/hotplex/internal/assets"
 	"github.com/hrygo/hotplex/internal/audit"
 	"github.com/hrygo/hotplex/internal/audit/sinks"
@@ -538,7 +537,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	agentConfigDir := ""
 	if cfg.AgentConfig.Enabled {
 		agentConfigDir = cfg.AgentConfig.ConfigDir
-		warnDeprecatedSuffixFiles(agentConfigDir, log)
 		log.Debug("config: agent config resolved", "dir", agentConfigDir)
 	}
 
@@ -1666,34 +1664,6 @@ func loadEnvFile(dir string) {
 	}
 	if loaded > 0 {
 		fmt.Fprintf(os.Stderr, "  env loaded %d vars from %s\n", loaded, envPath)
-	}
-}
-
-func warnDeprecatedSuffixFiles(dir string, log *slog.Logger) {
-	if dir == "" {
-		return
-	}
-	platforms := agentconfig.KnownPlatforms()
-	files := []struct {
-		legacyBase string
-		targetBase string
-	}{
-		{"SOUL", "SOUL"},
-		{"AGENTS", "AGENTS"},
-		{"TOOLS", "TOOLS"},
-		{"SKILLS", "TOOLS"},
-		{"USER", "USER"},
-		{"MEMORY", "MEMORY"},
-	}
-	for _, p := range platforms {
-		for _, file := range files {
-			suffix := file.legacyBase + "." + p + ".md"
-			if _, err := os.Stat(filepath.Join(dir, suffix)); err == nil {
-				log.Warn("agent-config: deprecated suffix file found; use directory-based layout instead",
-					"file", suffix,
-					"migration", "move to "+p+"/"+file.targetBase+".md")
-			}
-		}
 	}
 }
 

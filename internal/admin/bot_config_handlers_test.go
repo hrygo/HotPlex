@@ -150,20 +150,20 @@ func TestHandleAgentConfigFile_AcceptsCanonicalTools(t *testing.T) {
 	require.Equal(t, "tool guidance", prov.gotContent)
 }
 
-func TestHandleAgentConfigFile_LegacySkillsIsReadOnly(t *testing.T) {
+func TestHandleAgentConfigFile_RejectsSkillsAlias(t *testing.T) {
 	t.Parallel()
 	prov := &mockBotConfigProvider{}
 	api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
 
 	wGet, rGet := newBotAgentConfigRequest(t, http.MethodGet, "helper", "SKILLS.md", ScopeAdminRead, nil)
 	api.HandleGetAgentConfigFile(wGet, rGet)
-	require.Equal(t, http.StatusOK, wGet.Code, "body=%q", wGet.Body.String())
-	require.Equal(t, AgentConfigLegacySkills, prov.gotFile)
+	require.Equal(t, http.StatusBadRequest, wGet.Code, "body=%q", wGet.Body.String())
+	require.Empty(t, prov.gotFile, "provider must not be consulted for unknown reads")
 
 	wPut, rPut := newBotAgentConfigRequest(t, http.MethodPut, "helper", "SKILLS.md", ScopeAdminWrite, []byte(`{"content":"legacy"}`))
 	api.HandleWriteAgentConfigFile(wPut, rPut)
 	require.Equal(t, http.StatusBadRequest, wPut.Code)
-	require.Empty(t, prov.gotContent, "provider must not be consulted for legacy writes")
+	require.Empty(t, prov.gotContent, "provider must not be consulted for unknown writes")
 }
 
 func TestHandleGetPlatformAgentConfigFile_Success(t *testing.T) {
@@ -201,22 +201,21 @@ func TestHandleWritePlatformAgentConfigFile_Success(t *testing.T) {
 	require.Equal(t, AgentConfigSoul, prov.gotFile)
 }
 
-func TestHandlePlatformAgentConfigFile_ToolsCompatibility(t *testing.T) {
+func TestHandlePlatformAgentConfigFile_RejectsSkillsAlias(t *testing.T) {
 	t.Parallel()
 	prov := &mockBotConfigProvider{}
 	api := newTestAPI(func(d *Deps) { d.BotConfig = prov })
 
 	wGet, rGet := newPlatformRequest(t, http.MethodGet, "webchat", "SKILLS.md", ScopeAdminRead, nil)
 	api.HandleGetPlatformAgentConfigFile(wGet, rGet)
-	require.Equal(t, http.StatusOK, wGet.Code, "body=%q", wGet.Body.String())
-	require.Equal(t, AgentConfigLegacySkills, prov.gotFile)
+	require.Equal(t, http.StatusBadRequest, wGet.Code, "body=%q", wGet.Body.String())
+	require.Empty(t, prov.gotFile, "provider must not be consulted for unknown reads")
 
 	body := []byte(`{"content":"webchat tool guidance"}`)
-	wPut, rPut := newPlatformRequest(t, http.MethodPut, "webchat", "TOOLS.md", ScopeAdminWrite, body)
+	wPut, rPut := newPlatformRequest(t, http.MethodPut, "webchat", "SKILLS.md", ScopeAdminWrite, body)
 	api.HandleWritePlatformAgentConfigFile(wPut, rPut)
-	require.Equal(t, http.StatusNoContent, wPut.Code, "body=%q", wPut.Body.String())
-	require.Equal(t, AgentConfigTools, prov.gotFile)
-	require.Equal(t, "webchat tool guidance", prov.gotContent)
+	require.Equal(t, http.StatusBadRequest, wPut.Code, "body=%q", wPut.Body.String())
+	require.Empty(t, prov.gotContent, "provider must not be consulted for unknown writes")
 }
 
 // TestHandlePlatformAgentConfigFile_Rejections covers input validation and

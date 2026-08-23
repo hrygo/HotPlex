@@ -76,12 +76,12 @@ func (a *AdminAPI) HandleGetBotConfig(w http.ResponseWriter, r *http.Request) {
 // HandleGetAgentConfigFile reads a single agent config file for a bot.
 //
 // @Summary      Get agent config file
-// @Description  Returns the content of a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). SKILLS.md is a deprecated read-only alias for TOOLS.md. Requires admin:read scope.
+// @Description  Returns the content of a single agent config file (SOUL.md, AGENTS.md, TOOLS.md, USER.md, MEMORY.md). Requires admin:read scope.
 // @Tags         Admin API
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        name  path      string  true  "Bot name"
-// @Param        file  path      string  true  "Config file name"  Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md,SKILLS.md)
+// @Param        file  path      string  true  "Config file name"  Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md)
 // @Success      200   {object}  AgentConfigFile
 // @Failure      400   {object}  ErrorResponse  "Invalid config file name"
 // @Failure      403   {object}  ErrorResponse  "Insufficient scope: need admin:read"
@@ -103,7 +103,7 @@ func (a *AdminAPI) HandleGetAgentConfigFile(w http.ResponseWriter, r *http.Reque
 	}
 	fileStr := r.PathValue("file")
 	fileName := AgentConfigFileName(fileStr)
-	if !IsReadableConfigFile(fileName) {
+	if !ValidConfigFiles[fileName] {
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid config file %q", fileStr))
 		return
 	}
@@ -327,12 +327,12 @@ func (a *AdminAPI) HandleWriteAgentConfigFile(w http.ResponseWriter, r *http.Req
 // default) agent config file, identified by platform rather than a bot name.
 //
 // @Summary      Get channel default agent config file
-// @Description  Returns the content of a single platform-level agent config file (channel team default). SKILLS.md is a deprecated read-only alias for TOOLS.md. Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.
+// @Description  Returns the content of a single platform-level agent config file (channel team default). Used for platforms without a bot instance, e.g. webchat. Requires admin:read scope.
 // @Tags         Admin API
 // @Produce      json
 // @Security     AdminBearerAuth
 // @Param        platform  path  string  true  "Platform identifier"  Enums(webchat,slack,feishu)
-// @Param        file      path  string  true  "Config file name"     Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md,SKILLS.md)
+// @Param        file      path  string  true  "Config file name"     Enums(SOUL.md,AGENTS.md,TOOLS.md,USER.md,MEMORY.md)
 // @Success      200  {object}  AgentConfigFile
 // @Failure      400  {object}  ErrorResponse  "Invalid platform or config file name"
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:read"
@@ -353,7 +353,7 @@ func (a *AdminAPI) HandleGetPlatformAgentConfigFile(w http.ResponseWriter, r *ht
 	}
 	fileStr := r.PathValue("file")
 	fileName := AgentConfigFileName(fileStr)
-	if !IsReadableConfigFile(fileName) {
+	if !ValidConfigFiles[fileName] {
 		web.WriteAppError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid config file %q", fileStr))
 		return
 	}

@@ -69,7 +69,7 @@ func TestBotConfigAdapter_PlatformToolsConfig_WriteRead(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func TestBotConfigAdapter_PlatformToolsConfig_LegacyReadMetadata(t *testing.T) {
+func TestBotConfigAdapter_PlatformToolsConfig_IgnoresLegacyFile(t *testing.T) {
 	t.Parallel()
 	a, dir := newTestBotConfigAdapter(t)
 
@@ -79,16 +79,16 @@ func TestBotConfigAdapter_PlatformToolsConfig_LegacyReadMetadata(t *testing.T) {
 
 	got, err := a.GetPlatformAgentConfigFile(context.Background(), "webchat", admin.AgentConfigTools)
 	require.NoError(t, err)
-	require.Equal(t, legacyContent, got.Content)
+	require.Empty(t, got.Content)
+	require.Empty(t, got.Source)
 	require.Equal(t, "TOOLS.md", got.File)
 
 	summary := getAgentConfigSummary("webchat", "", dir)
 	require.NotNil(t, summary)
-	require.Equal(t, &admin.AgentConfigMeta{Source: "platform", Size: len(legacyContent)}, summary.Tools)
-	require.Equal(t, summary.Tools, summary.LegacySkills)
+	require.Nil(t, summary.Tools)
 }
 
-func TestBotConfigAdapter_PlatformToolsConfig_CanonicalSummaryOmitsLegacyAlias(t *testing.T) {
+func TestBotConfigAdapter_PlatformToolsConfig_CanonicalSummary(t *testing.T) {
 	t.Parallel()
 	a, dir := newTestBotConfigAdapter(t)
 
@@ -99,7 +99,6 @@ func TestBotConfigAdapter_PlatformToolsConfig_CanonicalSummaryOmitsLegacyAlias(t
 	summary := getAgentConfigSummary("webchat", "", dir)
 	require.NotNil(t, summary)
 	require.Equal(t, &admin.AgentConfigMeta{Source: "platform", Size: len(content)}, summary.Tools)
-	require.Nil(t, summary.LegacySkills)
 }
 
 // The written platform-level file must serve as the webchat channel team

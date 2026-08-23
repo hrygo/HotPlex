@@ -234,6 +234,22 @@ func TestLoadEmptyBotName(t *testing.T) {
 	require.Equal(t, []string{"item"}, p.All("test"))
 }
 
+func TestLoadIgnoresLegacyDefaultDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	legacyDir := filepath.Join(dir, "slack", "default")
+	require.NoError(t, os.MkdirAll(legacyDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(legacyDir, "PHRASES.md"),
+		[]byte("## Greetings\n- legacy greeting\n"),
+		0o644,
+	))
+
+	p, err := Load(dir, "slack", "")
+	require.NoError(t, err)
+	require.NotContains(t, p.All("greetings"), "legacy greeting")
+}
+
 func TestCategoriesSorted(t *testing.T) {
 	t.Parallel()
 	p := &Phrases{entries: map[string][]entry{

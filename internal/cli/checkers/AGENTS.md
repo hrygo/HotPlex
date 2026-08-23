@@ -1,13 +1,13 @@
 # checkers — Diagnostic Checks for `hotplex doctor`
 
 ## OVERVIEW
-27 self-registering diagnostic checks across 10 categories. Each check implements `cli.Checker`, returns a single `cli.Diagnostic`, and registers itself in `init()` via `cli.DefaultRegistry.Register`. Powers `hotplex doctor [--fix]`.
+26 self-registering diagnostic checks across 10 categories. Each check implements `cli.Checker`, returns a single `cli.Diagnostic`, and registers itself in `init()` via `cli.DefaultRegistry.Register`. Powers `hotplex doctor [--fix]`.
 
 ## STRUCTURE
 ```
 checkers/
   config.go          # 5 config.* checks: exists, syntax, required, values, env_vars
-  agentconfig.go     # 3 agent_config checks: suffix_deprecated, directory_structure, global_files
+  agentconfig.go     # 2 agent_config checks: directory_structure, global_files
   dependencies.go    # 3 dependencies.* checks: worker_binary, sqlite_path, opencode_server_resolve
   opencode_resolve.go # dependencies.opencode_server_resolve (#900): resolve + version probe + wrapper detection
   environment.go     # 3 environment.* checks: go_version, os_arch, build_tools
@@ -30,7 +30,7 @@ checkers/
 | Set config path | `config.go:20` | `SetConfigPath()` gates all `config.*` checks; `loadConfig()` returns `(nil,nil)` when unset |
 | Multi-bot credential check | `config.go:177` | `config.required` walks `bots[]` arrays (single-bot fallback at line 194) |
 | Auto-fix callback | `config.go:70` | `FixFunc` field; `fixConfigExists`, `fixConfigValues`, `fixEnvVars` write back to disk |
-| Agent-config layout | `agentconfig.go` | Detects deprecated `SOUL.slack.md` suffix; validates dir tree against `validConfigFiles` map |
+| Agent-config layout | `agentconfig.go` | Validates the directory tree against the canonical `validConfigFiles` map |
 | Disk space platform split | `disk_unix.go` / `disk_windows.go` | Build-tagged; both export the symbol `runtime.diskSpaceChecker` calls into |
 | STT/TTS install fix | `stt.go` / `tts.go` | `FixFunc` shells out to `pip install` (uses `os/exec`, the one allowed binary path) |
 
@@ -60,7 +60,7 @@ func init() { cli.DefaultRegistry.Register(configExistsChecker{}) }
 
 ## ANTI-PATTERNS
 - ❌ Return `[]Diagnostic` — the interface returns ONE `Diagnostic`. Emit multiple aspects by widening `Detail`/`Message`, or split into separate checkers.
-- ❌ Register at runtime or in `TestMain` — `init()` only; tests inject state via unexported struct fields (e.g. `agentConfigSuffixChecker{dir}`).
+- ❌ Register at runtime or in `TestMain` — `init()` only; tests inject state via unexported struct fields.
 - ❌ Read config without guarding `configPath == ""` — `loadConfig()` already returns `(nil,nil)`, prefer it over `config.Load` directly.
 - ❌ Skip `FixHint` on Warn/Fail — every negative result needs a remediation pointer.
 - ❌ Hardcode platform paths — use `config.HotplexHome()` and `filepath.Join`.

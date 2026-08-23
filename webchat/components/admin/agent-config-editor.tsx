@@ -7,7 +7,6 @@ import { AgentConfigFileList, CONFIG_FILES } from './agent-config-file-list';
 import {
   agentConfigOverridesEqual,
   hasAgentConfigOverride,
-  normalizeLegacyToolsOverride,
   prepareAgentConfigOverrides,
 } from '@/lib/agent-config-overrides';
 
@@ -25,17 +24,13 @@ export function AgentConfigEditor({
   overrides: OverridesMap;
   onSaved?: (ws: Workspace) => void;
 }) {
-  const initial = normalizeLegacyToolsOverride(overrides ?? {});
-  const [map, setMap] = useState<OverridesMap>(initial.overrides);
-  const [saved, setSaved] = useState<OverridesMap>(initial.overrides);
+  const initial = prepareAgentConfigOverrides(overrides ?? {});
+  const [map, setMap] = useState<OverridesMap>(initial);
+  const [saved, setSaved] = useState<OverridesMap>(initial);
   const [activeKey, setActiveKey] = useState<string>('soul');
   const [viewMode, setViewMode] = useState<ViewMode>('edit');
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
-    initial.conflict
-      ? { type: 'error', text: 'Both TOOLS.md and legacy SKILLS.md overrides exist. Resolve the server-side conflict before saving.' }
-      : null,
-  );
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const activeDef = CONFIG_FILES.find((f) => f.key === activeKey) ?? CONFIG_FILES[0];
   const content = map[activeDef.file] ?? '';
