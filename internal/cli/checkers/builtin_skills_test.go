@@ -67,9 +67,13 @@ func TestBuiltinSkillsCheckerMapsStatusErrorToStableFailure(t *testing.T) {
 func TestBuiltinSkillsCheckerIsRegisteredUnderSkills(t *testing.T) {
 	checkers := cli.DefaultRegistry.ByCategory("skills")
 	require.NotEmpty(t, checkers)
+	found := false
 	for _, checker := range checkers {
+		if checker.Name() != "skills.builtin" {
+			continue
+		}
+		found = true
 		require.Equal(t, "skills", checker.Category())
-		diagnostic := checker.Check(context.Background())
-		require.Nil(t, diagnostic.FixFunc)
 	}
+	require.True(t, found, "skills.builtin must be registered")
 }

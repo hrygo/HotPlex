@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -51,21 +52,51 @@ func TestGatewayStartupStatusSkipsEmptyTargetsWithoutRunner(t *testing.T) {
 func TestGatewayStartupStatusDoesNotLeakProjectionPaths(t *testing.T) {
 	t.Parallel()
 	var logs bytes.Buffer
+	runner := &lifecycleTestRunner{statusReport: reconcile.Report{Items: []reconcile.Item{
+		{
+			Target:     "/private/native-root",
+			BackupPath: "/private/backup",
+			Outcome:    reconcile.OutcomeDrift,
+			ReasonCode: reconcile.ReasonDrift,
+		},
+		{Outcome: reconcile.OutcomeConflict, ReasonCode: reconcile.ReasonCollision},
+		{Outcome: reconcile.OutcomeDrift, ReasonCode: reconcile.ReasonDrift},
+	}}}
+	err := runBuiltinSkillsStatus(context.Background(), &config.Config{Messaging: config.MessagingConfig{Slack: config.SlackConfig{
+		MessagingPlatformConfig: config.MessagingPlatformConfig{Enabled: true, WorkerType: "claude_code"},
+	}}}, t.TempDir(), t.TempDir(),
+		func(string, string) (reconcile.Runner, error) { return runner, nil },
+		slog.New(slog.NewTextHandler(&logs, nil)))
+	require.NoError(t, err)
+	require.Equal(t, 1, bytes.Count(logs.Bytes(), []byte("gateway: built-in skills drift")))
+	require.Contains(t, logs.String(), "reasons=collision,drift")
+	require.NotContains(t, logs.String(), "status unavailable")
+	require.NotContains(t, logs.String(), "/private/native-root")
+	require.NotContains(t, logs.String(), "/private/backup")
+}
+
+func TestGatewayStartupStatusMapsUnknownReasonToDrift(t *testing.T) {
+	t.Parallel()
+	var logs bytes.Buffer
 	runner := &lifecycleTestRunner{statusReport: reconcile.Report{Items: []reconcile.Item{{
 		Target:     "/private/native-root",
-		BackupPath: "/private/backup",
-		Outcome:    reconcile.OutcomeDrift,
-		ReasonCode: reconcile.ReasonDrift,
+		Outcome:    reconcile.OutcomeFailed,
+		ReasonCode: "internal-secret-reason",
 	}}}}
 	err := runBuiltinSkillsStatus(context.Background(), &config.Config{Messaging: config.MessagingConfig{Slack: config.SlackConfig{
 		MessagingPlatformConfig: config.MessagingPlatformConfig{Enabled: true, WorkerType: "claude_code"},
 	}}}, t.TempDir(), t.TempDir(),
 		func(string, string) (reconcile.Runner, error) { return runner, nil },
 		slog.New(slog.NewTextHandler(&logs, nil)))
-	require.ErrorIs(t, err, reconcile.ErrReportActionRequired)
-	require.Contains(t, logs.String(), reconcile.ReasonDrift)
-	require.NotContains(t, logs.String(), "/private/native-root")
-	require.NotContains(t, logs.String(), "/private/backup")
+	require.NoError(t, err)
+	require.Contains(t, logs.String(), "reasons=drift")
+	require.NotContains(t, logs.String(), "internal-secret-reason")
+}
+
+func TestGatewayStartupStatusErrorReasonIsBounded(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "status_unavailable", stableSkillsStatusReason(errors.New("/private/native-root failure")))
+	require.Equal(t, "no_worker_targets", stableSkillsStatusReason(reconcile.ErrNoWorkerTargets))
 }
 
 func TestDoctorSkillsStatusDoesNotWrite(t *testing.T) {

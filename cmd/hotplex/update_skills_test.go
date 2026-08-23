@@ -61,10 +61,64 @@ func TestUpdateExplicitSyncUsesSelectedProfile(t *testing.T) {
 func TestUpdateExplicitProfileWithoutSyncIsUsageError(t *testing.T) {
 	t.Parallel()
 	cmd := newUpdateCmd()
-	cmd.SetArgs([]string{"--skills-profile", "operator"})
+	cmd.SetArgs([]string{"--skills-profile", "runtime"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "--sync-skills")
+}
+
+func TestUpdateRejectsCheckAndSyncSkillsBeforeNetwork(t *testing.T) {
+	t.Parallel()
+	cmd := newUpdateCmd()
+	cmd.SetArgs([]string{"--check", "--sync-skills"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestUpdateCurrentBinarySyncsWithoutReplacement(t *testing.T) {
+	t.Parallel()
+	var replaced, rendered, synced, announced bool
+	err := completeUpdateLifecycle(updateLifecycleCallbacks{
+		SyncSkills: true,
+		Sync: func() (reconcile.Report, error) {
+			synced = true
+			return reconcile.Report{Profile: builtin.ProfileRuntime}, nil
+		},
+		Render: func(reconcile.Report) error {
+			rendered = true
+			return nil
+		},
+		BinaryUpdated: func() { announced = true },
+	})
+	require.NoError(t, err)
+	require.True(t, synced)
+	require.True(t, rendered)
+	require.False(t, replaced)
+	require.False(t, announced)
+}
+
+func TestUpdateReplacementAnnouncedBeforeSyncFailure(t *testing.T) {
+	t.Parallel()
+	sequence := make([]string, 0, 3)
+	err := completeUpdateLifecycle(updateLifecycleCallbacks{
+		SyncSkills: true,
+		Replace: func() error {
+			sequence = append(sequence, "replace")
+			return nil
+		},
+		BinaryUpdated: func() { sequence = append(sequence, "binary_updated") },
+		Sync: func() (reconcile.Report, error) {
+			sequence = append(sequence, "sync")
+			return reconcile.Report{Profile: builtin.ProfileRuntime}, reconcile.ErrReportActionRequired
+		},
+		Render: func(reconcile.Report) error {
+			sequence = append(sequence, "render")
+			return nil
+		},
+	})
+	require.ErrorIs(t, err, reconcile.ErrReportActionRequired)
+	require.Equal(t, []string{"replace", "binary_updated", "sync", "render"}, sequence)
 }
 
 func TestUpdateSyncFailureReturnsBoundedReportError(t *testing.T) {

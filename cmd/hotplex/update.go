@@ -25,6 +25,49 @@ type updateSkillsDeps struct {
 	NewRunner      func(userHome, hotplexHome string) (reconcile.Runner, error)
 }
 
+type updateLifecycleCallbacks struct {
+	Replace       func() error
+	BinaryUpdated func()
+	SyncSkills    bool
+	Sync          func() (reconcile.Report, error)
+	Render        func(reconcile.Report) error
+	SkillsSynced  func()
+}
+
+// completeUpdateLifecycle owns the post-check update ordering. A replacement
+// is announced before an explicitly requested skills sync, and a typed report
+// is rendered before propagating any sync error. This keeps the binary update
+// fact durable in the user's output even when projection reconciliation fails.
+func completeUpdateLifecycle(callbacks updateLifecycleCallbacks) error {
+	if callbacks.Replace != nil {
+		if err := callbacks.Replace(); err != nil {
+			return err
+		}
+		if callbacks.BinaryUpdated != nil {
+			callbacks.BinaryUpdated()
+		}
+	}
+	if !callbacks.SyncSkills {
+		return nil
+	}
+	if callbacks.Sync == nil {
+		return fmt.Errorf("skills: sync callback unavailable")
+	}
+	report, syncErr := callbacks.Sync()
+	if callbacks.Render != nil {
+		if err := callbacks.Render(report); err != nil {
+			return err
+		}
+	}
+	if syncErr != nil {
+		return syncErr
+	}
+	if callbacks.SkillsSynced != nil {
+		callbacks.SkillsSynced()
+	}
+	return nil
+}
+
 func defaultUpdateSkillsDeps() updateSkillsDeps {
 	return updateSkillsDeps{
 		LoadConfig:     config.Load,
@@ -54,12 +97,15 @@ windows/amd64, windows/arm64.`,
   hotplex update --restart    # Restart service after update
   hotplex update --sync-skills --skills-profile runtime # Explicitly sync built-in skills`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if checkOnly && syncSkills {
+				return fmt.Errorf("--check and --sync-skills are mutually exclusive")
+			}
+			if cmd.Flags().Changed("skills-profile") && !syncSkills {
+				return fmt.Errorf("--skills-profile requires --sync-skills")
+			}
 			profile, profileErr := parseSkillsProfile(skillsProfile)
 			if profileErr != nil {
 				return profileErr
-			}
-			if !syncSkills && cmd.Flags().Changed("skills-profile") && profile != builtin.ProfileRuntime {
-				return fmt.Errorf("--skills-profile %s requires --sync-skills", profile)
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
 			defer cancel()
@@ -80,6 +126,20 @@ windows/amd64, windows/arm64.`,
 
 			if !result.UpdateAvailable {
 				fmt.Fprintf(os.Stderr, "  Already up-to-date (%s)\n", result.LatestVersion)
+				if syncSkills {
+					return completeUpdateLifecycle(updateLifecycleCallbacks{
+						SyncSkills: true,
+						Sync: func() (reconcile.Report, error) {
+							return maybeSyncSkillsAfterUpdate(ctx, true, true, config.DefaultConfigPath(), profile, defaultUpdateSkillsDeps())
+						},
+						Render: func(report reconcile.Report) error {
+							return renderSkillsReport(cmd.OutOrStdout(), report, false)
+						},
+						SkillsSynced: func() {
+							fmt.Fprintf(os.Stderr, "  %s Built-in skills synchronized\n", output.StatusSymbol("pass"))
+						},
+					})
+				}
 				return nil
 			}
 
@@ -135,28 +195,27 @@ windows/amd64, windows/arm64.`,
 			// Detect running gateway before replacing.
 			gatewayInst, gatewayErr := findRunningGateway()
 
-			// Replace binary.
+			// Replace binary, announce the durable replacement, then optionally
+			// reconcile built-in skills before any restart.
 			fmt.Fprintf(os.Stderr, "  Installing...\n")
-			if err := u.Replace(tmpPath); err != nil {
+			if err := completeUpdateLifecycle(updateLifecycleCallbacks{
+				Replace: func() error { return u.Replace(tmpPath) },
+				BinaryUpdated: func() {
+					fmt.Fprintf(os.Stderr, "  Binary updated to %s\n", result.LatestVersion)
+				},
+				SyncSkills: syncSkills,
+				Sync: func() (reconcile.Report, error) {
+					return maybeSyncSkillsAfterUpdate(ctx, true, cmd.Flags().Changed("skills-profile"), config.DefaultConfigPath(), profile, defaultUpdateSkillsDeps())
+				},
+				Render: func(report reconcile.Report) error {
+					return renderSkillsReport(cmd.OutOrStdout(), report, false)
+				},
+				SkillsSynced: func() {
+					fmt.Fprintf(os.Stderr, "  %s Built-in skills synchronized\n", output.StatusSymbol("pass"))
+				},
+			}); err != nil {
 				return err
 			}
-
-			if syncSkills {
-				report, syncErr := maybeSyncSkillsAfterUpdate(ctx, true, cmd.Flags().Changed("skills-profile"), config.DefaultConfigPath(), profile, defaultUpdateSkillsDeps())
-				if outputErr := renderSkillsReport(cmd.OutOrStdout(), report, false); outputErr != nil {
-					return outputErr
-				}
-				if syncErr != nil {
-					return syncErr
-				}
-				if reportErr := report.Err(); reportErr != nil {
-					return reportErr
-				}
-				fmt.Fprintf(os.Stderr, "  %s Built-in skills synchronized\n", output.StatusSymbol("pass"))
-			}
-
-			fmt.Fprintf(os.Stderr, "  %s Updated to %s\n",
-				output.StatusSymbol("pass"), result.LatestVersion)
 
 			// Handle service restart.
 			if gatewayErr != nil {
@@ -192,7 +251,7 @@ func maybeSyncSkillsAfterUpdate(ctx context.Context, syncRequested, profileChang
 		return reconcile.Report{Profile: profile}, reconcile.ErrUnknownProfile
 	}
 	if !syncRequested {
-		if profileChanged && profile != builtin.ProfileRuntime {
+		if profileChanged {
 			return reconcile.Report{Profile: profile}, fmt.Errorf("--skills-profile %s requires --sync-skills", profile)
 		}
 		return reconcile.Report{}, nil
@@ -217,7 +276,7 @@ func maybeSyncSkillsAfterUpdate(ctx context.Context, syncRequested, profileChang
 	if cfg == nil {
 		return report, fmt.Errorf("load config for skills sync: empty config")
 	}
-	workers, err := parseUpdateSkillWorkerTypes(cfg.EnabledWorkerTypes())
+	workers, err := parseReconcileWorkerTypes(cfg.EnabledWorkerTypes())
 	if err != nil {
 		return report, err
 	}
@@ -242,7 +301,7 @@ func maybeSyncSkillsAfterUpdate(ctx context.Context, syncRequested, profileChang
 	return report, report.Err()
 }
 
-func parseUpdateSkillWorkerTypes(values []string) ([]reconcile.WorkerType, error) {
+func parseReconcileWorkerTypes(values []string) ([]reconcile.WorkerType, error) {
 	workers := make([]reconcile.WorkerType, 0, len(values))
 	for _, value := range values {
 		worker, err := reconcile.ParseWorkerType(value)

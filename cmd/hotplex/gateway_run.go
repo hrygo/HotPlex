@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1510,7 +1511,7 @@ func runBuiltinSkillsStatus(
 	if cfg == nil {
 		return reconcile.ErrNoWorkerTargets
 	}
-	workers, err := parseUpdateSkillWorkerTypes(cfg.EnabledWorkerTypes())
+	workers, err := parseReconcileWorkerTypes(cfg.EnabledWorkerTypes())
 	if err != nil {
 		return err
 	}
@@ -1531,29 +1532,77 @@ func runBuiltinSkillsStatus(
 	if err != nil {
 		return err
 	}
-	if reportErr := report.Err(); reportErr != nil && log != nil {
-		log.Warn("gateway: built-in skills drift", "reason", stableSkillsStatusReason(reportErr))
+	if report.Err() != nil {
+		if log != nil {
+			log.Warn("gateway: built-in skills drift", "reasons", builtinSkillsDiagnosticReasons(report))
+		}
+		return nil
 	}
-	return report.Err()
+	return nil
 }
 
 func stableSkillsStatusReason(err error) string {
 	switch {
 	case errors.Is(err, reconcile.ErrNoWorkerTargets):
-		return reconcile.ErrNoWorkerTargets.Error()
+		return "no_worker_targets"
 	case errors.Is(err, reconcile.ErrUnknownWorker):
-		return reconcile.ErrUnknownWorker.Error()
+		return "unknown_worker"
 	case errors.Is(err, reconcile.ErrUnknownProfile):
-		return reconcile.ErrUnknownProfile.Error()
+		return "unknown_profile"
 	case errors.Is(err, reconcile.ErrRootOutsideHome):
-		return reconcile.ErrRootOutsideHome.Error()
+		return "root_outside_home"
 	case errors.Is(err, reconcile.ErrInventoryOutsideHotplexHome):
-		return reconcile.ErrInventoryOutsideHotplexHome.Error()
+		return "inventory_outside_hotplex_home"
+	case errors.Is(err, reconcile.ErrInvalidReceipt):
+		return "invalid_receipt"
+	case errors.Is(err, reconcile.ErrReceiptWriteFailed):
+		return "receipt_write_failed"
+	case errors.Is(err, reconcile.ErrInvalidPackageName):
+		return "invalid_package"
 	case errors.Is(err, reconcile.ErrReportActionRequired):
-		return reconcile.ErrReportActionRequired.Error()
+		return "action_required"
 	default:
 		return "status_unavailable"
 	}
+}
+
+var builtinSkillsDiagnosticReasonSet = map[string]struct{}{
+	reconcile.ReasonMissingTarget:      {},
+	reconcile.ReasonDrift:              {},
+	reconcile.ReasonCollision:          {},
+	reconcile.ReasonInvalidReceipt:     {},
+	reconcile.ReasonRootOutsideHome:    {},
+	reconcile.ReasonReceiptWriteFailed: {},
+	reconcile.ReasonInventoryBlocked:   {},
+	reconcile.ReasonRollbackFailed:     {},
+	reconcile.ReasonUnsupportedWorker:  {},
+	reconcile.ReasonMissingReceipt:     {},
+	reconcile.ReasonInvalidPackage:     {},
+	reconcile.ReasonUnchanged:          {},
+	reconcile.ReasonChanged:            {},
+}
+
+func builtinSkillsDiagnosticReasons(report reconcile.Report) string {
+	reasons := make(map[string]struct{})
+	for _, item := range report.Items {
+		switch item.Outcome {
+		case reconcile.OutcomeConflict, reconcile.OutcomeDrift, reconcile.OutcomeFailed:
+			if _, ok := builtinSkillsDiagnosticReasonSet[item.ReasonCode]; ok {
+				reasons[item.ReasonCode] = struct{}{}
+			} else {
+				reasons[reconcile.ReasonDrift] = struct{}{}
+			}
+		}
+	}
+	if len(reasons) == 0 {
+		reasons[reconcile.ReasonDrift] = struct{}{}
+	}
+	values := make([]string, 0, len(reasons))
+	for reason := range reasons {
+		values = append(values, reason)
+	}
+	sort.Strings(values)
+	return strings.Join(values, ",")
 }
 
 // --- Config helpers ---
