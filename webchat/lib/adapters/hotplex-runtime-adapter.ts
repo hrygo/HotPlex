@@ -67,6 +67,7 @@ import type {
     ToolSummaryPart,
     ContextUsagePart,
     TurnSummaryPart,
+    SkillListPart,
     MessagePart,
 } from "@/lib/types/message-parts";
 import type { HotPlexMessage } from "@/lib/types/message";
@@ -101,6 +102,7 @@ export type {
     ToolSummaryPart,
     ContextUsagePart,
     TurnSummaryPart,
+    SkillListPart,
     MessagePart,
 };
 
@@ -189,13 +191,15 @@ export function isGatewayCommandAck(
 export function convertToThreadMessage(
     message: HotPlexMessage,
 ): ThreadMessageLike {
-    // Filter out ToolSummaryPart, ContextUsagePart, and TurnSummaryPart — not recognized by assistant-ui's ThreadMessageLike type
+    // Filter out custom card parts — they are rendered from message metadata,
+    // not passed into assistant-ui's ThreadMessageLike content union.
     const parts = message.parts ?? [];
     const content = parts.filter(
         (p): p is TextPart | ReasoningPart | ToolCallPart =>
             p.type !== "tool-summary" &&
             p.type !== "context-usage" &&
-            p.type !== "turn-summary",
+            p.type !== "turn-summary" &&
+            p.type !== "skill-list",
     );
 
     const role = (message.role as string) === "user" ? "user" : "assistant";
@@ -208,6 +212,10 @@ export function convertToThreadMessage(
     // Extract turn summary data for card rendering
     const turnSummaryPart = parts.find(
         (p): p is TurnSummaryPart => p.type === "turn-summary",
+    );
+
+    const skillListPart = parts.find(
+        (p): p is SkillListPart => p.type === "skill-list",
     );
 
     // Extended ThreadMessageLike for HotPlex-specific metadata
@@ -226,6 +234,7 @@ export function convertToThreadMessage(
                 ...(turnSummaryPart
                     ? { turnSummary: turnSummaryPart.data }
                     : {}),
+                ...(skillListPart ? { skillsList: skillListPart.skills } : {}),
                 ...(message.progress ? { progress: message.progress } : {}),
                 ...(message.clientMessageId
                     ? { clientMessageId: message.clientMessageId }
@@ -1611,6 +1620,10 @@ export function useHotPlexRuntime({
                     const pendingAssistantID = pendingAssistantIdRef.current;
                     const activeAssistantID = activeAssistantIdRef.current;
                     const commandText = activeTurnInputRef.current;
+                    const isSkillsCommand = commandText
+                        ?.trim()
+                        .toLowerCase()
+                        .startsWith("/skills");
                     pendingAssistantIdRef.current = null;
                     activeAssistantIdRef.current = null;
                     activeInputMessageIdRef.current = null;
@@ -1635,10 +1648,15 @@ export function useHotPlexRuntime({
                             );
                             if (pendingIndex !== -1) {
                                 const next = [...prev];
+                                const hasSkillList = next[pendingIndex].parts.some(
+                                    (part) => part.type === "skill-list",
+                                );
                                 next[pendingIndex] = {
                                     ...next[pendingIndex],
                                     progress: undefined,
-                                    parts: [confirmation],
+                                    parts: isSkillsCommand && hasSkillList
+                                        ? next[pendingIndex].parts
+                                        : [confirmation],
                                     status: "complete",
                                 };
                                 return next;
@@ -1651,6 +1669,14 @@ export function useHotPlexRuntime({
                         }
                         // Done beat the ack and removed the placeholder →
                         // append the confirmation so the turn is still visible.
+                        const lastMessage = prev[prev.length - 1];
+                        if (
+                            isSkillsCommand &&
+                            lastMessage?.role === "assistant" &&
+                            lastMessage.parts.some((part) => part.type === "skill-list")
+                        ) {
+                            return prev;
+                        }
                         return [
                             ...prev,
                             {
@@ -1813,6 +1839,29 @@ export function useHotPlexRuntime({
             skillsFetchedRef.current = true;
             const entries = data?.skills ?? [];
             onSkillsChangeRef.current?.(entries);
+            const isSkillsCommand = activeTurnInputRef.current
+                ?.trim()
+                .toLowerCase()
+                .startsWith("/skills");
+            if (!isSkillsCommand) return;
+
+            setMessages((prev) => {
+                const lastMessage = prev[prev.length - 1];
+                if (lastMessage?.role !== "assistant") return prev;
+                const parts = lastMessage.parts.filter(
+                    (part) => part.type !== "skill-list",
+                );
+                return [
+                    ...prev.slice(0, -1),
+                    {
+                        ...lastMessage,
+                        parts: [
+                            ...parts,
+                            { type: "skill-list" as const, skills: entries },
+                        ],
+                    },
+                ];
+            });
         };
         client.on("skillsList", handleSkillsList);
 

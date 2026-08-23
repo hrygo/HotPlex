@@ -20,6 +20,32 @@ describe("convertToThreadMessage", () => {
 
         expect(message.metadata?.custom?.progress).toBe("thinking");
     });
+
+    it("keeps a skills result in custom metadata for the structured card", () => {
+        const message = convertToThreadMessage({
+            id: "assistant-skills-1",
+            role: "assistant",
+            parts: [
+                {
+                    type: "skill-list",
+                    skills: [
+                        {
+                            name: "api-designer",
+                            description: "Design APIs",
+                            source: "global",
+                            status: "discoverable",
+                        },
+                    ],
+                },
+            ],
+            createdAt: new Date(0),
+            status: "complete",
+        }) as { metadata?: { custom?: { skillsList?: Array<{ name: string }> } } };
+
+        expect(message.metadata?.custom?.skillsList).toEqual([
+            expect.objectContaining({ name: "api-designer" }),
+        ]);
+    });
 });
 
 describe("isGatewayCommandAck", () => {

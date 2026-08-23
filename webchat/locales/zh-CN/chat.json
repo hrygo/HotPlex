@@ -70,7 +70,13 @@
     "kbd_send_hint": "发送",
     "kbd_newline_hint": "换行",
     "code_lines": "（{{count}} 行）",
-    "action_default": "操作..."
+    "action_default": "操作...",
+    "skill_not_callable": "当前 Worker 不支持直接调用此 Skill",
+    "skills_result_title": "技能目录",
+    "skills_result_summary": "共 {{total}} 个技能，其中 {{callable}} 个可直接调用",
+    "skill_invoke_hint": "可调用",
+    "skill_no_description": "暂无描述",
+    "skills_result_empty": "当前没有发现 Skill"
   },
   "status": {
     "preparing": "准备中",

@@ -70,7 +70,13 @@
     "kbd_send_hint": "to send",
     "kbd_newline_hint": "new line",
     "code_lines": "({{count}} lines)",
-    "action_default": "Action..."
+    "action_default": "Action...",
+    "skill_not_callable": "The current Worker cannot call this Skill directly",
+    "skills_result_title": "Skill catalog",
+    "skills_result_summary": "{{total}} skills found, {{callable}} callable directly",
+    "skill_invoke_hint": "Callable",
+    "skill_no_description": "No description",
+    "skills_result_empty": "No skills found"
   },
   "status": {
     "preparing": "PREPARING",

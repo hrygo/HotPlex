@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { BrandIcon } from "@/components/icons";
 import { getToolCategory } from "@/lib/tool-categories";
 import { MarkdownText } from "./MarkdownText";
+import { HelpCommandPanel } from "./HelpCommandPanel";
 import { TerminalTool } from "./tools/TerminalTool";
 import { FileDiffTool } from "./tools/FileDiffTool";
 import { SearchTool } from "./tools/SearchTool";
@@ -21,7 +22,9 @@ import { useTranslation } from "react-i18next";
 import { PermissionApprovalCard } from "@/components/assistant-ui/tools/PermissionApprovalCard";
 import { QuestionResponseCard } from "@/components/assistant-ui/tools/QuestionResponseCard";
 import { ElicitationFormCard } from "@/components/assistant-ui/tools/ElicitationFormCard";
+import { SkillListCard } from "./SkillListCard";
 import { shouldSkipAssistantMessageRender } from "./assistant-message-memo";
+import { parseHelpCommandText } from "@/lib/help-command";
 
 // ToolCallPart is isolated so that a streaming sibling (growing text/reasoning)
 // does not re-render completed tool parts. Its memo comparator compares the
@@ -247,7 +250,11 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
             if (p.type === "reasoning") {
               return <ReasoningBlock key={partIndex} text={p.text || p.reasoning || ""} isStreaming={reasoningActiveByIndex[partIndex]} />;
             }
-            if (p.type === "text") return <div key={partIndex} className={`prose-hotplex ${isStreaming ? "streaming-cursor" : ""}`}><MarkdownText text={p.text} /></div>;
+            if (p.type === "text") {
+              const helpDocument = parseHelpCommandText(p.text);
+              if (helpDocument) return <HelpCommandPanel key={partIndex} document={helpDocument} />;
+              return <div key={partIndex} className={`prose-hotplex ${isStreaming ? "streaming-cursor" : ""}`}><MarkdownText text={p.text} /></div>;
+            }
 
             if (p.type === "tool-call") {
               const isLastPart = partIndex === content.length - 1;
@@ -295,6 +302,9 @@ const AssistantMessage = memo(function AssistantMessage({ message, onInteraction
           )}
           {custom?.turnSummary && (
             <TurnSummaryCard data={custom.turnSummary} />
+          )}
+          {custom?.skillsList && (
+            <SkillListCard skills={custom.skillsList} />
           )}
           {custom?.progress && (
             <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">

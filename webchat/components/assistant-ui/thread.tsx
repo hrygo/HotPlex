@@ -18,6 +18,10 @@ import { PreAssistantIndicator } from "./PreAssistantIndicator";
 import { useTranslation } from "react-i18next";
 import { FollowUpQueue } from "./FollowUpQueue";
 import type { FollowUpQueueControls } from "@/lib/adapters/follow-up-queue";
+import {
+  canSelectSkillCommand,
+  isBlockedSkillInput,
+} from "@/lib/skill-command-policy";
 
 interface ThreadProps {
   skills?: SkillEntry[];
@@ -238,7 +242,10 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     if (!composingRef.current) aui.composer().setText(val);
   }, [aui]);
 
+  const blockedSkillInput = isBlockedSkillInput(localText, skills ?? []);
+
   const handleSelectCommand = useCallback((cmd: Command) => {
+    if (!canSelectSkillCommand(cmd)) return;
     // Skills take a trailing space so the user can start typing args right away;
     // built-in slash commands are inserted as-is.
     const value = cmd.type === "skill" ? `${cmd.key} ` : cmd.key;
@@ -249,6 +256,10 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
 
   const handleQueueSubmit = useCallback(() => {
     if (!followUpQueue || !localText.trim()) return;
+    if (isBlockedSkillInput(localText, skills ?? [])) {
+      setQueueError(t("text.skill_not_callable"));
+      return;
+    }
     const result = followUpQueue.enqueue(localText);
     if (!result.ok) {
       setQueueError(t(
@@ -262,7 +273,7 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
     setLocalText("");
     setMenuOpen(false);
     aui.composer().setText("");
-  }, [aui, followUpQueue, localText, t]);
+  }, [aui, followUpQueue, localText, skills, t]);
 
   const queueing = isRunning || !!isStoppingProp;
   // A bare "/" is the command-menu trigger, never a message: block it from
@@ -289,10 +300,15 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
       setMenuOpen(true);
       return;
     }
+    if (blockedSkillInput) {
+      event.preventDefault();
+      setQueueError(t("text.skill_not_callable"));
+      return;
+    }
     if (!queueing) return;
     event.preventDefault();
     handleQueueSubmit();
-  }, [handleQueueSubmit, queueing, isBareSlash]);
+  }, [blockedSkillInput, handleQueueSubmit, queueing, isBareSlash, t]);
 
   return (
     <div className="composer-container relative max-w-3xl mx-auto">
@@ -404,13 +420,13 @@ const ThreadComposer = React.memo(function ThreadComposer({ skills, isRunning, i
                   type="button"
                   onClick={handleQueueSubmit}
                   className="btn-icon btn-primary"
-                  disabled={disabled || !followUpQueue || !localText.trim() || isBareSlash}
+                  disabled={disabled || !followUpQueue || !localText.trim() || isBareSlash || blockedSkillInput}
                   aria-label={t('follow_up.aria.enqueue')}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
               ) : (
-                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled || isBareSlash} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
+                <ComposerPrimitive.Send className="btn-icon btn-primary" disabled={disabled || isBareSlash || blockedSkillInput} title={blockedSkillInput ? t('text.skill_not_callable') : undefined} aria-label={t('aria.send')}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" /></svg></ComposerPrimitive.Send>
               )}
             </div>
           </div>

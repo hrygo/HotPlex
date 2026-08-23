@@ -3,13 +3,17 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import type { SkillEntry, SkillStatus } from "@/lib/ai-sdk-transport/client/types";
+import {
+  canSelectSkillCommand,
+  nextSelectableCommandIndex,
+} from "@/lib/skill-command-policy";
 
 export interface Command {
   key: string;
   label: string;
   description: string;
   type: "slash" | "skill";
-  /** Invokability for skill entries; the menu disables unavailable ones (issue #957). */
+  /** Invokability for skill entries; only explicit callable entries are selectable. */
   status?: SkillStatus;
 }
 
@@ -73,46 +77,53 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
     return cmd.key.toLowerCase().includes(filterText) ||
            cmd.description.toLowerCase().includes(filterText);
   });
+  const firstSelectableIndex = useMemo(() => {
+    const index = filtered.findIndex(canSelectSkillCommand);
+    return index === -1 ? 0 : index;
+  }, [filtered]);
   // NOTE: No .slice() limit — container has max-h-[320px] + overflow-y-auto
   // and scrollIntoView handles keyboard navigation. A hard cap hides skills.
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset selection on input change
-    setSelectedIndex(0);
+    setSelectedIndex(firstSelectableIndex);
     scrollToSelected();
-  }, [inputValue, scrollToSelected]);
+  }, [firstSelectableIndex, inputValue, scrollToSelected]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
+        if (filtered.length === 0) return;
         e.preventDefault();
-        setSelectedIndex(prev => (prev + 1) % filtered.length);
+        setSelectedIndex(prev => nextSelectableCommandIndex(filtered, prev, 1));
         requestAnimationFrame(scrollToSelected);
       } else if (e.key === "ArrowUp") {
+        if (filtered.length === 0) return;
         e.preventDefault();
-        setSelectedIndex(prev => (prev - 1 + filtered.length) % filtered.length);
+        setSelectedIndex(prev => nextSelectableCommandIndex(filtered, prev, -1));
         requestAnimationFrame(scrollToSelected);
       } else if (e.key === "Enter" && !e.isComposing && filtered.length > 0) {
         const selected = filtered[selectedIndex];
-        if (selected.type !== "skill" || selected.status !== "unavailable") {
-          // The composer already holds the exact command — let the Enter pass
-          // through so it submits immediately instead of re-selecting.
-          const exactMatch =
-            inputValue.trim().toLowerCase() === selected.key.toLowerCase();
-          if (exactMatch) return;
+        if (!canSelectSkillCommand(selected)) {
+          // A discoverable Skill is visible for transparency, but it must never
+          // fall through to the composer and reach the gateway as failed input.
           e.preventDefault();
-          // Capture phase: stop propagation so the composer's own Enter submit
-          // never fires with the partial filter text before the selection
-          // lands (window bubble listeners run after React's keydown).
           e.stopPropagation();
-          onSelect(selected);
           return;
         }
-        // Unavailable skill: swallow Enter so it is not submitted as text.
+        // The composer already holds the exact command — let the Enter pass
+        // through so it submits immediately instead of re-selecting.
+        const exactMatch =
+          inputValue.trim().toLowerCase() === selected.key.toLowerCase();
+        if (exactMatch) return;
         e.preventDefault();
+        // Capture phase: stop propagation so the composer's own Enter submit
+        // never fires with the partial filter text before the selection lands.
         e.stopPropagation();
+        onSelect(selected);
+        return;
       } else if (e.key === "Escape") {
         onClose();
       }
@@ -139,31 +150,34 @@ export function CommandMenu({ inputValue, onSelect, isOpen, onClose, skills }: C
 
       <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
         {filtered.map((cmd, i) => {
+          const selectable = canSelectSkillCommand(cmd);
           const unavailable = cmd.type === "skill" && cmd.status === "unavailable";
+          const blocked = cmd.type === "skill" && !selectable;
           return (
           <button
             key={cmd.key}
             ref={i === selectedIndex ? selectedRef : undefined}
-            disabled={unavailable}
+            disabled={blocked}
+            title={blocked ? t('text.skill_not_callable') : undefined}
             className={`w-full px-4 py-3 text-left flex flex-col gap-0.5 transition-all ${
-              unavailable
+              blocked
                 ? "opacity-45 cursor-not-allowed"
                 : i === selectedIndex
                   ? "bg-[var(--bg-hover)] translate-x-1"
                   : "hover:bg-[rgba(255,255,255,0.02)]"
             }`}
-            onClick={() => !unavailable && onSelect(cmd)}
+            onClick={() => selectable && onSelect(cmd)}
             onMouseEnter={() => setSelectedIndex(i)}
           >
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-bold ${unavailable ? "line-through decoration-[var(--accent-coral)]/60 text-[var(--text-faint)]" : i === selectedIndex ? "text-[var(--accent-gold)]" : "text-[var(--text-primary)]"}`}>
+              <span className={`text-xs font-bold ${unavailable ? "line-through decoration-[var(--accent-coral)]/60 text-[var(--text-faint)]" : blocked ? "text-[var(--text-faint)]" : i === selectedIndex ? "text-[var(--accent-gold)]" : "text-[var(--text-primary)]"}`}>
                 {cmd.label}
               </span>
               {cmd.type === "slash" ? (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(251,191,36,0.1)] text-[var(--accent-gold)] font-mono font-bold uppercase">CMD</span>
               ) : cmd.status === "unavailable" ? (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(248,113,113,0.12)] text-[var(--accent-coral)] font-mono font-bold uppercase">{t('label.skill_status_unavailable')}</span>
-              ) : cmd.status === "discoverable" ? (
+              ) : (cmd.status ?? "discoverable") === "discoverable" ? (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(148,163,184,0.12)] text-[var(--text-faint)] font-mono font-bold uppercase">{t('label.skill_status_discoverable')}</span>
               ) : (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--accent-emerald)] font-mono font-bold uppercase">SKILL</span>

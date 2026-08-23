@@ -3,8 +3,7 @@
  * Single source of truth — import from here instead of defining locally.
  */
 
-import type { ContextUsageData } from '@/lib/ai-sdk-transport/client/types';
-import type { TurnSessionStats } from '@/lib/ai-sdk-transport/client/types';
+import type { ContextUsageData, SkillEntry, TurnSessionStats } from '@/lib/ai-sdk-transport/client/types';
 
 export interface TextPart {
   type: 'text';
@@ -42,4 +41,9 @@ export interface TurnSummaryPart {
   data: TurnSessionStats;
 }
 
-export type MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolSummaryPart | ContextUsagePart | TurnSummaryPart;
+export interface SkillListPart {
+  type: 'skill-list';
+  skills: SkillEntry[];
+}
+
+export type MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolSummaryPart | ContextUsagePart | TurnSummaryPart | SkillListPart;
