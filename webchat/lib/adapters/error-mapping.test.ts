@@ -45,6 +45,11 @@ describe("mapErrorToMessage", () => {
             "clear: worker: not implemented",
             "This worker does not support /clear. Use /reset or /new instead.",
         ],
+        [
+            "NOT_SUPPORTED",
+            "rewind: claudecode: rewind: control: request failed: File rewinding is not enabled.",
+            "File rewind is not enabled for this worker. Use /reset or /new instead.",
+        ],
     ])(
         "maps known code %s to its friendly message",
         (code, message, expected) => {
@@ -91,6 +96,17 @@ describe("mapErrorToMessage", () => {
         it("maps an unsupported command to a generic actionable message", () => {
             expect(mapErrorToMessage("NOT_SUPPORTED", "compact: unavailable")).toBe(
                 "This command is not supported by the current worker.",
+            );
+        });
+
+        it("maps a legacy internal error for a disabled capability", () => {
+            expect(
+                mapErrorToMessage(
+                    "INTERNAL_ERROR",
+                    "rewind: claudecode: rewind: control: request failed: File rewinding is not enabled.",
+                ),
+            ).toBe(
+                "File rewind is not enabled for this worker. Use /reset or /new instead.",
             );
         });
     });

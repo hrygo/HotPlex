@@ -1204,6 +1204,13 @@ export function useHotPlexRuntime({
             // NOT_SUPPORTED is an expected capability boundary (e.g. /clear
             // on Claude Code), not a runtime fault — warn, don't error.
             const isNotSupported = (data?.code as string) === "NOT_SUPPORTED";
+            // Older gateways may report a capability rejection as
+            // INTERNAL_ERROR. Keep the client graceful during rolling updates.
+            const isCapabilityRejection =
+                isNotSupported ||
+                /(not implemented|not supported|unsupported|not enabled)/i.test(
+                    data?.message || "",
+                );
 
             // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
             if (isBusy) {
@@ -1314,7 +1321,7 @@ export function useHotPlexRuntime({
                         message: data.message,
                         eventId: env?.id,
                     });
-                } else if (isNotSupported) {
+                } else if (isCapabilityRejection) {
                     logger.warn("RuntimeAdapter", "Command not supported", {
                         code: data.code,
                         message: data.message,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/internal/worker/base"
@@ -36,10 +37,7 @@ func classifyWorkerError(err error) events.ErrorCode {
 		errors.Is(err, worker.ErrPermissionCeilingUnset) {
 		return events.ErrCodeInvalidMessage
 	}
-	if errors.Is(err, worker.ErrNotImplemented) {
-		return events.ErrCodeNotSupported
-	}
-	if errors.Is(err, worker.ErrSkillNotSupported) {
+	if isCapabilityRejection(err) {
 		return events.ErrCodeNotSupported
 	}
 	we, ok := errors.AsType[*worker.WorkerError](err)
@@ -52,4 +50,30 @@ func classifyWorkerError(err error) events.ErrorCode {
 		}
 	}
 	return events.ErrCodeInternalError
+}
+
+// isCapabilityRejection recognizes the stable error vocabulary emitted by
+// Worker adapters when a command is unavailable or disabled. Adapters wrap
+// vendor-specific errors at different layers, so this keeps the wire-level
+// classification consistent without exposing those implementation details to
+// clients. Runtime availability errors are checked first above and do not use
+// this vocabulary.
+func isCapabilityRejection(err error) bool {
+	if errors.Is(err, worker.ErrNotImplemented) ||
+		errors.Is(err, worker.ErrSkillNotSupported) {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	for _, phrase := range []string{
+		"not implemented",
+		"not supported",
+		"unsupported",
+		"not enabled",
+	} {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	return false
 }

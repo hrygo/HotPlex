@@ -27,6 +27,13 @@ export function mapErrorToMessage(
     message: string | undefined,
 ): string {
     const msgLower = (message || "").toLowerCase();
+    const isFileRewindDisabled = msgLower.includes(
+        "file rewinding is not enabled",
+    );
+
+    if (isFileRewindDisabled) {
+        return "File rewind is not enabled for this worker. Use /reset or /new instead.";
+    }
 
     switch (code) {
         case "TURN_TIMEOUT":
