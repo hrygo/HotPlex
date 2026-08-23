@@ -945,19 +945,20 @@ type PublicCatalog interface {
 }
 ~~~
 
-The provider combines the embedded canonical registry with the immutable HotplexHome inventory and does not require an existing Worker projection or native projection receipt for visibility. It does not call user CRUD methods. It returns SourceGlobal to preserve the current source contract, Managed=false, and optional Built-in fields. Admin and WebChat handlers merge Built-ins only into read surfaces. User/project entries with the same name win; CLI reconciliation status remains the collision diagnostic source. Built-ins return a bounded read-only error from update/delete/replace paths.
+The provider enumerates the embedded canonical `ProfilePackageSet` directly. An embedded Built-in is permanently discoverable without an immutable inventory directory, native Worker projection, or projection receipt; inventory and projection state remain reconciliation/callability concerns and are never consulted for public visibility. It does not call user CRUD methods and never exposes host paths. It returns `SourceGlobal` to preserve the current source contract, `Managed=false`, and optional `Builtin`/`BuiltinPackageVersion` fields. Admin and WebChat handlers merge Built-ins only into read surfaces: real global/project entries are listed first and a same-name real entry suppresses the Built-in. A selected embedded Built-in is read-only only when no same-name real user/project item exists; update/delete/replace return stable `SKILL_BUILTIN_READONLY`. Creating/installing a same-name user override remains allowed and follows ordinary real-skill conflict/update/delete semantics. CLI reconciliation remains the source of native collision diagnostics.
 
 - [ ] Step 1: Add red Go and TypeScript model/handler tests.
 
 ~~~go
-func TestBuiltinPublicCatalogListsCanonicalAndInventoryWithoutProjection(t *testing.T) {}
+func TestBuiltinPublicCatalogListsCanonicalWithoutProjection(t *testing.T) {}
+func TestBuiltinPublicCatalogReadsEmbeddedBodyAndReferences(t *testing.T) {}
 func TestAdminListUserSkillShadowsBuiltinSameName(t *testing.T) {}
 func TestAdminBuiltinDetailIsReadableButNotMutable(t *testing.T) {}
 func TestWebChatMergedListIncludesUniqueBuiltinAsReadOnly(t *testing.T) {}
 func TestWorkspaceSkillCRUDNeverMutatesBuiltinInventory(t *testing.T) {}
 ~~~
 
-Require source == global, builtin == true, a non-empty builtin_package_version, managed == false, and stable SKILL_BUILTIN_READONLY for update/delete/replace. Add a WebChat test that renders a Built-in badge and disables edit/delete controls while retaining user same-name precedence.
+Require source == global, builtin == true, a non-empty builtin_package_version, managed == false, and stable `SKILL_BUILTIN_READONLY` for update/delete/replace only when the selected object is the embedded Built-in with no same-name real user/project item. Add tests that a same-name user override is allowed to create/install and remains normally mutable, while a real global/project item shadows the Built-in in list/get and pagination/search runs after precedence merging. Add a WebChat test that renders a Built-in badge and disables edit/delete controls while retaining user same-name precedence.
 
 - [ ] Step 2: Run the provenance red tests.
 
@@ -970,11 +971,11 @@ Expected: compilation fails because optional fields, public catalog, handler inj
 
 - [ ] Step 3: Implement the canonical/inventory public provider.
 
-Enumerate the embedded ProfilePackageSet and reconcile it with immutable inventory directories under HotplexHome. A package remains discoverable when its inventory exists without any native projection or projection receipt. Resolve package body and reference file names from the embedded registry or verified immutable inventory, never from a user-writable native projection. Set optional provenance fields and preserve the existing Skill.FilePath omission from JSON.
+Enumerate the embedded `ProfilePackageSet` and read package body/reference bytes from the embedded registry only. A package remains discoverable with no inventory, native projection, or projection receipt. Resolve package body and reference file names from canonical embedded assets, never from a user-writable native projection or host path. Set optional provenance fields and preserve the existing `Skill.FilePath` omission from JSON.
 
 - [ ] Step 4: Merge read-only metadata without changing CRUD semantics.
 
-Add SetBuiltinSkillsCatalog to AdminAPI and SkillHandlers. For list/get reads, merge unique Built-ins after user entries and suppress a Built-in with a user/project name collision. For Admin install/update/delete and workspace install/delete, reject a target name matching a Built-in with SKILL_BUILTIN_READONLY; do not pass it to Locator.Install, CreateText, Update, or Delete.
+Add SetBuiltinSkillsCatalog to AdminAPI and SkillHandlers. For list/get reads, merge real global/project/workspace entries first and suppress a Built-in with a same-name real entry before search/filter/page. For Admin update/delete and replace paths, return `SKILL_BUILTIN_READONLY` only when the selected object is an embedded Built-in and no same-name real user/project item exists; never pass that Built-in to Locator.Install, CreateText, Update, or Delete. Admin create/install and workspace create/install of a same-name user override remain allowed; once real, that object follows ordinary user CRUD semantics. Workspace list/get/delete stay workspace-only and do not receive Built-ins.
 
 Wire the provider from cmd/hotplex/gateway_run.go and cmd/hotplex/routes.go. Keep /skills semantics as real Agent Skills; do not expose TOOLS.md, META-COGNITION.md, or other AgentConfig files.
 
