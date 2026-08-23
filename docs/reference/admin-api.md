@@ -368,7 +368,12 @@ PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQU
 
 ### Skill 管理（admin 全局）
 
-> 🆕 **issue #910** — admin 控制台的全局 skill 管理。zip 上传安装到 `~/.agents/skills`（对齐开放 `.agents` 标准，Codex/OpenCode 原生读取；Claude Code 需软链，见 [Skill 配置教程](../tutorials/skills-setup.md)）。区别于用户自助的 `/api/workspaces/{wid}/skills/*`（见下文 WebChat 多租户端点段）：admin 端管理**全局共享** skill，用户端管理各自 **workspace** skill。
+Admin/WebChat/Worker `/skills` 管理和展示的都是真实 Agent Skills；AgentConfig 的 `TOOLS.md`
+（旧 `SKILLS.md` 兼容名）不属于此 catalog。embedded `hotplex-cli`（runtime）与
+`hotplex-operator`（operator）是永久可发现的 builtin，发现不依赖 UserHome projection、
+`$HOTPLEX_HOME` inventory 或 receipt；projection 只决定 Worker 是否 callable。区别于用户自助
+的 `/api/workspaces/{wid}/skills/*`（见下文 WebChat 多租户端点段）：admin 端管理真实 global
+skill，用户端管理各自 project/workspace skill。
 
 | 方法 | 路径 | Scope | 说明 |
 |------|------|-------|------|
@@ -378,17 +383,27 @@ PATCH 错误码：`400 INVALID_PERMISSION_MODE`（档位非法）/ `400 BAD_REQU
 | PUT | `/admin/api/skills/{name}` | `admin:write` | 在线更新 `SKILL.md` 全文（JSON `{"body":"..."}`，区别于 POST 的 zip 上传） |
 | DELETE | `/admin/api/skills/{name}` | `admin:write` | 删除全局 skill |
 
-**GET /admin/api/skills** — 合并扫描 home 下 `.agents/skills`（`managed:true`，可写）与 `.claude/skills`、`.hotplex/skills`（`managed:false`，只读外部），同名 project 覆盖 global。响应：`{"skills":[{name,description,source,managed}],"total":N}`。GET 不审计。
+**GET /admin/api/skills** — 合并扫描真实 global/project 项与 embedded builtins；真实项优先遮蔽
+同名 builtin，builtin 项 `managed:false`、`builtin:true`，并带可选
+`builtin_package_version`。`source` 仍只为 `global` 或 `project`，builtin 身份只由独立的
+`builtin` 字段表达。
+响应：`{"skills":[{name,description,source,managed,builtin,builtin_package_version}],"total":N}`。
+GET 不审计。builtin 的 detail body/files 来自 embedded manifest，不暴露 host path，也不要求
+native projection 存在。
 
 **POST /admin/api/skills** — multipart 上传，`file` 字段为 `.zip` 包（body 上限 20MB）。zip 根下须直接有 `SKILL.md`，或单一顶层目录内含 `SKILL.md`（目录名必须等于 frontmatter `name`）。frontmatter 必填 `name`（正则 `^[a-z0-9]+(-[a-z0-9]+)*$`，1-64 字符）与 `description`（1-1024 字符）。文件类型白名单：`.md`/`.json`/`.yaml`/`.yml`/`.txt`/`.py`/`.sh`/`.toml`/图片（`.png`/`.jpg`/`.jpeg`/`.svg`）；拒可执行/二进制。`?replace=true` 覆盖同名，否则同名返回 `409`。安装成功返回 `skills.InstallResult`（含 `name`/`description`/`source:"global"`/`managed:true`/`body`/`files`，以及可能的 `warning`）。
 
-**PUT /admin/api/skills/{name}** — 在线更新已存在 skill 的 `SKILL.md` 全文。请求体为 JSON `{"body":"<完整 SKILL.md 文本>"}`（非 multipart、非 zip），仅改写 `SKILL.md`、不动包内其他文件。frontmatter 须合规（`name`/`description` 缺失或 `name` 不匹配正则返回 `400 SKILL_INVALID_FORMAT`），`name` 须为合法 skill 名。仅 `managed`（`.agents/skills`）skill 可改；外部只读 skill（`.claude`/`.hotplex`）返回 `404 SKILL_NOT_FOUND`。成功返回更新后的 skill detail（同 GET 详情结构）。
+**PUT /admin/api/skills/{name}** — 在线更新已存在真实 skill 的 `SKILL.md` 全文。请求体为 JSON `{"body":"<完整 SKILL.md 文本>"}`（非 multipart、非 zip），仅改写 `SKILL.md`、不动包内其他文件。frontmatter 须合规（`name`/`description` 缺失或 `name` 不匹配正则返回 `400 SKILL_INVALID_FORMAT`），`name` 须为合法 skill 名。若选中的对象是 builtin 且没有同名真实项，返回 `409 SKILL_BUILTIN_READONLY`；同名真实 user/project/global 项优先并照常允许 update。成功返回更新后的 skill detail（同 GET 详情结构）。
 
 > 🛡️ **安全**：zip-slip（`SafePathJoin` + 前缀双保险）、解压炸弹（zip ≤20MB / 解压总 ≤50MB / 单文件 ≤5MB / entry ≤500 / 压缩率 >100× 拒）、恶意 entry（`IsRegular()` 过滤 symlink/device）多维防护（spec §3.3 A）。
 
 > 🛡️ **审计**：POST/PUT/DELETE 写操作由 middleware 级 `admin_audit` 统一记录，action = `skill.create`（POST，`?replace=true` 时映射为 `skill.update`）/ `skill.update`（PUT）/ `skill.delete`（DELETE），actor = uid（Cookie 通道）或 `admin-token`（Bearer）。
 
-错误码：`400 SKILL_INVALID_ZIP`（损坏/超限/含恶意 entry）/ `400 SKILL_INVALID_FORMAT`（无 SKILL.md / frontmatter 缺失 / name 不合规 / name≠目录名 / description 超长）/ `400 SKILL_FILE_TYPE_BLOCKED`（类型不在白名单）/ `409 SKILL_ALREADY_EXISTS`（同名且未带 `?replace=true`）/ `404 SKILL_NOT_FOUND`（name 不存在）。
+**DELETE /admin/api/skills/{name}`** — 删除真实 global skill。builtin-only 对象返回
+`409 SKILL_BUILTIN_READONLY`；同名真实项优先，按正常权限删除。创建/安装同名 builtin
+override 允许，仍通过 `source:global` 或 `source:project` 表示真实来源。
+
+错误码：`400 SKILL_INVALID_ZIP`（损坏/超限/含恶意 entry）/ `400 SKILL_INVALID_FORMAT`（无 SKILL.md / frontmatter 缺失 / name 不合规 / name≠目录名 / description 超长）/ `400 SKILL_FILE_TYPE_BLOCKED`（类型不在白名单）/ `409 SKILL_ALREADY_EXISTS`（同名且未带 `?replace=true`）/ `409 SKILL_BUILTIN_READONLY`（builtin-only update/delete）/ `404 SKILL_NOT_FOUND`（name 不存在）。
 
 ## Gateway API 端点
 
@@ -461,17 +476,17 @@ Workspace CRUD 是**跨通道租户锚**：同一个 `users.id` 无论经 **API 
 
 **Workspace Skill 管理（spec #910）**：
 
-每个 workspace 可管理自己的 skill（安装到 `<work_dir>/.agents/skills`）。鉴权与 workspace CRUD 一致（API Key 优先 / Cookie 兜底），写操作额外校验 owner 归属（`ws.OwnerUserID != uid && !isAdmin` → `403 WORKSPACE_FORBIDDEN`）。另提供脱离 workspace 的合并查询：`/api/skills` 返回 `全局 + 当前用户所有 workspace + 外部只读` 的合并列表（每用户视图）。
+每个 workspace 可管理自己的 skill（安装到 `<work_dir>/.agents/skills`）。鉴权与 workspace CRUD 一致（API Key 优先 / Cookie 兜底），写操作额外校验 owner 归属（`ws.OwnerUserID != uid && !isAdmin` → `403 WORKSPACE_FORBIDDEN`）。另提供脱离 workspace 的合并查询：`/api/skills` 返回 `全局 + 当前用户所有 workspace + 外部只读 + embedded builtin` 的合并列表（每用户视图）；同名真实项优先遮蔽 builtin，搜索、过滤和分页在合并后执行。
 
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
-| GET | `/api/skills` | API Key / Cookie | 合并列表：全局 + 我的 workspace + 外部只读（带 `managed` 标注） |
-| GET | `/api/skills/{name}` | API Key / Cookie | 合并列表中该 skill 的元信息（覆盖胜出 scope） |
+| GET | `/api/skills` | API Key / Cookie | 合并列表：全局 + 我的 workspace + 外部只读 + builtin（带 `managed`/`builtin`/版本标注） |
+| GET | `/api/skills/{name}` | API Key / Cookie | 合并列表中该 skill 的元信息或 builtin detail（真实项优先） |
 | POST | `/api/workspaces/{wid}/skills` | owner | zip 上传安装 workspace skill（`?replace=true` 覆盖） |
 | GET | `/api/workspaces/{wid}/skills/{name}` | owner | workspace scope skill 详情（含 `body` + `files`） |
 | DELETE | `/api/workspaces/{wid}/skills/{name}` | owner | 删除 workspace skill |
 
-> ⚠️ **同名遮蔽（spec §3.3 B6）**：workspace 安装与全局同名的 skill 时**允许安装但返回 `warning`**（`shadows global skill '<name>'`）——workspace skill 在合并列表中覆盖全局生效，UI 须显式提示。
+> ⚠️ **同名遮蔽（spec §3.3 B6）**：workspace 安装与全局或 builtin 同名的 skill 时**允许安装但返回 `warning`**（`shadows global skill '<name>'`）——workspace skill 在合并列表中覆盖全局/builtin 生效，UI 须显式提示。builtin 不注入 workspace-only 管理列表；真实 workspace override 可照常 update/delete。
 
 > 🛡️ **审计**：workspace skill 写操作（POST/DELETE）由 handler 显式写入 tamper-evident `user_activity`（`action` = `skill.install` / `skill.delete`，`resource_type` = `skill`，`platform` = `webchat`），与 `/api/admin/*` 写操作一致；读操作不审计。
 

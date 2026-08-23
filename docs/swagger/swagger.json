@@ -4234,6 +4234,12 @@
                 "body": {
                     "type": "string"
                 },
+                "builtin": {
+                    "type": "boolean"
+                },
+                "builtin_package_version": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },

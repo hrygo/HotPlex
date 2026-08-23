@@ -3,12 +3,12 @@ package builtin
 var generatedManifests = []PackageManifest{
 	{
 		Name:    "hotplex-cli",
-		Version: "v1-f2c3912551d4a9cb07e43c0fcb1f409da26ab23d226890ffaa50af6e58c1b865",
+		Version: "v1-8a86bcdd60dcdc507a24c1bb8d78e1c7e686b26100b3e316c61551c61b5f70d4",
 		Profile: ProfileRuntime,
 		Assets: []AssetManifest{
 			{Path: "SKILL.md", Size: 1039, SHA256: "dbdf74e7280932f717efe48b1ca849fe034eb479727936119af40168b8ab4e86"},
 			{Path: "references/cli-surface.generated.md", Size: 7070, SHA256: "476ca95bb1edea6e146bc93e578ca9bd3750d34f27214e78decb32a96cba9312"},
-			{Path: "references/cron.md", Size: 2583, SHA256: "ed800cf3cc2ddd6935b7316cfb41bf5f48aaa4a8af0b0180150540b8eca0ad24"},
+			{Path: "references/cron.md", Size: 2844, SHA256: "4fe41efcd97f27838301adbcf2c5a86a58499e325828c657f078277d83624725"},
 			{Path: "references/diagnostics.md", Size: 857, SHA256: "8e1137a1007778e3cc57d5551eb609095753a6e4aee2c028d28b7afd59c7e547"},
 			{Path: "references/slack.md", Size: 1054, SHA256: "0f46f60774ff1c99c6a9fbe21d2510a6c4983e65355a2fb5eac0a8de6267ba61"},
 		},

@@ -26,17 +26,20 @@ Cron 任务的创建不通过 CLI 手动输入 cron 表达式，而是通过 Age
 
 ```
 用户："每天早上 9 点检查系统健康状态"
-  -> Agent（通过 Skill Manual）识别为 cron 创建意图
+  -> Agent（通过当前 Session 的 hotplex-cli Skill）识别为 cron 创建意图
   -> Agent 调用 hotplex cron create 命令
   -> Scheduler.CreateJob() 创建任务
   -> timerLoop.arm() 重新计算下次触发时间
 ```
 
-Skill Manual（`cron-skill-manual.md`）通过 `go:embed` 编译进二进制文件，在 Scheduler 启动时释放到 `~/.hotplex/skills/cron.md`，由独立 Skills scanner 作为外部 Skill 发现并按需读取。它不进入 AgentConfig B 通道，也不来自 `TOOLS.md`。
+Cron 路由使用 embedded `hotplex-cli` canonical Skill 的短路由和 references；Skill 不可用时，
+Agent 必须查询当前二进制的 `hotplex cron --help` 与 `hotplex cron create --help`，不能依赖旧
+示例。`TOOLS.md` 只提供常驻工具使用指导，不是 Cron Skill catalog。
 
 ### 3 种调度类型
 
-Cron 支持三种调度语义，覆盖从定时循环到一次性触发的全部场景：
+Cron 支持三种调度语义，覆盖从定时循环到一次性触发的全部场景；`ScheduleAt` 同时接受
+绝对 RFC3339 和 parser 支持的 `at:+<duration>`：
 
 | 类型 | Kind | 触发规则 | 使用场景 |
 |------|------|---------|---------|
@@ -351,7 +354,6 @@ Dispatch(job):
 - `internal/cron/delivery.go` -- 结果投递：extract + PlatformDeliverer 回调
 - `internal/cron/store.go` -- SQLite 持久化：ErrJobNotFound 哨兵、jobColumns 常量
 - `internal/cron/loader.go` -- YAML 批量导入：name 幂等 upsert
-- `internal/cron/skill.go` -- go:embed Skill Manual
 - `internal/cron/retry.go` -- at 类型指数退避重试
 - `internal/cron/normalize.go` -- cron 表达式标准化
 
@@ -418,7 +420,7 @@ done
 [ -z "$TARGET" ] && { echo "All reviewed."; exit; }; PR=$TARGET
 
 ## §1.5 检出 PR 分支(强制)
-RB="/tmp/pr-review-$(date +%Y%m%d)" && mkdir -p "$RB"
+RB="/tmp/pr-review-<DATE>" && mkdir -p "$RB"
 PD="$RB/pr-$PR"
 if [ -d "$PD/.git" ]; then cd "$PD" && git fetch origin "+pull/$PR/head:review" && git reset --hard review
 else gh repo clone hrygo/hotplex "$PD" -- --no-checkout && cd "$PD" && git fetch origin "pull/$PR/head:review" && git checkout review

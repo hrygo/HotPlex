@@ -102,6 +102,15 @@ Admin API 的 `skills`、WebChat Skills、Session `/skills` 以及 Worker 原生
 
 Skill 状态按当前 Session 的证据区分：文件系统找到定义但没有当前 Worker 调用证据是 `discoverable`；Worker 权威目录确认可原生执行才是 `callable`；`unavailable` 保留给能力表面明确报告的不可用状态。只有 `callable` 可以调用。短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 都复用同一个 Session callability 判定；filesystem-only Skill 永远不能绕过它变成可调用。
 
+内置 Skill 是真实 Agent Skills 的只读公共发现项：`hotplex-cli` 面向日常 Cron、显式 Slack 和只读诊断，`hotplex-operator` 面向服务、更新、配置、Admin 与审计，后者需要显式 operator authority。内置项永久可发现，不以 projection、inventory 或 receipt 是否存在为前提；但 discoverable 不等于 callable，调用仍需当前 Worker 的权威目录证据。真实 global/project/user Skill 优先遮蔽同名内置项，`source` 仍只表示 `global` 或 `project`，builtin 元数据只通过可选 `builtin`/`builtin_package_version` 字段表达。没有同名真实项时，内置项 update/delete 返回 `SKILL_BUILTIN_READONLY`；创建同名用户 override 仍走正常 Skill CRUD。
+
+原生 Skill 同步把 UserHome 与 `$HOTPLEX_HOME` 分开：Claude 使用 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可推断的 filesystem root；immutable inventory、状态和 receipts 位于 `$HOTPLEX_HOME`。`hotplex skills status|sync|remove` 使用 runtime（`hotplex-cli`）或 operator（累积包含 `hotplex-cli` 与 `hotplex-operator`）profile，可重复传入 `--worker`，并支持 `--dry-run`/`--json`。未显式指定 worker 时只采用已启用 messaging platform/bot 的解析结果；空目标返回 bounded error，不回退到注册表。remove 只删除 receipt 与 unchanged-tree 能证明归属的 native projection，不删除 inventory。
+
+Gateway 启动与 `doctor` 只读；`onboard`/`update` 只有显式 `--sync-skills` 才同步（`update` 可用 `--skills-profile` 选择累积 profile）。同步遇到 collision、drift 或 failed item 以非零结果结束，也不会覆盖未知 user/project Skill；新 Session 或 `/reset` 后才重新看到新的 Worker 目录证据。
+
+Phase C 的 legacy manual migration 尚未交付；不要把旧手工迁移、旧 Skill release helper 或
+软链步骤写成当前自动化能力。
+
 ### CLI 与 Cron 路由
 
 处理 Cron 请求时，优先路由到当前 Session 实际暴露的 `hotplex-cli` Skill；Skill 不可用时，查询当前安装二进制而不是依赖旧示例：`hotplex cron --help`，再按需查看 `hotplex cron create --help`。创建后必须使用独立读取路径执行 `hotplex cron get <id|name> --json`，核对任务状态、schedule、platform 和 platform key；无法调用 CLI 时应明确返回 `unsupported`/degraded。

@@ -31,6 +31,25 @@ description: "HotPlex 聊天命令快速参考卡片，涵盖飞书 / Slack / We
 | `/worker <名称> [参数]` | 显式按名调用当前 Worker 已加载的技能（#959） |
 | `/mcp` | 查看 MCP 服务器连接状态 |
 
+### Agent Skills 与 CLI
+
+`/skills` 展示的是真实 Agent Skills（包括 embedded `hotplex-cli` 与
+`hotplex-operator`），不是 AgentConfig 的 `TOOLS.md` 或旧 `SKILLS.md` alias。需要投影到
+Worker 原生目录时，在有权限的终端显式执行：
+
+```bash
+hotplex skills status --profile runtime --worker claude_code --json
+hotplex skills sync --profile runtime --worker claude_code --dry-run
+hotplex skills remove --profile runtime --worker claude_code --json
+```
+
+`runtime` 与 `operator` 是累积 profile，`--worker` 可重复；UserHome 原生根和
+`$HOTPLEX_HOME` immutable inventory/state receipts 分离。Gateway startup、doctor 和普通
+onboard/update 路径不隐式同步；onboard/update 必须显式带 `--sync-skills`。empty enabled-worker
+target 会返回错误，不会回退到注册表。discoverable 不等于 callable，调用仍需 Worker 证据。
+
+Cron 创建后始终独立验证：`hotplex cron get <id|name> --json`；不要只看 `cron list`。
+
 ### 配置调整
 
 | 命令 | 参数 | 说明 |

@@ -123,6 +123,21 @@ replay 共用同一判定，filesystem-only Skill 不会因为存在路径而变
 配置变更和 Skill 可见性都应在新建 Session 或 `/reset` 后重新检查，并以当前 `/skills` 状态
 为准。
 
+### 内置 Skills 与显式同步
+
+`hotplex-cli`（runtime）和 `hotplex-operator`（operator，累积包含 runtime 包）是两个只读
+内置 Agent Skills。它们在 Admin/WebChat/Worker `/skills` 中永久可发现，即使还没有 native
+projection；是否 callable 仍由当前 Worker 的权威目录决定。真实 global/project/user Skill
+同名时优先显示真实项，`source` 仍为 `global`/`project`，builtin 只作为可选元数据和版本展示。
+只有 builtin-only 对象 update/delete 才返回 `SKILL_BUILTIN_READONLY`，同名用户 override 可以
+正常创建和管理。
+
+需要投影到 Worker 原生目录时，使用 `hotplex skills status|sync|remove`，按需选择累积
+`runtime`/`operator` profile、重复 `--worker`，并可使用 `--dry-run` 与 `--json`。UserHome
+原生根（Claude 的 `.claude/skills`、Codex/OpenCode 共享 `.agents/skills`）与
+`$HOTPLEX_HOME` 的 immutable inventory/state receipts 分离；ACP 没有可推断的 filesystem
+root。Gateway startup 与 doctor 不写入，onboard/update 只有显式 `--sync-skills` 才同步。
+
 ### Cron 请求的 CLI 路由
 
 Cron 请求优先使用当前 Session 可用的 `hotplex-cli` Skill；不可用时先查询当前二进制的

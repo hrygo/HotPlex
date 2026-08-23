@@ -1,12 +1,17 @@
 ---
 title: Skill 配置教程
 weight: 7
-description: 用 zip 上传管理 AI 技能 —— HotPlex skill 管理与各 Worker 软链引导
+description: 用 zip 上传管理 AI 技能 —— HotPlex Skill 发现、调用与显式同步
 ---
 
 # Skill 配置教程
 
-Skill 是封装了特定能力的 AI 技能包（含 `SKILL.md` 定义 + 辅助文件）。HotPlex 支持通过 WebChat UI 上传 zip 包安装 skill，统一存储在 `.agents/skills` 目录（对齐开放 `.agents` 标准）。完整规格见 [Skill-Management-Spec](../specs/Skill-Management-Spec.md)。
+Skill 是封装了特定能力的真实 Agent Skill（含 `SKILL.md` 定义和辅助文件）。HotPlex 支持通过
+WebChat/Admin 上传 zip 包安装，也会公开两个 embedded canonical package：runtime 的
+`hotplex-cli`（Cron、显式 Slack、只读诊断）和需要显式 operator authority 的
+`hotplex-operator`（服务、更新、配置、Admin、审计）。它们与 AgentConfig 的 `TOOLS.md`
+（旧 `SKILLS.md` 只读兼容名）是两个领域；`TOOLS.md` 不会出现在 Skills catalog。完整规格见
+[Skill-Management-Spec](../specs/Skill-Management-Spec.md)。
 
 **前置条件**：HotPlex Gateway v1.37+ 已运行，WebChat 多租户已启用。
 
@@ -65,36 +70,34 @@ WebChat UI → 管理后台（全局）或 Workspace 设置（workspace）→ Sk
 
 安装成功后，skill 立即出现在管理列表：`.agents/skills` 下的标注「可管理」，`.claude`/`.hotplex` 等目录下的标注「只读外部」。它是否能在某个 Session 中调用，仍取决于该 Session 的 Worker 目录证据。
 
-## 4. 各 Worker 加载与软链引导
+## 4. 各 Worker 原生根与显式同步
 
-> ⚠️ **关键**：HotPlex **不向任何 Worker 传递 skill 目录参数**——各 Worker 按自身规则读取 home 下的 skill 目录。统一存储在 `~/.agents/skills`，但不同 Worker 的原生扫描路径不同，**Claude Code 需要额外建软链**。
+HotPlex 不把 `$HOTPLEX_HOME` 的 inventory 当作 Worker 根，也不要求用户手工建立软链。同步
+命令会在安全检查后把选定 package 投影到 UserHome 的原生目录：
 
-| Worker | 原生读 `~/.agents/skills` | 需要的操作 |
-|--------|--------------------------|-----------|
-| **Codex CLI** | ✅ 主路径就是 `.agents/skills` | 无需任何操作 |
-| **OpenCode Server** | ✅ agent-compat 扫描 `.agents/skills` | 无需任何操作 |
-| **Claude Code** | ❌ 只读 `.claude/skills` | **必须建立软链**（见下） |
-| **ACP** | 取决于底层 agent | 按底层 agent 处理 |
+| Worker | UserHome 原生根 | 说明 |
+|--------|----------------|------|
+| **Claude Code** | `<UserHome>/.claude/skills` | 当前 worker 的权威目录可证明 `callable` |
+| **Codex CLI** | `<UserHome>/.agents/skills` | 与 OpenCode 共享根，选择任一 alias 会报告完整 aliases |
+| **OpenCode Server** | `<UserHome>/.agents/skills` | 与 Codex 共享根，选择任一 alias 会报告完整 aliases |
+| **ACP** | 无可推断 filesystem root | typed unsupported，不写入文件系统 |
 
-### Claude Code 软链设置（CC 专属）
-
-Claude Code 只读 `~/.claude/skills`，需把统一存储目录软链过去：
-
-```bash
-# 若 ~/.claude/skills 已是真实目录（非软链），请先备份/迁移其内容，再执行：
-ln -s ~/.agents/skills ~/.claude/skills
-```
-
-验证：
+使用以下命令查看、同步或移除 native projection：
 
 ```bash
-ls -l ~/.claude/skills
-# 应显示: ~/.claude/skills -> ~/.agents/skills 的符号链接
+hotplex skills status --profile runtime --worker claude_code --json
+hotplex skills sync --profile runtime --worker claude_code --dry-run
+hotplex skills sync --profile operator --worker codex_cli --worker opencode_server
+hotplex skills remove --profile runtime --worker claude_code --json
 ```
 
-建立软链后，新会话可让 Claude Code 按其原生规则发现 `~/.agents/skills` 下的 skill；这不等于 HotPlex 已确认可调用。应在新 Session 或 `/reset` 后检查 `/skills` 的状态。
-
-> ⚠️ **为什么不由程序代建软链？** 软链涉及「已有真实目录被覆盖、方向冲突、跨 Worker 归一化」等数据安全风险。HotPlex 把这一步留给用户显式完成，避免程序误覆盖用户已有的 `.claude/skills` 内容——这是有意的设计决策（spec §2「软链管理」）。
+`runtime` 只包含 `hotplex-cli`，`operator` 累积包含 `hotplex-cli` 与 `hotplex-operator`。
+`status`/`--dry-run` 严格只读；未显式传 `--worker` 时，CLI 只从已启用 Slack/Feishu/Yuanxin
+platform/bot 的 effective config 解析目标，空集合返回 bounded error，不回退到 RegisteredTypes。
+UserHome 原生根与 `$HOTPLEX_HOME/skills/builtin/<version>` immutable inventory、状态和
+receipts 分离。同步不会覆盖未知 user/project Skill；collision、drift、failed item 以非零
+结果报告。`remove` 只删除有 matching receipt 且 unchanged-tree 能证明归属的 projection，
+不会删除 immutable inventory。
 
 ## 5. 发现不等于可调用
 
@@ -108,8 +111,14 @@ Admin API 的 `skills`、WebChat Skills、Session `/skills` 和 Worker 原生 Sk
 
 ## 6. 修改与删除
 
-- **修改 skill** 有两种方式：① 在线编辑——在 skill 详情的「Body」标签页直接改写 `SKILL.md` 全文并保存（对应 `PUT /admin/api/skills/{name}`，仅 `managed` skill 可改）；② 重新打包 zip 上传覆盖（勾选「覆盖同名」）。两种方式都只更新 `SKILL.md`，包内其他文件需通过 zip 覆盖替换。
-- **删除 skill** = 列表中点击删除。仅 `managed` skill（`.agents/skills` 下）可删；`.claude`/`.hotplex` 下的只读外部 skill 需在文件系统手动删除。
+- **修改真实 skill** 有两种方式：① 在线编辑——在 skill 详情的「Body」标签页直接改写
+  `SKILL.md` 全文并保存（对应 `PUT /admin/api/skills/{name}`，仅真实 managed skill 可改）；
+  ② 重新打包 zip 上传覆盖（勾选「覆盖同名」）。真实 global/project/user 项目按当前权限
+  正常 update/delete。
+- **内置 skill** 永久可发现但不可直接 CRUD；builtin-only 对象 update/delete 返回
+  `SKILL_BUILTIN_READONLY`。创建同名用户 override 会优先遮蔽内置项，并按真实 skill 正常管理。
+- Worker projection 的 remove 与 Skills API 的删除是不同操作：前者只处理 receipt 证明归属
+  且 tree 未改变的 native 文件，不删除 `$HOTPLEX_HOME` inventory。
 
 ## 7. REST API
 

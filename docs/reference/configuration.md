@@ -428,6 +428,31 @@ facts 是受限的**声明**，不是外部 Worker 健康或权限已执行的�
 
 Skill 的 `name`/`description` progressive disclosure 由原生 Worker 负责，HotPlex 不复制一份 catalog 到 AgentConfig。Session `/skills` 保留 `callable`、`discoverable`、`unavailable` 三种状态；当前 merged catalog 把 filesystem-only Skill 标为 `discoverable`，只有 Worker 权威目录确认的 `callable` 才能执行。短 `/name`（包括 WebChat）、显式 `/worker <name>`、busy replay 和 crash structured replay 共用该判定。
 
+#### 3.8.2 Built-in Skill inventory 与 native projection
+
+HotPlex 发布两个 embedded canonical package：runtime profile 只有 `hotplex-cli`，用于日常
+Cron、显式 Slack 和只读诊断；operator profile 累积包含 `hotplex-cli` 与
+`hotplex-operator`，用于服务、更新、配置、Admin 和 audit，并要求显式 operator authority。
+Public/Admin/WebChat builtins 永久可发现，不以 projection 或 receipt 存在为前提；projection
+只影响 Worker 是否 callable。真实 global/project/user Skill 同名时优先遮蔽 builtin，`source`
+仍只使用 `global`/`project`，builtin 通过可选 `builtin`、`builtin_package_version` 元数据
+表达。builtin-only update/delete 返回 `SKILL_BUILTIN_READONLY`，同名用户 override 可正常
+创建和管理。
+
+显式同步命令为 `hotplex skills status|sync|remove`，支持累积 `runtime`/`operator` profile、
+重复 `--worker`、`--dry-run` 和 `--json`。Worker native roots 位于 UserHome：Claude 是
+`<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`；ACP 没有可
+推断 filesystem root，typed unsupported 且不写文件。immutable inventory 位于
+`$HOTPLEX_HOME/skills/builtin/<version>/<name>`，状态和 receipts 也位于
+`$HOTPLEX_HOME`，与 UserHome 原生 projection 分离。status/--dry-run 严格零写；同步不会覆盖
+未知 user/project Skill，collision、drift、failed item 返回非零；remove 只删除 matching
+receipt 且 unchanged-tree 能证明归属的 projection，不删除 inventory。
+
+Gateway startup 与 doctor 只读；onboard/update 只有显式 `--sync-skills` 才同步，修改后在新
+Session 或 `/reset` 才进入 Worker 的目录证据边界。未显式传 `--worker` 时，CLI 只解析已启用
+messaging platform/bot 的 effective worker targets；empty target 返回 bounded error，不回退到
+RegisteredTypes。
+
 ---
 
 ### 3.9 skills — Skills 发现
