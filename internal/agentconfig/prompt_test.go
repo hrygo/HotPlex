@@ -219,18 +219,26 @@ func TestEmbeddedMetacognitionDefinesStableRuntimeInvariants(t *testing.T) {
 
 	for _, required := range []string{
 		"Gateway 负责",
-		"五个可编辑配置槽位",
+		"HotPlex 只识别五个可编辑文件",
+		"SOUL.md",
+		"AGENTS.md",
 		"TOOLS.md",
-		"SKILL.md",
-		"Admin API",
-		"WebChat",
+		"USER.md",
+		"MEMORY.md",
+		"Bot → 平台 → 全局",
+		"<name>/SKILL.md",
+		"Admin/WebChat",
+		"Session `/skills`",
+		"hotplex-cli",
+		"hotplex cron --help",
 		"/reset",
-		"fallback",
 		"inspect",
 	} {
 		require.Contains(t, embeddedMetacognition, required)
 	}
 	for _, forbidden := range []string{
+		"SKILLS.md",
+		"platform/default/",
 		"真实 Skills",
 		"5 分钟",
 		"最多 3 次",

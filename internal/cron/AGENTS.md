@@ -19,8 +19,6 @@ cron/
   loader.go      # LoadFromYAML: name-idempotent upsert from YAML defs
   retry.go       # backoff schedule, scheduleRetry
   normalize.go   # ValidateJob, ValidateJobPrompt, threat detection, lifecycle constraints
-  skill.go       # go:embed cron-skill-manual.md → B channel skill manual
-  cron-skill-manual.md  # Embedded cron management manual for worker agents
 ```
 
 ## WHERE TO LOOK
@@ -44,7 +42,6 @@ cron/
 | YAML batch import | `loader.go` LoadFromYAML | Name-based idempotent upsert, recompute next_run |
 | Error classification | `errors.go` | classifyError (timeout/network/rate_limit/server/exec), isTemporaryError |
 | Backoff retry | `retry.go` backoff | 30s→1m→5m→15m→1h exponential, scheduleRetry (job retry; see delivery.go for delivery retry) |
-| Skill manual | `skill.go` SkillManual | go:embed cron-skill-manual.md, released to B channel |
 
 ## KEY PATTERNS
 
