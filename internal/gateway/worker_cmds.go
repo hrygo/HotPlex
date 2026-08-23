@@ -133,7 +133,7 @@ func (h *Handler) handleSetModel(ctx context.Context, env *events.Envelope, cr w
 func (h *Handler) handleSetPermMode(ctx context.Context, env *events.Envelope, cr worker.ControlRequester, args string, extra map[string]any) error {
 	mode, err := normalizeRequestedPermissionMode(args, extra)
 	if err != nil {
-		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "invalid permission mode: %v", err)
+		return h.sendErrorf(ctx, env, events.ErrCodeInvalidMessage, "%v", err)
 	}
 	if _, err := cr.SendControlRequest(ctx, "set_permission_mode", map[string]any{"mode": mode}); err != nil {
 		return h.sendErrorf(ctx, env, classifyWorkerError(err), "set permission: %v", err)

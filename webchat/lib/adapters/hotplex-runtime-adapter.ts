@@ -46,7 +46,10 @@ import { TODO_TOOLS } from "@/lib/tool-categories";
 import { useMetrics } from "@/lib/hooks/useMetrics";
 import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
-import { mapErrorToMessage } from "@/lib/adapters/error-mapping";
+import {
+    isExpectedCommandRejection,
+    mapErrorToMessage,
+} from "@/lib/adapters/error-mapping";
 import { logger } from "@/lib/logger";
 import i18n from "@/lib/i18n/config";
 import type {
@@ -1198,19 +1201,14 @@ export function useHotPlexRuntime({
             );
             const isTerminated =
                 (data?.code as string) === "SESSION_TERMINATED";
-            // CONFIG_INVALID is a user-command rejection (e.g. /cd on a
-            // workspace-bound session), not a runtime fault — warn, don't error.
-            const isConfigInvalid = (data?.code as string) === "CONFIG_INVALID";
-            // NOT_SUPPORTED is an expected capability boundary (e.g. /clear
-            // on Claude Code), not a runtime fault — warn, don't error.
+            // User-fixable command rejections (invalid args, unsupported
+            // capabilities, or legacy capability errors) are expected input
+            // outcomes, not runtime faults — warn, don't error.
+            const isExpectedCommandRejectionError = isExpectedCommandRejection(
+                data?.code,
+                data?.message,
+            );
             const isNotSupported = (data?.code as string) === "NOT_SUPPORTED";
-            // Older gateways may report a capability rejection as
-            // INTERNAL_ERROR. Keep the client graceful during rolling updates.
-            const isCapabilityRejection =
-                isNotSupported ||
-                /(not implemented|not supported|unsupported|not enabled)/i.test(
-                    data?.message || "",
-                );
 
             // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
             if (isBusy) {
@@ -1315,18 +1313,18 @@ export function useHotPlexRuntime({
                         details: data.details,
                         eventId: env?.id,
                     });
-                } else if (isConfigInvalid) {
-                    logger.warn("RuntimeAdapter", "Command rejected", {
-                        code: data.code,
-                        message: data.message,
-                        eventId: env?.id,
-                    });
-                } else if (isCapabilityRejection) {
-                    logger.warn("RuntimeAdapter", "Command not supported", {
-                        code: data.code,
-                        message: data.message,
-                        eventId: env?.id,
-                    });
+                } else if (isExpectedCommandRejectionError) {
+                    logger.warn(
+                        "RuntimeAdapter",
+                        isNotSupported
+                            ? "Command not supported"
+                            : "Command rejected",
+                        {
+                            code: data.code,
+                            message: data.message,
+                            eventId: env?.id,
+                        },
+                    );
                 } else {
                     logger.error("RuntimeAdapter", "Error received", {
                         code: data.code || "unknown",

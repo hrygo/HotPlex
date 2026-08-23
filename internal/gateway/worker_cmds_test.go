@@ -79,6 +79,15 @@ func TestHandleSetPermMode_ForwardsCanonicalModeFromBothEntryPoints(t *testing.T
 	}
 }
 
+func TestHandleSetPermMode_MissingModeUsesSingleValidationPrefix(t *testing.T) {
+	t.Parallel()
+	h := &Handler{}
+	env := &events.Envelope{SessionID: "sess-perm"}
+
+	err := h.handleSetPermMode(t.Context(), env, &permissionModeRecorder{}, "", nil)
+	require.EqualError(t, err, "INVALID_MESSAGE: invalid permission mode: permission mode required")
+}
+
 func TestClassifyWorkerError_PermissionModeUnsupported(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, events.ErrCodeNotSupported, classifyWorkerError(worker.ErrNotImplemented))
