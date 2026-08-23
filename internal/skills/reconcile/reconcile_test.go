@@ -61,10 +61,15 @@ func TestReceiptKeyUsesCanonicalTargetIdentity(t *testing.T) {
 	userHome := t.TempDir()
 	root := filepath.Join(userHome, ".agents", "skills")
 	equivalentRoot := filepath.Join(userHome, "nested", "..", ".agents", "skills")
-	first := ReceiptPath(state, PackageTargetIdentity(root, "hotplex-cli"))
-	second := ReceiptPath(state, PackageTargetIdentity(equivalentRoot, "hotplex-cli"))
+	first := ReceiptPath(state, mustPackageTargetIdentity(root, "hotplex-cli"))
+	second := ReceiptPath(state, mustPackageTargetIdentity(equivalentRoot, "hotplex-cli"))
 	require.Equal(t, first, second)
-	require.NotEqual(t, first, ReceiptPath(state, PackageTargetIdentity(root, "hotplex-operator")))
+	require.NotEqual(t, first, ReceiptPath(state, mustPackageTargetIdentity(root, "hotplex-operator")))
+}
+
+func TestPackageTargetIdentityRejectsInvalidName(t *testing.T) {
+	_, err := PackageTargetIdentity(t.TempDir(), "../escape")
+	require.ErrorIs(t, err, ErrInvalidPackageName)
 }
 
 func TestReportErrIsBoundedForActionRequiredOutcomes(t *testing.T) {
@@ -92,8 +97,140 @@ func TestSyncInitialInstallWritesInventoryProjectionAndReceipt(t *testing.T) {
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(paths.InventoryDir, manifest.Version, manifest.Name))
 	require.NoError(t, err)
-	_, err = os.Stat(ReceiptPath(paths.StateDir, PackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)))
+	_, err = os.Stat(ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)))
 	require.NoError(t, err)
+}
+
+func TestFreshStatusReportsInventoryAndProjectionDrift(t *testing.T) {
+	r, paths := newTestReconciler(t)
+	report, err := r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.Contains(t, reportReasons(report.Items), ReasonMissingTarget)
+	require.Contains(t, reportActions(report.Items), ActionInstall)
+	require.Contains(t, reportOutcomes(report.Items), OutcomeDrift)
+	nativeTarget := filepath.Join(r.paths.NativeRoots[WorkerClaude], "hotplex-cli")
+	var nativeMissing Item
+	for _, item := range report.Items {
+		if item.Target == nativeTarget {
+			nativeMissing = item
+			break
+		}
+	}
+	require.Equal(t, ActionInstall, nativeMissing.Action)
+	require.Equal(t, OutcomeDrift, nativeMissing.Outcome)
+	require.Equal(t, ReasonMissingTarget, nativeMissing.ReasonCode)
+	_, err = os.Stat(paths.InventoryDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestSyncDryRunReportsInventoryAndProjectionPlanWithoutWrites(t *testing.T) {
+	base := osFS{}
+	fs := &recordingFS{FileSystem: base}
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	paths := testPaths(userHome, hotplexHome)
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	r, err := New(registry, paths, fs)
+	require.NoError(t, err)
+	userBefore, hotplexBefore := snapshotTree(t, userHome), snapshotTree(t, hotplexHome)
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}, DryRun: true})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+	require.Contains(t, reportReasons(report.Items), ReasonChanged)
+	require.Contains(t, reportActions(report.Items), ActionInstall)
+	require.Contains(t, reportOutcomes(report.Items), OutcomeChanged)
+	require.Zero(t, fs.writeCalls())
+	require.Equal(t, userBefore, snapshotTree(t, userHome))
+	require.Equal(t, hotplexBefore, snapshotTree(t, hotplexHome))
+}
+
+func TestRemoveMissingTargetAndReceiptIsIdempotent(t *testing.T) {
+	r, _ := newTestReconciler(t)
+	first, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, first.Err())
+	require.Contains(t, reportReasons(first.Items), ReasonMissingTarget)
+	require.Contains(t, reportActions(first.Items), ActionNone)
+	require.Contains(t, reportOutcomes(first.Items), OutcomeUnchanged)
+	second, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, second.Err())
+	require.Equal(t, reportReasons(first.Items), reportReasons(second.Items))
+}
+
+func TestRemoveRefusesModifiedTree(t *testing.T) {
+	r, paths := newTestReconciler(t)
+	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	manifest, ok := r.registry.Package("hotplex-cli")
+	require.True(t, ok)
+	target := filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name)
+	require.NoError(t, os.WriteFile(filepath.Join(target, "user-change.txt"), []byte("keep"), 0o644))
+	report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.Contains(t, reportOutcomes(report.Items), OutcomeDrift)
+	_, err = os.Stat(filepath.Join(target, "user-change.txt"))
+	require.NoError(t, err)
+}
+
+func TestSyncIsIdempotentWhenManifestAndTreeMatch(t *testing.T) {
+	r, _ := newTestReconciler(t)
+	first, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, first.Err())
+	second, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, second.Err())
+	require.Contains(t, reportOutcomes(second.Items), OutcomeUnchanged)
+}
+
+func TestRemoveRequiresMatchingReceiptAndTarget(t *testing.T) {
+	t.Run("target exists without receipt", func(t *testing.T) {
+		r, _ := newTestReconciler(t)
+		_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		manifest, ok := r.registry.Package("hotplex-cli")
+		require.True(t, ok)
+		target := filepath.Join(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+		receiptPath := ReceiptPath(r.paths.StateDir, mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name))
+		require.NoError(t, os.Remove(receiptPath))
+		report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+		require.Contains(t, reportReasons(report.Items), ReasonMissingReceipt)
+		_, err = os.Stat(target)
+		require.NoError(t, err)
+	})
+
+	t.Run("target missing with receipt", func(t *testing.T) {
+		r, _ := newTestReconciler(t)
+		_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		manifest, ok := r.registry.Package("hotplex-cli")
+		require.True(t, ok)
+		target := filepath.Join(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+		require.NoError(t, os.RemoveAll(target))
+		report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+		require.Contains(t, reportReasons(report.Items), ReasonDrift)
+	})
+
+	t.Run("invalid receipt", func(t *testing.T) {
+		r, _ := newTestReconciler(t)
+		_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		manifest, ok := r.registry.Package("hotplex-cli")
+		require.True(t, ok)
+		receiptPath := ReceiptPath(r.paths.StateDir, mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name))
+		require.NoError(t, os.WriteFile(receiptPath, []byte("{}\n"), 0o600))
+		report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+		require.Contains(t, reportReasons(report.Items), ReasonInvalidReceipt)
+	})
 }
 
 func TestAnyInventoryConflictBlocksEveryNativeProjection(t *testing.T) {
@@ -141,7 +278,7 @@ func TestOperatorSyncDoesNotReclassifyCliReceiptForRuntimeStatus(t *testing.T) {
 
 	manifest, ok := r.registry.Package("hotplex-cli")
 	require.True(t, ok)
-	receipt, err := readReceipt(r.fs, ReceiptPath(paths.StateDir, PackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)))
+	receipt, err := readReceipt(r.fs, ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)))
 	require.NoError(t, err)
 	require.Equal(t, builtin.ProfileRuntime, receipt.Profile)
 	status, err := r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
@@ -156,11 +293,11 @@ func TestSharedRootReceiptAndReportKeepAllWorkerAliases(t *testing.T) {
 	require.NoError(t, report.Err())
 	manifest, ok := r.registry.Package("hotplex-cli")
 	require.True(t, ok)
-	receipt, err := readReceipt(r.fs, ReceiptPath(paths.StateDir, PackageTargetIdentity(paths.NativeRoots[WorkerCodex], manifest.Name)))
+	receipt, err := readReceipt(r.fs, ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerCodex], manifest.Name)))
 	require.NoError(t, err)
 	require.Equal(t, []WorkerType{WorkerCodex, WorkerOpenCode}, receipt.WorkerAliases)
 	for _, item := range report.Items {
-		if item.Target == PackageTargetIdentity(paths.NativeRoots[WorkerCodex], manifest.Name) {
+		if item.Target == mustPackageTargetIdentity(paths.NativeRoots[WorkerCodex], manifest.Name) {
 			require.Equal(t, []WorkerType{WorkerCodex, WorkerOpenCode}, item.WorkerAliases)
 		}
 	}
@@ -201,7 +338,7 @@ func TestRemoveRollsBackWhenReceiptDeleteFails(t *testing.T) {
 	require.True(t, ok)
 	_, err = os.Stat(filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name))
 	require.NoError(t, err)
-	_, err = os.Stat(ReceiptPath(paths.StateDir, PackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)))
+	_, err = os.Stat(ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name)))
 	require.NoError(t, err)
 }
 
@@ -238,6 +375,32 @@ func itemReasons(items []Item) []string {
 	return result
 }
 
+func reportReasons(items []Item) []string { return itemReasons(items) }
+
+func reportActions(items []Item) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.Action)
+	}
+	return result
+}
+
+func reportOutcomes(items []Item) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.Outcome)
+	}
+	return result
+}
+
+func mustPackageTargetIdentity(root, packageName string) string {
+	identity, err := PackageTargetIdentity(root, packageName)
+	if err != nil {
+		panic(err)
+	}
+	return identity
+}
+
 type recordingFS struct {
 	FileSystem
 	failRemoveContains    string
@@ -245,6 +408,8 @@ type recordingFS struct {
 	failRenameOldContains string
 	failSyncDir           bool
 	failRemoveAllContains string
+	failSyncDirAfter      int
+	syncDirCalls          int
 	writes                int
 }
 
@@ -290,10 +455,24 @@ func (f *recordingFS) SyncFile(path string) error {
 
 func (f *recordingFS) SyncDir(path string) error {
 	f.writes++
+	f.syncDirCalls++
+	if f.failSyncDirAfter > 0 && f.syncDirCalls >= f.failSyncDirAfter {
+		return errors.New("injected sync directory failure after commit")
+	}
 	if err := f.failSync(); err != nil {
 		return err
 	}
 	return f.FileSystem.SyncDir(path)
+}
+
+func (f *recordingFS) MkdirTemp(path, pattern string) (string, error) {
+	f.writes++
+	return f.FileSystem.MkdirTemp(path, pattern)
+}
+
+func (f *recordingFS) CreateTemp(path, pattern string, data []byte, mode os.FileMode) (string, error) {
+	f.writes++
+	return f.FileSystem.CreateTemp(path, pattern, data, mode)
 }
 
 func (f *recordingFS) writeCalls() int { return f.writes }

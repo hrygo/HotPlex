@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,10 +58,8 @@ var (
 	ErrReportActionRequired        = errors.New("skills: reconciliation requires explicit action")
 	ErrInvalidReceipt              = errors.New("skills: invalid receipt")
 	ErrReceiptWriteFailed          = errors.New("skills: receipt write failed")
-	// ErrReportFailed is retained as a source-compatible alias for callers that
-	// used the early plan name. Report.Err returns ErrReportActionRequired.
-	ErrReportFailed       = ErrReportActionRequired
-	ErrDirSyncUnsupported = errors.New("skills: directory sync unsupported on this platform")
+	ErrInvalidPackageName          = errors.New("skills: invalid package name")
+	ErrDirSyncUnsupported          = errors.New("skills: directory sync unsupported on this platform")
 )
 
 type Target struct {
@@ -90,20 +89,22 @@ type Item struct {
 }
 
 // PackageTargetIdentity returns the canonical native-root/package identity
-// used by native projection items and receipts. Package names are validated by
-// the reconciler before this helper is used as a filesystem path.
-func PackageTargetIdentity(canonicalNativeRoot, packageName string) string {
+// used by native projection items and receipts. Invalid package names fail
+// closed instead of being mapped to a fallback path.
+func PackageTargetIdentity(canonicalNativeRoot, packageName string) (string, error) {
+	if !validPackageName(packageName) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidPackageName, packageName)
+	}
 	root, err := filepath.Abs(filepath.Clean(canonicalNativeRoot))
 	if err != nil {
-		root = filepath.Clean(canonicalNativeRoot)
+		return "", err
 	}
-	if canonical, canonicalErr := canonicalOSPath(root); canonicalErr == nil {
-		root = canonical
+	canonical, canonicalErr := canonicalOSPath(root)
+	if canonicalErr != nil {
+		return "", canonicalErr
 	}
-	if !validPackageName(packageName) {
-		return filepath.Join(root, ".invalid-package")
-	}
-	return filepath.Join(root, packageName)
+	root = canonical
+	return filepath.Join(root, packageName), nil
 }
 
 func validPackageName(name string) bool {
@@ -131,6 +132,8 @@ type FileSystem interface {
 	EvalSymlinks(string) (string, error)
 	SyncFile(string) error
 	SyncDir(string) error
+	MkdirTemp(string, string) (string, error)
+	CreateTemp(string, string, []byte, os.FileMode) (string, error)
 }
 
 type Reconciler struct {

@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
 	"github.com/hrygo/hotplex/internal/skills/builtin"
 )
@@ -29,8 +28,6 @@ type Receipt struct {
 	ManifestSHA256      string          `json:"manifest_sha256"`
 	ProjectedTreeSHA256 string          `json:"projected_tree_sha256"`
 }
-
-var receiptSequence atomic.Uint64
 
 func ReceiptPath(stateDir, canonicalTarget string) string {
 	target := filepath.Clean(canonicalTarget)
@@ -147,6 +144,10 @@ func readReceipt(fs FileSystem, path string) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
+	return parseReceipt(data)
+}
+
+func parseReceipt(data []byte) (Receipt, error) {
 	var receipt Receipt
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
@@ -191,64 +192,129 @@ func sortedAliases(aliases []WorkerType) bool {
 	return true
 }
 
-func writeReceipt(fs FileSystem, stateDir, target string, receipt Receipt) (retErr error) {
-	if err := fs.MkdirAll(stateDir, 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(receipt, "", "  ")
+type receiptWriteResult struct {
+	committed bool
+	backup    string
+}
+
+type receiptWriteError struct {
+	err    error
+	result receiptWriteResult
+}
+
+func (e *receiptWriteError) Error() string { return e.err.Error() }
+func (e *receiptWriteError) Unwrap() error { return e.err }
+
+func writeReceipt(fs FileSystem, stateDir, target string, receipt Receipt) error {
+	data, err := marshalReceipt(receipt)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
 	finalPath := ReceiptPath(stateDir, target)
-	tempPath := filepath.Join(stateDir, fmt.Sprintf(".%s.tmp-%d", filepath.Base(finalPath), receiptSequence.Add(1)))
-	ownedTemp := true
-	defer func() {
-		if ownedTemp {
-			if cleanupErr := fs.Remove(tempPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
-				retErr = errors.Join(retErr, cleanupErr)
-			}
-		}
-	}()
-	if err := fs.WriteFile(tempPath, data, 0o600); err != nil {
-		return fmt.Errorf("%w: %w", ErrReceiptWriteFailed, err)
-	}
-	if err := fs.SyncFile(tempPath); err != nil {
-		return fmt.Errorf("%w: %w", ErrReceiptWriteFailed, err)
-	}
-	if err := atomicReplace(fs, tempPath, finalPath); err != nil {
-		return fmt.Errorf("%w: %w", ErrReceiptWriteFailed, err)
-	}
-	ownedTemp = false
-	if err := fs.SyncDir(stateDir); err != nil {
+	_, err = writeReceiptBytes(fs, stateDir, finalPath, data)
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrReceiptWriteFailed, err)
 	}
 	return nil
 }
 
-// atomicReplace handles POSIX rename-overwrite and Windows' two-step replace
-// semantics without deleting a pre-existing, unrelated sibling backup.
-func atomicReplace(fs FileSystem, tempPath, finalPath string) error {
-	if err := fs.Rename(tempPath, finalPath); err == nil {
-		return nil
-	} else {
-		firstErr := err
-		if _, statErr := fs.Lstat(finalPath); statErr != nil {
-			return firstErr
-		}
-		backup := uniqueSibling(fs, finalPath, ".hotplex-receipt-backup")
-		if err := fs.Rename(finalPath, backup); err != nil {
-			return errors.Join(firstErr, err)
-		}
-		if err := fs.Rename(tempPath, finalPath); err != nil {
-			restoreErr := fs.Rename(backup, finalPath)
-			return errors.Join(firstErr, err, restoreErr)
-		}
-		if err := fs.Remove(backup); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return errors.Join(firstErr, err)
-		}
-		return nil
+func marshalReceipt(receipt Receipt) ([]byte, error) {
+	data, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		return nil, err
 	}
+	return append(data, '\n'), nil
+}
+
+func writeReceiptBytes(fs FileSystem, stateDir, finalPath string, data []byte) (result receiptWriteResult, retErr error) {
+	if err := fs.MkdirAll(stateDir, 0o755); err != nil {
+		return result, err
+	}
+	tempPath, err := fs.CreateTemp(stateDir, ".hotplex-receipt-*", data, 0o600)
+	if err != nil {
+		return result, err
+	}
+	tempOwned := true
+	defer func() {
+		if tempOwned {
+			if cleanupErr := fs.Remove(tempPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+				retErr = errors.Join(retErr, cleanupErr)
+			}
+		}
+	}()
+	if err := fs.SyncFile(tempPath); err != nil {
+		return result, err
+	}
+	oldExists := false
+	if info, statErr := fs.Lstat(finalPath); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return result, ErrInvalidReceipt
+		}
+		oldExists = true
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return result, statErr
+	}
+	backupContainer := ""
+	backupPath := ""
+	if oldExists {
+		backupContainer, err = fs.MkdirTemp(stateDir, ".hotplex-receipt-backup-*")
+		if err != nil {
+			return result, err
+		}
+		backupPath = filepath.Join(backupContainer, "receipt.json")
+		if err := fs.Rename(finalPath, backupPath); err != nil {
+			cleanupErr := fs.RemoveAll(backupContainer)
+			return result, errors.Join(err, cleanupErr)
+		}
+		if err := fs.SyncDir(stateDir); err != nil {
+			restoreErr := fs.Rename(backupPath, finalPath)
+			if restoreErr == nil {
+				restoreErr = fs.SyncDir(stateDir)
+			}
+			cleanupErr := fs.RemoveAll(backupContainer)
+			return result, errors.Join(err, restoreErr, cleanupErr)
+		}
+	}
+	if err := fs.Rename(tempPath, finalPath); err != nil {
+		var restoreErr error
+		if oldExists {
+			restoreErr = fs.Rename(backupPath, finalPath)
+			if restoreErr == nil {
+				restoreErr = fs.SyncDir(stateDir)
+			}
+		}
+		cleanupErr := error(nil)
+		if backupContainer != "" {
+			cleanupErr = fs.RemoveAll(backupContainer)
+		}
+		return result, errors.Join(err, restoreErr, cleanupErr)
+	}
+	tempOwned = false
+	if err := fs.SyncDir(stateDir); err != nil {
+		removeErr := fs.Remove(finalPath)
+		var restoreErr error
+		if oldExists {
+			restoreErr = fs.Rename(backupPath, finalPath)
+		}
+		syncErr := fs.SyncDir(stateDir)
+		cleanupErr := error(nil)
+		if backupContainer != "" {
+			cleanupErr = fs.RemoveAll(backupContainer)
+		}
+		return result, errors.Join(err, removeErr, restoreErr, syncErr, cleanupErr)
+	}
+	result.committed = true
+	result.backup = backupContainer
+	if backupContainer != "" {
+		if err := fs.RemoveAll(backupContainer); err != nil {
+			return result, &receiptWriteError{err: err, result: result}
+		}
+		if err := fs.SyncDir(stateDir); err != nil {
+			return result, &receiptWriteError{err: err, result: result}
+		}
+		result.backup = ""
+	}
+	return result, nil
 }
 
 func receiptMatches(receipt Receipt, manifest builtin.PackageManifest, target string, aliases []WorkerType, projectedHash string) bool {

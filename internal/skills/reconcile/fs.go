@@ -1,6 +1,8 @@
 package reconcile
 
 import (
+	"errors"
+	"io"
 	"os"
 )
 
@@ -40,4 +42,41 @@ func (osFS) SyncFile(name string) error {
 	}
 	defer func() { _ = f.Close() }()
 	return f.Sync()
+}
+
+func (osFS) MkdirTemp(dir, pattern string) (string, error) {
+	return os.MkdirTemp(dir, pattern)
+}
+
+func (osFS) CreateTemp(dir, pattern string, data []byte, mode os.FileMode) (string, error) {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	cleanup := func(closeErr error) (string, error) {
+		if removeErr := os.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			closeErr = errors.Join(closeErr, removeErr)
+		}
+		return "", closeErr
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return cleanup(err)
+	}
+	if n, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return cleanup(err)
+	} else if n != len(data) {
+		_ = f.Close()
+		return cleanup(io.ErrShortWrite)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return cleanup(err)
+	}
+	if err := f.Close(); err != nil {
+		return cleanup(err)
+	}
+	return name, nil
 }
