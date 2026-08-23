@@ -45,7 +45,12 @@ func (r *Reconciler) syncProjection(target Target, manifest builtin.PackageManif
 	}
 	stage, err := r.stageProjection(manifest, parent)
 	if err != nil {
-		return failedItem(inspection.item, ReasonReceiptWriteFailed)
+		item := failedItem(inspection.item, ReasonReceiptWriteFailed)
+		item.BackupPath = retainedPath(r.fs, stage)
+		if item.BackupPath != "" {
+			item.ReasonCode = ReasonDrift
+		}
+		return item
 	}
 	stageOwned := true
 	cleanupStage := func() error {
@@ -58,22 +63,26 @@ func (r *Reconciler) syncProjection(target Target, manifest builtin.PackageManif
 		}
 		return nil
 	}
+	cleanupFailureItem := func(base Item) Item {
+		if cleanupErr := cleanupStage(); cleanupErr != nil {
+			base = failedItem(base, ReasonDrift)
+			base.BackupPath = retainedPath(r.fs, stage)
+		}
+		return base
+	}
 	oldReceipt := inspection.receiptRaw
 	backupContainer, backupPath := "", ""
 	if inspection.item.Action == ActionUpdate {
 		current, currentErr := r.inspectProjectionState(target, manifest)
 		if currentErr != nil {
-			_ = cleanupStage()
-			return failedItem(inspection.item, ReasonDrift)
+			return cleanupFailureItem(failedItem(inspection.item, ReasonDrift))
 		}
 		if current.item.Outcome != OutcomeChanged || current.item.Action != ActionUpdate || !bytes.Equal(current.receiptRaw, inspection.receiptRaw) {
-			_ = cleanupStage()
-			return failedItem(inspection.item, ReasonDrift)
+			return cleanupFailureItem(failedItem(inspection.item, ReasonDrift))
 		}
 		backupContainer, backupPath, err = r.moveProjectionBackup(parent, identity)
 		if err != nil {
-			_ = cleanupStage()
-			return failedItemWithBackup(inspection.item, retainedPath(r.fs, backupContainer), err)
+			return cleanupFailureItem(failedItemWithBackup(inspection.item, retainedPath(r.fs, backupContainer), err))
 		}
 	}
 	if err := r.revalidateTarget(target); err != nil {
@@ -82,11 +91,9 @@ func (r *Reconciler) syncProjection(target Target, manifest builtin.PackageManif
 	}
 	if inspection.item.Action == ActionInstall {
 		if _, statErr := r.fs.Lstat(identity); statErr == nil {
-			_ = cleanupStage()
-			return failedItem(inspection.item, ReasonCollision)
+			return cleanupFailureItem(failedItem(inspection.item, ReasonCollision))
 		} else if !errors.Is(statErr, os.ErrNotExist) {
-			_ = cleanupStage()
-			return failedItem(inspection.item, ReasonCollision)
+			return cleanupFailureItem(failedItem(inspection.item, ReasonCollision))
 		}
 	}
 	if err := r.fs.Rename(stage, identity); err != nil {
@@ -126,7 +133,10 @@ func (r *Reconciler) syncProjection(target Target, manifest builtin.PackageManif
 	if receiptErr != nil {
 		if receiptResult.committed {
 			item := failedItem(inspection.item, ReasonDrift)
-			item.BackupPath = receiptResult.backup
+			item.BackupPath = retainedPath(r.fs, backupContainer)
+			if item.BackupPath == "" {
+				item.BackupPath = retainedPath(r.fs, receiptResult.backup)
+			}
 			return item
 		}
 		remnant, rollbackErr := r.restoreProjection(identity, backupPath, backupContainer, stage, ReceiptPath(r.paths.StateDir, identity), oldReceipt)
@@ -136,7 +146,7 @@ func (r *Reconciler) syncProjection(target Target, manifest builtin.PackageManif
 	if backupContainer != "" {
 		if err := r.fs.RemoveAll(backupContainer); err != nil {
 			item := failedItem(inspection.item, ReasonDrift)
-			item.BackupPath = backupContainer
+			item.BackupPath = retainedPath(r.fs, backupContainer)
 			return item
 		}
 		if err := r.fs.SyncDir(parent); err != nil {
@@ -160,7 +170,7 @@ func (r *Reconciler) stageProjection(manifest builtin.PackageManifest, parent st
 	}
 	cleanup := func(primary error) (string, error) {
 		if cleanupErr := r.fs.RemoveAll(stage); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
-			primary = errors.Join(primary, cleanupErr)
+			return stage, errors.Join(primary, cleanupErr)
 		}
 		return "", primary
 	}

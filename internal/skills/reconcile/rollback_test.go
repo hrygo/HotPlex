@@ -29,7 +29,8 @@ func TestUpdateRollsBackWhenSecondRenameFails(t *testing.T) {
 	receiptPath := ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name))
 	receipt, err := readReceipt(r.fs, receiptPath)
 	require.NoError(t, err)
-	receipt.PackageVersion = "v-test-update"
+	receipt.PackageVersion = "v1-" + strings.Repeat("0", 64)
+	receipt.ManifestSHA256 = strings.Repeat("1", 64)
 	require.NoError(t, writeReceipt(r.fs, paths.StateDir, receipt.CanonicalTarget, receipt))
 	fs.failRenameOldContains = ".hotplex-stage"
 	before := snapshotTree(t, filepath.Join(paths.NativeRoots[WorkerClaude], "hotplex-cli"))
@@ -59,6 +60,35 @@ func TestStatusAndDryRunNeverRecoverStagingOrBackup(t *testing.T) {
 	require.Zero(t, fs.writeCalls())
 	require.Equal(t, beforeUser, snapshotTree(t, userHome))
 	require.Equal(t, beforeHotplex, snapshotTree(t, hotplexHome))
+}
+
+func TestStageCleanupFailureRemainsVisibleToStatus(t *testing.T) {
+	base := osFS{}
+	fs := &recordingFS{FileSystem: base, failWriteContains: ".hotplex-stage-", failRemoveAllContains: ".hotplex-stage-"}
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	r, _ := newTestReconcilerWithFS(t, fs, userHome, hotplexHome)
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	var remnant string
+	for _, item := range report.Items {
+		if item.BackupPath != "" && strings.Contains(item.BackupPath, ".hotplex-stage-") {
+			remnant = item.BackupPath
+		}
+	}
+	require.NotEmpty(t, remnant)
+	_, err = os.Stat(remnant)
+	require.NoError(t, err)
+	status, err := r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, status.Err(), ErrReportActionRequired)
+	var found bool
+	for _, item := range status.Items {
+		if item.Target == remnant {
+			found = true
+		}
+	}
+	require.True(t, found)
 }
 
 func TestPackageSymlinkIsConflictAndNeverFollowed(t *testing.T) {
@@ -91,6 +121,21 @@ func TestSyncDirFailureDoesNotClaimSuccessfulProjection(t *testing.T) {
 	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
 	require.NoError(t, err)
 	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	manifest, ok := registry.Package("hotplex-cli")
+	require.True(t, ok)
+	inventoryTarget := filepath.Join(r.paths.InventoryDir, manifest.Version, manifest.Name)
+	foundInventoryFailure := false
+	foundProjectionBlock := false
+	for _, item := range report.Items {
+		if item.Target == inventoryTarget {
+			foundInventoryFailure = item.Outcome == OutcomeFailed
+		}
+		if item.ReasonCode == ReasonInventoryBlocked && item.Outcome == OutcomeConflict {
+			foundProjectionBlock = true
+		}
+	}
+	require.True(t, foundInventoryFailure)
+	require.True(t, foundProjectionBlock)
 }
 
 func TestReceiptPromotionFailureRollsBackProjection(t *testing.T) {
@@ -111,7 +156,7 @@ func TestReceiptPromotionFailureRollsBackProjection(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-func TestBackupCleanupFailureRollsBackUpdate(t *testing.T) {
+func TestBackupCleanupFailureRetainsCommittedUpdate(t *testing.T) {
 	base := osFS{}
 	fs := &recordingFS{FileSystem: base, failRemoveAllContains: ".hotplex-backup"}
 	userHome, hotplexHome := t.TempDir(), t.TempDir()
@@ -127,7 +172,8 @@ func TestBackupCleanupFailureRollsBackUpdate(t *testing.T) {
 	receiptPath := ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name))
 	receipt, err := readReceipt(r.fs, receiptPath)
 	require.NoError(t, err)
-	receipt.PackageVersion = "v-test-update"
+	receipt.PackageVersion = "v1-" + strings.Repeat("0", 64)
+	receipt.ManifestSHA256 = strings.Repeat("1", 64)
 	require.NoError(t, writeReceipt(r.fs, paths.StateDir, receipt.CanonicalTarget, receipt))
 	before := snapshotTree(t, filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name))
 	fixedBackup := filepath.Join(filepath.Dir(filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name)), "hotplex-cli.hotplex-backup")
@@ -136,13 +182,25 @@ func TestBackupCleanupFailureRollsBackUpdate(t *testing.T) {
 	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
 	require.NoError(t, err)
 	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
-	require.NotEmpty(t, reportBackupPaths(report.Items))
-	_, err = os.Stat(filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name))
+	backupPaths := reportBackupPaths(report.Items)
+	require.NotEmpty(t, backupPaths)
+	for _, backupPath := range backupPaths {
+		_, statErr := os.Stat(backupPath)
+		require.NoError(t, statErr)
+	}
+	target := filepath.Join(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+	_, err = os.Stat(target)
 	require.NoError(t, err)
 	newReceipt, err := readReceipt(r.fs, receiptPath)
 	require.NoError(t, err)
 	require.Equal(t, manifest.Version, newReceipt.PackageVersion)
-	require.Equal(t, before, snapshotTree(t, filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name)))
+	require.Equal(t, manifestHash(manifest), newReceipt.ManifestSHA256)
+	require.Equal(t, mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name), newReceipt.CanonicalTarget)
+	require.Equal(t, manifest.Profile, newReceipt.Profile)
+	actualHash, err := treeHash(r.fs, target)
+	require.NoError(t, err)
+	require.Equal(t, actualHash, newReceipt.ProjectedTreeSHA256)
+	require.Equal(t, before, snapshotTree(t, target))
 	require.Equal(t, map[string]string{".": "dir", "sentinel": "file:6b656570"}, snapshotTree(t, fixedBackup))
 }
 
@@ -163,11 +221,23 @@ func TestRemoveFinalSyncFailureNeverLeavesReceiptWithoutTarget(t *testing.T) {
 	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
 	manifest, ok := registry.Package("hotplex-cli")
 	require.True(t, ok)
-	target := filepath.Join(paths.NativeRoots[WorkerClaude], manifest.Name)
-	receiptPath := ReceiptPath(paths.StateDir, mustPackageTargetIdentity(paths.NativeRoots[WorkerClaude], manifest.Name))
+	target := filepath.Join(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+	receiptPath := ReceiptPath(r.paths.StateDir, mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name))
 	_, targetErr := os.Stat(target)
 	_, receiptErr := os.Stat(receiptPath)
-	require.False(t, errors.Is(targetErr, os.ErrNotExist) && receiptErr == nil, "receipt must not survive without target")
+	targetExists := targetErr == nil
+	receiptExists := receiptErr == nil
+	require.Equal(t, targetExists, receiptExists, "remove must leave either complete old state or complete removed state")
+	if targetExists {
+		receipt, readErr := readReceipt(r.fs, receiptPath)
+		require.NoError(t, readErr)
+		actualHash, hashErr := treeHash(r.fs, target)
+		require.NoError(t, hashErr)
+		require.True(t, receiptMatches(receipt, manifest, target, []WorkerType{WorkerClaude}, actualHash))
+	} else {
+		require.ErrorIs(t, targetErr, os.ErrNotExist)
+		require.ErrorIs(t, receiptErr, os.ErrNotExist)
+	}
 }
 
 func reportBackupPaths(items []Item) []string {

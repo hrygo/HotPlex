@@ -133,12 +133,7 @@ func appendInventoryChangeItems(report *Report, statuses []inventoryStatus) {
 	}
 }
 
-func appendInventoryBlockedItems(report *Report, targets []Target, manifests []builtin.PackageManifest, statuses []inventoryStatus) {
-	for _, status := range statuses {
-		if status.conflict || status.err != nil {
-			report.Items = append(report.Items, Item{Target: status.path, Action: ActionNone, Outcome: OutcomeConflict, ReasonCode: status.reason})
-		}
-	}
+func appendInventoryBlockedItems(report *Report, targets []Target, manifests []builtin.PackageManifest) {
 	for _, target := range targets {
 		if target.ReasonCode == ReasonUnsupportedWorker {
 			continue
@@ -155,14 +150,36 @@ func appendInventoryBlockedItems(report *Report, targets []Target, manifests []b
 	}
 }
 
-func appendInventoryFailureItems(report *Report, targets []Target, manifests []builtin.PackageManifest) {
-	for _, target := range targets {
-		if target.ReasonCode == ReasonUnsupportedWorker {
-			continue
+func appendInventoryConflictItems(report *Report, statuses []inventoryStatus) {
+	for _, status := range statuses {
+		if status.conflict || status.err != nil {
+			report.Items = append(report.Items, Item{Target: status.path, Action: ActionNone, Outcome: OutcomeConflict, ReasonCode: status.reason})
 		}
-		for _, manifest := range manifests {
-			report.Items = append(report.Items, Item{Target: packageTargetIdentityOrEmpty(target.CanonicalRoot, manifest.Name), WorkerAliases: cloneWorkerAliases(target.WorkerAliases), Action: ActionInstall, Outcome: OutcomeFailed, ReasonCode: ReasonInventoryBlocked})
+	}
+}
+
+func appendInventoryPublicationFailureItems(report *Report, before, after []inventoryStatus) {
+	afterByPath := make(map[string]inventoryStatus, len(after))
+	for _, status := range after {
+		afterByPath[status.path] = status
+	}
+	for _, previous := range before {
+		current, ok := afterByPath[previous.path]
+		item := Item{Target: previous.path, Action: ActionInstall, Outcome: OutcomeFailed, ReasonCode: ReasonInventoryBlocked}
+		if ok {
+			switch {
+			case current.conflict || current.err != nil:
+				item.ReasonCode = current.reason
+			case previous.missing && !current.missing:
+				item.Outcome = OutcomeChanged
+				item.ReasonCode = ReasonChanged
+			case !previous.missing && !current.missing:
+				item.Action = ActionNone
+				item.Outcome = OutcomeUnchanged
+				item.ReasonCode = ReasonUnchanged
+			}
 		}
+		report.Items = append(report.Items, item)
 	}
 }
 

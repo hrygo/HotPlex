@@ -161,35 +161,47 @@ func parseReceipt(data []byte) (Receipt, error) {
 		}
 		return Receipt{}, fmt.Errorf("%w: %w", ErrInvalidReceipt, err)
 	}
-	if receipt.SchemaVersion != receiptSchemaVersion || receipt.PackageVersion == "" ||
-		receipt.PackageName == "" || receipt.CanonicalTarget == "" ||
-		receipt.ManifestSHA256 == "" || receipt.ProjectedTreeSHA256 == "" {
-		return Receipt{}, ErrInvalidReceipt
-	}
-	if receipt.Profile != builtin.ProfileRuntime && receipt.Profile != builtin.ProfileOperator {
-		return Receipt{}, ErrInvalidReceipt
-	}
-	if !validPackageName(receipt.PackageName) || !sortedAliases(receipt.WorkerAliases) {
+	if !validReceipt(receipt) {
 		return Receipt{}, ErrInvalidReceipt
 	}
 	return receipt, nil
 }
 
-func sortedAliases(aliases []WorkerType) bool {
-	if len(aliases) == 0 {
-		return true
-	}
-	copyAliases := cloneWorkerAliases(aliases)
-	sort.Slice(copyAliases, func(i, j int) bool { return copyAliases[i] < copyAliases[j] })
-	for i := range aliases {
-		if copyAliases[i] != aliases[i] {
-			return false
-		}
-		if aliases[i] != WorkerClaude && aliases[i] != WorkerCodex && aliases[i] != WorkerOpenCode && aliases[i] != WorkerACP {
+func validReceipt(receipt Receipt) bool {
+	return receipt.SchemaVersion == receiptSchemaVersion &&
+		validPackageVersion(receipt.PackageVersion) &&
+		validPackageName(receipt.PackageName) &&
+		filepath.IsAbs(receipt.CanonicalTarget) &&
+		filepath.Clean(receipt.CanonicalTarget) == receipt.CanonicalTarget &&
+		validSHA256Hex(receipt.ManifestSHA256) &&
+		validSHA256Hex(receipt.ProjectedTreeSHA256) &&
+		(receipt.Profile == builtin.ProfileRuntime || receipt.Profile == builtin.ProfileOperator) &&
+		validReceiptAliases(receipt.WorkerAliases)
+}
+
+func validPackageVersion(version string) bool {
+	return len(version) == len("v1-")+64 && strings.HasPrefix(version, "v1-") && validLowerHex(version[3:])
+}
+
+func validSHA256Hex(value string) bool {
+	return len(value) == 64 && validLowerHex(value)
+}
+
+func validLowerHex(value string) bool {
+	for i := 0; i < len(value); i++ {
+		char := value[i]
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			return false
 		}
 	}
 	return true
+}
+
+func validReceiptAliases(aliases []WorkerType) bool {
+	if len(aliases) == 1 {
+		return aliases[0] == WorkerClaude
+	}
+	return len(aliases) == 2 && aliases[0] == WorkerCodex && aliases[1] == WorkerOpenCode
 }
 
 type receiptWriteResult struct {
@@ -197,15 +209,10 @@ type receiptWriteResult struct {
 	backup    string
 }
 
-type receiptWriteError struct {
-	err    error
-	result receiptWriteResult
-}
-
-func (e *receiptWriteError) Error() string { return e.err.Error() }
-func (e *receiptWriteError) Unwrap() error { return e.err }
-
 func writeReceipt(fs FileSystem, stateDir, target string, receipt Receipt) error {
+	if !validReceipt(receipt) {
+		return ErrInvalidReceipt
+	}
 	data, err := marshalReceipt(receipt)
 	if err != nil {
 		return err
@@ -307,12 +314,13 @@ func writeReceiptBytes(fs FileSystem, stateDir, finalPath string, data []byte) (
 	result.backup = backupContainer
 	if backupContainer != "" {
 		if err := fs.RemoveAll(backupContainer); err != nil {
-			return result, &receiptWriteError{err: err, result: result}
-		}
-		if err := fs.SyncDir(stateDir); err != nil {
-			return result, &receiptWriteError{err: err, result: result}
+			result.backup = retainedPath(fs, backupContainer)
+			return result, err
 		}
 		result.backup = ""
+		if err := fs.SyncDir(stateDir); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }

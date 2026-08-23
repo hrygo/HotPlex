@@ -62,6 +62,7 @@ type projectionInspection struct {
 	receipt    Receipt
 	receiptRaw []byte
 	receiptOK  bool
+	owned      bool
 	treeHash   string
 }
 
@@ -87,7 +88,10 @@ func (r *Reconciler) inspectProjectionState(target Target, manifest builtin.Pack
 	}
 	info, lstatErr := r.fs.Lstat(identity)
 	if errors.Is(lstatErr, os.ErrNotExist) {
-		if rawErr == nil || receiptErr == nil {
+		if errors.Is(receiptErr, ErrInvalidReceipt) {
+			item.Outcome = OutcomeConflict
+			item.ReasonCode = ReasonInvalidReceipt
+		} else if rawErr == nil || receiptErr == nil {
 			item.Outcome = OutcomeDrift
 			item.ReasonCode = ReasonDrift
 		} else {
@@ -119,7 +123,7 @@ func (r *Reconciler) inspectProjectionState(target Target, manifest builtin.Pack
 		}
 		return projectionInspection{item: item, receiptRaw: receiptRaw, treeHash: actualHash}, nil
 	}
-	if receipt.CanonicalTarget != identity || receipt.PackageName != manifest.Name || !equalAliases(receipt.WorkerAliases, target.WorkerAliases) {
+	if receipt.CanonicalTarget != identity || receipt.PackageName != manifest.Name || receipt.Profile != manifest.Profile || !equalAliases(receipt.WorkerAliases, target.WorkerAliases) {
 		item.Outcome = OutcomeConflict
 		item.ReasonCode = ReasonInvalidReceipt
 		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, treeHash: actualHash}, nil
@@ -130,14 +134,15 @@ func (r *Reconciler) inspectProjectionState(target Target, manifest builtin.Pack
 		item.ReasonCode = ReasonDrift
 		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, treeHash: actualHash}, nil
 	}
+	owned := true
 	if receiptMatches(receipt, manifest, identity, target.WorkerAliases, actualHash) {
 		item.Action = ActionNone
 		item.Outcome = OutcomeUnchanged
 		item.ReasonCode = ReasonUnchanged
-		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, treeHash: actualHash}, nil
+		return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, owned: owned, treeHash: actualHash}, nil
 	}
 	item.Action = ActionUpdate
 	item.Outcome = OutcomeChanged
 	item.ReasonCode = ReasonChanged
-	return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, treeHash: actualHash}, nil
+	return projectionInspection{item: item, receipt: receipt, receiptRaw: receiptRaw, receiptOK: true, owned: owned, treeHash: actualHash}, nil
 }

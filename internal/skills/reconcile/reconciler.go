@@ -76,6 +76,11 @@ func (r *Reconciler) Status(ctx context.Context, options Options) (Report, error
 	report := Report{Profile: options.Profile}
 	r.appendDirectoryRemnantItems(&report, r.paths.InventoryDir, nil, 2)
 	r.appendDirectoryRemnantItems(&report, r.paths.StateDir, nil, 1)
+	inventory, inventoryErr := r.inventoryPreflight(manifests)
+	if inventoryErr != nil {
+		return report, inventoryErr
+	}
+	appendInventoryStatusItems(&report, inventory)
 	for _, target := range targets {
 		if target.ReasonCode == ReasonUnsupportedWorker {
 			report.Items = append(report.Items, unsupportedItem(target))
@@ -84,13 +89,8 @@ func (r *Reconciler) Status(ctx context.Context, options Options) (Report, error
 	if !hasNativeTarget(targets) {
 		return report, nil
 	}
-	inventory, inventoryErr := r.inventoryPreflight(manifests)
-	if inventoryErr != nil {
-		return report, inventoryErr
-	}
-	appendInventoryStatusItems(&report, inventory)
 	if inventoryBlocked(inventory) {
-		appendInventoryBlockedItems(&report, targets, manifests, inventory)
+		appendInventoryBlockedItems(&report, targets, manifests)
 		return report, nil
 	}
 	for _, target := range targets {
@@ -152,7 +152,8 @@ func (r *Reconciler) Sync(ctx context.Context, options Options) (Report, error) 
 		return report, inventoryErr
 	}
 	if inventoryBlocked(inventory) {
-		appendInventoryBlockedItems(&report, targets, manifests, inventory)
+		appendInventoryConflictItems(&report, inventory)
+		appendInventoryBlockedItems(&report, targets, manifests)
 		return report, nil
 	}
 	if options.DryRun {
@@ -177,7 +178,12 @@ func (r *Reconciler) Sync(ctx context.Context, options Options) (Report, error) 
 		return report, nil
 	}
 	if err := r.publishMissingInventory(inventory); err != nil {
-		appendInventoryFailureItems(&report, targets, manifests)
+		finalInventory, finalErr := r.inventoryPreflight(manifests)
+		if finalErr != nil {
+			finalInventory = inventory
+		}
+		appendInventoryPublicationFailureItems(&report, inventory, finalInventory)
+		appendInventoryBlockedItems(&report, targets, manifests)
 		return report, nil
 	}
 	appendInventoryChangeItems(&report, inventory)
@@ -221,22 +227,23 @@ func (r *Reconciler) Remove(ctx context.Context, options Options) (Report, error
 			continue
 		}
 		for _, manifest := range manifests {
-			item, inspectErr := r.inspectProjection(target, manifest)
+			inspection, inspectErr := r.inspectProjectionState(target, manifest)
 			if inspectErr != nil {
 				return report, inspectErr
 			}
+			item := inspection.item
 			if item.ReasonCode == ReasonMissingTarget && item.Outcome == OutcomeUnchanged {
 				report.Items = append(report.Items, item)
 				continue
 			}
-			if item.Outcome == OutcomeChanged && item.Action == ActionUpdate {
+			if item.Outcome == OutcomeChanged && item.Action == ActionUpdate && !inspection.owned {
 				item.Action = ActionRemove
 				item.Outcome = OutcomeConflict
 				item.ReasonCode = ReasonInvalidReceipt
 				report.Items = append(report.Items, item)
 				continue
 			}
-			if item.Outcome != OutcomeUnchanged {
+			if item.Outcome != OutcomeUnchanged && !inspection.owned {
 				item.Action = ActionRemove
 				report.Items = append(report.Items, item)
 				continue

@@ -63,17 +63,22 @@ func (r *Reconciler) restoreProjection(identity, backupPath, backupContainer, st
 			errs = append(errs, err)
 		}
 	}
+	remnant := ""
+	stageRemnant := ""
 	if stage != "" {
 		if err := r.fs.RemoveAll(stage); err != nil && !errors.Is(err, os.ErrNotExist) {
+			stageRemnant = retainedPath(r.fs, stage)
 			errs = append(errs, err)
 		}
 	}
-	remnant := ""
 	if backupContainer != "" {
 		if err := r.fs.RemoveAll(backupContainer); err != nil && !errors.Is(err, os.ErrNotExist) {
-			remnant = backupContainer
+			remnant = retainedPath(r.fs, backupContainer)
 			errs = append(errs, err)
 		}
+	}
+	if remnant == "" {
+		remnant = stageRemnant
 	}
 	return remnant, errors.Join(errs...)
 }
@@ -98,7 +103,7 @@ func (r *Reconciler) removeProjection(target Target, manifest builtin.PackageMan
 		item.Action = ActionNone
 		return item
 	}
-	if inspection.item.Outcome != OutcomeUnchanged {
+	if inspection.item.Outcome != OutcomeUnchanged && !inspection.owned {
 		return item
 	}
 	identity := item.Target
@@ -108,7 +113,7 @@ func (r *Reconciler) removeProjection(target Target, manifest builtin.PackageMan
 		return failedItem(item, ReasonRootOutsideHome)
 	}
 	current, currentErr := r.inspectProjectionState(target, manifest)
-	if currentErr != nil || current.item.Outcome != OutcomeUnchanged || !bytes.Equal(current.receiptRaw, inspection.receiptRaw) {
+	if currentErr != nil || (!current.owned && current.item.Outcome != OutcomeUnchanged) || !bytes.Equal(current.receiptRaw, inspection.receiptRaw) {
 		return failedItem(item, ReasonDrift)
 	}
 	backupContainer, backupPath, err := r.moveProjectionBackup(parent, identity)
@@ -153,7 +158,7 @@ func (r *Reconciler) removeProjection(target Target, manifest builtin.PackageMan
 			return failedItem(item, ReasonDrift)
 		}
 		item = failedItem(item, ReasonDrift)
-		item.BackupPath = backupContainer
+		item.BackupPath = retainedPath(r.fs, backupContainer)
 		return item
 	}
 	if err := r.fs.SyncDir(parent); err != nil {
@@ -228,6 +233,7 @@ func (r *Reconciler) restoreRemoved(identity, backupPath, backupContainer, recei
 				errs = append(errs, err)
 			} else if err := r.fs.SyncDir(filepath.Dir(identity)); err != nil {
 				errs = append(errs, err)
+				targetRestored = true
 			} else {
 				targetRestored = true
 			}
@@ -239,24 +245,64 @@ func (r *Reconciler) restoreRemoved(identity, backupPath, backupContainer, recei
 	}
 	if targetRestored && len(receiptRaw) > 0 {
 		if _, err := r.fs.Lstat(receiptPath); errors.Is(err, os.ErrNotExist) {
-			if err := writeRawReceipt(r.fs, filepath.Dir(receiptPath), receiptPath, receiptRaw); err != nil {
+			if err := writeRawReceiptRecovery(r.fs, filepath.Dir(receiptPath), receiptPath, receiptRaw); err != nil {
 				errs = append(errs, err)
 			}
 		}
 	}
+	remnant := ""
+	tombRemnant := ""
 	if tombContainer != "" {
 		if err := r.fs.RemoveAll(tombContainer); err != nil && !errors.Is(err, os.ErrNotExist) {
+			tombRemnant = retainedPath(r.fs, tombContainer)
 			errs = append(errs, err)
 		}
 	}
-	remnant := ""
 	if backupContainer != "" {
 		if err := r.fs.RemoveAll(backupContainer); err != nil && !errors.Is(err, os.ErrNotExist) {
-			remnant = backupContainer
+			remnant = retainedPath(r.fs, backupContainer)
 			errs = append(errs, err)
 		}
 	}
+	if remnant == "" {
+		remnant = tombRemnant
+	}
 	return remnant, errors.Join(errs...)
+}
+
+// writeRawReceiptRecovery preserves the physical target/receipt pair during
+// rollback even when a directory fsync is unavailable or injected to fail.
+// The normal receipt writer removes an uncommitted final after fsync failure;
+// recovery has already restored the matching target, so retaining the final
+// is the safer complete state to expose for the next explicit operation.
+func writeRawReceiptRecovery(fs FileSystem, stateDir, finalPath string, data []byte) error {
+	primaryErr := writeRawReceipt(fs, stateDir, finalPath, data)
+	if primaryErr == nil {
+		return nil
+	}
+	if _, err := fs.Lstat(finalPath); err == nil {
+		return primaryErr
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(primaryErr, err)
+	}
+	tempPath, err := fs.CreateTemp(stateDir, ".hotplex-recovery-receipt-*", data, 0o600)
+	if err != nil {
+		return errors.Join(primaryErr, err)
+	}
+	cleanupTemp := func() error {
+		cleanupErr := fs.Remove(tempPath)
+		if errors.Is(cleanupErr, os.ErrNotExist) {
+			return nil
+		}
+		return cleanupErr
+	}
+	if err := fs.SyncFile(tempPath); err != nil {
+		return errors.Join(primaryErr, err, cleanupTemp())
+	}
+	if err := fs.Rename(tempPath, finalPath); err != nil {
+		return errors.Join(primaryErr, err, cleanupTemp())
+	}
+	return errors.Join(primaryErr, fs.SyncDir(stateDir))
 }
 
 func (r *Reconciler) restoreRemovedAfterCommit(identity, backupPath, backupContainer, receiptPath string, receiptRaw []byte) error {
@@ -274,20 +320,18 @@ func (r *Reconciler) restoreRemovedAfterCommit(identity, backupPath, backupConta
 	if actualHash != receipt.ProjectedTreeSHA256 {
 		return errors.New("backup tree hash mismatch")
 	}
-	if _, err := r.fs.Lstat(backupPath); err != nil {
-		return err
-	}
 	if err := r.fs.Rename(backupPath, identity); err != nil {
 		return err
 	}
+	var errs []error
 	if err := r.fs.SyncDir(filepath.Dir(identity)); err != nil {
-		return err
+		errs = append(errs, err)
 	}
-	if err := writeRawReceipt(r.fs, filepath.Dir(receiptPath), receiptPath, receiptRaw); err != nil {
-		return err
+	if err := writeRawReceiptRecovery(r.fs, filepath.Dir(receiptPath), receiptPath, receiptRaw); err != nil {
+		errs = append(errs, err)
 	}
 	if err := r.fs.RemoveAll(backupContainer); err != nil {
-		return err
+		errs = append(errs, err)
 	}
-	return nil
+	return errors.Join(errs...)
 }

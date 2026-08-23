@@ -59,7 +59,6 @@ var (
 	ErrInvalidReceipt              = errors.New("skills: invalid receipt")
 	ErrReceiptWriteFailed          = errors.New("skills: receipt write failed")
 	ErrInvalidPackageName          = errors.New("skills: invalid package name")
-	ErrDirSyncUnsupported          = errors.New("skills: directory sync unsupported on this platform")
 )
 
 type Target struct {

@@ -36,6 +36,42 @@ func TestResolveTargetsRejectsEmptyListAndACPWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestStatusACPStillReportsInventoryWithoutWriting(t *testing.T) {
+	r, _ := newTestReconciler(t)
+	manifest, ok := r.registry.Package("hotplex-cli")
+	require.True(t, ok)
+	inventoryTarget := filepath.Join(r.paths.InventoryDir, manifest.Version, manifest.Name)
+	report, err := r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerACP}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	inventoryIndex, unsupportedIndex := -1, -1
+	for index, item := range report.Items {
+		if item.Target == inventoryTarget {
+			inventoryIndex = index
+			require.Equal(t, ReasonMissingTarget, item.ReasonCode)
+		}
+		if item.ReasonCode == ReasonUnsupportedWorker {
+			unsupportedIndex = index
+		}
+	}
+	require.GreaterOrEqual(t, inventoryIndex, 0)
+	require.Greater(t, unsupportedIndex, inventoryIndex)
+	_, err = os.Stat(r.paths.InventoryDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestSyncACPDoesNotPublishInventory(t *testing.T) {
+	fs := &recordingFS{FileSystem: osFS{}}
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	r, _ := newTestReconcilerWithFS(t, fs, userHome, hotplexHome)
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerACP}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.Zero(t, fs.writeCalls())
+	_, err = os.Stat(r.paths.InventoryDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestNativeRootSymlinkMustResolveInsideUserHomeAndApprovedBase(t *testing.T) {
 	userHome := t.TempDir()
 	outside := t.TempDir()
@@ -70,6 +106,32 @@ func TestReceiptKeyUsesCanonicalTargetIdentity(t *testing.T) {
 func TestPackageTargetIdentityRejectsInvalidName(t *testing.T) {
 	_, err := PackageTargetIdentity(t.TempDir(), "../escape")
 	require.ErrorIs(t, err, ErrInvalidPackageName)
+}
+
+func TestReceiptParserRejectsMalformedOwnershipFields(t *testing.T) {
+	r, _ := newTestReconciler(t)
+	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	manifest, ok := r.registry.Package("hotplex-cli")
+	require.True(t, ok)
+	receipt, err := readReceipt(r.fs, ReceiptPath(r.paths.StateDir, mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name)))
+	require.NoError(t, err)
+	for name, mutate := range map[string]func(*Receipt){
+		"relative target":         func(value *Receipt) { value.CanonicalTarget = "relative/target" },
+		"uppercase manifest hash": func(value *Receipt) { value.ManifestSHA256 = strings.Repeat("A", 64) },
+		"invalid version":         func(value *Receipt) { value.PackageVersion = "v-test" },
+		"duplicate aliases":       func(value *Receipt) { value.WorkerAliases = []WorkerType{WorkerClaude, WorkerClaude} },
+		"acp alias":               func(value *Receipt) { value.WorkerAliases = []WorkerType{WorkerACP} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := receipt
+			mutate(&candidate)
+			data, marshalErr := marshalReceipt(candidate)
+			require.NoError(t, marshalErr)
+			_, parseErr := parseReceipt(data)
+			require.ErrorIs(t, parseErr, ErrInvalidReceipt)
+		})
+	}
 }
 
 func TestReportErrIsBoundedForActionRequiredOutcomes(t *testing.T) {
@@ -231,13 +293,70 @@ func TestRemoveRequiresMatchingReceiptAndTarget(t *testing.T) {
 		require.ErrorIs(t, report.Err(), ErrReportActionRequired)
 		require.Contains(t, reportReasons(report.Items), ReasonInvalidReceipt)
 	})
+
+	t.Run("missing target with invalid receipt", func(t *testing.T) {
+		r, _ := newTestReconciler(t)
+		_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		manifest, ok := r.registry.Package("hotplex-cli")
+		require.True(t, ok)
+		identity := mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+		require.NoError(t, os.RemoveAll(identity))
+		receiptPath := ReceiptPath(r.paths.StateDir, identity)
+		require.NoError(t, os.WriteFile(receiptPath, []byte("{}\n"), 0o600))
+		report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+		require.Contains(t, reportReasons(report.Items), ReasonInvalidReceipt)
+	})
+
+	t.Run("profile mismatch", func(t *testing.T) {
+		r, _ := newTestReconciler(t)
+		_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		manifest, ok := r.registry.Package("hotplex-cli")
+		require.True(t, ok)
+		identity := mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+		receiptPath := ReceiptPath(r.paths.StateDir, identity)
+		receipt, err := readReceipt(r.fs, receiptPath)
+		require.NoError(t, err)
+		receipt.Profile = builtin.ProfileOperator
+		require.NoError(t, writeReceipt(r.fs, r.paths.StateDir, identity, receipt))
+		report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		require.NoError(t, err)
+		require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+		require.Contains(t, reportReasons(report.Items), ReasonInvalidReceipt)
+	})
+}
+
+func TestRemoveAcceptsOwnedProjectionWithOlderManifestReceipt(t *testing.T) {
+	r, _ := newTestReconciler(t)
+	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	manifest, ok := r.registry.Package("hotplex-cli")
+	require.True(t, ok)
+	identity := mustPackageTargetIdentity(r.paths.NativeRoots[WorkerClaude], manifest.Name)
+	receiptPath := ReceiptPath(r.paths.StateDir, identity)
+	receipt, err := readReceipt(r.fs, receiptPath)
+	require.NoError(t, err)
+	receipt.PackageVersion = "v1-" + strings.Repeat("0", 64)
+	receipt.ManifestSHA256 = strings.Repeat("1", 64)
+	require.NoError(t, writeReceipt(r.fs, r.paths.StateDir, identity, receipt))
+	report, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+	require.Contains(t, reportOutcomes(report.Items), OutcomeChanged)
+	_, err = os.Stat(identity)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(receiptPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestAnyInventoryConflictBlocksEveryNativeProjection(t *testing.T) {
 	r, paths := newTestReconciler(t)
 	manifest, ok := r.registry.Package("hotplex-cli")
 	require.True(t, ok)
-	conflictPath := filepath.Join(paths.InventoryDir, manifest.Version, manifest.Name)
+	conflictPath := filepath.Join(r.paths.InventoryDir, manifest.Version, manifest.Name)
 	base := osFS{}
 	require.NoError(t, base.MkdirAll(conflictPath, 0o755))
 	require.NoError(t, base.WriteFile(filepath.Join(conflictPath, "SKILL.md"), []byte("modified"), 0o644))
@@ -249,6 +368,34 @@ func TestAnyInventoryConflictBlocksEveryNativeProjection(t *testing.T) {
 	require.NotEmpty(t, report.Items)
 	require.Contains(t, itemReasons(report.Items), ReasonInventoryBlocked)
 	require.Equal(t, before, snapshotTree(t, paths.UserHome))
+}
+
+func TestInventoryConflictIsReportedOncePerOperation(t *testing.T) {
+	r, _ := newTestReconciler(t)
+	manifest, ok := r.registry.Package("hotplex-cli")
+	require.True(t, ok)
+	conflictPath := filepath.Join(r.paths.InventoryDir, manifest.Version, manifest.Name)
+	base := osFS{}
+	require.NoError(t, base.MkdirAll(conflictPath, 0o755))
+	require.NoError(t, base.WriteFile(filepath.Join(conflictPath, "SKILL.md"), []byte("modified"), 0o644))
+	for _, operation := range []func() (Report, error){
+		func() (Report, error) {
+			return r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		},
+		func() (Report, error) {
+			return r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+		},
+	} {
+		report, err := operation()
+		require.NoError(t, err)
+		count := 0
+		for _, item := range report.Items {
+			if item.Target == conflictPath {
+				count++
+			}
+		}
+		require.Equal(t, 1, count)
+	}
 }
 
 func TestDryRunDoesNotCreateInventoryOrProjection(t *testing.T) {
@@ -345,10 +492,15 @@ func TestRemoveRollsBackWhenReceiptDeleteFails(t *testing.T) {
 func newTestReconciler(t *testing.T) (*Reconciler, Paths) {
 	t.Helper()
 	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	return newTestReconcilerWithFS(t, osFS{}, userHome, hotplexHome)
+}
+
+func newTestReconcilerWithFS(t *testing.T, fs FileSystem, userHome, hotplexHome string) (*Reconciler, Paths) {
+	t.Helper()
 	paths := testPaths(userHome, hotplexHome)
 	registry, err := builtin.NewRegistry()
 	require.NoError(t, err)
-	r, err := New(registry, paths, osFS{})
+	r, err := New(registry, paths, fs)
 	require.NoError(t, err)
 	return r, paths
 }
@@ -406,6 +558,7 @@ type recordingFS struct {
 	failRemoveContains    string
 	failRenameContains    string
 	failRenameOldContains string
+	failWriteContains     string
 	failSyncDir           bool
 	failRemoveAllContains string
 	failSyncDirAfter      int
@@ -420,6 +573,9 @@ func (f *recordingFS) MkdirAll(path string, mode os.FileMode) error {
 
 func (f *recordingFS) WriteFile(path string, data []byte, mode os.FileMode) error {
 	f.writes++
+	if f.failWriteContains != "" && strings.Contains(path, f.failWriteContains) {
+		return errors.New("injected write failure")
+	}
 	return f.FileSystem.WriteFile(path, data, mode)
 }
 
