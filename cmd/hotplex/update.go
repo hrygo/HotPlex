@@ -62,6 +62,9 @@ func completeUpdateLifecycle(callbacks updateLifecycleCallbacks) error {
 	if syncErr != nil {
 		return syncErr
 	}
+	if reportErr := report.Err(); reportErr != nil {
+		return reportErr
+	}
 	if callbacks.SkillsSynced != nil {
 		callbacks.SkillsSynced()
 	}

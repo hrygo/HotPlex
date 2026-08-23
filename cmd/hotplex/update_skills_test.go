@@ -121,6 +121,29 @@ func TestUpdateReplacementAnnouncedBeforeSyncFailure(t *testing.T) {
 	require.Equal(t, []string{"replace", "binary_updated", "sync", "render"}, sequence)
 }
 
+func TestUpdateLifecycleRejectsDriftReportBeforeSuccessCallback(t *testing.T) {
+	t.Parallel()
+	rendered := false
+	success := false
+	err := completeUpdateLifecycle(updateLifecycleCallbacks{
+		SyncSkills: true,
+		Sync: func() (reconcile.Report, error) {
+			return reconcile.Report{Profile: builtin.ProfileRuntime, Items: []reconcile.Item{{
+				Outcome:    reconcile.OutcomeDrift,
+				ReasonCode: reconcile.ReasonDrift,
+			}}}, nil
+		},
+		Render: func(reconcile.Report) error {
+			rendered = true
+			return nil
+		},
+		SkillsSynced: func() { success = true },
+	})
+	require.ErrorIs(t, err, reconcile.ErrReportActionRequired)
+	require.True(t, rendered)
+	require.False(t, success)
+}
+
 func TestUpdateSyncFailureReturnsBoundedReportError(t *testing.T) {
 	t.Parallel()
 	runner := &lifecycleTestRunner{statusReport: reconcile.Report{}}
