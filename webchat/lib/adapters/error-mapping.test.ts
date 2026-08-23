@@ -40,6 +40,11 @@ describe("mapErrorToMessage", () => {
             "Recovering session...",
             "🔄 Recovering session...",
         ],
+        [
+            "NOT_SUPPORTED",
+            "clear: worker: not implemented",
+            "This worker does not support /clear. Use /reset or /new instead.",
+        ],
     ])(
         "maps known code %s to its friendly message",
         (code, message, expected) => {
@@ -78,6 +83,14 @@ describe("mapErrorToMessage", () => {
         it("prefixes non-auth Codex errors with a source label", () => {
             expect(mapErrorToMessage("CODEX_ERROR", "something else broke")).toBe(
                 "Codex error: something else broke",
+            );
+        });
+    });
+
+    describe("NOT_SUPPORTED", () => {
+        it("maps an unsupported command to a generic actionable message", () => {
+            expect(mapErrorToMessage("NOT_SUPPORTED", "compact: unavailable")).toBe(
+                "This command is not supported by the current worker.",
             );
         });
     });

@@ -43,6 +43,14 @@ export function mapErrorToMessage(
             return "The agent produced too much output and was terminated. Try to narrow down your request.";
         case "RESUME_RETRY":
             return `🔄 ${message || "Recovering session after unexpected crash..."}`;
+        case "NOT_SUPPORTED":
+            if (
+                msgLower.includes("clear:") &&
+                msgLower.includes("not implemented")
+            ) {
+                return "This worker does not support /clear. Use /reset or /new instead.";
+            }
+            return "This command is not supported by the current worker.";
         case "CODEX_ERROR": {
             if (CODEX_AUTH_PATTERNS.some((p) => msgLower.includes(p))) {
                 return "Your Codex login has expired. Please sign out and sign in again in the Codex CLI, then retry.";
