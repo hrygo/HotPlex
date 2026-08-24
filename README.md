@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.42.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.42.1-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,7 +133,7 @@ HotPlex separates the place where a user talks from the agent that performs the 
 
 Worker choice can be set per bot or platform, with shared defaults for the rest of the deployment.
 
-## ✨ Latest release: v1.42.0
+## ✨ Latest release: v1.42.1
 
 - **Reliable turns and reconnects.** Durable turn identity, ordered event publication, bounded WebSocket initialization retries, and sequence hydration make reconnects and uncertain delivery outcomes safer.
 - **Self-aware agent sessions.** Runtime facts and native skill catalogs expose the selected worker, available tools, and callable skills consistently across the gateway, CLI, admin API, and WebChat.
