@@ -102,6 +102,7 @@ func applyMessagingEnv(cfg *Config) {
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM", "AllowFrom"},
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_DM_FROM", "AllowDMFrom"},
 			{"HOTPLEX_MESSAGING_FEISHU_ALLOW_GROUP_FROM", "AllowGroupFrom"},
+			{"HOTPLEX_MESSAGING_FEISHU_GATEWAY_RESTART_ALLOW_FROM", "GatewayRestartAllowFrom"},
 		},
 	)
 

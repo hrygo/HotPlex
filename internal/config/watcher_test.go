@@ -115,6 +115,44 @@ func TestDiffConfigs_Precision(t *testing.T) {
 	require.True(t, foundAddr, "should have found gateway.addr change")
 }
 
+func TestDiffConfigs_FeishuGatewayRestartAllowFromIsHot(t *testing.T) {
+	t.Parallel()
+
+	prev := Default()
+	next := Default()
+	next.Messaging.Feishu.GatewayRestartAllowFrom = []string{"ou_operator"}
+
+	changes := diffConfigs(prev, next)
+	var found bool
+	for _, change := range changes {
+		if change.Field == "messaging.feishu.gateway_restart_allow_from" {
+			found = true
+			require.True(t, change.Hot)
+		}
+	}
+	require.True(t, found)
+}
+
+func TestDiffConfigs_FeishuBotGatewayRestartAllowFromIsHot(t *testing.T) {
+	t.Parallel()
+
+	prev := Default()
+	next := Default()
+	next.Messaging.Feishu.Bots = []FeishuBotConfig{
+		{Name: "ops", GatewayRestartAllowFrom: []string{"ou_operator"}},
+	}
+
+	changes := diffConfigs(prev, next)
+	var found bool
+	for _, change := range changes {
+		if change.Field == "messaging.feishu.gateway_restart_allow_from" {
+			found = true
+			require.True(t, change.Hot)
+		}
+	}
+	require.True(t, found)
+}
+
 func TestDiffConfigs_FullContentRetentionRequiresRestart(t *testing.T) {
 	t.Parallel()
 	prev := Default()
