@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -843,6 +844,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	log.Info("gateway: repairer started")
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
+	lifecycleBroadcaster := newLifecycleBroadcaster(deps)
 
 	// Wire cron delivery to platform adapters.
 	if cronDelivery != nil {
@@ -896,16 +898,15 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 
 	serverErr := make(chan error, 2)
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("gateway: server failed to start", "err", err)
-			serverErr <- err
-		}
-	}()
-
 	// Admin server: dedicated port for network isolation (always-on when enabled).
 	var adminServer *http.Server
 	var adminAddr string
+	if err := startGatewayHTTPServer(server, serverErr, log, "gateway: server failed", net.Listen); err != nil {
+		log.Error("gateway: server failed to start", "err", err)
+		cancel()
+		shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+		return err
+	}
 	if cfg.Admin.Enabled {
 		adminServer = &http.Server{
 			Addr:         cfg.Admin.Addr,
@@ -915,12 +916,12 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		}
 		adminAddr = adminServer.Addr
 		log.Info("admin: starting", "addr", adminAddr)
-		go func() {
-			if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Error("admin: server failed to start", "err", err)
-				serverErr <- err
-			}
-		}()
+		if err := startGatewayHTTPServer(adminServer, serverErr, log, "admin: server failed", net.Listen); err != nil {
+			log.Error("admin: server failed to start", "err", err)
+			cancel()
+			shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+			return err
+		}
 	}
 	printStartupBanner(os.Stdout, newBuildInfo(), RuntimeStatus{
 		GatewayAddr:     cfg.Gateway.Addr,
@@ -944,6 +945,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	if runtime.GOOS != "windows" {
 		signal.Notify(sig, syscall.SIGHUP)
 	}
+	defer signal.Stop(sig)
+	lifecycleBroadcaster.BroadcastStarted()
 
 loop:
 	for {
@@ -974,12 +977,35 @@ loop:
 		}
 	}
 
-	cancel()
-	shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+	runGatewayControlledShutdown(lifecycleBroadcaster, cancel, func() {
+		shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+	})
 	return nil
 }
 
 // --- Decomposed helpers ---
+
+type gatewayListenFunc func(network, address string) (net.Listener, error)
+
+func startGatewayHTTPServer(
+	server *http.Server,
+	serverErr chan<- error,
+	log *slog.Logger,
+	errorMessage string,
+	listen gatewayListenFunc,
+) error {
+	listener, err := listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", server.Addr, err)
+	}
+	go func() {
+		if serveErr := server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
+			log.Error(errorMessage, "err", serveErr)
+			serverErr <- serveErr
+		}
+	}()
+	return nil
+}
 
 func initLogging(cfg *config.Config) (*slog.Logger, *config.ConfigStore, *slog.LevelVar) {
 	cfgStore := config.NewConfigStore(cfg, slog.Default())

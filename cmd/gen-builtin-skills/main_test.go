@@ -114,7 +114,7 @@ func TestGenerateBuiltinSkillsRejectsIncompleteCanonicalTree(t *testing.T) {
 		mirrorRoot:     t.TempDir(),
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "want 5")
+	require.Contains(t, err.Error(), "want 6")
 }
 
 func TestMirrorPackagePreservesFixedBackup(t *testing.T) {
@@ -244,6 +244,7 @@ func writeCanonicalFixture(t *testing.T) string {
 			"references/cron.md",
 			"references/diagnostics.md",
 			"references/slack.md",
+			"references/user-guide.md",
 		},
 		"hotplex-operator": {
 			"SKILL.md",

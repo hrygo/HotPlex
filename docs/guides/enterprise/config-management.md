@@ -143,17 +143,13 @@ worker:
 
 ## 6. .env 文件加载顺序
 
-环境变量来源优先级（从低到高）：
-
-```
-1. .env              # 仓库级共享配置（git tracked）
-2. .env.local        # 本地覆盖（gitignored）
-3. Shell 环境变量     # 系统/CI 环境注入
-```
+Gateway 启动时读取与本次 `config.yaml` 同目录的单个 `.env` 文件；已经存在的 Shell 环境变量
+优先于文件中的同名值。`make dev` 由 `scripts/dev.sh` 额外加载仓库根目录 `.env`，而
+`.env.local` 不会被 Gateway 自动读取，除非启动脚本或 Shell 显式加载它。
 
 建议实践：
-- `.env` 存放非敏感默认值（API endpoint、feature flag）
-- `.env.local` 存放个人开发配置（密钥、本地路径）
+- `.env` 存放当前运行实例需要的凭据和覆盖项，并确保权限为仅用户可读
+- 若使用 `.env.local`，必须由启动脚本显式加载，并确认不会与 config 路径混用
 - 生产环境使用系统密钥管理（Vault / K8s Secrets）
 
 ---

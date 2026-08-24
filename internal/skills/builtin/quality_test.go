@@ -93,11 +93,11 @@ func TestBuiltinDescriptionsHavePositiveAndNegativeBoundaries(t *testing.T) {
 		description := strings.TrimSpace(metadata.Description)
 		switch manifest.Name {
 		case "hotplex-cli":
-			require.Contains(t, description, "Use HotPlex CLI")
-			require.Contains(t, description, "Do not use")
+			require.Contains(t, description, "使用 HotPlex CLI")
+			require.Contains(t, description, "不要用于")
 		case "hotplex-operator":
-			require.Contains(t, description, "Operate a HotPlex host")
-			require.Contains(t, description, "Use only in an explicitly authorized operator context")
+			require.Contains(t, description, "运维或初始化 HotPlex 主机")
+			require.Contains(t, description, "仅在明确授权的 operator 上下文中使用")
 		default:
 			t.Fatalf("unclassified canonical package %q", manifest.Name)
 		}
@@ -154,7 +154,9 @@ func TestGeneratedCLISurfaceHasNoHiddenOrSensitiveValues(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repositoryRoot(t), "internal/skills/builtin/hotplex-cli/references/cli-surface.generated.md"))
 	require.NoError(t, err)
 	text := string(data)
-	require.Contains(t, text, "# Public HotPlex CLI surface")
+	require.Contains(t, text, "# HotPlex CLI 公共命令面")
+	require.Contains(t, text, "选项：")
+	require.NotContains(t, text, "Audit log chain operations")
 	require.NotContains(t, text, "internal-generate-cli-surface")
 	require.NotContains(t, text, "/Users/")
 	require.NotContains(t, text, "/home/")

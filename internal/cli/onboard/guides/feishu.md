@@ -16,4 +16,10 @@
   4. Get Credentials: 凭证与基础信息 → App ID + App Secret
   5. Optional: speech:stt (云端语音转文字，仅 STT_PROVIDER=feishu 时)
 
+  Access policy:
+  - DM/group default to allowlist; set HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_xxx in .env
+  - Group messages also require @HotPlex by default
+  - To find your OpenID, send one message and inspect the Gateway receive log for user=ou_...
+    (service: hotplex service logs -f; dev: make gateway-logs), then restart the Gateway
+
   Docs: https://open.feishu.cn/document/home

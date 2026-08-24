@@ -86,7 +86,7 @@ AI 功能依赖 Claude Code CLI，确认已安装：`claude --version`。
 ### 4. 交互式配置
 
 ```bash
-hotplex onboard    # 向导：检测已有配置 → 平台选择 → 工作目录 → 生成 config.yaml
+hotplex onboard    # 默认写入 ~/.hotplex/config.yaml 与同目录 .env
 hotplex doctor     # 验证：所有检查项应显示 PASS 或可接受的 WARN
 ```
 
@@ -131,7 +131,8 @@ HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_xxxxxxxxxxxx
 HOTPLEX_MESSAGING_FEISHU_APP_SECRET=<your-app-secret>
 ```
 
-可重新运行 `hotplex onboard --enable-feishu` 自动生成配置。详细步骤见 [飞书集成教程](tutorials/feishu-integration.md)。
+可重新运行 `hotplex onboard --non-interactive --enable-feishu --feishu-allow-from ou_xxx` 自动生成配置（凭据从同目录 `.env` 读取）。
+详细步骤见 [飞书集成教程](tutorials/feishu-integration.md)。
 
 ### 重启生效
 
@@ -201,7 +202,9 @@ systemctl --user edit hotplex
 #     Environment=HOTPLEX_HOME=/data/hotplex
 ```
 
-> 开发模式（`make dev`）下也可写入项目 `.env`（`HOTPLEX_HOME=/data/hotplex`），由 dev.sh 自动加载；**安装的二进制不会自动读取 `.env`**，请使用 shell 配置文件或 systemd 注入。
+> 开发模式（`make dev`）由 `scripts/dev.sh` 加载项目根目录 `.env`；普通 Gateway/service
+> 启动会读取与所用 `config.yaml` 同目录的 `.env`。因此 service 通常使用 `~/.hotplex/.env`，
+> 直接指定仓库内配置时应确认 `.env` 位于该配置目录，或由启动脚本显式导出环境变量。
 
 **迁移已有数据**：`HOTPLEX_HOME` 不会自动搬运旧数据，请手动迁移：
 

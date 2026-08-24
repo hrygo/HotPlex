@@ -227,7 +227,13 @@ func (r *Reconciler) Remove(ctx context.Context, options Options) (Report, error
 			continue
 		}
 		for _, manifest := range manifests {
-			inspection, inspectErr := r.inspectProjectionState(target, manifest)
+			var inspection projectionInspection
+			var inspectErr error
+			if len(target.AliasRoots) > 0 {
+				inspection, inspectErr = r.inspectLinkedProjectionState(target, manifest)
+			} else {
+				inspection, inspectErr = r.inspectProjectionState(target, manifest)
+			}
 			if inspectErr != nil {
 				return report, inspectErr
 			}
@@ -287,25 +293,40 @@ func (r *Reconciler) selectedTargets(workerTypes []WorkerType) ([]Target, error)
 		seen[parsed] = struct{}{}
 	}
 	targets := make([]Target, 0, len(seen))
+	appendTarget := func(target Target) {
+		for i := range targets {
+			if targets[i].CanonicalRoot != target.CanonicalRoot || targets[i].ReasonCode != target.ReasonCode {
+				continue
+			}
+			targets[i].WorkerAliases = appendUniqueWorkers(targets[i].WorkerAliases, target.WorkerAliases...)
+			targets[i].AliasRoots = appendUniqueStrings(targets[i].AliasRoots, target.AliasRoots...)
+			return
+		}
+		targets = append(targets, target)
+	}
 	if _, ok := seen[WorkerClaude]; ok {
 		root, err := r.validateNativeRoot(WorkerClaude)
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerClaude}})
+		target := Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerClaude}}
+		if aliasRoot, aliasErr := r.validateAliasRoot(WorkerClaude); aliasErr == nil {
+			target.AliasRoots = []string{aliasRoot}
+		}
+		appendTarget(target)
 	}
 	if _, ok := seen[WorkerCodex]; ok {
 		root, err := r.validateNativeRoot(WorkerCodex)
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
+		appendTarget(Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
 	} else if _, ok := seen[WorkerOpenCode]; ok {
 		root, err := r.validateNativeRoot(WorkerOpenCode)
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
+		appendTarget(Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
 	}
 	if _, ok := seen[WorkerACP]; ok {
 		targets = append(targets, Target{WorkerAliases: []WorkerType{WorkerACP}, ReasonCode: ReasonUnsupportedWorker})
@@ -324,9 +345,6 @@ func (r *Reconciler) validateNativeRoot(workerType WorkerType) (string, error) {
 		return "", fmt.Errorf("resolve native root: %w", err)
 	}
 	baseName := ".agents"
-	if workerType == WorkerClaude {
-		baseName = ".claude"
-	}
 	base, err := canonicalFSPath(r.fs, filepath.Join(r.paths.UserHome, baseName))
 	if err != nil {
 		return "", fmt.Errorf("resolve native base: %w", err)
@@ -335,6 +353,30 @@ func (r *Reconciler) validateNativeRoot(workerType WorkerType) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrRootOutsideHome, root)
 	}
 	return canonicalRoot, nil
+}
+
+func (r *Reconciler) validateAliasRoot(workerType WorkerType) (string, error) {
+	root := r.paths.AliasRoots[workerType]
+	if root == "" {
+		return "", fmt.Errorf("%w: missing alias root for %s", ErrRootOutsideHome, workerType)
+	}
+	canonicalRoot, err := canonicalFSPath(r.fs, root)
+	if err != nil {
+		return "", fmt.Errorf("resolve alias root: %w", err)
+	}
+	base, err := canonicalFSPath(r.fs, filepath.Join(r.paths.UserHome, ".claude"))
+	if err != nil {
+		return "", fmt.Errorf("resolve alias base: %w", err)
+	}
+	centralRoot, err := r.validateNativeRoot(WorkerCodex)
+	if err != nil {
+		return "", err
+	}
+	if !isWithin(r.paths.UserHome, canonicalRoot) ||
+		(!isWithin(base, canonicalRoot) && canonicalRoot != centralRoot) {
+		return "", fmt.Errorf("%w: %s", ErrRootOutsideHome, root)
+	}
+	return filepath.Clean(root), nil
 }
 
 func (r *Reconciler) revalidateTarget(target Target) error {

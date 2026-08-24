@@ -16,7 +16,7 @@ WebChat/Admin 上传 zip 包安装，也会公开两个 embedded canonical packa
 两个内置包以 `internal/skills/builtin/hotplex-cli` 和
 `internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
 `.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，合计六个 Skill。
 
 真实 Skill 只按 `<skills-root>/<name>/SKILL.md` 发现。其他既有用户文件不会被识别，HotPlex 也
 不会自动删除或改写它们；需要清理时必须由用户明确指定目标。
@@ -85,7 +85,7 @@ HotPlex 不把 `$HOTPLEX_HOME` 的 inventory 当作 Worker 根，也不要求用
 
 | Worker | UserHome 原生根 | 说明 |
 |--------|----------------|------|
-| **Claude Code** | `<UserHome>/.claude/skills` | 当前 worker 的权威目录可证明 `callable` |
+| **Claude Code** | `<UserHome>/.claude/skills/<name>` → `<UserHome>/.agents/skills/<name>` | HotPlex 逐项创建软链接；当前 worker 的权威目录可证明 `callable` |
 | **Codex CLI** | `<UserHome>/.agents/skills` | 与 OpenCode 共享根，选择任一 alias 会报告完整 aliases |
 | **OpenCode Server** | `<UserHome>/.agents/skills` | 与 Codex 共享根，选择任一 alias 会报告完整 aliases |
 | **ACP** | 无可推断 filesystem root | typed unsupported，不写入文件系统 |

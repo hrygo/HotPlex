@@ -16,7 +16,7 @@ import (
 	"github.com/hrygo/hotplex/internal/skills/builtin"
 )
 
-const receiptSchemaVersion = 1
+const receiptSchemaVersion = 2
 
 type Receipt struct {
 	SchemaVersion       int             `json:"schema_version"`
@@ -27,6 +27,8 @@ type Receipt struct {
 	WorkerAliases       []WorkerType    `json:"worker_aliases"`
 	ManifestSHA256      string          `json:"manifest_sha256"`
 	ProjectedTreeSHA256 string          `json:"projected_tree_sha256"`
+	ProjectionType      string          `json:"projection_type,omitempty"`
+	LinkTarget          string          `json:"link_target,omitempty"`
 }
 
 func ReceiptPath(stateDir, canonicalTarget string) string {
@@ -168,11 +170,23 @@ func parseReceipt(data []byte) (Receipt, error) {
 }
 
 func validReceipt(receipt Receipt) bool {
-	return receipt.SchemaVersion == receiptSchemaVersion &&
+	if receipt.SchemaVersion != 1 && receipt.SchemaVersion != receiptSchemaVersion {
+		return false
+	}
+	if receipt.ProjectionType != "" && receipt.ProjectionType != "tree" && receipt.ProjectionType != "link" {
+		return false
+	}
+	if receipt.ProjectionType == "link" {
+		if !filepath.IsAbs(receipt.LinkTarget) || filepath.Clean(receipt.LinkTarget) != receipt.LinkTarget || !equalAliases(receipt.WorkerAliases, []WorkerType{WorkerClaude}) {
+			return false
+		}
+	} else if receipt.LinkTarget != "" {
+		return false
+	}
+	return filepath.IsAbs(receipt.CanonicalTarget) &&
+		filepath.Clean(receipt.CanonicalTarget) == receipt.CanonicalTarget &&
 		validPackageVersion(receipt.PackageVersion) &&
 		validPackageName(receipt.PackageName) &&
-		filepath.IsAbs(receipt.CanonicalTarget) &&
-		filepath.Clean(receipt.CanonicalTarget) == receipt.CanonicalTarget &&
 		validSHA256Hex(receipt.ManifestSHA256) &&
 		validSHA256Hex(receipt.ProjectedTreeSHA256) &&
 		(receipt.Profile == builtin.ProfileRuntime || receipt.Profile == builtin.ProfileOperator) &&
@@ -326,12 +340,26 @@ func writeReceiptBytes(fs FileSystem, stateDir, finalPath string, data []byte) (
 }
 
 func receiptMatches(receipt Receipt, manifest builtin.PackageManifest, target string, aliases []WorkerType, projectedHash string) bool {
-	return receipt.SchemaVersion == receiptSchemaVersion &&
+	return (receipt.SchemaVersion == 1 || receipt.SchemaVersion == receiptSchemaVersion) &&
+		(receipt.ProjectionType == "" || receipt.ProjectionType == "tree") &&
 		receipt.PackageVersion == manifest.Version &&
 		receipt.PackageName == manifest.Name &&
 		receipt.Profile == manifest.Profile &&
 		receipt.CanonicalTarget == target &&
 		equalAliases(receipt.WorkerAliases, aliases) &&
+		receipt.ManifestSHA256 == manifestHash(manifest) &&
+		receipt.ProjectedTreeSHA256 == projectedHash
+}
+
+func linkReceiptMatches(receipt Receipt, manifest builtin.PackageManifest, linkPath, sourcePath, projectedHash string) bool {
+	return receipt.SchemaVersion == receiptSchemaVersion &&
+		receipt.ProjectionType == "link" &&
+		receipt.PackageVersion == manifest.Version &&
+		receipt.PackageName == manifest.Name &&
+		receipt.Profile == manifest.Profile &&
+		receipt.CanonicalTarget == linkPath &&
+		receipt.LinkTarget == sourcePath &&
+		equalAliases(receipt.WorkerAliases, []WorkerType{WorkerClaude}) &&
 		receipt.ManifestSHA256 == manifestHash(manifest) &&
 		receipt.ProjectedTreeSHA256 == projectedHash
 }

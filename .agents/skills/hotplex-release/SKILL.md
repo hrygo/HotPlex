@@ -1,9 +1,9 @@
 ---
 name: hotplex-release
-description: Prepare or publish a HotPlex version by selecting SemVer impact, curating CHANGELOG entries, reconciling version surfaces, validating release inputs, tagging, and creating the GitHub Release. Do not use for host binary updates, runtime diagnosis, or documentation patrol.
+description: 通过判断 SemVer 影响、整理 CHANGELOG、对账版本面和验证发布输入来准备或发布 HotPlex 版本。不要用于主机二进制更新、运行时诊断或文档巡逻。
 ---
 
-# HotPlex release
+# HotPlex 发布
 
 本 Skill 可以准备发布材料，但不会扩大写入权限。创建 tag、push commit/tag 或创建、
 编辑 GitHub Release 前，必须有针对目标版本和 remote 的明确授权。仅要求版本分析、

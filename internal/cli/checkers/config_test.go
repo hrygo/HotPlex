@@ -70,6 +70,32 @@ func TestConfigExists_EmptyPath(t *testing.T) {
 	require.Contains(t, d.Message, "not set")
 }
 
+func TestConfigSource_ReportsConfigAndEnvPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("gateway:\n  addr: \"localhost:8888\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("CUSTOM=value\n"), 0o600))
+	withConfigPath(t, path)
+
+	d := (configSourceChecker{}).Check(context.Background())
+
+	require.Equal(t, cli.StatusPass, d.Status)
+	require.Contains(t, d.Detail, path)
+	require.Contains(t, d.Detail, filepath.Join(dir, ".env"))
+}
+
+func TestConfigSource_WarnsWhenEnvMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("gateway:\n  addr: \"localhost:8888\"\n"), 0o644))
+	withConfigPath(t, path)
+
+	d := (configSourceChecker{}).Check(context.Background())
+
+	require.Equal(t, cli.StatusWarn, d.Status)
+	require.Contains(t, d.Message, ".env")
+}
+
 func TestConfigExists_FixFunc(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

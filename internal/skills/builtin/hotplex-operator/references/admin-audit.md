@@ -1,17 +1,13 @@
-# Admin and audit operations
+# Admin 和审计操作
 
-Separate read-only evidence gathering from state changes. Inspect the current
-surface before acting:
+将只读证据收集与状态变更分开。执行前先检查当前命令面：
 
     hotplex admin --help
     hotplex audit --help
 
-Audit verification and authorized Admin read endpoints may support diagnosis.
-Account creation, audit-chain repair, and Admin API writes are mutations and
-require explicit authority for the target host and operation.
+审计验证和已授权的 Admin 读取端点可以支持诊断。账号创建、审计链修复和 Admin API 写入
+都属于变更，需要针对目标主机和具体操作的明确权限。
 
-Before a write, state the target, mutation, expected side effect, and recovery
-boundary. Afterward, verify through the narrowest read-only audit or status
-view and report the mutation and outcome. Do not load, print, or embed bearer
-tokens, cookies, credentials, or complete environment files merely to
-demonstrate an authenticated request.
+写入前说明目标、变更、预期副作用和恢复边界。完成后通过最窄的只读审计或状态视图验证，
+并报告变更与结果。不要为了证明请求已认证而加载、打印或嵌入 Bearer token、cookie、
+凭据或完整环境文件。

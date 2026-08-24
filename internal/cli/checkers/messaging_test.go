@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,6 +61,8 @@ func TestFeishuCreds_NoCreds(t *testing.T) {
 func TestFeishuCreds_ValidCreds(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel in Go 1.26
 
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_ID", "")
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_SECRET", "")
 	t.Setenv("FEISHU_APP_ID", "cli_test123")
 	t.Setenv("FEISHU_APP_SECRET", "secret123")
 
@@ -67,6 +70,50 @@ func TestFeishuCreds_ValidCreds(t *testing.T) {
 	d := c.Check(context.Background())
 
 	require.Equal(t, cli.StatusPass, d.Status)
+}
+
+func TestFeishuCreds_UsesEffectiveConfig(t *testing.T) {
+	// t.Setenv is incompatible with t.Parallel in Go 1.26
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+messaging:
+  feishu:
+    enabled: true
+`), 0o644))
+	withConfigPath(t, path)
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_ID", "cli_effective")
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_SECRET", "effective-secret")
+	t.Setenv("FEISHU_APP_ID", "")
+	t.Setenv("FEISHU_APP_SECRET", "")
+
+	d := (feishuCredsChecker{}).Check(context.Background())
+
+	require.Equal(t, cli.StatusPass, d.Status)
+	require.Contains(t, d.Message, "present")
+}
+
+func TestFeishuCreds_EnabledWithoutEffectiveCredentials(t *testing.T) {
+	// t.Setenv is incompatible with t.Parallel in Go 1.26
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+messaging:
+  feishu:
+    enabled: true
+`), 0o644))
+	withConfigPath(t, path)
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_ID", "")
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_SECRET", "")
+	t.Setenv("FEISHU_APP_ID", "")
+	t.Setenv("FEISHU_APP_SECRET", "")
+
+	d := (feishuCredsChecker{}).Check(context.Background())
+
+	require.Equal(t, cli.StatusFail, d.Status)
+	require.Contains(t, d.Message, "missing")
 }
 
 func TestFeishuCreds_WhitespaceOnly(t *testing.T) {

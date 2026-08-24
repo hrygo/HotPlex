@@ -43,7 +43,10 @@ onboard/
 - `templates.go` parses embedded `configs/config.yaml` into `yaml.Node`, walks via `lookupPath`, mutates with `setBool/setScalar/setStringList`. Never `sed`/regex on YAML source — comments would be lost and indentation is unsafe.
 
 **Env file write merge**
-- `buildEnvContent` (wizard.go:779) reads existing `.env`, preserves unknown keys, appends generated `HOTPLEX_ADMIN_TOKEN_1` and platform creds; `GenerateSecret()` (templates.go:139) yields 32-byte base64.
+- `buildEnvContent` reads existing `.env`, preserves unknown keys, existing platform credentials
+  and `HOTPLEX_MESSAGING_{SLACK,FEISHU}_ALLOW_FROM`, then appends generated
+  `HOTPLEX_ADMIN_TOKEN_1` and selected platform values; `GenerateSecret()` (templates.go:139)
+  yields 32-byte base64.
 
 **Non-interactive determinism**
 - With `NonInteractive=true` the wizard skips all `prompt*` calls; `EnableSlack`/`EnableFeishu` flags and `*Policy`/`*AllowFrom` fields fully specify output. Required-field gaps become failing `StepResult`s instead of prompts.

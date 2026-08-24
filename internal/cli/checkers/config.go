@@ -108,6 +108,55 @@ func init() {
 	cli.DefaultRegistry.Register(configExistsChecker{})
 }
 
+// configSourceChecker makes the configuration boundary visible in diagnostics.
+// It intentionally reports paths only; it must never print environment values.
+type configSourceChecker struct{}
+
+func (c configSourceChecker) Name() string     { return "config.source" }
+func (c configSourceChecker) Category() string { return "config" }
+func (c configSourceChecker) Check(ctx context.Context) cli.Diagnostic {
+	if configPath == "" {
+		return cli.Diagnostic{Name: c.Name(), Category: c.Category(), Status: cli.StatusFail, Message: "Config path not set", FixHint: "Set the config path before running diagnostics"}
+	}
+
+	if _, err := config.Load(configPath); err != nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
+			Message: "Cannot resolve effective config source", Detail: err.Error(),
+			FixHint: "Fix config syntax errors first",
+		}
+	}
+
+	envPath := filepath.Join(filepath.Dir(configPath), ".env")
+	_, err := os.Stat(envPath)
+	if os.IsNotExist(err) {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
+			Message: "Effective config loaded; adjacent .env is missing",
+			Detail:  fmt.Sprintf("config=%s; env=%s", configPath, envPath),
+			FixHint: "Run onboard or create the adjacent .env file",
+		}
+	}
+	if err != nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
+			Message: "Effective config loaded; cannot inspect adjacent .env",
+			Detail:  fmt.Sprintf("config=%s; env=%s; error=%v", configPath, envPath, err),
+			FixHint: "Check permissions for the config directory and adjacent .env",
+		}
+	}
+
+	return cli.Diagnostic{
+		Name: c.Name(), Category: c.Category(), Status: cli.StatusPass,
+		Message: "Effective config and adjacent .env loaded",
+		Detail:  fmt.Sprintf("config=%s; env=%s", configPath, envPath),
+	}
+}
+
+func init() {
+	cli.DefaultRegistry.Register(configSourceChecker{})
+}
+
 // ─── config.syntax ────────────────────────────────────────────────────────────
 
 type configSyntaxChecker struct{}

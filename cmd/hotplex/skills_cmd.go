@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -82,18 +81,7 @@ func newSkillsRunner(userHome, hotplexHome string) (reconcile.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	paths := reconcile.Paths{
-		UserHome:     userHome,
-		HotplexHome:  hotplexHome,
-		InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
-		StateDir:     filepath.Join(hotplexHome, "state", "skills"),
-		NativeRoots: map[reconcile.WorkerType]string{
-			reconcile.WorkerClaude:   filepath.Join(userHome, ".claude", "skills"),
-			reconcile.WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
-			reconcile.WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
-		},
-	}
-	return reconcile.New(registry, paths, reconcile.NewOSFileSystem())
+	return reconcile.New(registry, reconcile.DefaultPaths(userHome, hotplexHome), reconcile.NewOSFileSystem())
 }
 
 func loadSkillsOptions(deps skillsCommandDeps, configPath, profile string, workerFlags []string, dryRun bool) (reconcile.Options, error) {

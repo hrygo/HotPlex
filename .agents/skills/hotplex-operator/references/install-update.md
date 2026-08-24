@@ -1,41 +1,34 @@
-# Installation and binary updates
+# 安装和二进制更新
 
-## Install or initialize
+## 安装或初始化
 
-Start from the installed CLI rather than copied package-manager instructions:
+从已安装 CLI 开始，不要照抄包管理器指令：
 
     hotplex onboard --help
     hotplex install --help
 
-Use `hotplex onboard` for first-time configuration or reconfiguration. Run
-only the mode the operator requested; flags that overwrite configuration,
-install a service, or synchronize Skills are separate mutations and require
-matching authority. If installing a locally built binary is the request,
-inspect `hotplex install --help` and confirm its target before writing.
+首次配置或重新配置使用 `hotplex onboard`。只运行 operator 请求的模式；覆盖配置、安装
+服务和同步 Skill 的参数都是独立变更，需要对应权限。如果用户请求安装本地构建二进制，
+先检查 `hotplex install --help`，确认写入目标。
 
-If no trusted `hotplex` binary is available, stop and ask which official
-release artifact or source-build path the operator intends to use. Do not
-invent a remote-script pipeline. After installation or initialization, run:
+如果没有可信的 `hotplex` 二进制，停止并询问 operator 计划使用哪个官方 release artifact
+或源码构建路径。不要发明远程脚本安装链路。安装或初始化后运行：
 
     hotplex doctor
 
-Report failed or warning checks without automatically applying fixes that
-were not requested.
+报告失败和警告检查，不要自动应用用户未请求的修复。
 
-## Update
+## 更新
 
-Inspect the local update contract and current version before mutation:
+变更前检查本地更新契约和当前版本：
 
     hotplex update --help
     hotplex update --check
 
-Use `hotplex update` for an authorized binary update. Add `--restart` only
-when the request includes a service restart, and add `--sync-skills` only when
-the request includes built-in Skill synchronization. When synchronizing,
-select the intended profile explicitly and follow the reconciliation checks
-in [configuration.md](configuration.md).
+获得授权的二进制更新使用 `hotplex update`。只有请求包含服务重启时才添加 `--restart`，
+只有请求包含内置 Skill 同步时才添加 `--sync-skills`。同步时显式选择目标 profile，并遵循
+[configuration.md](configuration.md) 的对账检查。
 
-Record the pre-update version and expected recovery decision, then verify the
-installed version and run `hotplex doctor`. On failure, preserve the updater
-and service diagnostics and stop for an operator decision; do not replace the
-binary with ad hoc copies, fixed waits, or a Git checkout.
+记录更新前版本和预期恢复决策，然后验证已安装版本并运行 `hotplex doctor`。失败时保留
+updater 和服务诊断，停止并交由 operator 决策；不要用临时复制、固定等待或 Git checkout
+替换二进制。

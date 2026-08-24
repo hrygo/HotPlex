@@ -343,7 +343,7 @@ B 通道无条件覆盖 C 通道，防止上下文冲突。
 内置包以 `internal/skills/builtin/hotplex-cli` 和
 `internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
 `.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库另保留
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，构成五个职责互斥的 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，构成六个职责互斥的 Skill。
 
 ### DI 注入模式
 

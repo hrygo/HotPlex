@@ -118,7 +118,7 @@ Session `/skills` 的出现由当前 Worker/filesystem evidence 决定；filesys
 `internal/skills/builtin/hotplex-operator`。生成器产出 byte-identical 的
 `.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 恰好包含
 `hotplex-cli`、`hotplex-operator`、`hotplex-diagnostics`、`hotplex-release`、
-`hotplex-docs-patrol` 五个 Skill。
+`hotplex-docs-patrol`、`hotplex-stt-tts` 六个 Skill。
 
 原生 Skill 同步把 UserHome 与 `$HOTPLEX_HOME` 分开：Claude 使用 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可推断的 filesystem root；immutable inventory、状态和 receipts 位于 `$HOTPLEX_HOME`。`hotplex skills status|sync|remove` 使用 runtime（`hotplex-cli`）或 operator（累积包含 `hotplex-cli` 与 `hotplex-operator`）profile，可重复传入 `--worker`，并支持 `--dry-run`/`--json`。未显式指定 worker 时只采用已启用 messaging platform/bot 的解析结果；空目标返回 bounded error，不回退到注册表。remove 只删除 receipt 与 unchanged-tree 能证明归属的 native projection，不删除 inventory。
 

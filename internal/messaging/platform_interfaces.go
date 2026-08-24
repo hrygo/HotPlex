@@ -44,6 +44,12 @@ type CronResultSender interface {
 	SendCronResult(ctx context.Context, text string, platformKey map[string]string) error
 }
 
+// ProactiveMessageSender sends a sanitized system-originated message to a
+// platform target without starting or resuming a worker session.
+type ProactiveMessageSender interface {
+	SendProactiveMessage(ctx context.Context, text string, platformKey map[string]string) error
+}
+
 // HubInterface is the subset of gateway.Hub methods needed by platform adapters.
 type HubInterface interface {
 	JoinPlatformSession(sessionID string, pc PlatformConn)

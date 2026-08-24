@@ -43,6 +43,7 @@ var expectedPackageAssets = map[string][]string{
 		"references/cron.md",
 		"references/diagnostics.md",
 		"references/slack.md",
+		"references/user-guide.md",
 	},
 	"hotplex-operator": {
 		"SKILL.md",

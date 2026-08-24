@@ -14,6 +14,36 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+var _ messaging.ProactiveMessageSender = (*Adapter)(nil)
+
+func TestAdapter_SendProactiveMessage_MissingChatID(t *testing.T) {
+	t.Parallel()
+	a := &Adapter{}
+
+	err := a.SendProactiveMessage(context.Background(), "hello", map[string]string{})
+
+	require.EqualError(t, err, "feishu: missing chat_id in platform_key")
+}
+
+func TestAdapter_SendProactiveMessage_NilClient(t *testing.T) {
+	t.Parallel()
+	a := &Adapter{}
+
+	err := a.SendProactiveMessage(context.Background(), "hello", map[string]string{"chat_id": "chat-1"})
+
+	require.EqualError(t, err, "feishu: lark client not initialized")
+}
+
+func TestAdapter_SendCronResult_DelegatesProactiveValidation(t *testing.T) {
+	t.Parallel()
+	a := &Adapter{}
+
+	proactiveErr := a.SendProactiveMessage(context.Background(), "hello", map[string]string{})
+	cronErr := a.SendCronResult(context.Background(), "hello", map[string]string{})
+
+	require.EqualError(t, cronErr, proactiveErr.Error())
+}
+
 // ─── truncate ─────────────────────────────────────────────────────────────────
 // NOTE: truncate uses byte indexing, not rune. Multi-byte UTF-8 characters
 // will be sliced in the middle of a character, producing invalid UTF-8.

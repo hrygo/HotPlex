@@ -121,6 +121,8 @@ hotplex gateway stop
 
 重启 Gateway。停止当前实例后启动新实例，保留原配置和模式。
 
+受控停止或重启时，Gateway 会在停止前向当前已连接的 Slack、飞书和元信会话广播“服务即将停止”，并在新实例启动后向同一批去重后的会话广播“服务已启动”。通知为 best-effort，不覆盖 WebChat、进程崩溃、强制终止或无停止快照的冷启动。
+
 **示例**：
 
 ```bash
@@ -203,6 +205,8 @@ hotplex version --format json
 ### `hotplex doctor`
 
 运行环境诊断检查，验证 HotPlex 配置是否正确。检查按类别组织：environment、config、dependencies、security、runtime、messaging、stt、tts、agent_config、worker。
+
+诊断会显示 effective config 与同目录 `.env` 的路径（`config.source`），消息平台凭据检查也以这套 effective config 为准；`runtime.gateway_health` 会探测 Gateway `/health`，区分“未启动”和“配置/服务已启动但不健康”。诊断不会输出凭据值。
 
 **示例**：
 
@@ -413,6 +417,11 @@ hotplex onboard --non-interactive \
   --enable-slack \
   --slack-allow-from U12345,U67890 \
   --install-service
+
+hotplex onboard --non-interactive \
+  --enable-feishu \
+  --feishu-allow-from ou_xxxxxxxxxxxxxxxxx \
+  --install-service
 ```
 
 | 标志 | 类型 | 默认值 | 说明 |
@@ -557,6 +566,8 @@ hotplex service stop
 ### `hotplex service restart`
 
 重启系统服务。
+
+正常重启会向当前已连接的 Slack、飞书和元信会话发送停止、启动两条生命周期通知；异常退出或强制终止无法保证发送。
 
 ```bash
 hotplex service restart
@@ -1041,12 +1052,15 @@ hotplex skills remove --profile runtime --worker claude_code --json
 
 不显式传 `--worker` 时，命令只解析已启用 Slack/Feishu/Yuanxin platform/bot 的 effective
 worker targets；empty target 返回 bounded error，不回退 RegisteredTypes。Claude 的 native root
-是 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可
-推断 filesystem root。`$HOTPLEX_HOME/skills/builtin/<version>/<name>` 是 immutable inventory，
+是 `<UserHome>/.claude/skills/<name>` 到 `<UserHome>/.agents/skills/<name>` 的逐项软链接，Codex/OpenCode
+共享 `<UserHome>/.agents/skills`，ACP 没有可推断 filesystem root；`.codex/skills` 不属于当前
+HotPlex Worker root。`$HOTPLEX_HOME/skills/builtin/<version>/<name>` 是 immutable inventory，
 状态和 receipts 也位于 `$HOTPLEX_HOME`，与 UserHome projection 分离。
 
 `status` 和 `--dry-run` 零写；sync 不覆盖未知 user/project Skill，collision、drift、failed
-均以非零返回。remove 只删除 matching receipt 且 unchanged-tree 能证明归属的 projection，
+均以非零返回。Claude 的 projection 是 `<UserHome>/.claude/skills/<name>` 到
+`<UserHome>/.agents/skills/<name>` 的逐项软链接；`.codex/skills` 不属于当前 HotPlex Worker root。
+remove 只删除 matching receipt 且 unchanged-tree 能证明归属的 projection，
 不删除 inventory。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills
 checker 只读；onboard/update 只有显式 `--sync-skills` 才同步。Admin/WebChat 的 public Skills
 catalog 永久展示内置 inventory；Session `/skills` 仍按当前 Worker/filesystem/native evidence
@@ -1056,7 +1070,7 @@ catalog 永久展示内置 inventory；Session `/skills` 仍按当前 Worker/fil
 两个 built-in 的 canonical source 是 `internal/skills/builtin/hotplex-cli` 与
 `internal/skills/builtin/hotplex-operator`；生成的 `.agents/skills/hotplex-cli` 和
 `.agents/skills/hotplex-operator` mirror 必须 byte-identical。仓库 portfolio 另含
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，合计六个 Skill。
 
 ## Admin 账号管理
 

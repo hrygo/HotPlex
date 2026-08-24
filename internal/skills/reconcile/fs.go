@@ -33,6 +33,8 @@ func (osFS) Remove(name string) error { return os.Remove(name) }
 
 func (osFS) RemoveAll(name string) error { return os.RemoveAll(name) }
 
+func (osFS) Symlink(oldname, newname string) error { return os.Symlink(oldname, newname) }
+
 func (osFS) EvalSymlinks(name string) (string, error) { return filepathEvalSymlinks(name) }
 
 func (osFS) SyncFile(name string) error {

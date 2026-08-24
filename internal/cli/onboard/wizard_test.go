@@ -184,6 +184,46 @@ func TestBuildEnvContent(t *testing.T) {
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 		require.NotContains(t, got, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=")
 	})
+
+	t.Run("preserves_unmanaged_env_entries", func(t *testing.T) {
+		dir := t.TempDir()
+		envPath := filepath.Join(dir, ".env")
+		require.NoError(t, os.WriteFile(envPath, []byte("# user setting\nCUSTOM_PROVIDER_URL=https://example.test\n\n# keep this note\n"), 0o600))
+
+		got := buildEnvContent("new-admin", messagingPlatformConfig{}, messagingPlatformConfig{}, envPath)
+
+		require.Contains(t, got, "CUSTOM_PROVIDER_URL=https://example.test")
+		require.Contains(t, got, "# keep this note")
+		require.NotContains(t, got, "# Preserved user environment\n# Preserved user environment")
+	})
+
+	t.Run("preserves_existing_managed_credentials_when_not_replaced", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		envPath := filepath.Join(dir, ".env")
+		require.NoError(t, os.WriteFile(envPath, []byte(
+			"HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_existing\n"+"HOTPLEX_MESSAGING_FEISHU_APP_SECRET=secret_existing\n"+"HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_existing\n"), 0o600))
+
+		got := buildEnvContent("new-admin", messagingPlatformConfig{}, messagingPlatformConfig{enabled: true}, envPath)
+
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_existing")
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_SECRET=secret_existing")
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_existing")
+	})
+
+	t.Run("writes_allow_from_to_env", func(t *testing.T) {
+		t.Parallel()
+		got := buildEnvContent("admin", messagingPlatformConfig{}, messagingPlatformConfig{
+			enabled:   true,
+			allowFrom: []string{"ou_abc", "ou_def"},
+			credentials: map[string]string{
+				"HOTPLEX_MESSAGING_FEISHU_APP_ID":     "cli_test",
+				"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": "secret_test",
+			},
+		}, "")
+
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_abc,ou_def")
+	})
 }
 
 func TestStepWriteConfig(t *testing.T) {
@@ -303,6 +343,34 @@ func TestOnboardReportsTypedSyncOutcomeAndRoots(t *testing.T) {
 	require.Equal(t, "pass", step.Status)
 	require.Contains(t, step.Detail, "target=/tmp/native-root")
 	require.Contains(t, step.Detail, "aliases=claude_code")
+}
+
+func TestNewBuiltinSkillRunnerUsesSharedClaudeProjection(t *testing.T) {
+	t.Parallel()
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	runner, err := newBuiltinSkillRunner(userHome, hotplexHome)
+	require.NoError(t, err)
+
+	report, err := runner.Sync(context.Background(), reconcile.Options{
+		Profile:     builtin.ProfileRuntime,
+		WorkerTypes: []reconcile.WorkerType{reconcile.WorkerClaude},
+	})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+
+	central := filepath.Join(userHome, ".agents", "skills", "hotplex-cli")
+	alias := filepath.Join(userHome, ".claude", "skills", "hotplex-cli")
+	centralInfo, err := os.Lstat(central)
+	require.NoError(t, err)
+	require.True(t, centralInfo.IsDir())
+	aliasInfo, err := os.Lstat(alias)
+	require.NoError(t, err)
+	require.NotEqual(t, os.FileMode(0), aliasInfo.Mode()&os.ModeSymlink)
+	resolved, err := filepath.EvalSymlinks(alias)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(central)
+	require.NoError(t, err)
+	require.Equal(t, want, resolved)
 }
 
 type wizardSkillRunner struct {

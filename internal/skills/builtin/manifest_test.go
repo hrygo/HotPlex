@@ -29,6 +29,7 @@ func TestCanonicalPackagesHavePortableFrontmatterAndClosedReferences(t *testing.
 				"references/cron.md",
 				"references/slack.md",
 				"references/diagnostics.md",
+				"references/user-guide.md",
 				"references/cli-surface.generated.md",
 			},
 		},
@@ -67,11 +68,11 @@ func TestCanonicalPackagesHavePortableFrontmatterAndClosedReferences(t *testing.
 			require.Contains(t, text, "description:")
 			require.Contains(t, text, "compatibility:")
 			if tc.name == "hotplex-cli" {
-				require.Contains(t, text, "description: Use HotPlex CLI for Cron jobs, explicitly requested Slack operations, and read-only status, doctor, security, or config diagnostics. Do not use for Feishu, releases, service installation, binary updates, or Admin mutations.")
-				require.Contains(t, text, "compatibility: Requires the hotplex CLI and a runtime identity authorized for the requested operation.")
+				require.Contains(t, text, "description: \"使用 HotPlex CLI 处理 Cron、明确请求的 Slack 操作、普通用户聊天命令指引，以及只读 status、doctor、security、config 诊断。不要用于飞书写操作、发布、服务安装、二进制更新或 Admin 变更。\"")
+				require.Contains(t, text, "compatibility: \"需要 hotplex CLI，以及已获授权执行目标操作的运行时身份。\"")
 			} else {
-				require.Contains(t, text, "description: \"Operate a HotPlex host or initialize one: first-time onboard, service install/start, binary updates, host configuration, audit inspection, or Admin mutations. Use only in an explicitly authorized operator context.\"")
-				require.Contains(t, text, "compatibility: Requires local host access, the hotplex CLI, and explicit operator or Admin authority.")
+				require.Contains(t, text, "description: \"运维或初始化 HotPlex 主机，覆盖首次 onboard、服务安装/启动、二进制更新、主机配置、审计检查和 Admin 变更。仅在明确授权的 operator 上下文中使用。\"")
+				require.Contains(t, text, "compatibility: \"需要本机主机访问、hotplex CLI，以及明确的 operator 或 Admin 权限。\"")
 			}
 		})
 	}

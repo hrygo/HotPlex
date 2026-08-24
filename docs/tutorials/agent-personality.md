@@ -135,7 +135,7 @@ global/project/user Skill
 
 需要投影到 Worker 原生目录时，使用 `hotplex skills status|sync|remove`，按需选择累积
 `runtime`/`operator` profile、重复 `--worker`，并可使用 `--dry-run` 与 `--json`。UserHome
-原生根（Claude 的 `.claude/skills`、Codex/OpenCode 共享 `.agents/skills`）与
+原生根（Claude 的 `.claude/skills/<name>` 逐项链接到 `.agents/skills/<name>`、Codex/OpenCode 共享 `.agents/skills`）与
 `$HOTPLEX_HOME` 的 immutable inventory/state receipts 分离；ACP 没有可推断的 filesystem
 root。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills checker 不写入；
 onboard/update 只有显式 `--sync-skills` 才同步。
@@ -143,7 +143,7 @@ onboard/update 只有显式 `--sync-skills` 才同步。
 两个内置包以 `internal/skills/builtin/hotplex-cli` 和
 `internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
 `.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库还包含
-`hotplex-diagnostics`、`hotplex-release` 和 `hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol` 和 `hotplex-stt-tts`，合计六个 Skill。
 
 ### Cron 请求的 CLI 路由
 

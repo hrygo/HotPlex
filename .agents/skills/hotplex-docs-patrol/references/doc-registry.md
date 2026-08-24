@@ -2,7 +2,7 @@
 
 代码区域到文档的映射关系。巡逻时基于此表按图索骥。
 
-## Gateway Core (`internal/gateway/`)
+## Gateway 核心（`internal/gateway/`）
 
 WebSocket hub、AEP 事件分发、Session-Worker 生命周期编排。
 
@@ -26,7 +26,7 @@ WebSocket hub、AEP 事件分发、Session-Worker 生命周期编排。
 
 ---
 
-## Session Management (`internal/session/`)
+## Session 管理（`internal/session/`）
 
 Session 生命周期、持久化、确定性 ID 与资源配额。
 
@@ -39,7 +39,7 @@ Session 生命周期、持久化、确定性 ID 与资源配额。
 
 ---
 
-## Brain (`internal/brain/`)
+## Brain（`internal/brain/`）
 
 LLM 智能中间件：意图路由、安全审计、上下文压缩、装饰器链、4 层 API Key 发现。
 
@@ -53,7 +53,7 @@ LLM 智能中间件：意图路由、安全审计、上下文压缩、装饰器�
 
 ---
 
-## Cron (`internal/cron/`)
+## Cron（`internal/cron/`）
 
 AI-native 定时任务：scheduler、timerLoop、SQLite 持久化、平台投递。
 
@@ -66,7 +66,7 @@ AI-native 定时任务：scheduler、timerLoop、SQLite 持久化、平台投递
 
 ---
 
-## Messaging (`internal/messaging/`)
+## 消息系统（`internal/messaging/`）
 
 消息适配器基类、Slack Socket Mode、飞书 WS、元芯平台适配器、独立 STT/TTS 模块、工具调用格式化、权限交互。
 
@@ -91,7 +91,7 @@ AI-native 定时任务：scheduler、timerLoop、SQLite 持久化、平台投递
 
 ---
 
-## Agent Config (`internal/agentconfig/`)
+## AgentConfig（`internal/agentconfig/`）
 
 B/C 通道配置加载、BuildSystemPrompt、三级 fallback、XML 安全。
 
@@ -104,7 +104,7 @@ Admin/WebChat 编辑表面变化 → 同步检查 `reference/admin-api.md`。
 
 ---
 
-## Agent Skills (`internal/skills/`, `.agents/skills/`)
+## Agent Skills（`internal/skills/`、`.agents/skills/`）
 
 Skill 发现、目录契约、内置包、Worker 投影与仓库内维护 Skill。
 
@@ -118,7 +118,7 @@ CLI 参考；内置 portfolio 或 prompt 边界变化 → 教程+AgentConfig 原
 
 ---
 
-## Worker (`internal/worker/`)
+## Worker（`internal/worker/`）
 
 多 Agent 适配器 + 共享基座 + 跨平台进程管理。
 
@@ -140,7 +140,7 @@ CLI 参考；内置 portfolio 或 prompt 边界变化 → 教程+AgentConfig 原
 
 ---
 
-## CLI Commands (`cmd/hotplex/`)
+## CLI 命令（`cmd/hotplex/`）
 
 Cobra 根命令和子命令：gateway、cron、service、update、slack。
 
@@ -151,7 +151,7 @@ Cobra 根命令和子命令：gateway、cron、service、update、slack。
 
 ---
 
-## Config (`internal/config/`, `configs/`)
+## 配置（`internal/config/`、`configs/`）
 
 Viper 配置加载、热重载、三级继承、审计回滚。
 
@@ -160,7 +160,7 @@ Viper 配置加载、热重载、三级继承、审计回滚。
 
 ---
 
-## Security (`internal/security/`)
+## 安全（`internal/security/`）
 
 API Key + Bot ID 认证、SSRF 防御、路径安全、白名单。
 
@@ -171,7 +171,7 @@ API Key + Bot ID 认证、SSRF 防御、路径安全、白名单。
 
 ---
 
-## AEP Protocol (`pkg/events/`, `pkg/aep/`)
+## AEP 协议（`pkg/events/`、`pkg/aep/`）
 
 AEP v1 事件类型和编解码。
 

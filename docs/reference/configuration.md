@@ -439,7 +439,7 @@ Cron、显式 Slack 和只读诊断；operator profile 累积包含 `hotplex-cli
 它们的 canonical source 分别是 `internal/skills/builtin/hotplex-cli` 与
 `internal/skills/builtin/hotplex-operator`，生成器产出 byte-identical 的
 `.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，合计六个 Skill。
 Public/Admin/WebChat HTTP builtins 永久可发现，不以 projection 或 receipt 存在为前提；Session
 `/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项是 `discoverable`，
 只有 projection/native advertisement 和 adapter-verified activation 才能证明 `callable`。真实
@@ -450,8 +450,9 @@ global/project/user Skill 同名时优先遮蔽 builtin，`source`
 
 显式同步命令为 `hotplex skills status|sync|remove`，支持累积 `runtime`/`operator` profile、
 重复 `--worker`、`--dry-run` 和 `--json`。Worker native roots 位于 UserHome：Claude 是
-`<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`；ACP 没有可
-推断 filesystem root，typed unsupported 且不写文件。immutable inventory 位于
+`<UserHome>/.claude/skills/<name>` 逐项软链接到 `<UserHome>/.agents/skills/<name>`，Codex/OpenCode
+共享 `<UserHome>/.agents/skills`；ACP 没有可推断 filesystem root，typed unsupported 且不写文件。
+`.codex/skills` 不属于当前 HotPlex Worker root，不会被隐式修改。immutable inventory 位于
 `$HOTPLEX_HOME/skills/builtin/<version>/<name>`，状态和 receipts 也位于
 `$HOTPLEX_HOME`，与 UserHome 原生 projection 分离。status/--dry-run 严格零写；同步不会覆盖
 未知 user/project Skill，collision、drift、failed item 返回非零；remove 只删除 matching
