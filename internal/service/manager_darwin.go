@@ -3,20 +3,28 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+
+	"github.com/hrygo/hotplex/internal/worker/proc"
 )
 
 type darwinManager struct {
-	run CommandRunner
+	run          CommandRunner
+	processAlive func(int) bool
 }
 
 func NewManager() Manager {
-	return &darwinManager{run: realRunner{}}
+	return &darwinManager{
+		run:          realRunner{},
+		processAlive: defaultDarwinProcessAlive,
+	}
 }
 
 func (m *darwinManager) Install(opts InstallOptions) error {
@@ -89,17 +97,29 @@ func (m *darwinManager) Status(name string, level Level) (*Status, error) {
 		return s, nil
 	}
 
-	output := string(out)
-	s.Running = true
-	s.StatusText = "running"
-
-	if pidStr := parseLaunchctlPID(output); pidStr != "" {
-		if pid, err := strconv.Atoi(pidStr); err == nil {
-			s.PID = pid
-		}
+	pid, err := strconv.Atoi(parseLaunchctlPID(string(out)))
+	if err != nil || pid <= 0 || !m.isProcessAlive(pid) {
+		s.Running = false
+		s.StatusText = "stopped"
+		return s, nil
 	}
 
+	s.Running = true
+	s.StatusText = "running"
+	s.PID = pid
 	return s, nil
+}
+
+func (m *darwinManager) isProcessAlive(pid int) bool {
+	if m.processAlive != nil {
+		return m.processAlive(pid)
+	}
+	return defaultDarwinProcessAlive(pid)
+}
+
+func defaultDarwinProcessAlive(pid int) bool {
+	err := proc.IsProcessAlive(pid)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func (m *darwinManager) plistPath(name string, level Level) (string, error) {
