@@ -183,7 +183,7 @@ make help
 
 ### Slack / Cron CLI 示例
 
-Slack（send-message / upload-file / bookmark / react 等）与 Cron（create / list / trigger / history 等）的详细命令示例见 skill `hotplex-cli`（`.claude/skills/hotplex-cli/SKILL.md`）——按需加载，不常驻上下文。
+Slack（send-message / upload-file / bookmark / react 等）与 Cron（create / list / trigger / history 等）的详细命令示例见 skill `hotplex-cli`（`.agents/skills/hotplex-cli/SKILL.md`；Claude 目录为逐项软链接）——按需加载，不常驻上下文。
 
 ---
 

@@ -24,6 +24,173 @@ func TestResolveTargetsDeduplicatesSharedAgentsRootAndKeepsAllAliases(t *testing
 	}
 }
 
+func TestResolveTargetsUsesAgentsAsClaudeSourceAndClaudeAlias(t *testing.T) {
+	userHome := t.TempDir()
+	targets, err := ResolveTargets(userHome, []WorkerType{WorkerClaude})
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.Equal(t, filepath.Join(userHome, ".agents", "skills"), targets[0].CanonicalRoot)
+	require.Equal(t, []string{filepath.Join(userHome, ".claude", "skills")}, targets[0].AliasRoots)
+}
+
+func TestSyncClaudeCreatesCentralPackageAndPerSkillLink(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+
+	central := filepath.Join(paths.NativeRoots[WorkerCodex], "hotplex-cli")
+	link := filepath.Join(paths.AliasRoots[WorkerClaude], "hotplex-cli")
+	centralInfo, err := os.Lstat(central)
+	require.NoError(t, err)
+	require.True(t, centralInfo.IsDir())
+	linkInfo, err := os.Lstat(link)
+	require.NoError(t, err)
+	require.NotNil(t, linkInfo.Mode()&os.ModeSymlink)
+	resolved, err := filepath.EvalSymlinks(link)
+	require.NoError(t, err)
+	resolved, err = filepath.Abs(resolved)
+	require.NoError(t, err)
+	want, err := filepath.Abs(central)
+	require.NoError(t, err)
+	want, err = filepath.EvalSymlinks(want)
+	require.NoError(t, err)
+	require.Equal(t, want, resolved)
+}
+
+func TestSyncClaudeLinkIsIdempotent(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	second, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, second.Err())
+	for _, item := range second.Items {
+		if item.Target == filepath.Join(paths.AliasRoots[WorkerClaude], "hotplex-cli") {
+			require.Equal(t, OutcomeUnchanged, item.Outcome)
+			require.Equal(t, ReasonUnchanged, item.ReasonCode)
+		}
+	}
+}
+
+func TestSyncClaudeLinkCollisionDoesNotOverwriteRealDirectory(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	linkPath := filepath.Join(paths.AliasRoots[WorkerClaude], "hotplex-cli")
+	require.NoError(t, os.MkdirAll(linkPath, 0o755))
+	marker := filepath.Join(linkPath, "user-owned.txt")
+	require.NoError(t, os.WriteFile(marker, []byte("keep"), 0o600))
+
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.Contains(t, reportReasons(report.Items), ReasonCollision)
+	data, err := os.ReadFile(marker)
+	require.NoError(t, err)
+	require.Equal(t, "keep", string(data))
+}
+
+func TestSyncClaudeWrongLinkDoesNotOverwrite(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	linkPath := filepath.Join(paths.AliasRoots[WorkerClaude], "hotplex-cli")
+	otherRoot := filepath.Join(t.TempDir(), "other")
+	require.NoError(t, os.MkdirAll(otherRoot, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(linkPath), 0o755))
+	require.NoError(t, os.Symlink(otherRoot, linkPath))
+
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.ErrorIs(t, report.Err(), ErrReportActionRequired)
+	require.Contains(t, reportReasons(report.Items), ReasonCollision)
+	resolved, err := filepath.EvalSymlinks(linkPath)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(otherRoot)
+	require.NoError(t, err)
+	require.Equal(t, want, resolved)
+}
+
+func TestSyncClaudeRootLinkLeavesRootAndUsesCentralContent(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	centralRoot := paths.NativeRoots[WorkerCodex]
+	aliasRoot := paths.AliasRoots[WorkerClaude]
+	require.NoError(t, os.MkdirAll(centralRoot, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(aliasRoot), 0o755))
+	require.NoError(t, os.Symlink(centralRoot, aliasRoot))
+
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+	info, err := os.Lstat(aliasRoot)
+	require.NoError(t, err)
+	require.NotEqual(t, os.FileMode(0), info.Mode()&os.ModeSymlink)
+	linkTarget, err := os.Readlink(aliasRoot)
+	require.NoError(t, err)
+	require.Equal(t, centralRoot, linkTarget)
+	for _, item := range report.Items {
+		if item.Target == filepath.Join(aliasRoot, "hotplex-cli") {
+			require.Equal(t, ReasonRootLinked, item.ReasonCode)
+		}
+	}
+}
+
+func TestStatusAndRemoveClaudeLinkPreserveCentralPackage(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+
+	status, err := r.Status(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, status.Err())
+	link := filepath.Join(paths.AliasRoots[WorkerClaude], "hotplex-cli")
+	for _, item := range status.Items {
+		if item.Target == link {
+			require.Equal(t, OutcomeUnchanged, item.Outcome)
+			require.Equal(t, ReasonUnchanged, item.ReasonCode)
+		}
+	}
+
+	removed, err := r.Remove(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, removed.Err())
+	_, err = os.Lstat(link)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(filepath.Join(paths.NativeRoots[WorkerCodex], "hotplex-cli"))
+	require.NoError(t, err)
+}
+
+func TestSyncClaudeMigratesOwnedLegacyDirectoryToLink(t *testing.T) {
+	r, paths := newTestLinkedReconciler(t)
+	_, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	manifest, ok := r.registry.Package("hotplex-cli")
+	require.True(t, ok)
+	central := filepath.Join(paths.NativeRoots[WorkerCodex], manifest.Name)
+	link := filepath.Join(paths.AliasRoots[WorkerClaude], manifest.Name)
+	centralHash, err := treeHash(r.fs, central)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, copyTestTree(central, link))
+	require.NoError(t, writeReceipt(r.fs, paths.StateDir, link, Receipt{
+		SchemaVersion:       receiptSchemaVersion,
+		PackageVersion:      manifest.Version,
+		PackageName:         manifest.Name,
+		Profile:             manifest.Profile,
+		CanonicalTarget:     link,
+		WorkerAliases:       []WorkerType{WorkerClaude},
+		ManifestSHA256:      manifestHash(manifest),
+		ProjectedTreeSHA256: centralHash,
+	}))
+
+	report, err := r.Sync(t.Context(), Options{Profile: builtin.ProfileRuntime, WorkerTypes: []WorkerType{WorkerClaude}})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	require.NotEqual(t, os.FileMode(0), info.Mode()&os.ModeSymlink)
+	receipt, err := readReceipt(r.fs, ReceiptPath(paths.StateDir, link))
+	require.NoError(t, err)
+	require.Equal(t, "link", receipt.ProjectionType)
+}
+
 func TestResolveTargetsRejectsEmptyListAndACPWithoutWriting(t *testing.T) {
 	_, err := ResolveTargets(t.TempDir(), nil)
 	require.ErrorIs(t, err, ErrNoWorkerTargets)
@@ -522,11 +689,23 @@ func testPaths(userHome, hotplexHome string) Paths {
 		InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
 		StateDir:     filepath.Join(hotplexHome, "state", "skills"),
 		NativeRoots: map[WorkerType]string{
-			WorkerClaude:   filepath.Join(userHome, ".claude", "skills"),
+			WorkerClaude:   filepath.Join(userHome, ".agents", "skills"),
 			WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
 			WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
 		},
 	}
+}
+
+func newTestLinkedReconciler(t *testing.T) (*Reconciler, Paths) {
+	t.Helper()
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	paths := testPaths(userHome, hotplexHome)
+	paths.AliasRoots = map[WorkerType]string{WorkerClaude: filepath.Join(userHome, ".claude", "skills")}
+	registry, err := builtin.NewRegistry()
+	require.NoError(t, err)
+	r, err := New(registry, paths, osFS{})
+	require.NoError(t, err)
+	return r, paths
 }
 
 func itemReasons(items []Item) []string {
@@ -576,9 +755,35 @@ type recordingFS struct {
 	writes                int
 }
 
+func copyTestTree(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
+	})
+}
+
 func (f *recordingFS) MkdirAll(path string, mode os.FileMode) error {
 	f.writes++
 	return f.FileSystem.MkdirAll(path, mode)
+}
+
+func (f *recordingFS) Symlink(oldPath, newPath string) error {
+	f.writes++
+	return f.FileSystem.Symlink(oldPath, newPath)
 }
 
 func (f *recordingFS) WriteFile(path string, data []byte, mode os.FileMode) error {

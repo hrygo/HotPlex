@@ -439,17 +439,7 @@ func newBuiltinSkillRunner(userHome, hotplexHome string) (reconcile.Runner, erro
 	if err != nil {
 		return nil, err
 	}
-	return reconcile.New(registry, reconcile.Paths{
-		UserHome:     userHome,
-		HotplexHome:  hotplexHome,
-		InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
-		StateDir:     filepath.Join(hotplexHome, "state", "skills"),
-		NativeRoots: map[reconcile.WorkerType]string{
-			reconcile.WorkerClaude:   filepath.Join(userHome, ".claude", "skills"),
-			reconcile.WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
-			reconcile.WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
-		},
-	}, reconcile.NewOSFileSystem())
+	return reconcile.New(registry, reconcile.DefaultPaths(userHome, hotplexHome), reconcile.NewOSFileSystem())
 }
 
 func (r *WizardResult) hasFail() bool {

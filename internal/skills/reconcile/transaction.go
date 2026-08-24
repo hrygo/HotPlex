@@ -90,6 +90,13 @@ func writeRawReceipt(fs FileSystem, stateDir, finalPath string, data []byte) err
 }
 
 func (r *Reconciler) removeProjection(target Target, manifest builtin.PackageManifest) Item {
+	if len(target.AliasRoots) > 0 {
+		return r.removeLinkedProjection(target, manifest)
+	}
+	return r.removeTreeProjection(target, manifest)
+}
+
+func (r *Reconciler) removeTreeProjection(target Target, manifest builtin.PackageManifest) Item {
 	inspection, err := r.inspectProjectionState(target, manifest)
 	if err != nil {
 		identity, identityErr := PackageTargetIdentity(target.CanonicalRoot, manifest.Name)

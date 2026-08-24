@@ -46,6 +46,8 @@ const (
 	ReasonChanged            = "changed"
 	ReasonMissingReceipt     = "missing_receipt"
 	ReasonMissingTarget      = "missing_target"
+	ReasonMissingLink        = "missing_link"
+	ReasonRootLinked         = "root_linked"
 	ReasonInvalidPackage     = "invalid_package"
 )
 
@@ -64,6 +66,7 @@ var (
 type Target struct {
 	CanonicalRoot string
 	WorkerAliases []WorkerType
+	AliasRoots    []string
 	ReasonCode    string
 }
 
@@ -117,6 +120,7 @@ type Paths struct {
 	InventoryDir string
 	StateDir     string
 	NativeRoots  map[WorkerType]string
+	AliasRoots   map[WorkerType]string
 }
 
 type FileSystem interface {
@@ -128,6 +132,7 @@ type FileSystem interface {
 	Rename(string, string) error
 	Remove(string) error
 	RemoveAll(string) error
+	Symlink(oldname, newname string) error
 	EvalSymlinks(string) (string, error)
 	SyncFile(string) error
 	SyncDir(string) error

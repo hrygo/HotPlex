@@ -16,6 +16,9 @@ import (
 // allowed; after it, cleanup failures leave the new state in place and report
 // the retained backup instead of risking data loss.
 func (r *Reconciler) syncProjection(target Target, manifest builtin.PackageManifest) Item {
+	if len(target.AliasRoots) > 0 {
+		return r.syncLinkedProjection(target, manifest)
+	}
 	inspection, err := r.inspectProjectionState(target, manifest)
 	if err != nil {
 		identity, identityErr := PackageTargetIdentity(target.CanonicalRoot, manifest.Name)

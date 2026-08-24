@@ -63,9 +63,16 @@ type projectionInspection struct {
 	receiptRaw []byte
 	owned      bool
 	treeHash   string
+	linkPath   string
+	sourcePath string
+	legacyTree bool
 }
 
 func (r *Reconciler) inspectProjection(target Target, manifest builtin.PackageManifest) (Item, error) {
+	if len(target.AliasRoots) > 0 {
+		inspection, err := r.inspectLinkedProjectionState(target, manifest)
+		return inspection.item, err
+	}
 	inspection, err := r.inspectProjectionState(target, manifest)
 	return inspection.item, err
 }

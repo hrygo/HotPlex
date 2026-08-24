@@ -450,8 +450,9 @@ global/project/user Skill 同名时优先遮蔽 builtin，`source`
 
 显式同步命令为 `hotplex skills status|sync|remove`，支持累积 `runtime`/`operator` profile、
 重复 `--worker`、`--dry-run` 和 `--json`。Worker native roots 位于 UserHome：Claude 是
-`<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`；ACP 没有可
-推断 filesystem root，typed unsupported 且不写文件。immutable inventory 位于
+`<UserHome>/.claude/skills/<name>` 逐项软链接到 `<UserHome>/.agents/skills/<name>`，Codex/OpenCode
+共享 `<UserHome>/.agents/skills`；ACP 没有可推断 filesystem root，typed unsupported 且不写文件。
+`.codex/skills` 不属于当前 HotPlex Worker root，不会被隐式修改。immutable inventory 位于
 `$HOTPLEX_HOME/skills/builtin/<version>/<name>`，状态和 receipts 也位于
 `$HOTPLEX_HOME`，与 UserHome 原生 projection 分离。status/--dry-run 严格零写；同步不会覆盖
 未知 user/project Skill，collision、drift、failed item 返回非零；remove 只删除 matching

@@ -1047,12 +1047,15 @@ hotplex skills remove --profile runtime --worker claude_code --json
 
 不显式传 `--worker` 时，命令只解析已启用 Slack/Feishu/Yuanxin platform/bot 的 effective
 worker targets；empty target 返回 bounded error，不回退 RegisteredTypes。Claude 的 native root
-是 `<UserHome>/.claude/skills`，Codex/OpenCode 共享 `<UserHome>/.agents/skills`，ACP 没有可
-推断 filesystem root。`$HOTPLEX_HOME/skills/builtin/<version>/<name>` 是 immutable inventory，
+是 `<UserHome>/.claude/skills/<name>` 到 `<UserHome>/.agents/skills/<name>` 的逐项软链接，Codex/OpenCode
+共享 `<UserHome>/.agents/skills`，ACP 没有可推断 filesystem root；`.codex/skills` 不属于当前
+HotPlex Worker root。`$HOTPLEX_HOME/skills/builtin/<version>/<name>` 是 immutable inventory，
 状态和 receipts 也位于 `$HOTPLEX_HOME`，与 UserHome projection 分离。
 
 `status` 和 `--dry-run` 零写；sync 不覆盖未知 user/project Skill，collision、drift、failed
-均以非零返回。remove 只删除 matching receipt 且 unchanged-tree 能证明归属的 projection，
+均以非零返回。Claude 的 projection 是 `<UserHome>/.claude/skills/<name>` 到
+`<UserHome>/.agents/skills/<name>` 的逐项软链接；`.codex/skills` 不属于当前 HotPlex Worker root。
+remove 只删除 matching receipt 且 unchanged-tree 能证明归属的 projection，
 不删除 inventory。Gateway startup 的 built-in reconciliation check 与 doctor 的 built-in Skills
 checker 只读；onboard/update 只有显式 `--sync-skills` 才同步。Admin/WebChat 的 public Skills
 catalog 永久展示内置 inventory；Session `/skills` 仍按当前 Worker/filesystem/native evidence

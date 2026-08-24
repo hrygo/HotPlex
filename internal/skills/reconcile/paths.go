@@ -9,6 +9,26 @@ import (
 	"strings"
 )
 
+// DefaultPaths returns the shared runtime layout used by all built-in Skill
+// entry points. The .agents root is canonical; Claude receives per-package
+// links through AliasRoots.
+func DefaultPaths(userHome, hotplexHome string) Paths {
+	return Paths{
+		UserHome:     userHome,
+		HotplexHome:  hotplexHome,
+		InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
+		StateDir:     filepath.Join(hotplexHome, "state", "skills"),
+		NativeRoots: map[WorkerType]string{
+			WorkerClaude:   filepath.Join(userHome, ".agents", "skills"),
+			WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
+			WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
+		},
+		AliasRoots: map[WorkerType]string{
+			WorkerClaude: filepath.Join(userHome, ".claude", "skills"),
+		},
+	}
+}
+
 func ResolveTargets(userHome string, workerTypes []WorkerType) ([]Target, error) {
 	if strings.TrimSpace(userHome) == "" {
 		return nil, fmt.Errorf("%w: empty home", ErrRootOutsideHome)
@@ -43,25 +63,40 @@ func ResolveTargets(userHome string, workerTypes []WorkerType) ([]Target, error)
 	}
 
 	var targets []Target
+	appendTarget := func(target Target) {
+		for i := range targets {
+			if targets[i].CanonicalRoot != target.CanonicalRoot || targets[i].ReasonCode != target.ReasonCode {
+				continue
+			}
+			targets[i].WorkerAliases = appendUniqueWorkers(targets[i].WorkerAliases, target.WorkerAliases...)
+			targets[i].AliasRoots = appendUniqueStrings(targets[i].AliasRoots, target.AliasRoots...)
+			return
+		}
+		targets = append(targets, target)
+	}
 	if _, ok := seen[WorkerClaude]; ok {
-		root, err := resolveNativeOSRoot(homeInput, home, ".claude")
+		root, err := resolveNativeOSRoot(homeInput, home, ".agents")
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerClaude}})
+		aliasRoot, err := resolveNativeOSRoot(homeInput, home, ".claude")
+		if err != nil {
+			return nil, err
+		}
+		appendTarget(Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerClaude}, AliasRoots: []string{aliasRoot}})
 	}
 	if _, codex := seen[WorkerCodex]; codex {
 		root, err := resolveNativeOSRoot(homeInput, home, ".agents")
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
+		appendTarget(Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
 	} else if _, openCode := seen[WorkerOpenCode]; openCode {
 		root, err := resolveNativeOSRoot(homeInput, home, ".agents")
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
+		appendTarget(Target{CanonicalRoot: root, WorkerAliases: []WorkerType{WorkerCodex, WorkerOpenCode}})
 	}
 	if _, ok := seen[WorkerACP]; ok {
 		targets = append(targets, Target{WorkerAliases: []WorkerType{WorkerACP}, ReasonCode: ReasonUnsupportedWorker})
@@ -73,6 +108,32 @@ func ResolveTargets(userHome string, workerTypes []WorkerType) ([]Target, error)
 		return targets[i].ReasonCode < targets[j].ReasonCode
 	})
 	return targets, nil
+}
+
+func appendUniqueWorkers(values []WorkerType, additions ...WorkerType) []WorkerType {
+	seen := make(map[WorkerType]struct{}, len(values)+len(additions))
+	result := make([]WorkerType, 0, len(values)+len(additions))
+	for _, value := range append(values, additions...) {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(additions))
+	result := make([]string, 0, len(values)+len(additions))
+	for _, value := range append(values, additions...) {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func resolveNativeOSRoot(homeInput, canonicalHome, baseName string) (string, error) {
@@ -172,6 +233,7 @@ func normalizePaths(fs FileSystem, input Paths) (Paths, error) {
 		InventoryDir: input.InventoryDir,
 		StateDir:     input.StateDir,
 		NativeRoots:  make(map[WorkerType]string, len(input.NativeRoots)+3),
+		AliasRoots:   make(map[WorkerType]string, len(input.AliasRoots)+1),
 	}
 	if paths.InventoryDir == "" {
 		paths.InventoryDir = filepath.Join(hotplexHome, "skills", "builtin")
@@ -200,7 +262,7 @@ func normalizePaths(fs FileSystem, input Paths) (Paths, error) {
 		paths.NativeRoots[workerType] = root
 	}
 	defaults := map[WorkerType]string{
-		WorkerClaude:   filepath.Join(userHome, ".claude", "skills"),
+		WorkerClaude:   filepath.Join(userHome, ".agents", "skills"),
 		WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
 		WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
 	}
@@ -215,9 +277,6 @@ func normalizePaths(fs FileSystem, input Paths) (Paths, error) {
 			return Paths{}, fmt.Errorf("resolve native root: %w", rootErr)
 		}
 		baseName := ".agents"
-		if workerType == WorkerClaude {
-			baseName = ".claude"
-		}
 		base, baseErr := canonicalFSPath(fs, filepath.Join(userHome, baseName))
 		if baseErr != nil {
 			return Paths{}, fmt.Errorf("resolve native base: %w", baseErr)
@@ -226,6 +285,29 @@ func normalizePaths(fs FileSystem, input Paths) (Paths, error) {
 			return Paths{}, fmt.Errorf("%w: %s", ErrRootOutsideHome, root)
 		}
 		paths.NativeRoots[workerType] = canonicalRoot
+	}
+	for workerType, root := range input.AliasRoots {
+		if workerType != WorkerClaude {
+			continue
+		}
+		if !filepath.IsAbs(root) {
+			return Paths{}, fmt.Errorf("%w: alias root must be absolute", ErrRootOutsideHome)
+		}
+		aliasRoot := filepath.Clean(root)
+		canonicalAlias, aliasErr := canonicalFSPath(fs, aliasRoot)
+		if aliasErr != nil {
+			return Paths{}, fmt.Errorf("resolve alias root: %w", aliasErr)
+		}
+		aliasBase, baseErr := canonicalFSPath(fs, filepath.Join(userHome, ".claude"))
+		if baseErr != nil {
+			return Paths{}, fmt.Errorf("resolve alias base: %w", baseErr)
+		}
+		centralRoot := paths.NativeRoots[WorkerCodex]
+		if !isWithin(userHome, canonicalAlias) ||
+			(!isWithin(aliasBase, canonicalAlias) && canonicalAlias != centralRoot) {
+			return Paths{}, fmt.Errorf("%w: %s", ErrRootOutsideHome, aliasRoot)
+		}
+		paths.AliasRoots[workerType] = aliasRoot
 	}
 	return paths, nil
 }

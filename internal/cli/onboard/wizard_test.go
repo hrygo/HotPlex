@@ -317,6 +317,34 @@ func TestOnboardReportsTypedSyncOutcomeAndRoots(t *testing.T) {
 	require.Contains(t, step.Detail, "aliases=claude_code")
 }
 
+func TestNewBuiltinSkillRunnerUsesSharedClaudeProjection(t *testing.T) {
+	t.Parallel()
+	userHome, hotplexHome := t.TempDir(), t.TempDir()
+	runner, err := newBuiltinSkillRunner(userHome, hotplexHome)
+	require.NoError(t, err)
+
+	report, err := runner.Sync(context.Background(), reconcile.Options{
+		Profile:     builtin.ProfileRuntime,
+		WorkerTypes: []reconcile.WorkerType{reconcile.WorkerClaude},
+	})
+	require.NoError(t, err)
+	require.NoError(t, report.Err())
+
+	central := filepath.Join(userHome, ".agents", "skills", "hotplex-cli")
+	alias := filepath.Join(userHome, ".claude", "skills", "hotplex-cli")
+	centralInfo, err := os.Lstat(central)
+	require.NoError(t, err)
+	require.True(t, centralInfo.IsDir())
+	aliasInfo, err := os.Lstat(alias)
+	require.NoError(t, err)
+	require.NotEqual(t, os.FileMode(0), aliasInfo.Mode()&os.ModeSymlink)
+	resolved, err := filepath.EvalSymlinks(alias)
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(central)
+	require.NoError(t, err)
+	require.Equal(t, want, resolved)
+}
+
 type wizardSkillRunner struct {
 	syncCalls int
 	options   reconcile.Options

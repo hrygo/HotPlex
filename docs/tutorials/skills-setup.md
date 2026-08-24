@@ -85,7 +85,7 @@ HotPlex 不把 `$HOTPLEX_HOME` 的 inventory 当作 Worker 根，也不要求用
 
 | Worker | UserHome 原生根 | 说明 |
 |--------|----------------|------|
-| **Claude Code** | `<UserHome>/.claude/skills` | 当前 worker 的权威目录可证明 `callable` |
+| **Claude Code** | `<UserHome>/.claude/skills/<name>` → `<UserHome>/.agents/skills/<name>` | HotPlex 逐项创建软链接；当前 worker 的权威目录可证明 `callable` |
 | **Codex CLI** | `<UserHome>/.agents/skills` | 与 OpenCode 共享根，选择任一 alias 会报告完整 aliases |
 | **OpenCode Server** | `<UserHome>/.agents/skills` | 与 Codex 共享根，选择任一 alias 会报告完整 aliases |
 | **ACP** | 无可推断 filesystem root | typed unsupported，不写入文件系统 |
