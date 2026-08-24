@@ -73,7 +73,10 @@ func newRestartLeaseStore(path string, now func() time.Time, processAlive func(i
 	}
 	if processAlive == nil {
 		processAlive = func(pid int) bool {
-			return pid > 0 && proc.IsProcessAlive(pid) == nil
+			if pid <= 0 {
+				return false
+			}
+			return !proc.IsProcessNotExist(proc.IsProcessAlive(pid))
 		}
 	}
 	return &restartLeaseStore{
