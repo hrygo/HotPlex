@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -95,11 +96,32 @@ func setupRoutes(
 		NewSessionID:     newSessionID,
 		AllowedOriginsFn: corsOriginsFn,
 		Restart: func() error {
-			inst, err := findRunningGateway()
+			coordinator := deps.RestartCoordinator
+			if coordinator == nil {
+				coordinator = newGatewayRestartCoordinator(log, deps.ConfigStore, deps.ConfigPath, deps.DevMode)
+			}
+			ticket, err := coordinator.Prepare(context.Background(), gatewayRestartRequest{
+				Platform: "admin",
+				Daemon:   true,
+			})
 			if err != nil {
 				return err
 			}
-			return forkRestartHelper(inst, deps.ConfigPath, deps.DevMode, true)
+			return coordinator.Commit(ticket)
+		},
+		RestartPrepare: func(ctx context.Context) (func() error, func() error, error) {
+			coordinator := deps.RestartCoordinator
+			if coordinator == nil {
+				coordinator = newGatewayRestartCoordinator(log, deps.ConfigStore, deps.ConfigPath, deps.DevMode)
+			}
+			ticket, err := coordinator.Prepare(ctx, gatewayRestartRequest{
+				Platform: "admin",
+				Daemon:   true,
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return func() error { return coordinator.Commit(ticket) }, func() error { return coordinator.Abort(ticket) }, nil
 		},
 		DB:           deps.DB,
 		DBResolver:   deps.DBResolver,

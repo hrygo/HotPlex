@@ -19,60 +19,62 @@ func newRestartHelperCmd() *cobra.Command {
 	var source string
 	var configPath string
 	var level string
+	var requestID string
 	var devMode, daemon bool
 
 	cmd := &cobra.Command{
 		Use:    "_restart-helper",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRestartHelper(oldPID, source, configPath, level, devMode, daemon)
+			return runRestartHelper(oldPID, source, configPath, level, requestID, devMode, daemon)
 		},
 	}
 	cmd.Flags().IntVar(&oldPID, "old-pid", 0, "PID of the old gateway process")
 	cmd.Flags().StringVar(&source, "source", "pid", "discovery source (pid|service)")
 	cmd.Flags().StringVar(&configPath, "config", "", "config file path")
 	cmd.Flags().StringVar(&level, "level", "", "service level (user|system)")
+	cmd.Flags().StringVar(&requestID, "request-id", "", "restart request ID")
 	cmd.Flags().BoolVar(&devMode, "dev", false, "development mode")
 	cmd.Flags().BoolVarP(&daemon, "daemon", "d", false, "restart as daemon")
 	return cmd
 }
 
-func forkRestartHelper(inst *gatewayInstance, configPath string, devMode, daemon bool) error {
-	if err := checkRestartCooldown(); err != nil {
-		return err
+func (c *gatewayRestartCoordinator) spawnRestartHelper(ticket *gatewayRestartTicket) (int, error) {
+	if ticket == nil || ticket.Instance == nil || ticket.RequestID == "" {
+		return 0, fmt.Errorf("spawn restart helper: invalid ticket")
 	}
-
 	self, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
+		return 0, fmt.Errorf("resolve executable: %w", err)
 	}
 
 	args := []string{
 		"gateway", "_restart-helper",
-		"--old-pid", fmt.Sprintf("%d", inst.PID),
-		"--source", string(inst.Source),
+		"--old-pid", fmt.Sprintf("%d", ticket.Instance.PID),
+		"--source", string(ticket.Instance.Source),
+		"--request-id", ticket.RequestID,
 	}
-	if configPath != "" {
-		args = append(args, "--config", configPath)
+	if ticket.ConfigPath != "" {
+		args = append(args, "--config", ticket.ConfigPath)
 	}
-	if inst.Level != "" {
-		args = append(args, "--level", string(inst.Level))
+	if ticket.Instance.Level != "" {
+		args = append(args, "--level", string(ticket.Instance.Level))
 	}
-	if devMode {
+	if ticket.DevMode {
 		args = append(args, "--dev")
 	}
-	if daemon {
+	if ticket.Daemon {
 		args = append(args, "-d")
 	}
 
 	logDir := filepath.Join(config.HotplexHome(), "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return fmt.Errorf("create log dir: %w", err)
+		return 0, fmt.Errorf("create log dir: %w", err)
 	}
 	logPath := filepath.Join(logDir, "gateway-restart.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("open restart log: %w", err)
+		return 0, fmt.Errorf("open restart log: %w", err)
 	}
 	defer func() { _ = logFile.Close() }()
 
@@ -83,31 +85,41 @@ func forkRestartHelper(inst *gatewayInstance, configPath string, devMode, daemon
 	helperCmd.SysProcAttr = restartHelperSysProcAttr()
 
 	if err := helperCmd.Start(); err != nil {
-		return fmt.Errorf("spawn restart helper: %w", err)
+		return 0, fmt.Errorf("spawn restart helper: %w", err)
 	}
 
 	helperPID := helperCmd.Process.Pid
-	if err := writeRestartMarker(helperPID); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write restart marker: %s\n", err)
-	}
-
 	_ = helperCmd.Process.Release()
-
-	time.Sleep(500 * time.Millisecond)
-	if err := proc.IsProcessAlive(helperPID); err != nil {
-		removeRestartMarker()
-		return fmt.Errorf("restart helper exited unexpectedly; check %s", logPath)
-	}
-
 	fmt.Fprintf(os.Stderr, "gateway: restart helper spawned (PID %d, log: %s)\n", helperPID, logPath)
-	return nil
+	return helperPID, nil
 }
 
-func runRestartHelper(oldPID int, source, configPath, levelStr string, devMode, daemon bool) error {
-	defer removeRestartMarker()
+func terminateRestartHelper(pid int) {
+	if pid > 0 {
+		_ = proc.ForceKillProcess(pid)
+	}
+}
+
+func runRestartHelper(oldPID int, source, configPath, levelStr, requestID string, devMode, daemon bool) error {
+	if requestID == "" {
+		return fmt.Errorf("restart helper: missing request ID")
+	}
 
 	logDir := filepath.Join(config.HotplexHome(), "logs")
 	logPath := filepath.Join(logDir, "gateway-restart.log")
+	leaseStore := newRestartLeaseStore(restartMarkerPath(), time.Now, nil)
+	if err := waitForRestartHelperHandoff(leaseStore, requestID); err != nil {
+		appendRestartLog(logPath, "restart lease handoff failed: %s\n", err)
+		return fmt.Errorf("restart helper: lease handoff: %w", err)
+	}
+	if err := leaseStore.Update(requestID, func(lease *restartLease) error {
+		lease.Phase = restartLeaseWaitingForReady
+		lease.HelperPID = os.Getpid()
+		return nil
+	}); err != nil {
+		appendRestartLog(logPath, "restart lease update failed: %s\n", err)
+		return fmt.Errorf("restart helper: update lease: %w", err)
+	}
 
 	switch source {
 	case "service":
@@ -163,6 +175,33 @@ func runRestartHelper(oldPID int, source, configPath, levelStr string, devMode, 
 	}
 
 	return nil
+}
+
+func waitForRestartHelperHandoff(store *restartLeaseStore, requestID string) error {
+	if store == nil || requestID == "" {
+		return fmt.Errorf("invalid restart lease handoff")
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		lease, err := store.Read()
+		if err != nil {
+			return err
+		}
+		if lease.RequestID != requestID {
+			return errRestartLeaseTicketMismatch
+		}
+		if lease.Phase == restartLeaseHelperStarted || lease.Phase == restartLeaseWaitingForReady {
+			return nil
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			return fmt.Errorf("timed out waiting for prepared restart lease handoff")
+		}
+	}
 }
 
 func appendRestartLog(path, format string, args ...interface{}) {

@@ -157,11 +157,6 @@ type MessagingPlatformConfig struct {
 	AllowDMFrom    []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from"`
 
-	// GatewayRestartAllowFrom is a dedicated host-operations allowlist. It is
-	// intentionally separate from ordinary messaging access control and is
-	// empty by default (deny all).
-	GatewayRestartAllowFrom []string `mapstructure:"gateway_restart_allow_from"`
-
 	InjectExclude []string `mapstructure:"inject_exclude"` // platform-level default: files to skip from agent config injection
 	STTConfig     `mapstructure:",squash"`
 	TTSConfig     `mapstructure:",squash"`
@@ -233,6 +228,11 @@ type SlackBotConfig struct {
 // normalizeFeishuBots() resolves the two into a unified Bots slice.
 type FeishuConfig struct {
 	MessagingPlatformConfig `mapstructure:",squash"`
+
+	// GatewayRestartAllowFrom is a dedicated host-operations allowlist. It is
+	// intentionally separate from ordinary messaging access control and is
+	// empty by default (deny all).
+	GatewayRestartAllowFrom []string `mapstructure:"gateway_restart_allow_from"`
 
 	// Single-bot credentials (backward compatible).
 	AppID     string `mapstructure:"app_id"`

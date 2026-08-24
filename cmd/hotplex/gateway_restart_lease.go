@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -164,8 +165,16 @@ func (s *restartLeaseStore) Read() (*restartLease, error) {
 	}
 
 	var lease restartLease
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&lease); err != nil {
+		return nil, fmt.Errorf("decode restart lease: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, errors.New("decode restart lease: trailing JSON")
+		}
 		return nil, fmt.Errorf("decode restart lease: %w", err)
 	}
 	if err := validateRestartLease(&lease); err != nil {
@@ -203,7 +212,7 @@ func (s *restartLeaseStore) Release(requestID string) error {
 		return err
 	}
 	if current.RequestID != requestID || requestID == "" {
-		return nil
+		return errRestartLeaseTicketMismatch
 	}
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("release restart lease: %w", err)
@@ -264,7 +273,7 @@ func (s *restartLeaseStore) writeAtomic(lease *restartLease) error {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close restart lease temporary file: %w", err)
 	}
-	if err := os.Rename(tempPath, s.path); err != nil {
+	if err := replaceRestartFile(tempPath, s.path); err != nil {
 		return fmt.Errorf("replace restart lease: %w", err)
 	}
 	return nil
