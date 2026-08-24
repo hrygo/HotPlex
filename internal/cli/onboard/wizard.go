@@ -937,26 +937,44 @@ func buildEnvContent(adminToken string, slackCfg, feishuCfg messagingPlatformCon
 	b.WriteString("# HOTPLEX_WORKER_CLAUDE_CODE_COMMAND=claude\n")
 	b.WriteString("# HOTPLEX_WORKER_OPENCODE_SERVER_COMMAND=opencode\n")
 
-	writePlatformEnv := func(name, enabledEnv string, cfg messagingPlatformConfig, knownCredKeys []string) {
+	writePlatformEnv := func(name, enabledEnv, allowFromEnv string, cfg messagingPlatformConfig, knownCredKeys []string) {
 		if !cfg.enabled {
 			return
 		}
 		fmt.Fprintf(&b, "\n# ── %s ──\n%s=true\n", name, enabledEnv)
-		if cfg.kept {
-			for k, v := range readExistingEnvCredentials(existingEnvPath, knownCredKeys) {
-				fmt.Fprintf(&b, "%s=%s\n", k, v)
-			}
-			return
+
+		// Preserve existing managed credentials unless the user supplied a
+		// replacement. Non-interactive onboarding intentionally receives
+		// credentials from the adjacent .env rather than command-line flags.
+		credentials := readExistingEnvCredentials(existingEnvPath, knownCredKeys)
+		if credentials == nil {
+			credentials = make(map[string]string, len(knownCredKeys))
 		}
-		for _, key := range sortedKeys(cfg.credentials) {
-			fmt.Fprintf(&b, "%s=%s\n", key, cfg.credentials[key])
+		for k, v := range cfg.credentials {
+			credentials[k] = v
+		}
+		for _, key := range sortedKeys(credentials) {
+			fmt.Fprintf(&b, "%s=%s\n", key, credentials[key])
+		}
+
+		// Keep the allowlist in the same .env source used by service and dev
+		// startup. An empty new list preserves an existing value so a rerun
+		// cannot silently lock the owner out.
+		allowFrom := cfg.allowFrom
+		if len(allowFrom) == 0 {
+			if existing := readExistingEnvCredentials(existingEnvPath, []string{allowFromEnv}); existing[allowFromEnv] != "" {
+				allowFrom = strings.Split(existing[allowFromEnv], ",")
+			}
+		}
+		if len(allowFrom) > 0 {
+			fmt.Fprintf(&b, "%s=%s\n", allowFromEnv, strings.Join(allowFrom, ","))
 		}
 	}
-	writePlatformEnv("Slack", "HOTPLEX_MESSAGING_SLACK_ENABLED", slackCfg, []string{
+	writePlatformEnv("Slack", "HOTPLEX_MESSAGING_SLACK_ENABLED", "HOTPLEX_MESSAGING_SLACK_ALLOW_FROM", slackCfg, []string{
 		"HOTPLEX_MESSAGING_SLACK_BOT_TOKEN",
 		"HOTPLEX_MESSAGING_SLACK_APP_TOKEN",
 	})
-	writePlatformEnv("Feishu", "HOTPLEX_MESSAGING_FEISHU_ENABLED", feishuCfg, []string{
+	writePlatformEnv("Feishu", "HOTPLEX_MESSAGING_FEISHU_ENABLED", "HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM", feishuCfg, []string{
 		"HOTPLEX_MESSAGING_FEISHU_APP_ID",
 		"HOTPLEX_MESSAGING_FEISHU_APP_SECRET",
 	})
@@ -980,9 +998,11 @@ func preserveUnmanagedEnv(envPath string) string {
 		"HOTPLEX_MESSAGING_SLACK_ENABLED":     {},
 		"HOTPLEX_MESSAGING_SLACK_BOT_TOKEN":   {},
 		"HOTPLEX_MESSAGING_SLACK_APP_TOKEN":   {},
+		"HOTPLEX_MESSAGING_SLACK_ALLOW_FROM":  {},
 		"HOTPLEX_MESSAGING_FEISHU_ENABLED":    {},
 		"HOTPLEX_MESSAGING_FEISHU_APP_ID":     {},
 		"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": {},
+		"HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM": {},
 	}
 	generatedComments := map[string]struct{}{
 		"# HotPlex Worker Gateway - Environment Configuration": {},

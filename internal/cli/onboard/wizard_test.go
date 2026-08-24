@@ -196,6 +196,34 @@ func TestBuildEnvContent(t *testing.T) {
 		require.Contains(t, got, "# keep this note")
 		require.NotContains(t, got, "# Preserved user environment\n# Preserved user environment")
 	})
+
+	t.Run("preserves_existing_managed_credentials_when_not_replaced", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		envPath := filepath.Join(dir, ".env")
+		require.NoError(t, os.WriteFile(envPath, []byte(
+			"HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_existing\n"+"HOTPLEX_MESSAGING_FEISHU_APP_SECRET=secret_existing\n"+"HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_existing\n"), 0o600))
+
+		got := buildEnvContent("new-admin", messagingPlatformConfig{}, messagingPlatformConfig{enabled: true}, envPath)
+
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_existing")
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_APP_SECRET=secret_existing")
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_existing")
+	})
+
+	t.Run("writes_allow_from_to_env", func(t *testing.T) {
+		t.Parallel()
+		got := buildEnvContent("admin", messagingPlatformConfig{}, messagingPlatformConfig{
+			enabled:   true,
+			allowFrom: []string{"ou_abc", "ou_def"},
+			credentials: map[string]string{
+				"HOTPLEX_MESSAGING_FEISHU_APP_ID":     "cli_test",
+				"HOTPLEX_MESSAGING_FEISHU_APP_SECRET": "secret_test",
+			},
+		}, "")
+
+		require.Contains(t, got, "HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_abc,ou_def")
+	})
 }
 
 func TestStepWriteConfig(t *testing.T) {
