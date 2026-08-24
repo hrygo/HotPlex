@@ -5,6 +5,7 @@
 ### Added
 
 - **Messaging/Gateway**: 受控停止或重启时，向当前已连接的 Slack、飞书和元信会话广播服务停止、启动通知；启动通知复用停止前的去重会话快照，发送失败不会阻塞服务生命周期。
+- **Built-in Skills/Onboarding**: 恢复 HotPlex 初始化工作流；内置 `hotplex-operator` 新增初始化参考，覆盖配置、诊断、服务安装/启动/状态验收与 Skill 同步边界，并更新 `onboard` 引导。
 
 ## [1.42.0] - 2026-08-23
 
