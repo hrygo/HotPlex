@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 const (
@@ -35,6 +37,10 @@ type gatewayRestartReceipt struct {
 
 type restartReceiptStore struct {
 	path string
+}
+
+func gatewayRestartReceiptPath() string {
+	return filepath.Join(config.HotplexHome(), ".pids", "gateway.restart.receipt.json")
 }
 
 func newRestartReceiptStore(path string) *restartReceiptStore {
@@ -87,7 +93,7 @@ func (s *restartReceiptStore) Write(receipt *gatewayRestartReceipt) error {
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close gateway restart receipt: %w", err)
 	}
-	if err := os.Rename(tempPath, s.path); err != nil {
+	if err := replaceRestartFile(tempPath, s.path); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return errRestartReceiptExists
 		}
@@ -105,6 +111,7 @@ func (s *restartReceiptStore) Read() (*gatewayRestartReceipt, error) {
 		return nil, fmt.Errorf("read gateway restart receipt: %w", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
 	var receipt gatewayRestartReceipt
 	if err := decoder.Decode(&receipt); err != nil {
 		return nil, fmt.Errorf("decode gateway restart receipt: %w", err)

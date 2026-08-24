@@ -426,13 +426,30 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:write")
 		return
 	}
-	if a.restart == nil {
+	if a.restartPrepare == nil && a.restart == nil {
 		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "restart is not configured")
 		return
 	}
 
+	if a.restartPrepare != nil {
+		commit, abort, err := a.restartPrepare(r.Context())
+		if err != nil {
+			web.WriteAppError(w, http.StatusConflict, "RESTART_REJECTED", "gateway restart could not be scheduled")
+			return
+		}
+		respondJSON(w, map[string]any{"status": "restarting"})
+		go func() {
+			if commitErr := commit(); commitErr != nil {
+				a.log.Error("admin: restart commit failed", "error_kind", "commit_failed")
+				if abort != nil {
+					_ = abort()
+				}
+			}
+		}()
+		return
+	}
+
 	go func() {
-		time.Sleep(500 * time.Millisecond)
 		a.log.Info("admin: initiating gateway restart via helper")
 		if err := a.restart(); err != nil {
 			a.log.Error("admin: restart failed", "err", err)

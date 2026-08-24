@@ -179,31 +179,32 @@ func sanitizedJSONString(v any) string {
 // GatewayDeps holds all dependencies constructed during gateway initialization.
 // These are passed to various components and registrations.
 type GatewayDeps struct {
-	Log             *slog.Logger
-	Ctx             context.Context // gateway lifecycle context for graceful shutdown
-	Config          *config.Config
-	ConfigStore     *config.ConfigStore
-	Hub             *gateway.Hub
-	SessionMgr      *session.Manager
-	EventStore      eventStoreProvider
-	EventCollector  *eventstore.Collector
-	ExecutionStore  execution.Store
-	Auth            *security.Authenticator
-	Handler         *gateway.Handler
-	Bridge          *gateway.Bridge
-	ConfigWatcher   *config.Watcher
-	CronScheduler   *cron.Scheduler
-	WebhookHandler  *gateway.WebhookHandler // non-nil when webhook is enabled
-	CookieAuth      *security.CookieAuth    // non-nil when webchat is enabled
-	OAuthManager    *security.OAuthManager  // non-nil when SSO providers are configured
-	ChatAccessStore messaging.ChatAccessStorer
-	DB              *sql.DB
-	DBResolver      *security.DBResolver
-	APIKeyStore     admin.APIKeyUserStorer
-	WorkspaceStore  session.UserWorkspaceStore
-	WriteMu         *sqlutil.WriteMu
-	ConfigPath      string
-	DevMode         bool
+	Log                *slog.Logger
+	Ctx                context.Context // gateway lifecycle context for graceful shutdown
+	Config             *config.Config
+	ConfigStore        *config.ConfigStore
+	Hub                *gateway.Hub
+	SessionMgr         *session.Manager
+	EventStore         eventStoreProvider
+	EventCollector     *eventstore.Collector
+	ExecutionStore     execution.Store
+	Auth               *security.Authenticator
+	Handler            *gateway.Handler
+	Bridge             *gateway.Bridge
+	ConfigWatcher      *config.Watcher
+	CronScheduler      *cron.Scheduler
+	WebhookHandler     *gateway.WebhookHandler // non-nil when webhook is enabled
+	CookieAuth         *security.CookieAuth    // non-nil when webchat is enabled
+	OAuthManager       *security.OAuthManager  // non-nil when SSO providers are configured
+	ChatAccessStore    messaging.ChatAccessStorer
+	DB                 *sql.DB
+	DBResolver         *security.DBResolver
+	APIKeyStore        admin.APIKeyUserStorer
+	WorkspaceStore     session.UserWorkspaceStore
+	WriteMu            *sqlutil.WriteMu
+	ConfigPath         string
+	DevMode            bool
+	RestartCoordinator *gatewayRestartCoordinator
 	// Audit subsystem (issue #833 P1). Nil when audit.enabled=false.
 	AuditCollector *audit.Collector
 	AuditStore     audit.Store
@@ -825,6 +826,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		LeaseManager:         leaseMgr,
 		Repairer:             repairer,
 	}
+	deps.RestartCoordinator = newGatewayRestartCoordinator(log, cfgStore, configPath, devMode)
 
 	// Brain: lightweight LLM layer for TTS summarization (fail-open).
 	if err := brain.Init(log); err != nil {
@@ -947,6 +949,11 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	}
 	defer signal.Stop(sig)
 	lifecycleBroadcaster.BroadcastStarted()
+	if deps.RestartCoordinator != nil {
+		if err := deps.RestartCoordinator.CompleteReady(); err != nil {
+			log.Warn("gateway restart: ready lease completion failed", "error_kind", "lease_complete_failed")
+		}
+	}
 
 loop:
 	for {

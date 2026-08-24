@@ -156,6 +156,7 @@ type AdminAPI struct {
 	version          func() string
 	newSessionID     func() string
 	restart          func() error
+	restartPrepare   func(context.Context) (func() error, func() error, error)
 	cookieAuth       *security.CookieAuth           // Optional: enables cookie-session fallback (issue #788 A2)
 	idp              *security.LocalAccountProvider // Optional: paired with cookieAuth
 	startedAt        time.Time
@@ -183,6 +184,7 @@ type Deps struct {
 	Version          func() string
 	NewSessionID     func() string
 	Restart          func() error
+	RestartPrepare   func(context.Context) (func() error, func() error, error)
 	AllowedOriginsFn func() []string  // Optional: returns allowed CORS origins; defaults to ["*"] when nil
 	DB               DBExecutor       // Optional: enables API key user CRUD + DB resolver
 	DBResolver       cacheInvalidator // Optional: invalidates DBResolver cache after CUD
@@ -216,10 +218,11 @@ func New(deps Deps) *AdminAPI {
 			}
 			return newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver, deps.WriteMu)
 		}(),
-		version:      deps.Version,
-		newSessionID: deps.NewSessionID,
-		restart:      deps.Restart,
-		startedAt:    time.Now(),
+		version:        deps.Version,
+		newSessionID:   deps.NewSessionID,
+		restart:        deps.Restart,
+		restartPrepare: deps.RestartPrepare,
+		startedAt:      time.Now(),
 		allowedOriginsFn: func() []string {
 			if deps.AllowedOriginsFn != nil {
 				return deps.AllowedOriginsFn()

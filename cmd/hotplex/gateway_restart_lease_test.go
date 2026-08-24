@@ -64,7 +64,7 @@ func TestRestartLease_PermissionsAndTicketFencing(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, errRestartLeaseTicketMismatch)
-	require.NoError(t, store.Release("req_wrong"))
+	require.ErrorIs(t, store.Release("req_wrong"), errRestartLeaseTicketMismatch)
 
 	current, err := store.Read()
 	require.NoError(t, err)

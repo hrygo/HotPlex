@@ -29,6 +29,7 @@ type GatewayRestartRequest struct {
 	ThreadKey      string
 	MessageID      string
 	ReplyToMessage string
+	PlatformKey    map[string]string
 	Reply          func(context.Context, string) error
 }
 
