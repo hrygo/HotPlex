@@ -938,7 +938,6 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		RetryMax:        cfg.Worker.AutoRetry.MaxRetries,
 		RetryDelay:      cfg.Worker.AutoRetry.BaseDelay.String(),
 	}, configPath)
-	lifecycleBroadcaster.BroadcastStarted()
 
 	// Wait for shutdown signal or SIGHUP reload
 	sig := make(chan os.Signal, 1)
@@ -946,6 +945,8 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	if runtime.GOOS != "windows" {
 		signal.Notify(sig, syscall.SIGHUP)
 	}
+	defer signal.Stop(sig)
+	lifecycleBroadcaster.BroadcastStarted()
 
 loop:
 	for {

@@ -430,6 +430,34 @@ func TestLifecycleBroadcast_TimeoutDoesNotBlock(t *testing.T) {
 	require.Equal(t, 1, summary.FailedCount)
 }
 
+func TestLifecycleBroadcast_TimeoutDoesNotWaitForSenderCancellation(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "gateway.lifecycle-broadcast.json")
+	release := make(chan struct{})
+	defer close(release)
+	adapter := &lifecycleFakeAdapter{
+		platform: messaging.PlatformSlack,
+		botName:  "ops",
+		botID:    "bot-1",
+		send: func(context.Context, string, map[string]string) error {
+			<-release
+			return nil
+		},
+	}
+	b := newTestLifecycleBroadcaster(path, []*session.SessionInfo{lifecycleSlackSession("ops", "channel-1")}, adapter)
+	b.timeout = 20 * time.Millisecond
+	done := make(chan lifecycleBroadcastSummary, 1)
+	go func() { done <- b.BroadcastStopping() }()
+
+	select {
+	case summary := <-done:
+		require.Equal(t, 1, summary.FailedCount)
+	case <-time.After(250 * time.Millisecond):
+		require.Fail(t, "broadcast waited for a sender that ignored context cancellation")
+	}
+}
+
 func TestLifecycleBroadcast_LimitsConcurrentSends(t *testing.T) {
 	t.Parallel()
 

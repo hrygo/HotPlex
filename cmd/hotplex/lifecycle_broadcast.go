@@ -7,7 +7,6 @@ import (
 	"maps"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hrygo/hotplex/internal/config"
@@ -48,6 +47,11 @@ type lifecycleBroadcastSummary struct {
 	TargetCount int
 	SentCount   int
 	FailedCount int
+}
+
+type lifecycleSendResult struct {
+	target *session.SessionInfo
+	err    error
 }
 
 type lifecycleBroadcaster struct {
@@ -166,46 +170,62 @@ func (b *lifecycleBroadcaster) broadcast(
 	if limit <= 0 {
 		limit = 1
 	}
-	semaphore := make(chan struct{}, limit)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+	if limit > len(targets) {
+		limit = len(targets)
+	}
+	jobs := make(chan *session.SessionInfo, len(targets))
+	results := make(chan lifecycleSendResult, len(targets))
 	for _, target := range targets {
-		target := target
-		wg.Add(1)
+		jobs <- target
+	}
+	close(jobs)
+	for range limit {
 		go func() {
-			defer wg.Done()
-			select {
-			case semaphore <- struct{}{}:
-				defer func() { <-semaphore }()
-			case <-ctx.Done():
-				mu.Lock()
-				summary.FailedCount++
-				mu.Unlock()
-				return
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case target, ok := <-jobs:
+					if !ok {
+						return
+					}
+					sender, err := resolveLifecycleSender(b.bots, target)
+					if err == nil {
+						err = sender.SendProactiveMessage(ctx, text, target.PlatformKey)
+					}
+					results <- lifecycleSendResult{target: target, err: err}
+				}
 			}
+		}()
+	}
 
-			sender, err := resolveLifecycleSender(b.bots, target)
-			if err == nil {
-				err = sender.SendProactiveMessage(ctx, text, target.PlatformKey)
-			}
-			mu.Lock()
-			if err != nil {
+	pending := len(targets)
+	for pending > 0 {
+		select {
+		case result := <-results:
+			pending--
+			if result.err != nil {
 				summary.FailedCount++
 			} else {
 				summary.SentCount++
 			}
-			mu.Unlock()
-			if err != nil {
+			if result.err != nil {
 				b.logger().Warn("lifecycle broadcast: target send failed",
 					"phase", summary.Phase,
-					"platform", target.Platform,
-					"bot_name", target.BotName,
-					"session_id", target.ID,
+					"platform", result.target.Platform,
+					"bot_name", result.target.BotName,
+					"session_id", result.target.ID,
 					"error_kind", "send_failed")
 			}
-		}()
+		case <-ctx.Done():
+			summary.FailedCount += pending
+			b.logSummary(summary, time.Since(startedAt))
+			return summary
+		}
 	}
-	wg.Wait()
 	b.logSummary(summary, time.Since(startedAt))
 	return summary
 }
