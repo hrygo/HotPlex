@@ -19,7 +19,7 @@
 | [Interaction-Response-Chain-Fix-Spec.md](./Interaction-Response-Chain-Fix-Spec.md) | 交互响应链修复 — 权限/Q&A 响应路由重构 | proposed | - | - |
 | [Inbound-Event-Storage-Fix-Spec.md](./Inbound-Event-Storage-Fix-Spec.md) | 入站事件存储修复 — 事件持久化一致性 | proposed | 2026-05-07 | - |
 | [Hot-Reload-Spec.md](./Hot-Reload-Spec.md) | 配置热重载修复 — 配置变更即时生效 | draft | 2026-04-22 | 20% |
-| [Gateway-Self-Restart-Spec.md](./Gateway-Self-Restart-Spec.md) | Gateway 自重启 — Worker-initiated 进程重启能力 (AEP-006) | implemented | 2026-05-12 | 100% |
+| [Gateway-Self-Restart-Spec.md](./Gateway-Self-Restart-Spec.md) | 飞书特权命令安全重启 Gateway — Gateway 直拦截、专用授权、原子租约与版本化生命周期回执 | proposed | 2026-08-24 | 0% |
 | [Multi-Bot-Support-Spec.md](./Multi-Bot-Support-Spec.md) | 多 Bot 支持 — 多 bot 实例同时运行与隔离 | implemented | 2026-05-13 | 100% |
 | [agent-config-injection-control.md](./agent-config-injection-control.md) | Agent 配置注入排除 — inject_exclude 3 级回退机制 | implemented | 2026-05-31 | 100% |
 | [pr-review-webhook-driven.md](./pr-review-webhook-driven.md) | PR Review Webhook 触发 — GitHub Webhook 驱动自动化代码审查 | implemented | 2026-05-30 | 90% |
