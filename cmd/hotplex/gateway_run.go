@@ -843,6 +843,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 	log.Info("gateway: repairer started")
 
 	msgAdapters, adapterStatuses := startMessagingAdapters(ctx, deps)
+	lifecycleBroadcaster := newLifecycleBroadcaster(deps)
 
 	// Wire cron delivery to platform adapters.
 	if cronDelivery != nil {
@@ -937,6 +938,7 @@ func runGateway(configPath string, devMode bool, stopCh <-chan struct{}) (err er
 		RetryMax:        cfg.Worker.AutoRetry.MaxRetries,
 		RetryDelay:      cfg.Worker.AutoRetry.BaseDelay.String(),
 	}, configPath)
+	lifecycleBroadcaster.BroadcastStarted()
 
 	// Wait for shutdown signal or SIGHUP reload
 	sig := make(chan os.Signal, 1)
@@ -974,8 +976,9 @@ loop:
 		}
 	}
 
-	cancel()
-	shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+	runGatewayControlledShutdown(lifecycleBroadcaster, cancel, func() {
+		shutdownGateway(ctx, log, deps, msgAdapters, server, adminServer, skillsLocator, pidTracker, cleanupWG, cronScheduler)
+	})
 	return nil
 }
 

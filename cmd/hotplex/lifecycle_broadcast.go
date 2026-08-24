@@ -39,6 +39,10 @@ type lifecycleConnectionChecker interface {
 	HasActiveConn(sessionID string) bool
 }
 
+type lifecycleStopNotifier interface {
+	BroadcastStopping() lifecycleBroadcastSummary
+}
+
 type lifecycleBroadcastSummary struct {
 	Phase       string
 	TargetCount int
@@ -77,6 +81,18 @@ func newLifecycleBroadcaster(deps *GatewayDeps) *lifecycleBroadcaster {
 		b.connections = deps.Hub
 	}
 	return b
+}
+
+func runGatewayControlledShutdown(notifier lifecycleStopNotifier, cancel, shutdown func()) {
+	if notifier != nil {
+		notifier.BroadcastStopping()
+	}
+	if cancel != nil {
+		cancel()
+	}
+	if shutdown != nil {
+		shutdown()
+	}
 }
 
 func (b *lifecycleBroadcaster) BroadcastStopping() lifecycleBroadcastSummary {

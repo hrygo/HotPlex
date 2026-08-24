@@ -488,6 +488,21 @@ func TestLifecycleBroadcast_LimitsConcurrentSends(t *testing.T) {
 	require.LessOrEqual(t, maximum.Load(), int32(lifecycleBroadcastConcurrency))
 }
 
+func TestGatewayLifecycle_ControlledShutdownOrder(t *testing.T) {
+	t.Parallel()
+
+	order := make([]string, 0, 3)
+	notifier := lifecycleStopRecorder{record: func() { order = append(order, "broadcast") }}
+
+	runGatewayControlledShutdown(
+		notifier,
+		func() { order = append(order, "cancel") },
+		func() { order = append(order, "shutdown") },
+	)
+
+	require.Equal(t, []string{"broadcast", "cancel", "shutdown"}, order)
+}
+
 type lifecycleFakeBotRegistry struct {
 	entries []*messaging.BotEntry
 }
@@ -538,6 +553,17 @@ func (a *lifecycleFakeAdapter) SendProactiveMessage(ctx context.Context, text st
 
 type lifecycleNonProactiveAdapter struct {
 	messaging.PlatformAdapterInterface
+}
+
+type lifecycleStopRecorder struct {
+	record func()
+}
+
+func (r lifecycleStopRecorder) BroadcastStopping() lifecycleBroadcastSummary {
+	if r.record != nil {
+		r.record()
+	}
+	return lifecycleBroadcastSummary{Phase: lifecyclePhaseStopping}
 }
 
 type lifecycleFakeSessions struct {
