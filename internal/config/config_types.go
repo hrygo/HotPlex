@@ -157,6 +157,11 @@ type MessagingPlatformConfig struct {
 	AllowDMFrom    []string `mapstructure:"allow_dm_from"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from"`
 
+	// GatewayRestartAllowFrom is a dedicated host-operations allowlist. It is
+	// intentionally separate from ordinary messaging access control and is
+	// empty by default (deny all).
+	GatewayRestartAllowFrom []string `mapstructure:"gateway_restart_allow_from"`
+
 	InjectExclude []string `mapstructure:"inject_exclude"` // platform-level default: files to skip from agent config injection
 	STTConfig     `mapstructure:",squash"`
 	TTSConfig     `mapstructure:",squash"`
@@ -255,6 +260,10 @@ type FeishuBotConfig struct {
 	AllowDMFrom    []string `mapstructure:"allow_dm_from,omitempty"`
 	AllowGroupFrom []string `mapstructure:"allow_group_from,omitempty"`
 
+	// GatewayRestartAllowFrom uses nil to inherit the Feishu platform value;
+	// an explicit empty slice disables restart for this bot.
+	GatewayRestartAllowFrom []string `mapstructure:"gateway_restart_allow_from"`
+
 	// Per-bot agent config injection override (falls back to platform-level when nil).
 	// No omitempty: inject_exclude: [] must produce a non-nil empty slice to
 	// explicitly clear the parent-level exclusion (nil = inherit, [] = clear).
@@ -266,6 +275,25 @@ type FeishuBotConfig struct {
 	// IsSingleBot marks a bot auto-wrapped from platform-level credentials
 	// (single-bot mode). Not loaded from YAML/env — set by normalizeFeishuBots.
 	IsSingleBot bool `mapstructure:"-"`
+}
+
+// ResolveGatewayRestartAllowFrom resolves the platform/Bot inheritance used by
+// Feishu's dedicated Gateway restart authorization. A non-nil Bot slice,
+// including an explicit empty slice, overrides the platform value.
+func ResolveGatewayRestartAllowFrom(platform, bot []string) []string {
+	if bot != nil {
+		return cloneStrings(bot)
+	}
+	return cloneStrings(platform)
+}
+
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
 }
 
 // YuanxinConfig holds Yuanxin Pulsar adapter settings.

@@ -16,23 +16,24 @@ import (
 // without requiring a restart. All other fields are treated as static.
 // Format: "TopLevel.NestedField" (matches mapstructure tags).
 var hotReloadableFields = map[string]bool{
-	"log.level":                 true,
-	"session.gc_scan_interval":  true,
-	"pool.max_size":             true,
-	"pool.max_idle_per_user":    true,
-	"pool.max_memory_per_user":  true, // spec ⑤
-	"pool.max_per_workspace":    true, // spec ⑤
-	"security.api_keys":         true,
-	"security.allowed_origins":  true,
-	"security.security_contact": true,
-	"worker.max_lifetime":       true,
-	"worker.idle_timeout":       true,
-	"worker.execution_timeout":  true,
-	"worker.auto_retry":         true,
-	"admin.requests_per_sec":    true,
-	"admin.burst":               true,
-	"admin.tokens":              true,
-	"admin.allowed_cidrs":       true,
+	"log.level":                                   true,
+	"session.gc_scan_interval":                    true,
+	"pool.max_size":                               true,
+	"pool.max_idle_per_user":                      true,
+	"pool.max_memory_per_user":                    true, // spec ⑤
+	"pool.max_per_workspace":                      true, // spec ⑤
+	"security.api_keys":                           true,
+	"security.allowed_origins":                    true,
+	"security.security_contact":                   true,
+	"worker.max_lifetime":                         true,
+	"worker.idle_timeout":                         true,
+	"worker.execution_timeout":                    true,
+	"worker.auto_retry":                           true,
+	"admin.requests_per_sec":                      true,
+	"admin.burst":                                 true,
+	"admin.tokens":                                true,
+	"admin.allowed_cidrs":                         true,
+	"messaging.feishu.gateway_restart_allow_from": true,
 	// Audit fields (spec §8): retention and collector tuning are safe to hot-reload.
 	"audit.retention":                true,
 	"audit.collector.batch_interval": true,
@@ -362,6 +363,9 @@ var sensitiveFields = map[string]bool{
 // Returns the value as a string for comparison and audit logging.
 // Sensitive fields are redacted to prevent credential leakage.
 func resolveField(cfg *Config, path string) string {
+	if path == "messaging.feishu.gateway_restart_allow_from" {
+		return feishuGatewayRestartAllowFromValue(cfg)
+	}
 	if sensitiveFields[path] {
 		return "[REDACTED]"
 	}
@@ -394,6 +398,21 @@ func resolveField(cfg *Config, path string) string {
 	}
 
 	return fmt.Sprintf("%v", v.Interface())
+}
+
+// feishuGatewayRestartAllowFromValue fingerprints only the dedicated Feishu
+// restart allowlists. It lets a bot-level allowlist change trigger a hot
+// reload without making the unrelated Feishu bot configuration hot.
+func feishuGatewayRestartAllowFromValue(cfg *Config) string {
+	if cfg == nil {
+		return "<nil>"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "platform=%#v", cfg.Messaging.Feishu.GatewayRestartAllowFrom)
+	for _, bot := range cfg.Messaging.Feishu.Bots {
+		fmt.Fprintf(&b, ";bot=%q:%#v", bot.Name, bot.GatewayRestartAllowFrom)
+	}
+	return b.String()
 }
 
 // AuditLog returns a copy of the change audit log.
