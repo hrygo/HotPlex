@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -60,6 +61,8 @@ type lifecycleBroadcaster struct {
 	connections lifecycleConnectionChecker
 	bots        lifecycleBotRegistry
 	snapshots   *lifecycleSnapshotStore
+	receipts    *restartReceiptStore
+	buildInfo   BuildInfo
 	timeout     time.Duration
 	concurrency int
 }
@@ -74,6 +77,8 @@ func newLifecycleBroadcaster(deps *GatewayDeps) *lifecycleBroadcaster {
 		log:         slog.Default(),
 		bots:        messaging.DefaultBotRegistry(),
 		snapshots:   newLifecycleSnapshotStore(filepath.Join(home, ".pids", lifecycleSnapshotFilename), maxTargets, time.Now),
+		receipts:    newRestartReceiptStore(gatewayRestartReceiptPath()),
+		buildInfo:   newBuildInfo(),
 		timeout:     lifecycleBroadcastTimeout,
 		concurrency: lifecycleBroadcastConcurrency,
 	}
@@ -101,58 +106,174 @@ func runGatewayControlledShutdown(notifier lifecycleStopNotifier, cancel, shutdo
 
 func (b *lifecycleBroadcaster) BroadcastStopping() lifecycleBroadcastSummary {
 	summary := lifecycleBroadcastSummary{Phase: lifecyclePhaseStopping}
-	if b == nil || b.sessions == nil || b.connections == nil || b.snapshots == nil {
+	if b == nil {
 		return summary
 	}
-	targets := collectLifecycleTargets(b.sessions.ListActive(), b.connections.HasActiveConn)
+	receipt := b.readRestartReceipt()
+	if receipt != nil {
+		b.logger().Info("lifecycle broadcast: restart stopping", "request_id", receipt.RequestID)
+	}
+	var targets []*session.SessionInfo
+	if b.sessions != nil && b.connections != nil {
+		targets = collectLifecycleTargets(b.sessions.ListActive(), b.connections.HasActiveConn)
+		if b.snapshots != nil {
+			ids := make([]string, 0, len(targets))
+			for _, target := range targets {
+				ids = append(ids, target.ID)
+			}
+			if err := b.snapshots.Save(ids); err != nil {
+				b.logger().Warn("lifecycle broadcast: snapshot save failed", "phase", lifecyclePhaseStopping, "err", err)
+			}
+		}
+	}
+	if explicit := lifecycleTargetFromRestartReceipt(receipt); explicit != nil {
+		targets = mergeLifecycleTargets([]*session.SessionInfo{explicit}, targets)
+	}
 	summary.TargetCount = len(targets)
-	ids := make([]string, 0, len(targets))
-	for _, target := range targets {
-		ids = append(ids, target.ID)
-	}
-	if err := b.snapshots.Save(ids); err != nil {
-		b.logger().Warn("lifecycle broadcast: snapshot save failed", "phase", lifecyclePhaseStopping, "err", err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), b.effectiveTimeout())
 	defer cancel()
-	return b.broadcast(ctx, lifecycleStoppingMessage, targets, summary)
+	return b.broadcast(ctx, lifecycleStoppingMessageFor(b.buildInfo, receipt), targets, summary)
 }
 
 func (b *lifecycleBroadcaster) BroadcastStarted() lifecycleBroadcastSummary {
 	summary := lifecycleBroadcastSummary{Phase: lifecyclePhaseStarted}
-	if b == nil || b.sessions == nil || b.snapshots == nil {
+	if b == nil {
 		return summary
 	}
-	snapshot, claimedPath, err := b.snapshots.Claim()
-	if err != nil {
-		b.logger().Warn("lifecycle broadcast: snapshot claim failed", "phase", lifecyclePhaseStarted, "err", err)
-		return summary
+	receipt := b.readRestartReceipt()
+	if receipt != nil {
+		b.logger().Info("lifecycle broadcast: restart started", "request_id", receipt.RequestID)
 	}
-	if snapshot == nil {
+	var snapshot *lifecycleSnapshot
+	var claimedPath string
+	if b.snapshots != nil {
+		var err error
+		snapshot, claimedPath, err = b.snapshots.Claim()
+		if err != nil {
+			b.logger().Warn("lifecycle broadcast: snapshot claim failed", "phase", lifecyclePhaseStarted, "err", err)
+			if receipt == nil {
+				return summary
+			}
+			snapshot = nil
+			claimedPath = ""
+		}
+	}
+	if snapshot == nil && receipt == nil {
 		return summary
 	}
 	defer func() {
-		if removeErr := b.snapshots.CompleteClaim(claimedPath); removeErr != nil {
-			b.logger().Warn("lifecycle broadcast: snapshot cleanup failed", "phase", lifecyclePhaseStarted, "err", removeErr)
+		if b.snapshots != nil {
+			if removeErr := b.snapshots.CompleteClaim(claimedPath); removeErr != nil {
+				b.logger().Warn("lifecycle broadcast: snapshot cleanup failed", "phase", lifecyclePhaseStarted, "err", removeErr)
+			}
 		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), b.effectiveTimeout())
 	defer cancel()
-	restored := make([]*session.SessionInfo, 0, len(snapshot.SessionIDs))
-	summary.TargetCount = len(snapshot.SessionIDs)
-	for _, id := range snapshot.SessionIDs {
-		si, getErr := b.sessions.Get(ctx, id)
-		if getErr != nil {
-			summary.FailedCount++
-			b.logger().Warn("lifecycle broadcast: session restore failed", "phase", lifecyclePhaseStarted, "session_id", id)
-			continue
+	var restored []*session.SessionInfo
+	if snapshot != nil && b.sessions != nil {
+		restored = make([]*session.SessionInfo, 0, len(snapshot.SessionIDs))
+		for _, id := range snapshot.SessionIDs {
+			si, getErr := b.sessions.Get(ctx, id)
+			if getErr != nil {
+				summary.FailedCount++
+				b.logger().Warn("lifecycle broadcast: session restore failed", "phase", lifecyclePhaseStarted, "session_id", id)
+				continue
+			}
+			restored = append(restored, si)
 		}
-		restored = append(restored, si)
 	}
 	targets := collectLifecycleTargets(restored, func(string) bool { return true })
+	if explicit := lifecycleTargetFromRestartReceipt(receipt); explicit != nil {
+		targets = mergeLifecycleTargets([]*session.SessionInfo{explicit}, targets)
+	}
 	summary.TargetCount = summary.FailedCount + len(targets)
-	return b.broadcast(ctx, lifecycleStartedMessage, targets, summary)
+	summary = b.broadcast(ctx, lifecycleStartedMessageFor(b.buildInfo, receipt), targets, summary)
+	if receipt != nil && summary.FailedCount == 0 && summary.SentCount > 0 && b.receipts != nil {
+		if err := b.receipts.Complete(receipt.RequestID); err != nil {
+			b.logger().Warn("lifecycle broadcast: restart receipt completion failed", "phase", lifecyclePhaseStarted, "error_kind", "receipt_complete_failed")
+		}
+	}
+	return summary
+}
+
+func (b *lifecycleBroadcaster) readRestartReceipt() *gatewayRestartReceipt {
+	if b == nil || b.receipts == nil {
+		return nil
+	}
+	receipt, err := b.receipts.Read()
+	if err == nil {
+		return receipt
+	}
+	if _, quarantineErr := b.receipts.Quarantine(); quarantineErr != nil {
+		b.logger().Warn("lifecycle broadcast: invalid restart receipt", "phase", "restart", "error_kind", "receipt_invalid")
+	}
+	return nil
+}
+
+func lifecycleTargetFromRestartReceipt(receipt *gatewayRestartReceipt) *session.SessionInfo {
+	if receipt == nil || receipt.Platform == "" {
+		return nil
+	}
+	return &session.SessionInfo{
+		ID:          "restart:" + receipt.RequestID,
+		Platform:    receipt.Platform,
+		BotName:     receipt.BotName,
+		PlatformKey: maps.Clone(receipt.PlatformKey),
+	}
+}
+
+func mergeLifecycleTargets(groups ...[]*session.SessionInfo) []*session.SessionInfo {
+	var merged []*session.SessionInfo
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for _, si := range group {
+			if si == nil {
+				continue
+			}
+			key, ok := lifecycleTargetKey(si)
+			if !ok && strings.HasPrefix(si.ID, "restart:") {
+				key = "restart" + lifecycleTargetSeparator + si.ID
+				ok = true
+			}
+			if !ok {
+				continue
+			}
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			copyInfo := *si
+			copyInfo.PlatformKey = maps.Clone(si.PlatformKey)
+			merged = append(merged, &copyInfo)
+		}
+	}
+	return merged
+}
+
+func lifecycleStoppingMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
+	if receipt == nil {
+		return lifecycleStoppingMessage
+	}
+	version := info.Version
+	if version == "" {
+		version = receipt.OldVersion
+	}
+	return fmt.Sprintf("⚠️ HotPlex Gateway 即将重启。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n原因: Feishu /gateway restart\n请求时间: %s",
+		version, info.BuildTime, receipt.OldPID, info.OS, info.Arch, receipt.RequestedAt.UTC().Format(time.RFC3339))
+}
+
+func lifecycleStartedMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
+	if receipt == nil {
+		return lifecycleStartedMessage
+	}
+	previousVersion := receipt.OldVersion
+	if previousVersion == "" {
+		previousVersion = "unknown"
+	}
+	return fmt.Sprintf("✅ HotPlex Gateway 已启动。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n上一版本: %s\n上一 PID: %d\n请求 ID: %s\n请求时间: %s",
+		info.Version, info.BuildTime, os.Getpid(), info.OS, info.Arch, previousVersion, receipt.OldPID, receipt.RequestID, receipt.RequestedAt.UTC().Format(time.RFC3339))
 }
 
 func (b *lifecycleBroadcaster) broadcast(
