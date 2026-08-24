@@ -130,8 +130,16 @@ func TestOperatorSkillConsolidatesSetupAndUpdateWorkflows(t *testing.T) {
 		}
 		for _, requiredCommand := range []string{
 			"hotplex onboard",
+			"--non-interactive",
+			"--install-service",
+			"--sync-skills",
 			"hotplex doctor",
+			"hotplex doctor --json",
 			"hotplex update",
+			"hotplex service install",
+			"hotplex service start",
+			"hotplex service status",
+			"hotplex service logs",
 			"hotplex service restart",
 			"hotplex skills status",
 		} {

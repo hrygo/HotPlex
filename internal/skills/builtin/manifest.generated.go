@@ -15,12 +15,13 @@ var generatedManifests = []PackageManifest{
 	},
 	{
 		Name:    "hotplex-operator",
-		Version: "v1-c0b2c43d73d295a8bed536d5ba7b0a6562befcd1db9e414f82829d790078e19e",
+		Version: "v1-84a5d570901a8b67d52e75fbc5a3befe2508fb6852a42bc29171cf74a00c19bf",
 		Profile: ProfileOperator,
 		Assets: []AssetManifest{
-			{Path: "SKILL.md", Size: 1203, SHA256: "7407b3d89b5400fb27e2044e762730ff8e13b789ba389daf518fe13bd30a34e9"},
+			{Path: "SKILL.md", Size: 1326, SHA256: "0e28f671ef4f3ce1ff1d9a9a9aa4575084bd53f43e3b4dcbf5c6aff2277c084b"},
 			{Path: "references/admin-audit.md", Size: 742, SHA256: "01fadb1da1ce8245ca5b185de25fc7301781a689c1b59aa001d35f2a4a9e0f3f"},
 			{Path: "references/configuration.md", Size: 1527, SHA256: "fb0452c9fbdc93b22ecb32973ad9fb2fea2f2a8ca27fbca6743ffb0cd0a9481c"},
+			{Path: "references/initialization.md", Size: 5225, SHA256: "f05978e4bc82eacf8704a28be90171dc9f92257dac9f620a3f3483960722c5a1"},
 			{Path: "references/install-update.md", Size: 1679, SHA256: "0a862b8966bf3a9f22e0a9170c8afac63159c43c78f7b2741230e724377b2782"},
 			{Path: "references/service-lifecycle.md", Size: 845, SHA256: "eb542339a9abcd02254b936b12b480eb3962a28c0e34be2bd09bf174f7ad09e3"},
 		},

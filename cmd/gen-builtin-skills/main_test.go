@@ -249,6 +249,7 @@ func writeCanonicalFixture(t *testing.T) string {
 			"SKILL.md",
 			"references/admin-audit.md",
 			"references/configuration.md",
+			"references/initialization.md",
 			"references/install-update.md",
 			"references/service-lifecycle.md",
 		},
