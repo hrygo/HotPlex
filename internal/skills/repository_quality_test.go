@@ -206,7 +206,7 @@ func validateMutationBoundary(t *testing.T, name, entrypoint, tree string) {
 		require.NotContains(t, tree, "gh issue create")
 		require.NotContains(t, tree, "Authorization: Bearer")
 	case "hotplex-operator":
-		require.Regexp(t, regexp.MustCompile(`(?i)explicit[^\n]{0,80}authori`), prefix)
+		require.Contains(t, prefix, "明确授权")
 	case "hotplex-release":
 		require.Contains(t, prefix, "明确授权")
 		require.Contains(t, prefix, "tag")
@@ -218,7 +218,7 @@ func validateMutationBoundary(t *testing.T, name, entrypoint, tree string) {
 			require.NotContains(t, tree, implicitDelivery)
 		}
 	case "hotplex-stt-tts":
-		require.Contains(t, prefix, "explicitly authorizes")
+		require.Contains(t, prefix, "明确授权")
 		require.Contains(t, tree, "hotplex service restart")
 	}
 }

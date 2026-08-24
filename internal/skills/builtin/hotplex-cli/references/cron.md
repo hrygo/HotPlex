@@ -1,19 +1,16 @@
-# Cron operations
+# Cron 操作
 
-Use the `hotplex cron` command family for scheduled agent work. Inspect the
-installed validators before creating a job:
+使用 `hotplex cron` 命令族管理 Agent 定时任务。创建任务前先检查已安装版本的校验器：
 
     hotplex cron --help
     hotplex cron create --help
 
-Accepted schedule forms are `cron:<expression>`, `every:<duration>`,
-`at:<RFC3339>`, and `at:+<duration>`. Use a portable RFC3339 timestamp rather
-than shell-specific date arithmetic. Recurring schedules need explicit
-lifecycle limits such as `--max-runs` and `--expires-at`.
+支持的 schedule 形式为 `cron:<expression>`、`every:<duration>`、`at:<RFC3339>` 和
+`at:+<duration>`。使用可移植的 RFC3339 时间戳，不要依赖 shell 专用的日期计算。
+重复任务必须设置明确的生命周期限制，例如 `--max-runs` 和 `--expires-at`。
 
-Use isolated execution by default. Its prompt must contain all context needed
-for a later run. For an isolated recurring job, use a self-contained prompt and
-explicit lifecycle limits:
+默认使用隔离执行。prompt 必须包含后续运行所需的全部上下文。隔离的重复任务应使用
+自包含 prompt 和明确的生命周期限制：
 
     hotplex cron create \
       --name "health-check" \
@@ -26,13 +23,11 @@ explicit lifecycle limits:
       --platform cron \
       --silent
 
-Capture the returned identifier, then verify it through the independent JSON
-read path without triggering execution:
+记录返回的任务标识，然后通过独立的 JSON 读取路径验证，不触发执行：
 
     hotplex cron get <JOB_ID> --json
 
-For a safe isolated one-shot relative schedule, use the parser-accepted
-`at:+duration` form and an explicit cleanup policy:
+安全的隔离一次性相对调度应使用解析器接受的 `at:+duration` 形式，并设置明确的清理策略：
 
     hotplex cron create \
       --name "one-shot-health-check" \
@@ -43,14 +38,13 @@ For a safe isolated one-shot relative schedule, use the parser-accepted
       --platform cron \
       --delete-after-run
 
-Then independently run:
+随后独立执行：
 
     hotplex cron get <JOB_ID> --json
 
-Use `--attach` only when the request explicitly needs an existing session and
-the current command help confirms the attached-session requirements. An
-attached job needs `GATEWAY_SESSION_ID`; use `at:+duration` for a safe
-one-shot, or `every:<duration>` with explicit recurring limits:
+只有请求明确需要复用已有 session，且当前命令帮助确认 attached-session 要求时，才使用
+`--attach`。附加任务需要 `GATEWAY_SESSION_ID`；一次性任务使用 `at:+duration`，重复任务
+使用 `every:<duration>` 并设置明确限制：
 
     hotplex cron create \
       --attach \
@@ -58,18 +52,15 @@ one-shot, or `every:<duration>` with explicit recurring limits:
       --message "Read the current gateway health." \
       --schedule "at:+10m"
 
-Verify the returned job ID independently:
+独立验证返回的任务 ID：
 
     hotplex cron get <JOB_ID> --json
 
-Use the present `GATEWAY_*` identity and delivery-routing keys when the
-installed command requires them; never print their values or copy unrelated
-environment variables into a prompt. Confirm the semantics of `--silent`,
-`--delete-after-run`, `--max-retries`, `--timeout`, and `--allowed-tools`
-against the current help and validators before using them.
+当已安装命令要求时，使用当前的 `GATEWAY_*` 身份和投递路由键；绝不打印其值，也不要把
+无关环境变量复制到 prompt。使用前根据当前帮助和校验器确认 `--silent`、
+`--delete-after-run`、`--max-retries`、`--timeout` 和 `--allowed-tools` 的语义。
 
-Use `hotplex cron list` to find jobs, `hotplex cron update` to change one,
-`hotplex cron trigger` to run one immediately, `hotplex cron history` to
-inspect executions, and `hotplex cron delete` only after explicit removal
-authorization. A list or history result is not a substitute for the
-post-create `cron get --json` verification.
+使用 `hotplex cron list` 查找任务，使用 `hotplex cron update` 修改任务，使用
+`hotplex cron trigger` 立即运行任务，使用 `hotplex cron history` 查看执行记录。
+只有获得明确删除授权后才能使用 `hotplex cron delete`。list 或 history 结果不能替代
+创建后的 `cron get --json` 验证。

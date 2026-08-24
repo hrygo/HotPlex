@@ -29,6 +29,8 @@ func TestRenderPublicCLISurfaceFiltersHiddenAndSensitiveValues(t *testing.T) {
 	require.Contains(t, text, "--file <string>")
 	require.Contains(t, text, "hotplex slack download-file")
 	require.Contains(t, text, "--output <string>")
+	require.Contains(t, text, "审计日志链操作")
+	require.NotContains(t, text, "Audit log chain operations")
 	require.Contains(t, text, "--secret-token <string>")
 	require.NotContains(t, text, "hidden-internal")
 	require.NotContains(t, text, "example-secret")

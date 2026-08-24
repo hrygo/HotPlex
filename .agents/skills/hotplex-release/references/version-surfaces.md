@@ -1,4 +1,4 @@
-# HotPlex version-surface inventory
+# HotPlex 版本面清单
 
 本文件记录 HotPlex 当前已知的版本入口与豁免。它不能替代每次发布的动态扫描；新增 SDK、package、构建目标或 workflow 后，应先扫描，再补充本清单。
 

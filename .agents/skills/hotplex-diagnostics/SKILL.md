@@ -1,9 +1,9 @@
 ---
 name: hotplex-diagnostics
-description: 深入诊断 HotPlex Gateway、Worker、Session、日志或反馈链异常。普通 status/doctor/security/config 只读检查属于 hotplex-cli；安装、更新、重启、配置写入和 Admin mutation 属于 hotplex-operator。
+description: 深入诊断 HotPlex Gateway、Worker、Session、日志或反馈链异常。普通 status/doctor/security/config 只读检查属于 hotplex-cli；安装、更新、重启、配置写入和 Admin 变更属于 hotplex-operator。
 ---
 
-# HotPlex diagnostics
+# HotPlex 诊断
 
 本 Skill 只授权读取和分析。诊断请求不授权修复、终止 Session、读取凭据、创建
 Issue 或改变任何外部状态。需要受保护的 Admin 证据时，只使用已经获得授权的

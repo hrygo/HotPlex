@@ -1,9 +1,9 @@
 ---
 name: hotplex-docs-patrol
-description: Maintain HotPlex current documentation by mapping code, configuration, API, or release changes to BFS-reachable docs and repairing only verified drift. Do not use for ordinary copy editing, runtime diagnosis, or version publication.
+description: 维护 HotPlex 当前文档，将代码、配置、API 或发布变更映射到 BFS 可达文档，只修复已验证的文档漂移。不要用于普通润色、运行时诊断或版本发布。
 ---
 
-# HotPlex docs patrol
+# HotPlex 文档巡逻
 
 文档巡逻请求授权在当前工作树内读取变更并修复确有影响的当前文档；它不自动授权
 创建或切换分支、创建 Issue/PR、push 或其他远端写入。上述动作必须由当前请求明确授权。

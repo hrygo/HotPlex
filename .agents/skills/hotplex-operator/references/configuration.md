@@ -1,39 +1,33 @@
-# Host configuration and built-in Skills
+# 主机配置和内置 Skills
 
-## Configure the host
+## 配置主机
 
-Inspect the installed surfaces before changing configuration:
+修改配置前先检查已安装命令面：
 
     hotplex config --help
     hotplex onboard --help
 
-Use `hotplex onboard` only for the requested setup or reconfiguration mode.
-Treat `--force`, service installation, and Skill synchronization as distinct
-side effects. Confirm the effective configuration source, distinguish a
-repository-local development environment from the runtime HotPlex home, and
-preserve unrelated settings.
+只在用户请求的设置或重新配置模式下使用 `hotplex onboard`。将 `--force`、服务安装和
+Skill 同步视为不同副作用。确认有效配置来源，区分仓库本地开发环境与运行时 HotPlex home，
+并保留无关设置。
 
-Do not change global AgentConfig to affect one bot. Account for the documented
-new-session or reset boundary when verifying AgentConfig changes. Never print
-credentials or complete secret-bearing files. After a change, run:
+不要通过修改全局 AgentConfig 影响单个 Bot。验证 AgentConfig 变更时遵守文档规定的新
+session 或 reset 生效边界。绝不打印凭据或完整的含密文件。变更后运行：
 
     hotplex doctor
 
-Report the specific checks and effective behavior that were verified.
+报告实际验证的具体检查和有效行为。
 
-## Reconcile built-in Skills
+## 对账内置 Skills
 
-Begin every projection decision with read-only inventory and drift evidence:
+每次决定 projection 前都先读取 inventory 和 drift 证据：
 
     hotplex skills status
     hotplex skills status --profile operator --worker <worker>
 
-Inspect `hotplex skills status --help` on the installed binary before choosing
-profiles or workers. For `sync` or `remove`, pass the selected `--profile` and
-each `--worker` target explicitly; use `--dry-run` when the intended changes
-are not already clear. Report collisions, drift, skipped targets, and the final
-status.
+选择 profile 或 worker 前先检查已安装二进制的 `hotplex skills status --help`。执行 `sync`
+或 `remove` 时显式传入选定的 `--profile` 和每个 `--worker` 目标；意图尚不清晰时使用
+`--dry-run`。报告 collision、drift、跳过目标和最终状态。
 
-Skill synchronization and removal mutate Worker-visible projections. They do
-not edit the canonical built-in packages, and a status request does not
-authorize either mutation.
+Skill 同步和删除会变更 Worker 可见的 projection，但不会编辑 canonical 内置包；状态查询
+请求也不授权这两种变更。
