@@ -409,6 +409,81 @@ func TestLifecycleBroadcast_IsolatesTargetFailure(t *testing.T) {
 	require.Equal(t, 1, summary.FailedCount)
 }
 
+func TestLifecycleBroadcast_RestartReceiptCoversNoSessionTarget(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sentText := make(chan string, 2)
+	adapter := &lifecycleFakeAdapter{
+		platform: messaging.PlatformFeishu,
+		botName:  "ops",
+		botID:    "bot-1",
+		send: func(_ context.Context, text string, _ map[string]string) error {
+			sentText <- text
+			return nil
+		},
+	}
+	b := newTestLifecycleBroadcaster(filepath.Join(dir, "snapshot.json"), nil, adapter)
+	b.receipts = newRestartReceiptStore(filepath.Join(dir, "receipt.json"))
+	receipt := &gatewayRestartReceipt{
+		SchemaVersion: gatewayRestartReceiptSchemaVersion,
+		RequestID:     "req_0123456789abcdef0123456789abcdef",
+		Platform:      string(messaging.PlatformFeishu),
+		BotName:       "ops",
+		PlatformKey:   map[string]string{"chat_id": "oc_chat", "message_id": "om_message"},
+		RequestedAt:   time.Date(2026, 8, 25, 1, 2, 3, 0, time.UTC),
+		OldVersion:    "v1.42.1",
+		OldPID:        4321,
+	}
+	require.NoError(t, b.receipts.Write(receipt))
+	b.buildInfo = BuildInfo{Version: "v1.43.0", BuildTime: "2026-08-25", OS: "darwin", Arch: "arm64"}
+
+	stopping := b.BroadcastStopping()
+	require.Equal(t, 1, stopping.TargetCount)
+	require.Equal(t, 1, stopping.SentCount)
+	require.Contains(t, <-sentText, "Gateway 即将重启")
+
+	started := b.BroadcastStarted()
+	require.Equal(t, 1, started.TargetCount)
+	require.Equal(t, 1, started.SentCount)
+	require.Contains(t, <-sentText, "上一版本")
+	_, err := os.Stat(b.receipts.path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLifecycleBroadcast_RestartReceiptSurvivesSendFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	adapter := &lifecycleFakeAdapter{
+		platform: messaging.PlatformFeishu,
+		botName:  "ops",
+		botID:    "bot-1",
+		send: func(context.Context, string, map[string]string) error {
+			return errors.New("send failed")
+		},
+	}
+	b := newTestLifecycleBroadcaster(filepath.Join(dir, "snapshot.json"), nil, adapter)
+	b.receipts = newRestartReceiptStore(filepath.Join(dir, "receipt.json"))
+	receipt := &gatewayRestartReceipt{
+		SchemaVersion: gatewayRestartReceiptSchemaVersion,
+		RequestID:     "req_0123456789abcdef0123456789abcdef",
+		Platform:      string(messaging.PlatformFeishu),
+		BotName:       "ops",
+		PlatformKey:   map[string]string{"chat_id": "oc_chat"},
+		RequestedAt:   time.Now().UTC(),
+		OldVersion:    "v1.42.1",
+		OldPID:        4321,
+	}
+	require.NoError(t, b.receipts.Write(receipt))
+
+	summary := b.BroadcastStarted()
+	require.Equal(t, 1, summary.FailedCount)
+	remaining, err := b.receipts.Read()
+	require.NoError(t, err)
+	require.Equal(t, receipt.RequestID, remaining.RequestID)
+}
+
 func TestLifecycleBroadcast_TimeoutDoesNotBlock(t *testing.T) {
 	t.Parallel()
 

@@ -5,6 +5,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,4 +71,26 @@ func TestDarwinManagerStatusRequiresLiveLaunchctlPID(t *testing.T) {
 			require.Equal(t, tt.wantPID, status.PID)
 		})
 	}
+}
+
+func TestDarwinManagerRestartUsesKickstartWithoutUnload(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchdLabel("hotplex", LevelUser)+".plist")
+	require.NoError(t, os.MkdirAll(filepath.Dir(plistPath), 0o755))
+	require.NoError(t, os.WriteFile(plistPath, []byte("plist"), 0o600))
+
+	var gotName string
+	var gotArgs []string
+	manager := &darwinManager{run: mockCommandRunner{
+		runFn: func(name string, args ...string) error {
+			gotName = name
+			gotArgs = append([]string(nil), args...)
+			return nil
+		},
+	}}
+
+	require.NoError(t, manager.Restart("hotplex", LevelUser))
+	require.Equal(t, "launchctl", gotName)
+	require.Equal(t, []string{"kickstart", "-k", "gui/" + strconv.Itoa(os.Getuid()) + "/" + launchdLabel("hotplex", LevelUser)}, gotArgs)
 }

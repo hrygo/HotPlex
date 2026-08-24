@@ -599,6 +599,7 @@ webhook:
 |------|------|--------|----------|------|
 | `app_id` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_ID` | 飞书 App ID（`cli_xxxx`）（单 bot 模式） |
 | `app_secret` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 飞书 App Secret（单 bot 模式） |
+| `gateway_restart_allow_from` | []string | `[]` | `HOTPLEX_MESSAGING_FEISHU_GATEWAY_RESTART_ALLOW_FROM` | `/gateway restart` 专用操作者 OpenID 白名单；默认拒绝所有用户 |
 | `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
 #### 3.11.7 Yuanxin 专有配置
@@ -643,6 +644,7 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `worker_type` | string | 覆盖 Worker 类型 |
 | `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
 | `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
+| `gateway_restart_allow_from` | []string | 继承平台级 | — | `/gateway restart` 专用操作者 OpenID；显式 `[]` 禁止该 Bot |
 | `inject_exclude` | []string | 覆盖 agent config 排除列表（bot 级，覆盖平台级和全局级） |
 | `stt_*` | — | 覆盖 STT 配置 |
 | `tts_*` | — | 覆盖 TTS 配置 |
@@ -1014,6 +1016,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM` | `messaging.feishu.allow_from` |
 | `HOTPLEX_MESSAGING_FEISHU_ALLOW_DM_FROM` | `messaging.feishu.allow_dm_from` |
 | `HOTPLEX_MESSAGING_FEISHU_ALLOW_GROUP_FROM` | `messaging.feishu.allow_group_from` |
+| `HOTPLEX_MESSAGING_FEISHU_GATEWAY_RESTART_ALLOW_FROM` | `messaging.feishu.gateway_restart_allow_from` |
 | `HOTPLEX_MESSAGING_FEISHU_STT_PROVIDER` | `messaging.feishu.stt_provider` |
 | `HOTPLEX_MESSAGING_FEISHU_STT_LOCAL_CMD` | `messaging.feishu.stt_local_cmd` |
 | `HOTPLEX_MESSAGING_FEISHU_STT_LOCAL_IDLE_TTL` | `messaging.feishu.stt_local_idle_ttl` |

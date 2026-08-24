@@ -10,6 +10,6 @@ import (
 
 func restartHelperSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS | windows.CREATE_BREAKAWAY_FROM_JOB,
 	}
 }
