@@ -72,6 +72,9 @@ func (s *restartReceiptStore) Write(receipt *gatewayRestartReceipt) error {
 	if err != nil {
 		return fmt.Errorf("encode gateway restart receipt: %w", err)
 	}
+	if len(data) > gatewayRestartReceiptMaxBytes {
+		return fmt.Errorf("gateway restart receipt exceeds %d bytes", gatewayRestartReceiptMaxBytes)
+	}
 	temp, err := os.CreateTemp(filepath.Dir(s.path), ".gateway.restart.receipt.*")
 	if err != nil {
 		return fmt.Errorf("create gateway restart receipt temporary file: %w", err)
