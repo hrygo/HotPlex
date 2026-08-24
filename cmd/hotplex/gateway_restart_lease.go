@@ -64,7 +64,7 @@ type restartLeaseStore struct {
 	path         string
 	now          func() time.Time
 	processAlive func(int) bool
-	acquireMu    sync.Mutex
+	mu           sync.Mutex
 }
 
 func newRestartLeaseStore(path string, now func() time.Time, processAlive func(int) bool) *restartLeaseStore {
@@ -84,8 +84,8 @@ func newRestartLeaseStore(path string, now func() time.Time, processAlive func(i
 }
 
 func (s *restartLeaseStore) Acquire(ownerPID int) (*restartLease, error) {
-	s.acquireMu.Lock()
-	defer s.acquireMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if ownerPID <= 0 {
 		return nil, fmt.Errorf("acquire restart lease: invalid owner PID %d", ownerPID)
@@ -95,7 +95,7 @@ func (s *restartLeaseStore) Acquire(ownerPID int) (*restartLease, error) {
 	}
 
 	for {
-		current, err := s.Read()
+		current, err := s.readUnlocked()
 		if err == nil {
 			if !s.stale(current) {
 				return nil, &restartLeaseConflictError{RequestID: current.RequestID}
@@ -131,6 +131,12 @@ func (s *restartLeaseStore) Acquire(ownerPID int) (*restartLease, error) {
 }
 
 func (s *restartLeaseStore) Read() (*restartLease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readUnlocked()
+}
+
+func (s *restartLeaseStore) readUnlocked() (*restartLease, error) {
 	data, err := readBoundedFile(s.path, restartLeaseMaxBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -187,7 +193,9 @@ func (s *restartLeaseStore) Update(requestID string, mutate func(*restartLease) 
 	if mutate == nil {
 		return errors.New("update restart lease: nil mutation")
 	}
-	current, err := s.Read()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.readUnlocked()
 	if err != nil {
 		return err
 	}
@@ -204,7 +212,9 @@ func (s *restartLeaseStore) Update(requestID string, mutate func(*restartLease) 
 }
 
 func (s *restartLeaseStore) Release(requestID string) error {
-	current, err := s.Read()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.readUnlocked()
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
