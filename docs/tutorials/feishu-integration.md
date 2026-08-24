@@ -110,6 +110,8 @@ description: 一步步将 HotPlex Gateway 接入飞书，实现 AI 对话、语�
 HOTPLEX_MESSAGING_FEISHU_ENABLED=true
 HOTPLEX_MESSAGING_FEISHU_APP_ID=cli_xxxxxxxxxxxx
 HOTPLEX_MESSAGING_FEISHU_APP_SECRET=your_app_secret_here
+# 首次使用可先留空；allowlist 模式下填入你的 OpenID（ou_...）
+# HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_xxxxxxxxxxxxxxxxx
 ```
 
 或使用交互式向导自动写入：
@@ -145,6 +147,10 @@ hotplex onboard
 ```
 
 向导会依次引导你选择平台（Feishu）、输入 App ID/Secret，自动写入 `.env`。
+
+向导的配置文件和 `.env` 必须是同一目录。默认 service 使用 `~/.hotplex/config.yaml` 与
+`~/.hotplex/.env`；开发环境使用 `make dev` 加载项目根目录 `.env`。如果需要指定路径，
+使用 `hotplex onboard --config <config.yaml>`，不要只修改另一套目录的 `.env`。
 
 **验证**：
 
@@ -189,6 +195,18 @@ hotplex service logs -f
 1. 在飞书中搜索你的机器人名称
 2. 发送「你好」
 3. **期望**：收到流式更新的卡片消息，内容逐步填充
+
+如果私聊没有回复，而 Feishu 策略仍为 `allowlist`，请先获取 OpenID：
+
+1. 保持 Gateway 运行，发送一条短消息；
+2. service 使用 `hotplex service logs -f`，开发环境使用 `make gateway-logs`；
+3. 在接收事件日志中找到 `user=ou_...`，将该值写入同目录 `.env`：
+
+   ```bash
+   HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM=ou_xxxxxxxxxxxxxxxxx
+   ```
+
+4. 重启 Gateway 后再测试。群聊还必须 `@HotPlex`，除非显式关闭 `REQUIRE_MENTION`。
 
 ### 4.2 权限交互
 
@@ -263,7 +281,7 @@ HOTPLEX_MESSAGING_TTS_MAX_CHARS=150
 | 症状 | 检查项 |
 |------|--------|
 | `feishu ✗` | 确认 `APP_ID`/`APP_SECRET` 正确，应用已发布 |
-| 消息无回复 | `hotplex service logs -f` 查看 Worker 错误 |
+| 消息无回复 | 先检查 config/.env 路径、allowlist 的 `user=ou_...`、群聊是否 @Bot，再查看 `hotplex service logs -f` 或 `make gateway-logs` |
 | 语音不转写 | 检查 STT provider 配置和本地引擎是否安装 |
 | 群聊不响应 | 确认 `REQUIRE_MENTION=true` 时已 @机器人 |
 

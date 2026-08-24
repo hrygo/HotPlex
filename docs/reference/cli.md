@@ -417,6 +417,11 @@ hotplex onboard --non-interactive \
   --enable-slack \
   --slack-allow-from U12345,U67890 \
   --install-service
+
+hotplex onboard --non-interactive \
+  --enable-feishu \
+  --feishu-allow-from ou_xxxxxxxxxxxxxxxxx \
+  --install-service
 ```
 
 | 标志 | 类型 | 默认值 | 说明 |
