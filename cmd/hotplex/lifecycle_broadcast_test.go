@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -529,6 +531,27 @@ func TestGatewayLifecycle_ControlledShutdownOrder(t *testing.T) {
 	)
 
 	require.Equal(t, []string{"broadcast", "cancel", "shutdown"}, order)
+}
+
+func TestGatewayLifecycle_HTTPServerBindFailureIsSynchronous(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("address already in use")
+	serverErr := make(chan error, 1)
+	err := startGatewayHTTPServer(
+		&http.Server{Addr: "127.0.0.1:1"},
+		serverErr,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		"gateway: server failed",
+		func(string, string) (net.Listener, error) { return nil, wantErr },
+	)
+
+	require.ErrorIs(t, err, wantErr)
+	select {
+	case asyncErr := <-serverErr:
+		require.Failf(t, "bind failure was reported asynchronously", "got %v", asyncErr)
+	default:
+	}
 }
 
 type lifecycleFakeBotRegistry struct {
