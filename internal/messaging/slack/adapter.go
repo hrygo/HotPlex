@@ -64,8 +64,8 @@ func init() {
 	})
 }
 
-// SendCronResult delivers a cron job result to a Slack channel.
-func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
+// SendProactiveMessage delivers a system-originated message to a Slack channel.
+func (a *Adapter) SendProactiveMessage(ctx context.Context, text string, platformKey map[string]string) error {
 	channelID := platformKey["channel_id"]
 	if channelID == "" {
 		return fmt.Errorf("slack: missing channel_id in platform_key")
@@ -73,9 +73,14 @@ func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey m
 	text = messaging.SanitizeText(text)
 	_, _, err := a.client.PostMessageContext(ctx, channelID, slack.MsgOptionText(text, false))
 	if err != nil {
-		return fmt.Errorf("slack: send cron result: %w", err)
+		return fmt.Errorf("slack: send proactive message: %w", err)
 	}
 	return nil
+}
+
+// SendCronResult delivers a cron job result to a Slack channel.
+func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
+	return a.SendProactiveMessage(ctx, text, platformKey)
 }
 
 // Adapter implements messaging.PlatformAdapterInterface for Slack Socket Mode.
@@ -112,6 +117,7 @@ type Adapter struct {
 func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformSlack }
 
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
+var _ messaging.ProactiveMessageSender = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.botID }
 func (a *Adapter) GetBotName() string         { return a.botName }

@@ -12,6 +12,8 @@ import (
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
+var _ messaging.ProactiveMessageSender = (*Adapter)(nil)
+
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
@@ -481,6 +483,36 @@ func TestAdapter_SendCronResult_MissingMessageId(t *testing.T) {
 	err := a.SendCronResult(context.Background(), "hello", map[string]string{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing message_id")
+}
+
+func TestAdapter_SendProactiveMessage_MissingMessageID(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter()
+
+	err := a.SendProactiveMessage(context.Background(), "hello", map[string]string{})
+
+	require.EqualError(t, err, "yuanxin: missing message_id in platform_key")
+}
+
+func TestAdapter_SendProactiveMessage_NoProducer(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter()
+
+	err := a.SendProactiveMessage(context.Background(), "hello", map[string]string{
+		"message_id": "msg-123",
+	})
+
+	require.EqualError(t, err, "yuanxin: producer not initialized")
+}
+
+func TestAdapter_SendCronResult_DelegatesProactiveValidation(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter()
+
+	proactiveErr := a.SendProactiveMessage(context.Background(), "hello", map[string]string{})
+	cronErr := a.SendCronResult(context.Background(), "hello", map[string]string{})
+
+	require.EqualError(t, cronErr, proactiveErr.Error())
 }
 
 func TestAdapter_SendCronResult_NoProducer(t *testing.T) {

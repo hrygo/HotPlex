@@ -48,6 +48,7 @@ func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformY
 
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
 var _ messaging.CronResultSender = (*Adapter)(nil)
+var _ messaging.ProactiveMessageSender = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.appID }
 func (a *Adapter) GetInjectExclude() []string { return a.injectExclude }
@@ -414,7 +415,8 @@ func (a *Adapter) HandleTextMessage(_ context.Context, _, _, _, _, _, _ string) 
 	return nil
 }
 
-func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
+// SendProactiveMessage delivers a system-originated message to a Yuanxin target.
+func (a *Adapter) SendProactiveMessage(ctx context.Context, text string, platformKey map[string]string) error {
 	messageID := platformKey["message_id"]
 	if messageID == "" {
 		return fmt.Errorf("yuanxin: missing message_id in platform_key")
@@ -439,7 +441,7 @@ func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey m
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		return fmt.Errorf("yuanxin: marshal cron result: %w", err)
+		return fmt.Errorf("yuanxin: marshal proactive message: %w", err)
 	}
 
 	a.mu.RLock()
@@ -451,9 +453,14 @@ func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey m
 
 	_, err = producer.Send(ctx, &pulsar.ProducerMessage{Payload: data})
 	if err != nil {
-		return fmt.Errorf("yuanxin: send cron result: %w", err)
+		return fmt.Errorf("yuanxin: send proactive message: %w", err)
 	}
 	return nil
+}
+
+// SendCronResult delivers a cron job result to a Yuanxin target.
+func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
+	return a.SendProactiveMessage(ctx, text, platformKey)
 }
 
 func metadataString(md map[string]any, key string) string {

@@ -59,6 +59,7 @@ type Adapter struct {
 func (a *Adapter) Platform() messaging.PlatformType { return messaging.PlatformFeishu }
 
 var _ messaging.PlatformAdapterInterface = (*Adapter)(nil)
+var _ messaging.ProactiveMessageSender = (*Adapter)(nil)
 
 func (a *Adapter) GetBotID() string           { return a.botOpenID }
 func (a *Adapter) GetBotName() string         { return a.botName }
@@ -246,14 +247,19 @@ func (a *Adapter) replyOrSend(ctx context.Context, msgID, chatID, text string) e
 	return a.sendTextMessage(ctx, chatID, text)
 }
 
-// SendCronResult delivers a cron job result to a Feishu chat.
-// When message_id is present in platformKey, replies to that message (thread delivery).
-func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
+// SendProactiveMessage delivers a system-originated message to a Feishu chat.
+// When message_id is present in platformKey, it replies to that message.
+func (a *Adapter) SendProactiveMessage(ctx context.Context, text string, platformKey map[string]string) error {
 	chatID := platformKey["chat_id"]
 	if chatID == "" {
 		return fmt.Errorf("feishu: missing chat_id in platform_key")
 	}
 	return a.replyOrSend(ctx, platformKey["message_id"], chatID, messaging.SanitizeText(text))
+}
+
+// SendCronResult delivers a cron job result to a Feishu chat.
+func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey map[string]string) error {
+	return a.SendProactiveMessage(ctx, text, platformKey)
 }
 
 func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) error {
