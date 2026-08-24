@@ -380,7 +380,7 @@ skill，用户端管理各自 project/workspace skill。
 两个 builtin 的 canonical source 是 `internal/skills/builtin/hotplex-cli` 与
 `internal/skills/builtin/hotplex-operator`，生成的 `.agents/skills/hotplex-cli` 和
 `.agents/skills/hotplex-operator` 是 byte-identical mirror。连同 `hotplex-diagnostics`、
-`hotplex-release`、`hotplex-docs-patrol`，仓库 portfolio 恰好包含五个 Skill。
+`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，仓库 portfolio 恰好包含六个 Skill。
 
 | 方法 | 路径 | Scope | 说明 |
 |------|------|-------|------|

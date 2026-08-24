@@ -3,6 +3,8 @@ package checkers
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hrygo/hotplex/internal/cli"
+	"github.com/hrygo/hotplex/internal/config"
 )
 
 func TestDiskSpace(t *testing.T) {
@@ -55,6 +58,48 @@ func TestPortAvailable_Blocked(t *testing.T) {
 	// At minimum, the checker must produce a valid diagnostic structure.
 	require.Equal(t, "runtime.port_available", d.Name)
 	require.Contains(t, []cli.Status{cli.StatusPass, cli.StatusFail}, d.Status)
+}
+
+func TestGatewayHealth_Healthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/health", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("gateway:\n  addr: \"127.0.0.1:8888\"\n"), 0o644))
+	withConfigPath(t, path)
+
+	c := gatewayHealthChecker{
+		client: http.DefaultClient,
+		endpointFn: func(*config.Config) (string, error) {
+			return server.URL + "/health", nil
+		},
+	}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusPass, d.Status)
+	require.Contains(t, d.Message, "HTTP 200")
+}
+
+func TestGatewayHealth_NotRunning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("gateway:\n  addr: \"127.0.0.1:8888\"\n"), 0o644))
+	withConfigPath(t, path)
+
+	c := gatewayHealthChecker{
+		client: http.DefaultClient,
+		endpointFn: func(*config.Config) (string, error) {
+			return "http://127.0.0.1:1/health", nil
+		},
+	}
+	d := c.Check(context.Background())
+
+	require.Equal(t, cli.StatusWarn, d.Status)
+	require.Contains(t, d.Message, "not running")
+	require.NotEmpty(t, d.FixHint)
 }
 
 func TestOrphanPIDs_NoDir(t *testing.T) {

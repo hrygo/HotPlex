@@ -143,7 +143,7 @@ onboard/update 只有显式 `--sync-skills` 才同步。
 两个内置包以 `internal/skills/builtin/hotplex-cli` 和
 `internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
 `.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库还包含
-`hotplex-diagnostics`、`hotplex-release` 和 `hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol` 和 `hotplex-stt-tts`，合计六个 Skill。
 
 ### Cron 请求的 CLI 路由
 

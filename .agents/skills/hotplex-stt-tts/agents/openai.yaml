@@ -1,0 +1,4 @@
+interface:
+  display_name: "HotPlex STT/TTS"
+  short_description: "初始化和修复 HotPlex 本地 STT/TTS 运行时"
+  default_prompt: "初始化 HotPlex 的本地 STT 和 MOSS TTS 依赖、模型并完成验收。"

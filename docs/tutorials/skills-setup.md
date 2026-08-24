@@ -16,7 +16,7 @@ WebChat/Admin 上传 zip 包安装，也会公开两个 embedded canonical packa
 两个内置包以 `internal/skills/builtin/hotplex-cli` 和
 `internal/skills/builtin/hotplex-operator` 为 canonical source，生成 byte-identical 的
 `.agents/skills/hotplex-cli` 与 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，合计六个 Skill。
 
 真实 Skill 只按 `<skills-root>/<name>/SKILL.md` 发现。其他既有用户文件不会被识别，HotPlex 也
 不会自动删除或改写它们；需要清理时必须由用户明确指定目标。

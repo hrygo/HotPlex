@@ -118,6 +118,8 @@ HOTPLEX_MESSAGING_FEISHU_APP_SECRET=your_app_secret_here
 hotplex onboard
 ```
 
+> `.env` 必须与本次使用的 `config.yaml` 位于同一目录：开发环境通常是项目根目录，服务安装通常是 `~/.hotplex/`。可用 `hotplex doctor -v` 查看实际生效的 config 与 `.env` 路径；不要只修改另一套目录中的 `.env`。
+
 ---
 
 ## 2. 配置 HotPlex
@@ -148,8 +150,11 @@ hotplex onboard
 
 ```bash
 hotplex doctor
-# 输出应包含：messaging.feishu_creds ✓  Feishu credentials present
+# 输出应包含：config.source ✓、messaging.feishu_creds ✓
+# 如果 Gateway 已启动，还应包含：runtime.gateway_health ✓  Gateway health OK (HTTP 200)
 ```
+
+`messaging.feishu_creds` 和 `config.required` 都读取 effective config（包括同目录 `.env` 的 `HOTPLEX_MESSAGING_FEISHU_*` 覆盖值），不会只检查旧的裸环境变量名。若尚未启动 Gateway，`runtime.gateway_health` 会给出可执行的启动提示，而不是把凭据问题误报为运行问题。
 
 ---
 

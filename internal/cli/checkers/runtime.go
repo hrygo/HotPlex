@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/config"
@@ -76,6 +78,102 @@ func (c portAvailableChecker) Check(ctx context.Context) cli.Diagnostic {
 		Message:  "Ports in use: " + strings.Join(blocked, ", "),
 		FixHint:  "Kill the process using the port (lsof -i :PORT | grep LISTEN) then kill -9 <PID>",
 	}
+}
+
+type gatewayHealthChecker struct {
+	client     *http.Client
+	endpointFn func(*config.Config) (string, error)
+}
+
+func (c gatewayHealthChecker) Name() string     { return "runtime.gateway_health" }
+func (c gatewayHealthChecker) Category() string { return "runtime" }
+func (c gatewayHealthChecker) Check(ctx context.Context) cli.Diagnostic {
+	cfg, err := loadConfig()
+	if err != nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
+			Message: "Cannot load Gateway config", Detail: err.Error(),
+			FixHint: "Fix config syntax errors first",
+		}
+	}
+	if cfg == nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
+			Message: "Gateway health check skipped (config path not set)",
+			FixHint: "Run doctor with the same --config path used to start Gateway",
+		}
+	}
+
+	endpointFn := c.endpointFn
+	if endpointFn == nil {
+		endpointFn = gatewayHealthEndpoint
+	}
+	endpoint, err := endpointFn(cfg)
+	if err != nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusFail,
+			Message: "Invalid Gateway health endpoint", Detail: err.Error(),
+			FixHint: "Fix gateway.addr in the effective config",
+		}
+	}
+
+	client := c.client
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Second}
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, http.NoBody)
+	if err != nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusFail,
+			Message: "Cannot create Gateway health request", Detail: err.Error(),
+			FixHint: "Fix gateway.addr in the effective config",
+		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
+			Message: "Gateway is not running or health endpoint is unreachable",
+			Detail:  err.Error(),
+			FixHint: "Start Gateway with `hotplex service start` or `hotplex gateway start`",
+		}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return cli.Diagnostic{
+			Name: c.Name(), Category: c.Category(), Status: cli.StatusFail,
+			Message: fmt.Sprintf("Gateway health returned HTTP %d", resp.StatusCode),
+			FixHint: "Inspect Gateway logs and run `hotplex gateway restart` after fixing the reported error",
+		}
+	}
+
+	return cli.Diagnostic{
+		Name: c.Name(), Category: c.Category(), Status: cli.StatusPass,
+		Message: fmt.Sprintf("Gateway health OK (HTTP %d)", resp.StatusCode),
+		Detail:  endpoint,
+	}
+}
+
+func gatewayHealthEndpoint(cfg *config.Config) (string, error) {
+	addr := strings.TrimSpace(cfg.Gateway.Addr)
+	if addr == "" {
+		return "", fmt.Errorf("gateway.addr is empty")
+	}
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return strings.TrimRight(addr, "/") + "/health", nil
+	}
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("parse gateway.addr %q: %w", addr, err)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/health", nil
 }
 
 type orphanPIDsChecker struct {
@@ -224,6 +322,7 @@ func init() {
 	hplexHome := config.HotplexHome()
 	cli.DefaultRegistry.Register(diskSpaceChecker{})
 	cli.DefaultRegistry.Register(portAvailableChecker{})
+	cli.DefaultRegistry.Register(gatewayHealthChecker{})
 	cli.DefaultRegistry.Register(orphanPIDsChecker{pidDir: filepath.Join(hplexHome, ".pids")})
 	cli.DefaultRegistry.Register(dataDirWritableChecker{dataDir: filepath.Join(hplexHome, "data")})
 }

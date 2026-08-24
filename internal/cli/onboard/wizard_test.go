@@ -184,6 +184,18 @@ func TestBuildEnvContent(t *testing.T) {
 		require.Contains(t, got, "HOTPLEX_MESSAGING_SLACK_ENABLED=true")
 		require.NotContains(t, got, "HOTPLEX_MESSAGING_SLACK_BOT_TOKEN=")
 	})
+
+	t.Run("preserves_unmanaged_env_entries", func(t *testing.T) {
+		dir := t.TempDir()
+		envPath := filepath.Join(dir, ".env")
+		require.NoError(t, os.WriteFile(envPath, []byte("# user setting\nCUSTOM_PROVIDER_URL=https://example.test\n\n# keep this note\n"), 0o600))
+
+		got := buildEnvContent("new-admin", messagingPlatformConfig{}, messagingPlatformConfig{}, envPath)
+
+		require.Contains(t, got, "CUSTOM_PROVIDER_URL=https://example.test")
+		require.Contains(t, got, "# keep this note")
+		require.NotContains(t, got, "# Preserved user environment\n# Preserved user environment")
+	})
 }
 
 func TestStepWriteConfig(t *testing.T) {

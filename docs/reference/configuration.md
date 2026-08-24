@@ -439,7 +439,7 @@ Cron、显式 Slack 和只读诊断；operator profile 累积包含 `hotplex-cli
 它们的 canonical source 分别是 `internal/skills/builtin/hotplex-cli` 与
 `internal/skills/builtin/hotplex-operator`，生成器产出 byte-identical 的
 `.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator` mirror。仓库 portfolio 还包含
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，合计六个 Skill。
 Public/Admin/WebChat HTTP builtins 永久可发现，不以 projection 或 receipt 存在为前提；Session
 `/skills` 的出现由当前 Worker/filesystem evidence 决定，filesystem-only 项是 `discoverable`，
 只有 projection/native advertisement 和 adapter-verified activation 才能证明 `callable`。真实

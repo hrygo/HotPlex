@@ -206,6 +206,8 @@ hotplex version --format json
 
 运行环境诊断检查，验证 HotPlex 配置是否正确。检查按类别组织：environment、config、dependencies、security、runtime、messaging、stt、tts、agent_config、worker。
 
+诊断会显示 effective config 与同目录 `.env` 的路径（`config.source`），消息平台凭据检查也以这套 effective config 为准；`runtime.gateway_health` 会探测 Gateway `/health`，区分“未启动”和“配置/服务已启动但不健康”。诊断不会输出凭据值。
+
 **示例**：
 
 ```bash
@@ -1060,7 +1062,7 @@ catalog 永久展示内置 inventory；Session `/skills` 仍按当前 Worker/fil
 两个 built-in 的 canonical source 是 `internal/skills/builtin/hotplex-cli` 与
 `internal/skills/builtin/hotplex-operator`；生成的 `.agents/skills/hotplex-cli` 和
 `.agents/skills/hotplex-operator` mirror 必须 byte-identical。仓库 portfolio 另含
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`，合计五个 Skill。
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts`，合计六个 Skill。
 
 ## Admin 账号管理
 

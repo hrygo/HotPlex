@@ -15,42 +15,35 @@ type slackCredsChecker struct{}
 func (c slackCredsChecker) Name() string     { return "messaging.slack_creds" }
 func (c slackCredsChecker) Category() string { return "messaging" }
 func (c slackCredsChecker) Check(ctx context.Context) cli.Diagnostic {
-	botToken := os.Getenv("SLACK_BOT_TOKEN")
-	appToken := os.Getenv("SLACK_APP_TOKEN")
+	platform, err := loadMessagingPlatform("slack")
+	if err != nil {
+		return configLoadDiagnostic(c.Name(), c.Category(), err)
+	}
+	if !platform.enabled {
+		return platformDisabledDiagnostic(c.Name(), c.Category(), "Slack")
+	}
 
-	if botToken == "" && appToken == "" {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusPass,
-			Message:  "Slack not configured (no tokens set)",
+	issues := validateCredentialEntries("Slack", platform.bots, func(b botCheck) []string {
+		var issues []string
+		if b.Cred1 != "" && !strings.HasPrefix(b.Cred1, "xoxb-") {
+			issues = append(issues, "bot token has invalid prefix (expected xoxb-)")
 		}
-	}
-
-	var issues []string
-	if botToken != "" && !strings.HasPrefix(botToken, "xoxb-") {
-		issues = append(issues, "SLACK_BOT_TOKEN has invalid prefix (expected xoxb-)")
-	}
-	if appToken != "" && !strings.HasPrefix(appToken, "xapp-") {
-		issues = append(issues, "SLACK_APP_TOKEN has invalid prefix (expected xapp-)")
-	}
-
+		if b.Cred2 != "" && !strings.HasPrefix(b.Cred2, "xapp-") {
+			issues = append(issues, "app token has invalid prefix (expected xapp-)")
+		}
+		return issues
+	})
 	if len(issues) > 0 {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
 			Status:   cli.StatusFail,
-			Message:  "Invalid Slack token format: " + strings.Join(issues, "; "),
-			FixHint:  "Check token values in .env — bot tokens start with xoxb-, app tokens with xapp-",
+			Message:  "Invalid Slack credentials: " + strings.Join(issues, "; "),
+			FixHint:  "Check effective Slack credentials in the config or its adjacent .env file",
 		}
 	}
 
-	return cli.Diagnostic{
-		Name:     c.Name(),
-		Category: c.Category(),
-		Status:   cli.StatusPass,
-		Message:  "Slack token format valid",
-	}
+	return cli.Diagnostic{Name: c.Name(), Category: c.Category(), Status: cli.StatusPass, Message: "Slack credentials present and valid"}
 }
 
 type feishuCredsChecker struct{}
@@ -58,42 +51,111 @@ type feishuCredsChecker struct{}
 func (c feishuCredsChecker) Name() string     { return "messaging.feishu_creds" }
 func (c feishuCredsChecker) Category() string { return "messaging" }
 func (c feishuCredsChecker) Check(ctx context.Context) cli.Diagnostic {
-	appID := os.Getenv("FEISHU_APP_ID")
-	appSecret := os.Getenv("FEISHU_APP_SECRET")
-
-	if appID == "" && appSecret == "" {
-		return cli.Diagnostic{
-			Name:     c.Name(),
-			Category: c.Category(),
-			Status:   cli.StatusPass,
-			Message:  "Feishu not configured (no credentials set)",
-		}
+	platform, err := loadMessagingPlatform("feishu")
+	if err != nil {
+		return configLoadDiagnostic(c.Name(), c.Category(), err)
+	}
+	if !platform.enabled {
+		return platformDisabledDiagnostic(c.Name(), c.Category(), "Feishu")
 	}
 
-	var issues []string
-	if appID != "" && strings.TrimSpace(appID) == "" {
-		issues = append(issues, "FEISHU_APP_ID is whitespace-only")
-	}
-	if appSecret != "" && strings.TrimSpace(appSecret) == "" {
-		issues = append(issues, "FEISHU_APP_SECRET is whitespace-only")
-	}
-
+	issues := validateCredentialEntries("Feishu", platform.bots, nil)
 	if len(issues) > 0 {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
 			Status:   cli.StatusFail,
 			Message:  "Invalid Feishu credentials: " + strings.Join(issues, "; "),
-			FixHint:  "Check FEISHU_APP_ID and FEISHU_APP_SECRET values in .env",
+			FixHint:  "Check effective Feishu credentials in the config or its adjacent .env file",
 		}
 	}
 
-	return cli.Diagnostic{
-		Name:     c.Name(),
-		Category: c.Category(),
-		Status:   cli.StatusPass,
-		Message:  "Feishu credentials present",
+	return cli.Diagnostic{Name: c.Name(), Category: c.Category(), Status: cli.StatusPass, Message: "Feishu credentials present and valid"}
+}
+
+type messagingPlatform struct {
+	enabled bool
+	bots    []botCheck
+}
+
+func loadMessagingPlatform(platform string) (messagingPlatform, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return messagingPlatform{}, err
 	}
+	if cfg == nil {
+		// Standalone checker calls have no config path. Keep the legacy fallback
+		// for compatibility, while all doctor/onboard calls use effective config.
+		if platform == "slack" {
+			botToken := firstNonEmptyEnv("HOTPLEX_MESSAGING_SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN")
+			appToken := firstNonEmptyEnv("HOTPLEX_MESSAGING_SLACK_APP_TOKEN", "SLACK_APP_TOKEN")
+			return messagingPlatform{enabled: botToken != "" || appToken != "", bots: []botCheck{{Name: "slack", Cred1: botToken, Cred2: appToken}}}, nil
+		}
+		appID := firstNonEmptyEnv("HOTPLEX_MESSAGING_FEISHU_APP_ID", "FEISHU_APP_ID")
+		appSecret := firstNonEmptyEnv("HOTPLEX_MESSAGING_FEISHU_APP_SECRET", "FEISHU_APP_SECRET")
+		return messagingPlatform{enabled: appID != "" || appSecret != "", bots: []botCheck{{Name: "feishu", Cred1: appID, Cred2: appSecret}}}, nil
+	}
+
+	switch platform {
+	case "slack":
+		return messagingPlatform{enabled: cfg.Messaging.Slack.Enabled, bots: mapSlackBots(cfg.Messaging.Slack.Bots)}, nil
+	case "feishu":
+		return messagingPlatform{enabled: cfg.Messaging.Feishu.Enabled, bots: mapFeishuBots(cfg.Messaging.Feishu.Bots)}, nil
+	default:
+		return messagingPlatform{}, fmt.Errorf("unsupported messaging platform %q", platform)
+	}
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func validateCredentialEntries(platform string, bots []botCheck, formatFn func(botCheck) []string) []string {
+	if len(bots) == 0 {
+		return []string{strings.ToLower(platform) + " credentials are missing"}
+	}
+	firstName, secondName := "primary credential", "secondary credential"
+	if strings.EqualFold(platform, "slack") {
+		firstName, secondName = "bot_token", "app_token"
+	} else if strings.EqualFold(platform, "feishu") {
+		firstName, secondName = "app_id", "app_secret"
+	}
+	var issues []string
+	for _, bot := range bots {
+		prefix := strings.ToLower(platform)
+		if bot.Name != "" {
+			prefix += " bot " + fmt.Sprintf("%q", bot.Name)
+		}
+		if strings.TrimSpace(bot.Cred1) == "" {
+			issues = append(issues, prefix+" "+firstName+" is missing")
+		}
+		if strings.TrimSpace(bot.Cred2) == "" {
+			issues = append(issues, prefix+" "+secondName+" is missing")
+		}
+		if formatFn != nil {
+			for _, issue := range formatFn(bot) {
+				issues = append(issues, prefix+": "+issue)
+			}
+		}
+	}
+	return issues
+}
+
+func configLoadDiagnostic(name, category string, err error) cli.Diagnostic {
+	return cli.Diagnostic{
+		Name: name, Category: category, Status: cli.StatusWarn,
+		Message: "Cannot load effective config", Detail: err.Error(),
+		FixHint: "Fix config syntax errors first",
+	}
+}
+
+func platformDisabledDiagnostic(name, category, platform string) cli.Diagnostic {
+	return cli.Diagnostic{Name: name, Category: category, Status: cli.StatusPass, Message: platform + " disabled in effective config"}
 }
 
 func init() {

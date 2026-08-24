@@ -436,8 +436,8 @@ description: "HotPlex 工具使用指南"
 两个 embedded built-in package 的唯一来源是
 `internal/skills/builtin/hotplex-cli` 与 `internal/skills/builtin/hotplex-operator`，生成器把它们
 分别镜像到 `.agents/skills/hotplex-cli` 和 `.agents/skills/hotplex-operator`，两侧内容必须
-byte-identical。仓库的五个 Skill portfolio 由 `hotplex-cli`、`hotplex-operator`、
-`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol` 组成。
+byte-identical。仓库的六个 Skill portfolio 由 `hotplex-cli`、`hotplex-operator`、
+`hotplex-diagnostics`、`hotplex-release`、`hotplex-docs-patrol`、`hotplex-stt-tts` 组成。
 
 Admin/WebChat 的 public Skills catalog 用于 built-in inventory 与发现；Session `/skills` 以当前
 Worker/filesystem/native evidence 判定可用性。discoverable 不等于 callable；ACP 没有可推断的

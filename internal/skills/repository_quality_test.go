@@ -49,6 +49,7 @@ func TestRepositorySkillQuality(t *testing.T) {
 		"hotplex-docs-patrol",
 		"hotplex-operator",
 		"hotplex-release",
+		"hotplex-stt-tts",
 	}, names)
 
 	for _, name := range names {
@@ -216,6 +217,9 @@ func validateMutationBoundary(t *testing.T, name, entrypoint, tree string) {
 		for _, implicitDelivery := range []string{"git checkout -b", "gh issue create", "gh pr create", "git push fork"} {
 			require.NotContains(t, tree, implicitDelivery)
 		}
+	case "hotplex-stt-tts":
+		require.Contains(t, prefix, "explicitly authorizes")
+		require.Contains(t, tree, "hotplex service restart")
 	}
 }
 
