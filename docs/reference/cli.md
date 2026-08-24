@@ -121,6 +121,8 @@ hotplex gateway stop
 
 重启 Gateway。停止当前实例后启动新实例，保留原配置和模式。
 
+受控停止或重启时，Gateway 会在停止前向当前已连接的 Slack、飞书和元信会话广播“服务即将停止”，并在新实例启动后向同一批去重后的会话广播“服务已启动”。通知为 best-effort，不覆盖 WebChat、进程崩溃、强制终止或无停止快照的冷启动。
+
 **示例**：
 
 ```bash
@@ -557,6 +559,8 @@ hotplex service stop
 ### `hotplex service restart`
 
 重启系统服务。
+
+正常重启会向当前已连接的 Slack、飞书和元信会话发送停止、启动两条生命周期通知；异常退出或强制终止无法保证发送。
 
 ```bash
 hotplex service restart
