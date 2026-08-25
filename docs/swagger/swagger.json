@@ -1899,6 +1899,18 @@
                             "$ref": "#/definitions/admin.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Gateway restart already in progress",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Gateway restart preparation failed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.ErrorResponse"
+                        }
+                    },
                     "503": {
                         "description": "Restart not configured",
                         "schema": {

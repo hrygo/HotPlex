@@ -2,9 +2,12 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -407,12 +410,43 @@ func feishuGatewayRestartAllowFromValue(cfg *Config) string {
 	if cfg == nil {
 		return "<nil>"
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "platform=%#v", cfg.Messaging.Feishu.GatewayRestartAllowFrom)
-	for _, bot := range cfg.Messaging.Feishu.Bots {
-		fmt.Fprintf(&b, ";bot=%q:%#v", bot.Name, bot.GatewayRestartAllowFrom)
+	type botAllowlist struct {
+		Name      string   `json:"name"`
+		AllowFrom []string `json:"allow_from"`
 	}
-	return b.String()
+	type allowlistSnapshot struct {
+		Platform []string       `json:"platform"`
+		Bots     []botAllowlist `json:"bots"`
+	}
+
+	platform := append([]string(nil), cfg.Messaging.Feishu.GatewayRestartAllowFrom...)
+	sort.Strings(platform)
+	bots := make([]botAllowlist, 0, len(cfg.Messaging.Feishu.Bots))
+	principalCount := len(platform)
+	for _, bot := range cfg.Messaging.Feishu.Bots {
+		allowFrom := append([]string(nil), bot.GatewayRestartAllowFrom...)
+		sort.Strings(allowFrom)
+		bots = append(bots, botAllowlist{Name: bot.Name, AllowFrom: allowFrom})
+		principalCount += len(allowFrom)
+	}
+	sort.Slice(bots, func(i, j int) bool {
+		if bots[i].Name != bots[j].Name {
+			return bots[i].Name < bots[j].Name
+		}
+		return strings.Join(bots[i].AllowFrom, "\x00") < strings.Join(bots[j].AllowFrom, "\x00")
+	})
+	payload, err := json.Marshal(allowlistSnapshot{Platform: platform, Bots: bots})
+	if err != nil {
+		return "sha256:invalid"
+	}
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf(
+		"sha256:%x;platform_count=%d;bot_count=%d;principal_count=%d",
+		digest,
+		len(platform),
+		len(bots),
+		principalCount,
+	)
 }
 
 // AuditLog returns a copy of the change audit log.

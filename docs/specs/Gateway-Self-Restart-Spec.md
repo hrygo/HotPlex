@@ -148,7 +148,7 @@ Admin API 先返回既有 `{"status":"restarting"}`，再异步 `Commit`；CLI �
 - 只有 ticket/request ID 匹配的调用方可以更新或释放租约。
 - 租约存在时，所有入口返回“restart already in progress”及 request ID，不再创建 helper。
 - `prepared` 状态若 owner PID 已不存在，可回收；其他状态超过 5 分钟且 owner/helper 均不存在时可回收。
-- 回收采用“读取校验 → 删除旧租约 → `O_EXCL` 重试”；最终仍只能有一个请求成功获取租约。
+- Acquire、Update、Release 的读改写序列由 `$HOTPLEX_HOME/.pids/gateway.restart.lock` 的 OS 文件锁跨进程串行化；锁文件权限为 `0600`，进程退出时由内核释放锁。stale 回收在该锁内执行“读取校验 → 删除旧租约 → `O_EXCL` 重试”，最终仍只能有一个请求成功获取租约。
 - helper 启动新进程后不立即删除租约；由新 Gateway 达到 ready 状态后完成租约。启动失败时保留租约至过期，避免失败循环。
 
 ### D5：跨重启回执不依赖 Session

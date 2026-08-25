@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -119,7 +120,7 @@ func setupRoutes(
 				Daemon:   true,
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, adminRestartPrepareError(err)
 			}
 			return func() error { return coordinator.Commit(ticket) }, func() error { return coordinator.Abort(ticket) }, nil
 		},
@@ -455,4 +456,14 @@ func setupRoutes(
 			return r.Method + " " + r.URL.Path
 		}),
 	)
+}
+
+func adminRestartPrepareError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, conflict := restartConflictRequestID(err); conflict {
+		return fmt.Errorf("%w: %w", admin.ErrRestartConflict, err)
+	}
+	return err
 }

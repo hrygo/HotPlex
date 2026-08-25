@@ -153,6 +153,32 @@ func TestDiffConfigs_FeishuBotGatewayRestartAllowFromIsHot(t *testing.T) {
 	require.True(t, found)
 }
 
+func TestFeishuGatewayRestartAllowFromValue_IsCanonicalAndRedacted(t *testing.T) {
+	t.Parallel()
+
+	first := Default()
+	first.Messaging.Feishu.GatewayRestartAllowFrom = []string{"ou_platform_b", "ou_platform_a"}
+	first.Messaging.Feishu.Bots = []FeishuBotConfig{
+		{Name: "support", GatewayRestartAllowFrom: []string{"ou_support"}},
+		{Name: "ops", GatewayRestartAllowFrom: []string{"ou_ops_b", "ou_ops_a"}},
+	}
+	second := Default()
+	second.Messaging.Feishu.GatewayRestartAllowFrom = []string{"ou_platform_a", "ou_platform_b"}
+	second.Messaging.Feishu.Bots = []FeishuBotConfig{
+		{Name: "ops", GatewayRestartAllowFrom: []string{"ou_ops_a", "ou_ops_b"}},
+		{Name: "support", GatewayRestartAllowFrom: []string{"ou_support"}},
+	}
+
+	firstValue := feishuGatewayRestartAllowFromValue(first)
+	secondValue := feishuGatewayRestartAllowFromValue(second)
+
+	require.Equal(t, firstValue, secondValue)
+	require.Contains(t, firstValue, "sha256:")
+	for _, openID := range []string{"ou_platform_a", "ou_platform_b", "ou_ops_a", "ou_ops_b", "ou_support"} {
+		require.NotContains(t, firstValue, openID)
+	}
+}
+
 func TestDiffConfigs_FullContentRetentionRequiresRestart(t *testing.T) {
 	t.Parallel()
 	prev := Default()

@@ -284,7 +284,7 @@ Bot 列表与详情的 `agent_configs` 元数据只包含 `soul`、`agents`、`t
 |------|------|-------|------|
 | POST | `/admin/restart` | `admin:write` | 触发网关重启 |
 
-**POST /admin/restart** — 两阶段异步触发网关重启：先获取全局 restart lease，成功后立即返回 `{ "status": "restarting" }`，再提交独立 helper 完成重启。已有事务时返回 `409 RESTART_REJECTED`；未配置 restart handler 时返回 `503`。Admin、CLI 与飞书入口共享同一 lease，不能并发绕过。
+**POST /admin/restart** — 两阶段异步触发网关重启：先获取全局 restart lease，成功并确认响应已刷新后返回 `{ "status": "restarting" }`，再提交独立 helper 完成重启。已有事务时返回 `409 RESTART_REJECTED`；实例发现、receipt 校验或文件系统等内部准备失败返回 `500 INTERNAL`；未配置 restart handler 时返回 `503`。Admin、CLI 与飞书入口共享同一 lease，不能并发绕过。
 
 ### 用户行为审计
 

@@ -87,50 +87,48 @@ func newRestartLeaseStore(path string, now func() time.Time, processAlive func(i
 }
 
 func (s *restartLeaseStore) Acquire(ownerPID int) (*restartLease, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if ownerPID <= 0 {
 		return nil, fmt.Errorf("acquire restart lease: invalid owner PID %d", ownerPID)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return nil, fmt.Errorf("create restart lease directory: %w", err)
-	}
-
-	for {
-		current, err := s.readUnlocked()
-		if err == nil {
-			if !s.stale(current) {
-				return nil, &restartLeaseConflictError{RequestID: current.RequestID}
-			}
-			if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("reclaim stale restart lease: %w", err)
-			}
-			continue
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-
-		requestID, err := newRestartRequestID()
-		if err != nil {
-			return nil, err
-		}
-		lease := &restartLease{
-			SchemaVersion: restartLeaseSchemaVersion,
-			RequestID:     requestID,
-			Phase:         restartLeasePrepared,
-			OwnerPID:      ownerPID,
-			CreatedAt:     s.now().UTC(),
-		}
-		if err := s.create(lease); err != nil {
-			if errors.Is(err, os.ErrExist) {
+	var acquired *restartLease
+	err := s.withExclusiveLock(func() error {
+		for {
+			current, err := s.readUnlocked()
+			if err == nil {
+				if !s.stale(current) {
+					return &restartLeaseConflictError{RequestID: current.RequestID}
+				}
+				if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("reclaim stale restart lease: %w", err)
+				}
 				continue
 			}
-			return nil, err
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+
+			requestID, err := newRestartRequestID()
+			if err != nil {
+				return err
+			}
+			lease := &restartLease{
+				SchemaVersion: restartLeaseSchemaVersion,
+				RequestID:     requestID,
+				Phase:         restartLeasePrepared,
+				OwnerPID:      ownerPID,
+				CreatedAt:     s.now().UTC(),
+			}
+			if err := s.create(lease); err != nil {
+				if errors.Is(err, os.ErrExist) {
+					continue
+				}
+				return err
+			}
+			acquired = lease
+			return nil
 		}
-		return lease, nil
-	}
+	})
+	return acquired, err
 }
 
 func (s *restartLeaseStore) Read() (*restartLease, error) {
@@ -196,41 +194,59 @@ func (s *restartLeaseStore) Update(requestID string, mutate func(*restartLease) 
 	if mutate == nil {
 		return errors.New("update restart lease: nil mutation")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	current, err := s.readUnlocked()
-	if err != nil {
-		return err
-	}
-	if current.RequestID != requestID || requestID == "" {
-		return errRestartLeaseTicketMismatch
-	}
-	if err := mutate(current); err != nil {
-		return err
-	}
-	if err := validateRestartLease(current); err != nil {
-		return err
-	}
-	return s.writeAtomic(current)
+	return s.withExclusiveLock(func() error {
+		current, err := s.readUnlocked()
+		if err != nil {
+			return err
+		}
+		if current.RequestID != requestID || requestID == "" {
+			return errRestartLeaseTicketMismatch
+		}
+		if err := mutate(current); err != nil {
+			return err
+		}
+		if err := validateRestartLease(current); err != nil {
+			return err
+		}
+		return s.writeAtomic(current)
+	})
 }
 
 func (s *restartLeaseStore) Release(requestID string) error {
+	return s.withExclusiveLock(func() error {
+		current, err := s.readUnlocked()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current.RequestID != requestID || requestID == "" {
+			return errRestartLeaseTicketMismatch
+		}
+		if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("release restart lease: %w", err)
+		}
+		return nil
+	})
+}
+
+func (s *restartLeaseStore) withExclusiveLock(action func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current, err := s.readUnlocked()
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("create restart lease directory: %w", err)
 	}
+	release, err := acquireRestartLeaseFileLock(s.path + ".lock")
 	if err != nil {
-		return err
+		return fmt.Errorf("acquire restart lease lock: %w", err)
 	}
-	if current.RequestID != requestID || requestID == "" {
-		return errRestartLeaseTicketMismatch
+	actionErr := action()
+	if releaseErr := release(); releaseErr != nil {
+		return errors.Join(actionErr, fmt.Errorf("release restart lease lock: %w", releaseErr))
 	}
-	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("release restart lease: %w", err)
-	}
-	return nil
+	return actionErr
 }
 
 func (s *restartLeaseStore) create(lease *restartLease) error {

@@ -460,6 +460,31 @@ func TestLifecycleBroadcast_RestartReceiptCoversNoSessionTarget(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestLifecycleBroadcast_InvalidRestartReceiptLogsAndQuarantines(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "receipt.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"schema_version":99}`), 0o600))
+	var logs bytes.Buffer
+	b := &lifecycleBroadcaster{
+		log:      slog.New(slog.NewJSONHandler(&logs, nil)),
+		receipts: newRestartReceiptStore(path),
+	}
+
+	receipt := b.readRestartReceipt()
+
+	require.Nil(t, receipt)
+	require.NoFileExists(t, path)
+	quarantined, err := filepath.Glob(path + ".corrupt.*")
+	require.NoError(t, err)
+	require.Len(t, quarantined, 1)
+	var record map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &record))
+	require.Equal(t, "receipt_invalid", record["error_kind"])
+	require.Equal(t, true, record["quarantined"])
+}
+
 func TestLifecycleBroadcast_RestartReceiptSurvivesSendFailure(t *testing.T) {
 	t.Parallel()
 

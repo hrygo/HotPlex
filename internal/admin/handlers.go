@@ -419,6 +419,8 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 // @Security     AdminBearerAuth
 // @Success      200  {object}  RestartResponse
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      409  {object}  ErrorResponse  "Gateway restart already in progress"
+// @Failure      500  {object}  ErrorResponse  "Gateway restart preparation failed"
 // @Failure      503  {object}  ErrorResponse  "Restart not configured"
 // @Router       /admin/restart [post]
 func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
@@ -434,15 +436,30 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	if a.restartPrepare != nil {
 		commit, abort, err := a.restartPrepare(r.Context())
 		if err != nil {
-			web.WriteAppError(w, http.StatusConflict, "RESTART_REJECTED", "gateway restart could not be scheduled")
+			if errors.Is(err, ErrRestartConflict) {
+				web.WriteAppError(w, http.StatusConflict, "RESTART_REJECTED", "gateway restart could not be scheduled")
+				return
+			}
+			a.log.Error("admin: restart prepare failed", "error_kind", "prepare_failed")
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "gateway restart could not be scheduled")
 			return
 		}
-		respondJSON(w, map[string]any{"status": "restarting"})
+		if err := respondJSONAndFlush(w, map[string]any{"status": "restarting"}); err != nil {
+			a.log.Warn("admin: restart acceptance response failed", "error_kind", "response_failed")
+			if abort != nil {
+				if abortErr := abort(); abortErr != nil {
+					a.log.Error("admin: restart abort failed", "error_kind", "abort_failed")
+				}
+			}
+			return
+		}
 		go func() {
 			if commitErr := commit(); commitErr != nil {
 				a.log.Error("admin: restart commit failed", "error_kind", "commit_failed")
 				if abort != nil {
-					_ = abort()
+					if abortErr := abort(); abortErr != nil {
+						a.log.Error("admin: restart abort failed", "error_kind", "abort_failed")
+					}
 				}
 			}
 		}()

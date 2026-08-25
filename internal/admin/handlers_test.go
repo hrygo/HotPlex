@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -140,6 +142,17 @@ func withScope(r *http.Request, scopes ...string) *http.Request {
 	return r.WithContext(ctx)
 }
 
+type restartFlushRecorder struct {
+	*httptest.ResponseRecorder
+	flushed  atomic.Bool
+	flushErr error
+}
+
+func (w *restartFlushRecorder) FlushError() error {
+	w.flushed.Store(true)
+	return w.flushErr
+}
+
 // --- Handler tests ---
 
 func TestCreateSession_Success(t *testing.T) {
@@ -205,6 +218,122 @@ func TestHandleDebugSession_DurableErrorsReturnNull(t *testing.T) {
 	require.Contains(t, response.Debug, "db_last_seq")
 	require.Nil(t, response.Debug["db_turn_count"])
 	require.Nil(t, response.Debug["db_last_seq"])
+}
+
+func TestHandleRestart_FlushesAcceptedResponseBeforeCommit(t *testing.T) {
+	t.Parallel()
+
+	w := &restartFlushRecorder{ResponseRecorder: httptest.NewRecorder()}
+	commitSawFlush := make(chan bool, 1)
+	api := newTestAPI(func(d *Deps) {
+		d.RestartPrepare = func(context.Context) (func() error, func() error, error) {
+			return func() error {
+				commitSawFlush <- w.flushed.Load()
+				return nil
+			}, func() error { return nil }, nil
+		}
+	})
+	r := withScope(httptest.NewRequest(http.MethodPost, "/admin/restart", nil), ScopeAdminWrite)
+
+	api.HandleRestart(w, r)
+
+	select {
+	case flushed := <-commitSawFlush:
+		require.True(t, flushed)
+	case <-time.After(time.Second):
+		require.FailNow(t, "restart commit was not called")
+	}
+}
+
+func TestHandleRestart_FlushFailureAbortsWithoutCommit(t *testing.T) {
+	t.Parallel()
+
+	w := &restartFlushRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		flushErr:         errors.New("flush failed"),
+	}
+	var commits atomic.Int32
+	var aborts atomic.Int32
+	api := newTestAPI(func(d *Deps) {
+		d.RestartPrepare = func(context.Context) (func() error, func() error, error) {
+			return func() error {
+					commits.Add(1)
+					return nil
+				}, func() error {
+					aborts.Add(1)
+					return nil
+				}, nil
+		}
+	})
+	r := withScope(httptest.NewRequest(http.MethodPost, "/admin/restart", nil), ScopeAdminWrite)
+
+	api.HandleRestart(w, r)
+
+	require.Eventually(t, func() bool {
+		return commits.Load() > 0 || aborts.Load() > 0
+	}, time.Second, 10*time.Millisecond)
+	require.Zero(t, commits.Load())
+	require.Equal(t, int32(1), aborts.Load())
+}
+
+func TestHandleRestart_MiddlewarePreservesFlush(t *testing.T) {
+	t.Parallel()
+
+	w := &restartFlushRecorder{ResponseRecorder: httptest.NewRecorder()}
+	outcome := make(chan string, 1)
+	api := newTestAPI(func(d *Deps) {
+		d.RestartPrepare = func(context.Context) (func() error, func() error, error) {
+			return func() error {
+					outcome <- "commit"
+					return nil
+				}, func() error {
+					outcome <- "abort"
+					return nil
+				}, nil
+		}
+	})
+	handler := api.Middleware(http.HandlerFunc(api.HandleRestart))
+	r := httptest.NewRequest(http.MethodPost, "/admin/restart", nil)
+	r.Header.Set("Authorization", "Bearer test-token")
+
+	handler.ServeHTTP(w, r)
+
+	select {
+	case got := <-outcome:
+		require.Equal(t, "commit", got)
+	case <-time.After(time.Second):
+		require.FailNow(t, "restart handler produced no outcome")
+	}
+	require.True(t, w.flushed.Load())
+}
+
+func TestHandleRestart_ClassifiesPrepareErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		prepareErr error
+		wantStatus int
+	}{
+		{name: "active restart conflict", prepareErr: ErrRestartConflict, wantStatus: http.StatusConflict},
+		{name: "internal prepare failure", prepareErr: errors.New("instance discovery failed"), wantStatus: http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			api := newTestAPI(func(d *Deps) {
+				d.RestartPrepare = func(context.Context) (func() error, func() error, error) {
+					return nil, nil, tt.prepareErr
+				}
+			})
+			w := httptest.NewRecorder()
+			r := withScope(httptest.NewRequest(http.MethodPost, "/admin/restart", nil), ScopeAdminWrite)
+
+			api.HandleRestart(w, r)
+
+			require.Equal(t, tt.wantStatus, w.Code)
+		})
+	}
 }
 
 func TestCreateSession_Forbidden(t *testing.T) {

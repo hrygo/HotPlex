@@ -263,9 +263,21 @@ func (b *lifecycleBroadcaster) readRestartReceipt() *gatewayRestartReceipt {
 	if err == nil {
 		return receipt
 	}
-	if _, quarantineErr := b.receipts.Quarantine(); quarantineErr != nil {
-		b.logger().Warn("lifecycle broadcast: invalid restart receipt", "phase", "restart", "error_kind", "receipt_invalid")
+	quarantinedPath, quarantineErr := b.receipts.Quarantine()
+	if quarantineErr != nil {
+		b.logger().Warn("lifecycle broadcast: invalid restart receipt",
+			"phase", "restart",
+			"error_kind", "receipt_invalid",
+			"quarantined", false,
+			"quarantine_error_kind", "quarantine_failed",
+		)
+		return nil
 	}
+	b.logger().Warn("lifecycle broadcast: invalid restart receipt",
+		"phase", "restart",
+		"error_kind", "receipt_invalid",
+		"quarantined", quarantinedPath != "",
+	)
 	return nil
 }
 

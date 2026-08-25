@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -39,6 +40,10 @@ const (
 	ScopeRuntimeRead  = "runtime:read"
 	ScopeRuntimeWrite = "runtime:write"
 )
+
+// ErrRestartConflict classifies a restart preparation failure caused by an
+// already active global restart transaction.
+var ErrRestartConflict = errors.New("gateway restart already in progress")
 
 // DBExecutor covers the sql.DB methods used by apiKeyUserStore.
 type DBExecutor interface {
@@ -133,6 +138,12 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 		r.WriteHeader(http.StatusOK)
 	}
 	return r.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach optional capabilities such as
+// Flusher on the underlying server ResponseWriter.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 type AdminAPI struct {

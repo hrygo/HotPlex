@@ -47,6 +47,80 @@ func TestRestartLease_ConcurrentAcquireOnlyOneWinner(t *testing.T) {
 	require.Equal(t, restartLeasePrepared, winner.Phase)
 }
 
+func TestRestartLease_StaleReclaimSerializesIndependentStores(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "gateway.restart")
+	stale := &restartLease{
+		SchemaVersion: restartLeaseSchemaVersion,
+		RequestID:     "req_0123456789abcdef0123456789abcdef",
+		Phase:         restartLeasePrepared,
+		OwnerPID:      9001,
+		CreatedAt:     time.Now().Add(-restartLeaseReclaimAfter),
+	}
+	data, err := json.Marshal(stale)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	staleCheckStarted := make(chan struct{})
+	releaseStaleCheck := make(chan struct{})
+	blockedStore := newRestartLeaseStore(path, time.Now, func(pid int) bool {
+		if pid == stale.OwnerPID {
+			close(staleCheckStarted)
+			<-releaseStaleCheck
+			return false
+		}
+		return pid == 1001
+	})
+	competingStore := newRestartLeaseStore(path, time.Now, func(pid int) bool {
+		return pid == 1001
+	})
+
+	type acquireResult struct {
+		lease *restartLease
+		err   error
+	}
+	blockedResult := make(chan acquireResult, 1)
+	go func() {
+		lease, acquireErr := blockedStore.Acquire(1001)
+		blockedResult <- acquireResult{lease: lease, err: acquireErr}
+	}()
+	<-staleCheckStarted
+
+	competingResult := make(chan acquireResult, 1)
+	go func() {
+		lease, acquireErr := competingStore.Acquire(2002)
+		competingResult <- acquireResult{lease: lease, err: acquireErr}
+	}()
+
+	var earlyCompeting *acquireResult
+	select {
+	case result := <-competingResult:
+		earlyCompeting = &result
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseStaleCheck)
+
+	blocked := <-blockedResult
+	var competing acquireResult
+	if earlyCompeting != nil {
+		competing = *earlyCompeting
+	} else {
+		competing = <-competingResult
+	}
+
+	winners := 0
+	for _, result := range []acquireResult{blocked, competing} {
+		if result.err == nil {
+			winners++
+			require.NotNil(t, result.lease)
+			continue
+		}
+		require.ErrorIs(t, result.err, errRestartLeaseInProgress)
+	}
+	require.Equal(t, 1, winners)
+}
+
 func TestRestartLease_PermissionsAndTicketFencing(t *testing.T) {
 	t.Parallel()
 
@@ -58,6 +132,9 @@ func TestRestartLease_PermissionsAndTicketFencing(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	lockInfo, err := os.Stat(path + ".lock")
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), lockInfo.Mode().Perm())
 
 	err = store.Update("req_wrong", func(current *restartLease) error {
 		current.Phase = restartLeaseHelperStarted
