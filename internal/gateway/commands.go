@@ -152,6 +152,17 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		h.cancelRetryIfNeeded(env.SessionID)
 
 		if err := h.bridge.StopAndDisposeCurrentRun(ctx, env.SessionID, workerRunID); err != nil {
+			if errors.Is(err, errWorkerRunTerminal) {
+				// A natural Done/Error committed while this stop waited for the
+				// event barrier. It already settled the turn, so neither provider
+				// cancellation nor a second synthetic terminal is appropriate.
+				h.stopFence.Rollback(env.SessionID, workerRunID, execID)
+				h.log.Debug("gateway: stop lost race to natural terminal",
+					"session_id", env.SessionID,
+					"worker_run_id", workerRunID,
+					"execution_id", execID)
+				return nil
+			}
 			if stopFailureAllowsRollback(err) {
 				// Provider cancellation never committed: reopen event flow and let
 				// a manual stop retry claim this same turn.

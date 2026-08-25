@@ -545,6 +545,37 @@ func TestHandleControl_Stop_Success(t *testing.T) {
 	require.Equal(t, "stopped_by_user", doneData["reason"])
 }
 
+func TestHandleControl_Stop_AfterNaturalTerminalIsSilent(t *testing.T) {
+	t.Parallel()
+
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_stop_after_natural_terminal"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	w := new(mockWorkerForHandler)
+	w.conn = noopworker.NewConn(sid, "user1")
+	w.On("StopCurrentTurn", mock.Anything).Return(nil).Maybe()
+	w.On("Terminate", mock.Anything).Return(nil).Maybe()
+	mgr.AttachWorker(context.Background(), sid, w)
+
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: mgr})
+	handler.bridge = bridge
+	binding := bridge.bindWorkerRun(sid, w, "run-stop-after-natural-terminal")
+	binding.lifecycle.terminalCommitted.Store(true)
+
+	env := controlEnvelope(sid, string(events.ControlActionStop))
+	env.OwnerID = "user1"
+	require.NoError(t, handler.handleControl(context.Background(), env),
+		"a natural terminal that won the event barrier must make the racing stop a silent no-op")
+	w.AssertNotCalled(t, "StopCurrentTurn", mock.Anything)
+	w.AssertNotCalled(t, "Terminate", mock.Anything)
+	require.True(t, handler.stopFence.Claim(sid, binding.id, ""),
+		"the no-op stop must roll back its claim instead of fencing the next turn")
+}
+
 func TestHandleControl_Stop_LedgerLookupFailureFailsClosed(t *testing.T) {
 	t.Parallel()
 	handler, mgr, hub, _ := newHandlerWithRealStore(t)

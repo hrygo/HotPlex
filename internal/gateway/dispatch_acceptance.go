@@ -7,11 +7,13 @@ import (
 
 var errWorkerDispatchPanic = errors.New("worker dispatch panicked")
 
-// runAcceptedDispatch releases an orchestration admission as soon as the
-// provider has accepted a turn, while still returning the adapter's eventual
-// completion result to the caller. The result channel is buffered so an
-// adapter completing concurrently with acceptance never leaks its goroutine.
-func runAcceptedDispatch(dispatch func(accepted func()) error, release func()) (bool, error) {
+// runAcceptedDispatch finalizes provider acceptance before releasing an
+// orchestration admission, while still returning the adapter's eventual
+// completion result to the caller. This ordering prevents a concurrent stop
+// from publishing its terminal before the accepted input's durable side
+// effects. The result channel is buffered so an adapter completing concurrently
+// with acceptance never leaks its goroutine.
+func runAcceptedDispatch(dispatch func(accepted func()) error, onAccepted, release func()) (bool, error) {
 	acceptedCh := make(chan struct{})
 	resultCh := make(chan error, 1)
 	var acceptedOnce sync.Once
@@ -25,20 +27,31 @@ func runAcceptedDispatch(dispatch func(accepted func()) error, release func()) (
 
 	select {
 	case <-acceptedCh:
-		release()
+		finalizeAcceptedDispatch(onAccepted, release)
 		return true, <-resultCh
 	case err := <-resultCh:
 		// A fast success without an explicit callback is still a completed
-		// delivery. An error means the request was not accepted. Either way,
-		// this admission no longer protects useful work.
-		wasAccepted := false
+		// delivery. An error without a callback means the request was not
+		// accepted. Either way, this admission no longer protects useful work.
+		wasAccepted := err == nil
 		select {
 		case <-acceptedCh:
 			wasAccepted = true
 		default:
 		}
-		release()
+		if wasAccepted {
+			finalizeAcceptedDispatch(onAccepted, release)
+		} else {
+			release()
+		}
 		return wasAccepted, err
+	}
+}
+
+func finalizeAcceptedDispatch(onAccepted, release func()) {
+	defer release()
+	if onAccepted != nil {
+		onAccepted()
 	}
 }
 

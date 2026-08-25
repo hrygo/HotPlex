@@ -278,7 +278,7 @@ func runC10QuiescenceTimeout(t *testing.T, profile e2econtract.WorkerProfile) {
 }
 
 func runC11BlockingInputStop(t *testing.T, profile e2econtract.WorkerProfile) {
-	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile, contracttest.WithEventCollector())
 	probe := h.Worker()
 	probe.EnableBlocking()
 	probe.BlockInputCompletion()
@@ -321,7 +321,43 @@ func runC11BlockingInputStop(t *testing.T, profile e2econtract.WorkerProfile) {
 	probe.ReleaseStopCurrentTurn()
 	require.NoError(t, <-stopDone, "C11: stop must complete after dispatch acceptance")
 	require.NoError(t, <-inputDone, "C11: successful stop must absorb the accepted input's cancellation result")
-	require.Zero(t, lifecycleCount(h.Events(), events.Error), "C11: accepted-input cancellation must not emit an error after stop")
+	var log []*events.Envelope
+	require.Eventually(t, func() bool {
+		log = h.Events()
+		for _, env := range log {
+			if env.Event.Type != events.InputAck {
+				continue
+			}
+			ack, ok := env.Event.Data.(events.InputAckData)
+			if ok && ack.Status == events.ExecutionStatusDelivered {
+				return true
+			}
+		}
+		return false
+	}, lifecycleWaitTimeout, lifecycleWaitPoll,
+		"C11: provider acceptance must eventually emit delivered input.ack")
+	require.Zero(t, lifecycleCount(log, events.Error), "C11: accepted-input cancellation must not emit an error after stop")
+	stoppedIndex := -1
+	deliveredIndex := -1
+	for i, env := range log {
+		if env.Event.Type == events.Done && lifecycleDoneReason(env) == "stopped_by_user" {
+			stoppedIndex = i
+		}
+		if env.Event.Type == events.InputAck {
+			ack, ok := env.Event.Data.(events.InputAckData)
+			if ok && ack.Status == events.ExecutionStatusDelivered {
+				deliveredIndex = i
+			}
+		}
+	}
+	require.NotEqual(t, -1, stoppedIndex, "C11: stop must emit stopped_by_user done")
+	require.NotEqual(t, -1, deliveredIndex, "C11: provider acceptance must emit delivered input.ack")
+	require.Less(t, deliveredIndex, stoppedIndex,
+		"C11: accepted-input delivery side effects must commit before the stop terminal")
+	for _, env := range log[stoppedIndex+1:] {
+		require.NotEqual(t, events.InputAck, env.Event.Type,
+			"C11: an accepted input must not emit input.ack after stopped_by_user done")
+	}
 }
 
 func runC12StaleStopClaim(t *testing.T, profile e2econtract.WorkerProfile) {

@@ -66,6 +66,26 @@ type forwardContext struct {
 	flog *slog.Logger
 }
 
+func (fc *forwardContext) claimTerminal() bool {
+	if fc == nil || !fc.terminalSent.CompareAndSwap(false, true) {
+		return false
+	}
+	if fc.lifecycle != nil {
+		fc.lifecycle.terminalCommitted.Store(true)
+	}
+	return true
+}
+
+func (fc *forwardContext) reopenTerminal() {
+	if fc == nil {
+		return
+	}
+	fc.terminalSent.Store(false)
+	if fc.lifecycle != nil {
+		fc.lifecycle.terminalCommitted.Store(false)
+	}
+}
+
 // flogOf returns fc.flog or b.log when fc is nil or fc.flog is unset.
 func (b *Bridge) flogOf(fc *forwardContext) *slog.Logger {
 	if fc != nil && fc.flog != nil {
@@ -152,7 +172,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 				return
 			}
 			defer releaseEvent()
-			if b.hub != nil && !w.IsStopped() && fc.terminalSent.CompareAndSwap(false, true) {
+			if b.hub != nil && !w.IsStopped() && fc.claimTerminal() {
 				b.sendError(sessionID, events.ErrCodeWorkerCrash, "worker event stream interrupted before terminal")
 			}
 		}
@@ -222,7 +242,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 			if !fc.turnTimerFired.CompareAndSwap(false, true) {
 				return
 			}
-			if !fc.terminalSent.CompareAndSwap(false, true) {
+			if !fc.claimTerminal() {
 				return
 			}
 			flog.Warn("bridge: turn timeout exceeded, terminating worker",
@@ -273,7 +293,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		}
 
 		// Flush buffered error that never reached a retry decision point.
-		if fc.pendingError != nil && fc.terminalSent.CompareAndSwap(false, true) {
+		if fc.pendingError != nil && fc.claimTerminal() {
 			releaseSeq := func() {}
 			canFlush := true
 			if b.collector != nil {
@@ -430,7 +450,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		// state(running) event. A post-terminal content event is therefore the
 		// next turn boundary; reopen the terminal fence before processing it.
 		fc.doneReceived = false
-		fc.terminalSent.Store(false)
+		fc.reopenTerminal()
 	}
 
 	// A worker stream may emit a duplicate Done/Error (or emit Done after a
@@ -438,7 +458,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// before any stats/runtime side effects so exactly one terminal is visible.
 	// Retryable errors return above as pending and claim only when flushed.
 	if env.Event.Type == events.Done || env.Event.Type == events.Error {
-		if w.IsStopped() || !fc.terminalSent.CompareAndSwap(false, true) {
+		if w.IsStopped() || !fc.claimTerminal() {
 			return
 		}
 	}
@@ -460,10 +480,10 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		fc.doneReceived = false
 		if stateData, ok := env.Event.Data.(events.StateData); ok && stateData.State == events.StateRunning {
 			fc.turnStartTime = time.Now()
-			fc.terminalSent.Store(false)
+			fc.reopenTerminal()
 		} else if m, ok := env.Event.Data.(map[string]any); ok && m["state"] == string(events.StateRunning) {
 			fc.turnStartTime = time.Now()
-			fc.terminalSent.Store(false)
+			fc.reopenTerminal()
 		}
 	}
 
@@ -525,7 +545,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
 		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(context.TODO(), sessionID, fc.lastError); shouldRetry {
 			fc.pendingError = nil
-			fc.terminalSent.Store(false)
+			fc.reopenTerminal()
 			// Pre-register cancel channel before launching goroutine to close
 			// the race window where CancelRetry can't find the channel.
 			cancelCh := make(chan struct{})
@@ -905,7 +925,7 @@ func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
 	if skipOnDone && fc.doneReceived {
 		return
 	}
-	if !fc.terminalSent.CompareAndSwap(false, true) {
+	if !fc.claimTerminal() {
 		fc.pendingError = nil
 		return
 	}

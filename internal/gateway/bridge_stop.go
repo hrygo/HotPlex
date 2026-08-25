@@ -12,6 +12,7 @@ import (
 var (
 	errWorkerRunChanged     = errors.New("worker run changed")
 	errWorkerEventBarrier   = errors.New("worker event barrier timeout")
+	errWorkerRunTerminal    = errors.New("worker run turn already terminal")
 	errWorkerStopNotApplied = errors.New("worker stop not applied")
 	errWorkerRunTeardown    = errors.New("worker run teardown failed")
 	errWorkerRunQuiescence  = errors.New("worker run quiescence timeout")
@@ -52,6 +53,11 @@ func (b *Bridge) StopAndDisposeCurrentRun(ctx context.Context, sessionID, expect
 		b.logStopPhase(sessionID, binding.id, "stop_failed", started, "run_changed", workerType)
 		return errWorkerRunChanged
 	}
+	if lifecycle.terminalCommitted.Load() {
+		lifecycle.unlockEventBarrier()
+		b.logStopPhase(sessionID, binding.id, "stop_completed", started, "already_terminal", workerType)
+		return errWorkerRunTerminal
+	}
 	if err := stopCurrentTurnUnderEventBarrier(lifecycle, func() error {
 		return binding.worker.StopCurrentTurn(stopCtx)
 	}); err != nil {
@@ -91,6 +97,29 @@ func (b *Bridge) StopAndDisposeCurrentRun(ctx context.Context, sessionID, expect
 		return errWorkerRunTeardown
 	}
 	b.logStopPhase(sessionID, binding.id, "stop_completed", started, "", workerType)
+	return nil
+}
+
+// beginWorkerRunTurn reopens the per-turn terminal state only after every
+// event admitted for the preceding turn has completed. The caller holds the
+// session dispatch gate, so a stop cannot observe the reopened state before
+// the new provider dispatch begins.
+func (b *Bridge) beginWorkerRunTurn(ctx context.Context, sessionID, expectedRunID string) error {
+	binding, ok := b.currentWorkerRunBinding(sessionID, expectedRunID)
+	if !ok || binding.lifecycle == nil {
+		return errWorkerRunChanged
+	}
+	lifecycle := binding.lifecycle
+	if !lifecycle.lockEventBarrier(ctx) {
+		return errWorkerEventBarrier
+	}
+	defer lifecycle.unlockEventBarrier()
+
+	current, stillCurrent := b.currentWorkerRunBinding(sessionID, expectedRunID)
+	if !stillCurrent || current.worker != binding.worker || current.lifecycle != lifecycle {
+		return errWorkerRunChanged
+	}
+	lifecycle.terminalCommitted.Store(false)
 	return nil
 }
 
@@ -192,6 +221,7 @@ func (b *Bridge) logStopPhase(sessionID, runID, phase string, started time.Time,
 func stopFailureAllowsRollback(err error) bool {
 	return errors.Is(err, errWorkerRunChanged) ||
 		errors.Is(err, errWorkerEventBarrier) ||
+		errors.Is(err, errWorkerRunTerminal) ||
 		errors.Is(err, errWorkerStopNotApplied)
 }
 
@@ -201,6 +231,8 @@ func stopErrorKind(err error) string {
 		return "run_changed"
 	case errors.Is(err, errWorkerEventBarrier):
 		return "event_barrier"
+	case errors.Is(err, errWorkerRunTerminal):
+		return "already_terminal"
 	case errors.Is(err, errWorkerStopNotApplied):
 		return "provider_cancel"
 	case errors.Is(err, errWorkerRunTeardown):

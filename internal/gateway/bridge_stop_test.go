@@ -21,6 +21,89 @@ type teardownPanicWorker struct {
 	killCalls int
 }
 
+func TestBridge_StopAndDisposeCurrentRun_NaturalTerminalSkipsProviderStop(t *testing.T) {
+	t.Parallel()
+
+	_, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_natural_terminal_before_stop"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	w := new(mockWorkerForHandler)
+	w.conn = noopworker.NewConn(sid, "user1")
+	w.On("StopCurrentTurn", mock.Anything).Return(nil).Maybe()
+	w.On("Terminate", mock.Anything).Return(nil).Maybe()
+	mgr.AttachWorker(context.Background(), sid, w)
+
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: mgr})
+	binding := bridge.bindWorkerRun(sid, w, "run-natural-terminal")
+	binding.lifecycle.terminalCommitted.Store(true)
+	close(binding.lifecycle.done)
+
+	stopErr := bridge.StopAndDisposeCurrentRun(context.Background(), sid, binding.id)
+	require.ErrorIs(t, stopErr, errWorkerRunTerminal)
+	w.AssertNotCalled(t, "StopCurrentTurn", mock.Anything)
+	w.AssertNotCalled(t, "Terminate", mock.Anything)
+	require.False(t, binding.lifecycle.stopping.Load())
+	_, _, stillBound := bridge.CurrentWorkerBinding(sid)
+	require.True(t, stillBound, "natural completion must retain the reusable worker run")
+}
+
+func TestBridge_BeginWorkerRunTurn_DrainsPriorEventBeforeReopen(t *testing.T) {
+	t.Parallel()
+
+	_, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_begin_turn_event_barrier"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	w := new(mockWorkerForHandler)
+	w.conn = noopworker.NewConn(sid, "user1")
+	w.On("Terminate", mock.Anything).Return(nil).Maybe()
+	mgr.AttachWorker(context.Background(), sid, w)
+
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: mgr})
+	binding := bridge.bindWorkerRun(sid, w, "run-begin-turn-barrier")
+	releaseEvent, admitted := binding.lifecycle.beginEvent()
+	require.True(t, admitted)
+	binding.lifecycle.terminalCommitted.Store(true)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- bridge.beginWorkerRunTurn(context.Background(), sid, binding.id)
+	}()
+	select {
+	case err := <-done:
+		require.FailNow(t, "new turn reopened before the preceding event drained", "error: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseEvent()
+	require.NoError(t, <-done)
+	require.False(t, binding.lifecycle.terminalCommitted.Load())
+}
+
+func TestForwardContext_TerminalStateMirrorsLifecycle(t *testing.T) {
+	t.Parallel()
+
+	lifecycle := newWorkerRunLifecycle(nil)
+	fc := &forwardContext{lifecycle: lifecycle}
+
+	require.True(t, fc.claimTerminal())
+	require.True(t, fc.terminalSent.Load())
+	require.True(t, lifecycle.terminalCommitted.Load())
+	require.False(t, fc.claimTerminal(), "one turn may claim only one terminal")
+
+	fc.reopenTerminal()
+	require.False(t, fc.terminalSent.Load())
+	require.False(t, lifecycle.terminalCommitted.Load())
+	require.True(t, fc.claimTerminal(), "the next turn must be able to claim a terminal")
+}
+
 func (w *teardownPanicWorker) Kill() error {
 	w.killCalls++
 	return nil

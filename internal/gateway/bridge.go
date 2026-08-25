@@ -137,11 +137,12 @@ type workerRunBinding struct {
 // never survives reset or replacement, even when the provider session identity
 // is resumed by the next Worker.
 type workerRunLifecycle struct {
-	eventMu        sync.RWMutex
-	eventAdmission chan struct{}
-	stopping       atomic.Bool
-	done           chan struct{}
-	conn           worker.SessionConn
+	eventMu           sync.RWMutex
+	eventAdmission    chan struct{}
+	stopping          atomic.Bool
+	terminalCommitted atomic.Bool
+	done              chan struct{}
+	conn              worker.SessionConn
 }
 
 func newWorkerRunLifecycle(conn worker.SessionConn) *workerRunLifecycle {
