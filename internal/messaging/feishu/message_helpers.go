@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -10,7 +11,9 @@ import (
 )
 
 const (
-	messageExpiry = 30 * time.Minute
+	messageExpiry       = 30 * time.Minute
+	receiveIDTypeChatID = "chat_id"
+	receiveIDTypeOpenID = "open_id"
 )
 
 // IsMessageExpired checks if a message's create time is beyond the expiry threshold.
@@ -23,14 +26,24 @@ func IsMessageExpired(createTimeMs int64) bool {
 
 // larkCreateMessage sends a new message via Lark IM Create API and returns the message ID.
 func larkCreateMessage(ctx context.Context, client *lark.Client, chatID, content string) (string, error) {
+	return larkCreateMessageTo(ctx, client, receiveIDTypeChatID, chatID, content)
+}
+
+func larkCreateMessageTo(ctx context.Context, client *lark.Client, receiveIDType, receiveID, content string) (string, error) {
+	if strings.TrimSpace(receiveID) == "" {
+		return "", fmt.Errorf("im message create: empty receive ID")
+	}
+	if receiveIDType != receiveIDTypeChatID && receiveIDType != receiveIDTypeOpenID {
+		return "", fmt.Errorf("im message create: unsupported receive ID type %q", receiveIDType)
+	}
 	body := larkim.NewCreateMessageReqBodyBuilder().
-		ReceiveId(chatID).
+		ReceiveId(receiveID).
 		MsgType(larkim.MsgTypeInteractive).
 		Content(content).
 		Build()
 
 	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType("chat_id").
+		ReceiveIdType(receiveIDType).
 		Body(body).
 		Build()
 

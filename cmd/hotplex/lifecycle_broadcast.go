@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -58,6 +59,8 @@ type lifecycleSendResult struct {
 
 type lifecycleBroadcaster struct {
 	log         *slog.Logger
+	config      *config.Config
+	configStore *config.ConfigStore
 	sessions    lifecycleSessionSource
 	connections lifecycleConnectionChecker
 	bots        lifecycleBotRegistry
@@ -89,6 +92,8 @@ func newLifecycleBroadcaster(deps *GatewayDeps) *lifecycleBroadcaster {
 		}
 		b.sessions = deps.SessionMgr
 		b.connections = deps.Hub
+		b.config = deps.Config
+		b.configStore = deps.ConfigStore
 	}
 	return b
 }
@@ -129,6 +134,8 @@ func (b *lifecycleBroadcaster) BroadcastStopping() lifecycleBroadcastSummary {
 	}
 	if explicit := lifecycleTargetFromRestartReceipt(receipt); explicit != nil {
 		targets = mergeLifecycleTargets([]*session.SessionInfo{explicit}, targets)
+	} else {
+		targets = mergeLifecycleTargets(b.configuredFeishuTargets(), targets)
 	}
 	summary.TargetCount = len(targets)
 	ctx, cancel := context.WithTimeout(context.Background(), b.effectiveTimeout())
@@ -145,6 +152,10 @@ func (b *lifecycleBroadcaster) BroadcastStarted() lifecycleBroadcastSummary {
 	if receipt != nil {
 		b.logger().Info("lifecycle broadcast: restart started", "request_id", receipt.RequestID)
 	}
+	var configuredTargets []*session.SessionInfo
+	if receipt == nil {
+		configuredTargets = b.configuredFeishuTargets()
+	}
 	var snapshot *lifecycleSnapshot
 	var claimedPath string
 	if b.snapshots != nil {
@@ -152,14 +163,14 @@ func (b *lifecycleBroadcaster) BroadcastStarted() lifecycleBroadcastSummary {
 		snapshot, claimedPath, err = b.snapshots.Claim()
 		if err != nil {
 			b.logger().Warn("lifecycle broadcast: snapshot claim failed", "phase", lifecyclePhaseStarted, "err", err)
-			if receipt == nil {
+			if receipt == nil && len(configuredTargets) == 0 {
 				return summary
 			}
 			snapshot = nil
 			claimedPath = ""
 		}
 	}
-	if snapshot == nil && receipt == nil {
+	if snapshot == nil && receipt == nil && len(configuredTargets) == 0 {
 		return summary
 	}
 	defer func() {
@@ -186,6 +197,7 @@ func (b *lifecycleBroadcaster) BroadcastStarted() lifecycleBroadcastSummary {
 		}
 	}
 	targets := collectLifecycleTargets(restored, func(string) bool { return true })
+	targets = mergeLifecycleTargets(configuredTargets, targets)
 	explicit := lifecycleTargetFromRestartReceipt(receipt)
 	explicitKey, explicitValid := lifecycleTargetKey(explicit)
 	if explicitValid {
@@ -291,6 +303,52 @@ func lifecycleTargetFromRestartReceipt(receipt *gatewayRestartReceipt) *session.
 		BotName:     receipt.BotName,
 		PlatformKey: maps.Clone(receipt.PlatformKey),
 	}
+}
+
+func (b *lifecycleBroadcaster) configuredFeishuTargets() []*session.SessionInfo {
+	if b == nil {
+		return nil
+	}
+	cfg := b.config
+	if b.configStore != nil {
+		if current := b.configStore.Load(); current != nil {
+			cfg = current
+		}
+	}
+	if cfg == nil || !cfg.Messaging.Feishu.Enabled {
+		return nil
+	}
+
+	platformAllowlist := cfg.Messaging.Feishu.GatewayRestartAllowFrom
+	targets := make([]*session.SessionInfo, 0)
+	seen := make(map[string]struct{})
+	for _, bot := range cfg.Messaging.Feishu.Bots {
+		botName := strings.TrimSpace(bot.Name)
+		if botName == "" {
+			continue
+		}
+		for _, rawOpenID := range config.ResolveGatewayRestartAllowFrom(platformAllowlist, bot.GatewayRestartAllowFrom) {
+			openID := strings.TrimSpace(rawOpenID)
+			if openID == "" {
+				continue
+			}
+			routeKey := botName + lifecycleTargetSeparator + openID
+			if _, duplicate := seen[routeKey]; duplicate {
+				continue
+			}
+			seen[routeKey] = struct{}{}
+			targetHash := sha256.Sum256([]byte(routeKey))
+			targets = append(targets, &session.SessionInfo{
+				ID:       fmt.Sprintf("lifecycle:feishu:%x", targetHash),
+				Platform: string(messaging.PlatformFeishu),
+				BotName:  botName,
+				PlatformKey: map[string]string{
+					"open_id": openID,
+				},
+			})
+		}
+	}
+	return targets
 }
 
 func mergeLifecycleTargets(groups ...[]*session.SessionInfo) []*session.SessionInfo {
@@ -608,10 +666,15 @@ func lifecycleTargetKey(si *session.SessionInfo) (string, bool) {
 		fields = append(fields, si.PlatformKey["team_id"], channelID, si.PlatformKey["thread_ts"])
 	case messaging.PlatformFeishu:
 		chatID := si.PlatformKey["chat_id"]
-		if chatID == "" {
+		if chatID != "" {
+			fields = append(fields, "chat_id", chatID, si.PlatformKey["thread_ts"])
+			break
+		}
+		openID := si.PlatformKey["open_id"]
+		if openID == "" {
 			return "", false
 		}
-		fields = append(fields, chatID, si.PlatformKey["thread_ts"])
+		fields = append(fields, "open_id", openID)
 	case messaging.PlatformYuanxin:
 		messageID := si.PlatformKey["message_id"]
 		if messageID == "" {

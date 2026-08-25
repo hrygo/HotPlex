@@ -370,14 +370,19 @@ func TestLifecycleBroadcast_ConstructorUsesGatewayDependencies(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{
+		Pool: config.PoolConfig{MaxSize: 17},
+	}
+	store := config.NewConfigStore(cfg, logger)
 	b := newLifecycleBroadcaster(&GatewayDeps{
-		Log: logger,
-		Config: &config.Config{
-			Pool: config.PoolConfig{MaxSize: 17},
-		},
+		Log:         logger,
+		Config:      cfg,
+		ConfigStore: store,
 	})
 
 	require.Same(t, logger, b.log)
+	require.Same(t, cfg, b.config)
+	require.Same(t, store, b.configStore)
 	require.Equal(t, 17, b.snapshots.maxTargets)
 	require.Equal(t, lifecycleBroadcastTimeout, b.timeout)
 	require.Equal(t, lifecycleBroadcastConcurrency, b.concurrency)

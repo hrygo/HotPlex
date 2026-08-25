@@ -247,14 +247,18 @@ func (a *Adapter) replyOrSend(ctx context.Context, msgID, chatID, text string) e
 	return a.sendTextMessage(ctx, chatID, text)
 }
 
-// SendProactiveMessage delivers a system-originated message to a Feishu chat.
-// When message_id is present in platformKey, it replies to that message.
+// SendProactiveMessage delivers a system-originated message to a Feishu chat
+// or user. When chat_id and message_id are present, it replies to that message.
 func (a *Adapter) SendProactiveMessage(ctx context.Context, text string, platformKey map[string]string) error {
 	chatID := platformKey["chat_id"]
-	if chatID == "" {
-		return fmt.Errorf("feishu: missing chat_id in platform_key")
+	if chatID != "" {
+		return a.replyOrSend(ctx, platformKey["message_id"], chatID, messaging.SanitizeText(text))
 	}
-	return a.replyOrSend(ctx, platformKey["message_id"], chatID, messaging.SanitizeText(text))
+	openID := platformKey["open_id"]
+	if openID == "" {
+		return fmt.Errorf("feishu: missing chat_id or open_id in platform_key")
+	}
+	return a.sendTextMessageTo(ctx, receiveIDTypeOpenID, openID, messaging.SanitizeText(text))
 }
 
 // SendCronResult delivers a cron job result to a Feishu chat.
@@ -263,18 +267,22 @@ func (a *Adapter) SendCronResult(ctx context.Context, text string, platformKey m
 }
 
 func (a *Adapter) sendTextMessage(ctx context.Context, chatID, text string) error {
+	return a.sendTextMessageTo(ctx, receiveIDTypeChatID, chatID, text)
+}
+
+func (a *Adapter) sendTextMessageTo(ctx context.Context, receiveIDType, receiveID, text string) error {
 	if a.larkClient == nil {
 		return fmt.Errorf("feishu: lark client not initialized")
 	}
 
 	cardJSON := buildCardContent(text, cardHeader{Title: a.resolveDisplayName()})
-	a.Log.Debug("feishu: sending card message", "chat", chatID, "content_len", len(cardJSON))
+	a.Log.Debug("feishu: sending card message", "receive_id_type", receiveIDType, "content_len", len(cardJSON))
 
-	_, err := larkCreateMessage(ctx, a.larkClient, chatID, cardJSON)
+	_, err := larkCreateMessageTo(ctx, a.larkClient, receiveIDType, receiveID, cardJSON)
 	if err != nil {
 		return fmt.Errorf("feishu: send message: %w", err)
 	}
-	a.Log.Debug("feishu: message sent", "chat", chatID)
+	a.Log.Debug("feishu: message sent", "receive_id_type", receiveIDType)
 	return nil
 }
 

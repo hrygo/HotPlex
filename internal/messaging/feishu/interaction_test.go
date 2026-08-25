@@ -16,13 +16,13 @@ import (
 
 var _ messaging.ProactiveMessageSender = (*Adapter)(nil)
 
-func TestAdapter_SendProactiveMessage_MissingChatID(t *testing.T) {
+func TestAdapter_SendProactiveMessage_MissingRecipient(t *testing.T) {
 	t.Parallel()
 	a := &Adapter{}
 
 	err := a.SendProactiveMessage(context.Background(), "hello", map[string]string{})
 
-	require.EqualError(t, err, "feishu: missing chat_id in platform_key")
+	require.EqualError(t, err, "feishu: missing chat_id or open_id in platform_key")
 }
 
 func TestAdapter_SendProactiveMessage_NilClient(t *testing.T) {
