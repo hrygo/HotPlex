@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.42.1-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.43.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,7 +133,7 @@ HotPlex 把“用户在哪里对话”和“哪个 Agent 执行任务”分离�
 
 Worker 可以按 Bot 或平台指定，其余场景继承部署级共享默认值。
 
-## ✨ 最新版本：v1.42.1
+## ✨ 最新版本：v1.43.0
 
 - **Turn 与重连更可靠。** 持久化 turn 身份、有序事件发布、有限次 WebSocket 初始化重试和序列水化，让重连及不确定投递结果更安全。
 - **Agent Session 具备可解释运行事实。** Gateway、CLI、Admin API 与 WebChat 统一展示当前 Worker、工具和可调用 Skill 能力。

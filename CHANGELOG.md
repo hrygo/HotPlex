@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.43.0] - 2026-08-25
+
+### Summary
+
+v1.43.0 是一次 minor 版本更新，核心主题是 **Gateway 受控重启与生命周期闭环**。本版本为 CLI、Admin API 和飞书运维入口统一了安全的重启控制面，加入全局 fenced lease、独立 helper、持久化 receipt 与 Worker run quiescence；同时向 Slack、飞书和元信会话发送可追踪的停止/启动通知。
+
+### Added
+
+- **Gateway Operations**: 新增 `hotplex gateway restart`、`POST /admin/restart` 与飞书 `/gateway restart` 入口；三者共享 fenced restart lease 和独立 helper，拒绝重叠事务并保留请求回执。
+- **Feishu Operations**: 新增 `gateway_restart_allow_from` 及对应环境变量，仅允许显式 OpenID 白名单执行 Gateway 重启；原请求会话可收到带 request ID 的完成/失败回执。
+- **Lifecycle**: 受控停止或重启时等待当前 Worker run 静默退出，并向已连接的 Slack、飞书和元信会话广播停止与启动通知；通知失败可重试且不阻塞生命周期。
+
+### Changed
+
+- **Restart Coordination**: CLI、Admin API、飞书和服务生命周期统一经过 coordinator，跨平台复用 lease、receipt、PID 探测和 detached helper 流程；`--detached` 保留为兼容参数。
+- **Configuration**: Gateway restart 白名单支持平台级与 Bot 级配置，并遵循现有配置热更新边界。
+
+### Fixed
+
+- **Reliability**: 修复重启准备/提交/启动就绪阶段的并发竞争、旧 Gateway 仍存活时的清理时序、生命周期回执丢失，以及配置检查测试中的并发不确定性。
+
+### Security
+
+- **Gateway Operations**: 非法或扩展的 `/gateway` 命令保留在 Gateway 控制面，不会回退给 Worker；restart lease、receipt 有大小与状态校验，PID 探测异常默认拒绝执行。
+
 ## [1.42.1] - 2026-08-24
 
 ### Added
