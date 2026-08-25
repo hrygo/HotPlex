@@ -64,10 +64,31 @@ func TestRetryTerminal_ExpiryReturnsOriginalError(t *testing.T) {
 	got := collectN(t, ch, 2)
 	require.Equal(t, events.Error, got[0].Event.Type)
 	errData := got[0].Event.Data.(events.ErrorData)
+	require.Equal(t, events.ErrCodeRateLimited, errData.Code)
 	require.Equal(t, "Monthly usage limit reached", errData.Message)
 	require.Equal(t, events.Done, got[1].Event.Type)
 	done := got[1].Event.Data.(events.DoneData)
 	require.False(t, done.Success)
+}
+
+func TestRetryErrorCode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		message string
+		want    events.ErrorCode
+	}{
+		{name: "monthly usage limit", message: "Monthly usage limit reached", want: events.ErrCodeRateLimited},
+		{name: "http 429", message: "provider returned 429", want: events.ErrCodeRateLimited},
+		{name: "generic provider failure", message: "provider connection failed", want: events.ErrCodeInternalError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, retryErrorCode(tt.message))
+		})
+	}
 }
 
 func TestRetryTerminal_FallbackCancelsStaleExpiry(t *testing.T) {

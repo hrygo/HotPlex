@@ -477,12 +477,33 @@ func (c *Converter) handleRetryExhausted(sessionID, message string) []*events.En
 	}
 	return []*events.Envelope{
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
-			Code:    events.ErrCodeInternalError,
+			Code:    retryErrorCode(message),
 			Message: message,
 		}),
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
 			events.DoneData{Success: false, Stats: stats}),
 	}
+}
+
+func retryErrorCode(message string) events.ErrorCode {
+	normalized := strings.ToLower(message)
+	for _, marker := range []string{
+		"rate limit",
+		"rate-limit",
+		"usage limit",
+		"quota",
+		"too many requests",
+	} {
+		if strings.Contains(normalized, marker) {
+			return events.ErrCodeRateLimited
+		}
+	}
+	for _, field := range strings.Fields(normalized) {
+		if strings.Trim(field, "()[]{}:;,") == "429" {
+			return events.ErrCodeRateLimited
+		}
+	}
+	return events.ErrCodeInternalError
 }
 
 func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) []*events.Envelope {
