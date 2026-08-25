@@ -17,9 +17,9 @@ import (
 // with checkers in other files.
 func withConfigPath(t *testing.T, path string) {
 	t.Helper()
-	orig := configPath
+	orig := getConfigPath()
 	SetConfigPath(path)
-	t.Cleanup(func() { configPath = orig })
+	t.Cleanup(func() { SetConfigPath(orig) })
 }
 
 // resetConfigPath is a compatibility helper that sets configPath to "".
@@ -27,13 +27,13 @@ func withConfigPath(t *testing.T, path string) {
 func resetConfigPath() { SetConfigPath("") }
 
 func TestSetConfigPath(t *testing.T) {
-	orig := configPath
-	defer func() { configPath = orig }()
+	orig := getConfigPath()
+	defer func() { SetConfigPath(orig) }()
 
 	SetConfigPath("/some/path/config.yaml")
-	require.Equal(t, "/some/path/config.yaml", configPath)
+	require.Equal(t, "/some/path/config.yaml", getConfigPath())
 	SetConfigPath("")
-	require.Equal(t, "", configPath)
+	require.Equal(t, "", getConfigPath())
 }
 
 func TestConfigExists_Missing(t *testing.T) {

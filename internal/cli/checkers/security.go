@@ -112,11 +112,11 @@ func (c filePermsChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	if configPath != "" {
-		checkPerm(filepath.Dir(configPath), 0o700)
-		checkPerm(configPath, 0o600)
+	if getConfigPath() != "" {
+		checkPerm(filepath.Dir(getConfigPath()), 0o700)
+		checkPerm(getConfigPath(), 0o600)
 
-		cfg, err := config.Load(configPath)
+		cfg, err := config.Load(getConfigPath())
 		if err == nil && cfg.DB.Path != "" {
 			checkPerm(filepath.Dir(cfg.DB.Path), 0o700)
 		}
@@ -222,8 +222,8 @@ func init() {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func envFilePath() string {
-	if configPath != "" {
-		return filepath.Join(filepath.Dir(configPath), ".env")
+	if getConfigPath() != "" {
+		return filepath.Join(filepath.Dir(getConfigPath()), ".env")
 	}
 	return ".env"
 }

@@ -80,15 +80,15 @@ func TestFixConfigValues(t *testing.T) {
 	withConfigPath(t, filepath.Join(dir, "config.yaml"))
 
 	cfgContent := "gateway:\n  addr: \":99999\"\nadmin:\n  enabled: true\n  addr: \":88888\"\ndb:\n  path: \"\"\n"
-	require.NoError(t, os.WriteFile(configPath, []byte(cfgContent), 0o600))
+	require.NoError(t, os.WriteFile(getConfigPath(), []byte(cfgContent), 0o600))
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(getConfigPath())
 	require.NoError(t, err)
 
 	err = fixConfigValues(cfg)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(getConfigPath())
 	require.NoError(t, err)
 	require.Contains(t, string(data), "gateway")
 }
