@@ -137,17 +137,21 @@ type workerRunBinding struct {
 // never survives reset or replacement, even when the provider session identity
 // is resumed by the next Worker.
 type workerRunLifecycle struct {
-	eventMu  sync.RWMutex
-	stopping atomic.Bool
-	done     chan struct{}
-	conn     worker.SessionConn
+	eventMu        sync.RWMutex
+	eventAdmission chan struct{}
+	stopping       atomic.Bool
+	done           chan struct{}
+	conn           worker.SessionConn
 }
 
 func newWorkerRunLifecycle(conn worker.SessionConn) *workerRunLifecycle {
-	return &workerRunLifecycle{
-		done: make(chan struct{}),
-		conn: conn,
+	lifecycle := &workerRunLifecycle{
+		eventAdmission: make(chan struct{}, 1),
+		done:           make(chan struct{}),
+		conn:           conn,
 	}
+	lifecycle.eventAdmission <- struct{}{}
+	return lifecycle
 }
 
 // beginEvent admits one complete event-side-effect operation. A successful
@@ -157,12 +161,47 @@ func (l *workerRunLifecycle) beginEvent() (func(), bool) {
 	if l == nil {
 		return func() {}, true
 	}
+	if l.stopping.Load() {
+		return nil, false
+	}
+	<-l.eventAdmission
 	l.eventMu.RLock()
+	l.eventAdmission <- struct{}{}
 	if l.stopping.Load() {
 		l.eventMu.RUnlock()
 		return nil, false
 	}
 	return l.eventMu.RUnlock, true
+}
+
+// lockEventBarrier prevents new event admissions, then waits for already
+// admitted side effects to drain. Holding the admission token makes TryLock
+// starvation-free without spawning an orphan goroutine when ctx expires.
+func (l *workerRunLifecycle) lockEventBarrier(ctx context.Context) bool {
+	select {
+	case <-l.eventAdmission:
+	case <-ctx.Done():
+		return false
+	}
+
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if l.eventMu.TryLock() {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			l.eventAdmission <- struct{}{}
+			return false
+		case <-ticker.C:
+		}
+	}
+}
+
+func (l *workerRunLifecycle) unlockEventBarrier() {
+	l.eventMu.Unlock()
+	l.eventAdmission <- struct{}{}
 }
 
 type crashHistory struct {

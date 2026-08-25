@@ -11,6 +11,7 @@ import (
 
 var (
 	errWorkerRunChanged     = errors.New("worker run changed")
+	errWorkerEventBarrier   = errors.New("worker event barrier timeout")
 	errWorkerStopNotApplied = errors.New("worker stop not applied")
 	errWorkerRunTeardown    = errors.New("worker run teardown failed")
 	errWorkerRunQuiescence  = errors.New("worker run quiescence timeout")
@@ -41,20 +42,23 @@ func (b *Bridge) StopAndDisposeCurrentRun(ctx context.Context, sessionID, expect
 
 	b.logStopPhase(sessionID, binding.id, "stop_requested", started, "", workerType)
 	lifecycle := binding.lifecycle
-	lifecycle.eventMu.Lock()
+	if !lifecycle.lockEventBarrier(stopCtx) {
+		b.logStopPhase(sessionID, binding.id, "stop_failed", started, "event_barrier", workerType)
+		return errWorkerEventBarrier
+	}
 	current, stillCurrent := b.currentWorkerRunBinding(sessionID, expectedRunID)
 	if !stillCurrent || current.worker != binding.worker || current.lifecycle != lifecycle {
-		lifecycle.eventMu.Unlock()
+		lifecycle.unlockEventBarrier()
 		b.logStopPhase(sessionID, binding.id, "stop_failed", started, "run_changed", workerType)
 		return errWorkerRunChanged
 	}
 	if err := binding.worker.StopCurrentTurn(stopCtx); err != nil {
-		lifecycle.eventMu.Unlock()
+		lifecycle.unlockEventBarrier()
 		b.logStopPhase(sessionID, binding.id, "stop_failed", started, "provider_cancel", workerType)
 		return errWorkerStopNotApplied
 	}
 	lifecycle.stopping.Store(true)
-	lifecycle.eventMu.Unlock()
+	lifecycle.unlockEventBarrier()
 	b.logStopPhase(sessionID, binding.id, "provider_cancelled", started, "", workerType)
 
 	b.logStopPhase(sessionID, binding.id, "worker_terminating", started, "", workerType)
@@ -164,13 +168,17 @@ func (b *Bridge) logStopPhase(sessionID, runID, phase string, started time.Time,
 }
 
 func stopFailureAllowsRollback(err error) bool {
-	return errors.Is(err, errWorkerRunChanged) || errors.Is(err, errWorkerStopNotApplied)
+	return errors.Is(err, errWorkerRunChanged) ||
+		errors.Is(err, errWorkerEventBarrier) ||
+		errors.Is(err, errWorkerStopNotApplied)
 }
 
 func stopErrorKind(err error) string {
 	switch {
 	case errors.Is(err, errWorkerRunChanged):
 		return "run_changed"
+	case errors.Is(err, errWorkerEventBarrier):
+		return "event_barrier"
 	case errors.Is(err, errWorkerStopNotApplied):
 		return "provider_cancel"
 	case errors.Is(err, errWorkerRunTeardown):

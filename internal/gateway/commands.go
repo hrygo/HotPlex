@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -99,10 +100,18 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		// different (or no) record and admit the duplicate.
 		var execID, persistedRunID string
 		if h.executionStore != nil {
-			if rec, err := h.executionStore.LatestBySession(ctx, env.SessionID); err == nil {
-				execID = rec.ExecutionID
-				persistedRunID = rec.WorkerRunID
+			rec, lookupErr := h.executionStore.LatestBySession(ctx, env.SessionID)
+			if lookupErr != nil || rec == nil {
+				errorKind := "lookup_failed"
+				if errors.Is(lookupErr, execution.ErrNotFound) {
+					errorKind = "not_found"
+				}
+				h.log.Warn("gateway: stop execution identity unavailable",
+					"session_id", env.SessionID, "error_kind", errorKind)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop execution identity unavailable")
 			}
+			execID = rec.ExecutionID
+			persistedRunID = rec.WorkerRunID
 		}
 		if workerRunID == "" {
 			workerRunID = persistedRunID

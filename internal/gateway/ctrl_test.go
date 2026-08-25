@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -542,6 +543,36 @@ func TestHandleControl_Stop_Success(t *testing.T) {
 	doneData, ok := doneEnv.Event.Data.(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "stopped_by_user", doneData["reason"])
+}
+
+func TestHandleControl_Stop_LedgerLookupFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+	handler, mgr, hub, _ := newHandlerWithRealStore(t)
+
+	const sid = "sess_stop_ledger_lookup_failure"
+	_, err := mgr.Create(context.Background(), sid, "user1", worker.TypeClaudeCode, nil, "", "")
+	require.NoError(t, err)
+	require.NoError(t, mgr.Transition(context.Background(), sid, events.StateRunning))
+
+	w := new(mockWorkerForHandler)
+	w.conn = noopworker.NewConn(sid, "user1")
+	w.On("StopCurrentTurn", mock.Anything).Return(errors.New("stop must not be called")).Maybe()
+	w.On("Terminate", mock.Anything).Return(nil).Maybe()
+	mgr.AttachWorker(context.Background(), sid, w)
+
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: mgr})
+	handler.bridge = bridge
+	bridge.bindWorkerRun(sid, w, "run-stop-ledger-failure")
+	handler.executionStore = &fakeExecutionStore{latestErr: errors.New("injected ledger outage")}
+
+	env := controlEnvelope(sid, string(events.ControlActionStop))
+	env.OwnerID = "user1"
+	err = handler.handleControl(context.Background(), env)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stop execution identity unavailable")
+	w.AssertNotCalled(t, "StopCurrentTurn", mock.Anything)
+	require.True(t, handler.stopFence.Claim(sid, "run-stop-ledger-failure", "exec-stop-ledger-failure"),
+		"lookup failure must not mutate the exact stop fence")
 }
 
 func TestHandleControl_Terminate_Unauthorized(t *testing.T) {

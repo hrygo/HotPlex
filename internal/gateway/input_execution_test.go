@@ -36,6 +36,7 @@ type fakeExecutionStore struct {
 	finishRunID   string
 	finishStatus  execution.RuntimeStatus
 	finishErr     error
+	latestErr     error
 }
 
 func (s *fakeExecutionStore) Accept(_ context.Context, req execution.AcceptRequest) (*execution.Record, bool, error) {
@@ -105,6 +106,9 @@ func (s *fakeExecutionStore) OpenBySession(context.Context, string) (*execution.
 func (s *fakeExecutionStore) LatestBySession(context.Context, string) (*execution.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.latestErr != nil {
+		return nil, s.latestErr
+	}
 	if s.openRecord != nil {
 		return s.openRecord, nil
 	}
