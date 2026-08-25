@@ -17,6 +17,7 @@ import (
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/internal/sqlutil"
 	"github.com/hrygo/hotplex/internal/worker"
+	noopworker "github.com/hrygo/hotplex/internal/worker/noop"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -484,9 +485,21 @@ func TestHandleControl_Stop_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	w := new(mockWorkerForHandler)
+	w.conn = noopworker.NewConn(sid, "user1")
 	w.On("StopCurrentTurn", mock.Anything).Return(nil)
-	w.On("Terminate", mock.Anything).Return(nil).Maybe()
+	w.On("Terminate", mock.Anything).Return(nil)
+	w.On("Wait").Return(0, nil)
 	mgr.AttachWorker(context.Background(), sid, w)
+	bridge := NewBridge(BridgeDeps{Log: slog.Default(), Hub: hub, SM: mgr})
+	handler.bridge = bridge
+	runBinding := bridge.bindWorkerRun(sid, w, "run-stop-success")
+	bridge.fwdWg.Add(1)
+	go func() {
+		defer bridge.fwdWg.Done()
+		defer close(runBinding.lifecycle.done)
+		defer bridge.clearWorkerRun(sid, w, runBinding.id)
+		bridge.launchForwarderLocked(runBinding, sid, forwardOpts{ctx: context.Background(), workerRunID: runBinding.id})
+	}()
 
 	// The stop must converge the pending execution runtime (acceptance A3:
 	// Gateway stopped_by_user closed loop).

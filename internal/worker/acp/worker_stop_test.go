@@ -182,3 +182,27 @@ func TestWorker_StopCurrentTurn_CancelErrorStillFails(t *testing.T) {
 	require.Contains(t, err.Error(), "acp cancel")
 	require.False(t, w.IsStopped(), "stopped marker must clear so the gateway can roll back its stop fence")
 }
+
+func TestWorker_StopThenTerminateClosesOnlyCurrentRun(t *testing.T) {
+	t.Parallel()
+
+	live := newACPConn("user-1", "session-1", slog.Default())
+	stopped := &Worker{BaseWorker: base.NewBaseWorker(slog.Default(), nil), conn: live}
+	stopped.SetWorkerSessionID("provider-session-1")
+
+	require.NoError(t, stopped.StopCurrentTurn(context.Background()))
+	require.True(t, stopped.IsStopped())
+	require.NoError(t, stopped.Terminate(context.Background()))
+	require.NoError(t, stopped.Terminate(context.Background()), "teardown must be idempotent after stop")
+	_, open := <-live.Recv()
+	require.False(t, open, "teardown must close the stopped run connection")
+
+	resumed := &Worker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		conn:       newACPConn("user-1", "session-1", slog.Default()),
+	}
+	resumed.SetWorkerSessionID(stopped.GetWorkerSessionID())
+	require.NotSame(t, stopped, resumed)
+	require.Equal(t, "provider-session-1", resumed.GetWorkerSessionID())
+	require.False(t, resumed.IsStopped(), "stopped state must not leak into a fresh run")
+}

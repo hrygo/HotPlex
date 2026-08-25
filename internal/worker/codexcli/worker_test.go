@@ -564,6 +564,70 @@ func TestAppServerWorkerTerminate(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAppServerWorker_StopThenTerminatePreservesSiblingWrapper(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Hour})
+	var output strings.Builder
+	mgr.stdin = struct {
+		io.Writer
+		io.Closer
+	}{
+		Writer: &output,
+		Closer: io.NopCloser(nil),
+	}
+	mgr.mu.Lock()
+	mgr.refs = 2
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	recvA := mgr.Subscribe("thread-a", "session-a")
+	recvB := mgr.Subscribe("thread-b", "session-b")
+	connA := &appConn{userID: "user-1", sessionID: "session-a", recvCh: recvA, manager: mgr}
+	connB := &appConn{userID: "user-1", sessionID: "session-b", recvCh: recvB, manager: mgr}
+	workerA := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-a",
+		turnID:     "turn-a",
+		doneCh:     make(chan struct{}),
+		conn:       connA,
+	}
+	workerB := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-b",
+		turnID:     "turn-b",
+		doneCh:     make(chan struct{}),
+		conn:       connB,
+	}
+
+	require.NoError(t, workerA.StopCurrentTurn(context.Background()))
+	require.NoError(t, workerA.Terminate(context.Background()))
+	require.NoError(t, workerA.Terminate(context.Background()), "wrapper release must be idempotent")
+	_, open := <-connA.Recv()
+	require.False(t, open, "terminated wrapper connection must close")
+
+	mgr.mu.Lock()
+	require.Equal(t, 1, mgr.refs, "only the stopped wrapper reference must be released")
+	require.Equal(t, stateRunning, mgr.state, "terminating one wrapper must not stop the shared app-server")
+	mgr.mu.Unlock()
+	mgr.subMu.Lock()
+	_, hasA := mgr.subscribers["thread-a"]
+	_, hasB := mgr.subscribers["thread-b"]
+	mgr.subMu.Unlock()
+	require.False(t, hasA)
+	require.True(t, hasB, "sibling wrapper subscription must remain active")
+
+	want := &events.Envelope{SessionID: "session-b", Event: events.Event{Type: events.State}}
+	require.True(t, connB.TrySend(want), "sibling wrapper connection must remain usable")
+	require.Same(t, want, <-connB.Recv())
+	require.Contains(t, output.String(), `"method":"turn/interrupt"`)
+
+	require.NoError(t, workerB.Terminate(context.Background()))
+}
+
 func TestAppServerWorkerKill(t *testing.T) {
 	t.Parallel()
 

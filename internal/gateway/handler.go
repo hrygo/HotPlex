@@ -35,7 +35,10 @@ import (
 
 // LevelTrace is one step below slog.LevelDebug, for high-volume protocol
 // chatter (ping/pong) that should not appear even at debug level.
-const LevelTrace = slog.Level(-8)
+const (
+	LevelTrace                 = slog.Level(-8)
+	stopRuntimeFinalizeTimeout = 500 * time.Millisecond
+)
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
 
@@ -53,6 +56,7 @@ type Handler struct {
 	repairer        *execution.Repairer
 	ownerInstanceID string
 	stopFence       turnStopFence
+	dispatchGate    sessionDispatchGate
 
 	// catalogStore is the session-scoped merged command catalog (spec §5.2).
 	// catalogGen tracks the per-session generation bumped on /reset, /cd, and
@@ -1214,6 +1218,14 @@ func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope
 }
 
 func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation, handleBusy bool) error {
+	unlockDispatch := h.dispatchGate.Lock(env.SessionID)
+	dispatchLocked := true
+	defer func() {
+		if dispatchLocked {
+			unlockDispatch()
+		}
+	}()
+
 	inputReceivedAt := time.Now()
 	si, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
@@ -1236,6 +1248,11 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			if !handleBusy {
 				return execution.ErrSessionBusy
 			}
+			// Supplement handling can re-enter normal primary delivery after
+			// re-checking the active execution. Release this non-reentrant gate
+			// before that path to avoid self-deadlock.
+			unlockDispatch()
+			dispatchLocked = false
 			return h.handleSupplementOnBusy(ctx, env, content, invocation)
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
@@ -1748,7 +1765,9 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 	if h.executionStore == nil {
 		return
 	}
-	rec, err := h.executionStore.OpenBySession(ctx, sessionID)
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), stopRuntimeFinalizeTimeout)
+	defer finishCancel()
+	rec, err := h.executionStore.OpenBySession(finishCtx, sessionID)
 	if err != nil {
 		return
 	}
@@ -1758,7 +1777,7 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 	errorCode := string(events.ErrCodeSessionTerminated)
 
 	err = h.executionStore.FinishRuntime(
-		context.WithoutCancel(ctx), rec.ExecutionID, workerRunID, rtStatus, errorCode,
+		finishCtx, rec.ExecutionID, workerRunID, rtStatus, errorCode,
 	)
 	if err != nil {
 		h.log.Warn("gateway: finish runtime on stop failed, enqueuing repair", "err", err, "session_id", sessionID, observability.KeyExecutionID, rec.ExecutionID)
@@ -1779,7 +1798,7 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 		ErrorCode:   events.ErrorCode(errorCode),
 	})
 	rtEnv.OwnerID = ownerID
-	_ = h.hub.SendToSession(ctx, rtEnv)
+	_ = h.hub.SendToSession(finishCtx, rtEnv)
 }
 
 func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, record *execution.Record, duplicate bool) {

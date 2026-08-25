@@ -54,6 +54,17 @@ func (f *turnStopFence) Claim(sessionID, workerRunID, execID string) bool {
 	return true
 }
 
+// IsClaimed reports whether any successful stop claim remains for sessionID.
+// It is used only after the run binding disappeared: without an execution
+// ledger there is no longer enough identity to rebuild the original composite
+// key, but a repeated stop must still stay idempotent.
+func (f *turnStopFence) IsClaimed(sessionID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.claimed[sessionID]
+	return ok
+}
+
 // Rollback releases the claim after a FAILED StopCurrentTurn so a manual retry
 // can stop again. It only clears when the claim still belongs to the given
 // run/execution — an old run's rollback must not clear a newer claim.

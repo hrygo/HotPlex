@@ -43,6 +43,8 @@ type BridgeDeps struct {
 	RetryCtrl              *LLMRetryController
 	AgentConfigDir         string
 	TurnTimeout            time.Duration
+	StopTeardownTimeout    time.Duration            // optional; zero uses the 8s server-side run-stop budget
+	StopForwarderTimeout   time.Duration            // optional; zero uses the 1s post-teardown settle budget
 	WorkerEnv              []string                 // extra env vars from worker.environment config
 	WorkerEnvBlocklist     []string                 // extra blocklist entries from worker.env_blocklist config
 	CronEnv                []string                 // env vars injected only into cron platform sessions (e.g. admin API creds)

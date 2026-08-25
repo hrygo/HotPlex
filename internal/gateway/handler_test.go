@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -357,6 +358,8 @@ func (h *testableHandler) handleGC(ctx context.Context, sessionID, ownerID strin
 // mockWorkerForHandler implements worker.Worker for handler tests.
 type mockWorkerForHandler struct {
 	mock.Mock
+	conn    worker.SessionConn
+	stopped atomic.Bool
 }
 
 func (m *mockWorkerForHandler) Type() worker.WorkerType   { return worker.TypeClaudeCode }
@@ -374,6 +377,7 @@ func (m *mockWorkerForHandler) Start(ctx context.Context, session worker.Session
 	return args.Error(0)
 }
 func (m *mockWorkerForHandler) Input(ctx context.Context, content string, metadata map[string]any) error {
+	m.stopped.Store(false)
 	args := m.Called(ctx, content, metadata)
 	return args.Error(0)
 }
@@ -390,7 +394,7 @@ func (m *mockWorkerForHandler) Wait() (int, error) {
 	args := m.Called()
 	return args.Int(0), args.Error(1)
 }
-func (m *mockWorkerForHandler) Conn() worker.SessionConn { return nil }
+func (m *mockWorkerForHandler) Conn() worker.SessionConn { return m.conn }
 func (m *mockWorkerForHandler) Health() worker.WorkerHealth {
 	args := m.Called()
 	return args.Get(0).(worker.WorkerHealth)
@@ -405,10 +409,14 @@ func (m *mockWorkerForHandler) ResetContext(ctx context.Context) (worker.ResetRe
 }
 func (m *mockWorkerForHandler) StopCurrentTurn(ctx context.Context) error {
 	args := m.Called(ctx)
-	return args.Error(0)
+	err := args.Error(0)
+	if err == nil {
+		m.stopped.Store(true)
+	}
+	return err
 }
 func (m *mockWorkerForHandler) IsStopped() bool {
-	return false
+	return m.stopped.Load()
 }
 
 // ─── handleReset tests ──────────────────────────────────────────────────────

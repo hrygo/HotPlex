@@ -78,14 +78,15 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 			}
 			return h.sendErrorf(ctx, env, events.ErrCodeUnauthorized, "ownership required")
 		}
-		w := h.sm.GetWorker(env.SessionID)
-		if w == nil {
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop: no active worker")
-		}
+		unlockDispatch := h.dispatchGate.Lock(env.SessionID)
+		defer unlockDispatch()
 
-		var workerRunID string
+		var (
+			workerRunID string
+			bindingOK   bool
+		)
 		if h.bridge != nil {
-			_, workerRunID, _ = h.bridge.CurrentWorkerBinding(env.SessionID)
+			_, workerRunID, bindingOK = h.bridge.CurrentWorkerBinding(env.SessionID)
 		}
 
 		// The claim is keyed by the turn's execution ID (when the execution
@@ -96,11 +97,23 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		// the first stop's finishRuntimeOnStop closes the runtime BEFORE a
 		// duplicate stop arrives, so the open-runtime query would resolve to a
 		// different (or no) record and admit the duplicate.
-		var execID string
+		var execID, persistedRunID string
 		if h.executionStore != nil {
 			if rec, err := h.executionStore.LatestBySession(ctx, env.SessionID); err == nil {
 				execID = rec.ExecutionID
+				persistedRunID = rec.WorkerRunID
 			}
+		}
+		if workerRunID == "" {
+			workerRunID = persistedRunID
+		}
+		if !bindingOK && h.stopFence.IsClaimed(env.SessionID) {
+			// The first successful stop detaches the run before a duplicate
+			// arrives. When the execution ledger is disabled (or temporarily
+			// unavailable), the original composite key cannot be reconstructed;
+			// the retained session claim still proves the stop was already applied.
+			h.log.Debug("gateway: stop already completed for detached run", "session_id", env.SessionID)
+			return nil
 		}
 
 		// Per-turn stop fence: admit exactly one effective stop per (session,
@@ -112,17 +125,36 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 				"session_id", env.SessionID, "worker_run_id", workerRunID, "execution_id", execID)
 			return nil
 		}
+		if h.bridge == nil || !bindingOK {
+			h.stopFence.Rollback(env.SessionID, workerRunID, execID)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop: no active worker run")
+		}
 
 		// A stop supersedes any pending LLM auto-retry: the retried input must
 		// not fire after the stop and start a new turn under the fresh claim.
 		h.cancelRetryIfNeeded(env.SessionID)
 
-		if err := w.StopCurrentTurn(ctx); err != nil {
-			// The stop never took effect: roll the claim back so a manual retry
-			// can stop again (failed-abort convergence, session retained).
-			h.stopFence.Rollback(env.SessionID, workerRunID, execID)
-			h.log.Warn("gateway: stop current turn failed", "session_id", env.SessionID, "err", err)
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop failed: %v", err)
+		if err := h.bridge.StopAndDisposeCurrentRun(ctx, env.SessionID, workerRunID); err != nil {
+			if stopFailureAllowsRollback(err) {
+				// Provider cancellation never committed: reopen event flow and let
+				// a manual stop retry claim this same turn.
+				h.stopFence.Rollback(env.SessionID, workerRunID, execID)
+			} else {
+				// Provider cancellation committed, so the run stays isolated even
+				// when teardown/quiescence reports failure. Close its durable runtime
+				// without sending the success-only stopped done.
+				h.finishRuntimeOnStop(ctx, env.SessionID, workerRunID, env.OwnerID)
+			}
+			h.log.Warn("gateway: stop worker run failed",
+				"session_id", env.SessionID,
+				"worker_run_id", workerRunID,
+				"execution_id", execID,
+				"stop_phase", "stop_failed",
+				"error_kind", stopErrorKind(err))
+			if errors.Is(err, errWorkerRunChanged) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "worker run changed during stop")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker run did not stop cleanly")
 		}
 
 		// Finish the pending execution runtime immediately when stopped.

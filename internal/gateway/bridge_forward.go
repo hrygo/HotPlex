@@ -59,6 +59,7 @@ type forwardContext struct {
 	pendingError   *events.Envelope
 	turnTimerFired atomic.Bool
 	turnTimer      *time.Timer
+	lifecycle      *workerRunLifecycle
 	// flog carries trace_id from the forwardEvents OTel span. Helpers must
 	// use fc.flog (not b.log) to keep log lines correlatable with the span.
 	// Nil-safe via bridge.flogOf; tests build forwardContext without it.
@@ -143,7 +144,15 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 			// A panic after stream consumption must still produce one visible
 			// terminal. Without this guard the client is left indefinitely in a
 			// thinking state; a later worker cleanup has no forwarder to notify it.
-			if fc != nil && b.hub != nil && !w.IsStopped() && fc.terminalSent.CompareAndSwap(false, true) {
+			if fc == nil {
+				return
+			}
+			releaseEvent, admitted := fc.lifecycle.beginEvent()
+			if !admitted {
+				return
+			}
+			defer releaseEvent()
+			if b.hub != nil && !w.IsStopped() && fc.terminalSent.CompareAndSwap(false, true) {
 				b.sendError(sessionID, events.ErrCodeWorkerCrash, "worker event stream interrupted before terminal")
 			}
 		}
@@ -167,6 +176,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		startTime:     time.Now(),
 		turnStartTime: time.Now(),
 		firstEvent:    true,
+		lifecycle:     fb.lifecycle,
 		flog:          flog,
 	}
 
@@ -204,6 +214,11 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 
 	if b.turnTimeout > 0 {
 		fc.turnTimer = time.AfterFunc(b.turnTimeout, func() {
+			releaseEvent, admitted := fc.lifecycle.beginEvent()
+			if !admitted {
+				return
+			}
+			defer releaseEvent()
 			if !fc.turnTimerFired.CompareAndSwap(false, true) {
 				return
 			}
@@ -252,29 +267,33 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	// connection. In the defensive nil-frozen-Conn path this also preserves the
 	// input from the live fallback that actually supplied the event stream.
 	lastReplay := snapshotInputReplay(recvSource)
-	if !fc.doneReceived {
-		b.finishTurnTTFT(sessionID, "worker_exit")
-	}
+	releaseExitEvent, admitted := fc.lifecycle.beginEvent()
+	if admitted {
+		if !fc.doneReceived {
+			b.finishTurnTTFT(sessionID, "worker_exit")
+		}
 
-	// Flush buffered error that never reached a retry decision point.
-	if fc.pendingError != nil && fc.terminalSent.CompareAndSwap(false, true) {
-		releaseSeq := func() {}
-		canFlush := true
-		if b.collector != nil {
-			var ok bool
-			releaseSeq, ok = b.hub.BeginSeqOperation(sessionID)
-			if !ok {
-				canFlush = false
+		// Flush buffered error that never reached a retry decision point.
+		if fc.pendingError != nil && fc.terminalSent.CompareAndSwap(false, true) {
+			releaseSeq := func() {}
+			canFlush := true
+			if b.collector != nil {
+				var ok bool
+				releaseSeq, ok = b.hub.BeginSeqOperation(sessionID)
+				if !ok {
+					canFlush = false
+				}
 			}
-		}
-		if canFlush {
-			if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
-				flog.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
+			if canFlush {
+				if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
+					flog.Warn("bridge: flush pending error on exit failed", "session_id", sessionID, "err", err)
+				}
+				b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data, flog)
+				releaseSeq()
 			}
-			b.captureEvent(sessionID, fc.pendingError.Seq, fc.pendingError.Event.Type, fc.pendingError.Event.Data, flog)
-			releaseSeq()
+			fc.pendingError = nil
 		}
-		fc.pendingError = nil
+		releaseExitEvent()
 	}
 	fc.pendingError = nil
 
@@ -293,6 +312,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 		resetGen:       myResetGen,
 		lastInput:      lastReplay.Content,
 		lastReplay:     lastReplay,
+		lifecycle:      fc.lifecycle,
 		flog:           flog,
 	})
 }
@@ -320,6 +340,12 @@ func snapshotInputReplay(conn worker.SessionConn) worker.InputReplay {
 
 // processForwardedEvent handles a single worker event in the forwarding loop.
 func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, opts forwardOpts, fc *forwardContext) {
+	releaseEvent, ok := fc.lifecycle.beginEvent()
+	if !ok {
+		return
+	}
+	defer releaseEvent()
+
 	sessionID := fc.sessionID
 	workerType := fc.workerType
 
@@ -514,7 +540,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 			// detects recvCh closure immediately instead of waiting for the
 			// backoff timer to expire. The goroutine uses shutdownCtx so it
 			// cancels promptly during bridge shutdown.
-			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt, cancelCh)
+			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt, cancelCh, fc.lifecycle)
 			fc.turnText.Reset()
 			if b.collector != nil {
 				b.collector.ResetSession(sessionID)
@@ -916,6 +942,7 @@ type workerExitParams struct {
 	// releases the worker's mutable live connection.
 	lastInput  string
 	lastReplay worker.InputReplay
+	lifecycle  *workerRunLifecycle
 }
 
 // rawExitCodeFields extracts the raw OS exit code from workers that implement
@@ -999,6 +1026,13 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 				"session_id", p.sessionID, "worker_type", workerType)
 		}
 	}
+
+	releaseExit, admitted := p.lifecycle.beginEvent()
+	if !admitted {
+		b.detachStoppedWorkerRun(p.sessionID, w, lg)
+		return
+	}
+	defer releaseExit()
 
 	wasStopped := w.IsStopped()
 
@@ -1128,15 +1162,19 @@ func (b *Bridge) handleWorkerExit(w worker.Worker, p workerExitParams) {
 		if wasStopped {
 			// User-initiated stop: detach the dead worker and transition to Idle
 			// so the session stays alive for the next turn (not Terminated).
-			if b.sm != nil {
-				b.sm.DetachWorkerIf(p.sessionID, w)
-				if err := b.sm.Transition(context.Background(), p.sessionID, events.StateIdle); err != nil {
-					lg.Debug("bridge: transition to idle after stop", "session_id", p.sessionID, "err", err)
-				}
-			}
+			b.detachStoppedWorkerRun(p.sessionID, w, lg)
 		} else {
 			b.cleanupCrashedWorker(p.sessionID, w)
 		}
+	}
+}
+
+func (b *Bridge) detachStoppedWorkerRun(sessionID string, w worker.Worker, lg *slog.Logger) {
+	if b.sm == nil || !b.sm.DetachWorkerIf(sessionID, w) {
+		return
+	}
+	if err := b.sm.Transition(context.Background(), sessionID, events.StateIdle); err != nil {
+		lg.Debug("bridge: transition to idle after stop", "session_id", sessionID, "err", err)
 	}
 }
 

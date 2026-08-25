@@ -1043,6 +1043,56 @@ func TestWorker_StopCurrentTurn_AbortsWithoutReleasingSession(t *testing.T) {
 	assertStopTurnRetention(t, w, mgr, live, sseCtx, true)
 }
 
+func TestWorker_StopThenTerminatePreservesSiblingWrapper(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/session/ses-a/abort", r.URL.Path)
+		_, _ = rw.Write([]byte("true"))
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	mgr.mu.Lock()
+	mgr.refs = 2
+	mgr.mu.Unlock()
+	workerA, connA := stopTurnTestWorker(t, server, mgr, "ses-a", "/tmp/a")
+	workerB, connB := stopTurnTestWorker(t, server, mgr, "ses-b", "/tmp/b")
+	mgr.Subscribe("ses-a")
+	mgr.Subscribe("ses-b")
+	ctxA, cancelA := context.WithCancel(context.Background())
+	ctxB, cancelB := context.WithCancel(context.Background())
+	workerA.Mu.Lock()
+	workerA.sseCancel = cancelA
+	workerA.Mu.Unlock()
+	workerB.Mu.Lock()
+	workerB.sseCancel = cancelB
+	workerB.Mu.Unlock()
+
+	require.NoError(t, workerA.StopCurrentTurn(context.Background()))
+	require.NoError(t, workerA.Terminate(context.Background()))
+	require.NoError(t, workerA.Kill(), "wrapper release must be idempotent")
+	require.Error(t, ctxA.Err(), "stopped wrapper SSE context must be cancelled")
+	_, open := <-connA.Recv()
+	require.False(t, open, "terminated wrapper connection must close")
+
+	mgr.mu.Lock()
+	require.Equal(t, 1, mgr.refs, "only the stopped wrapper reference must be released")
+	require.Equal(t, stateRunning, mgr.state, "terminating one wrapper must not stop the shared server")
+	mgr.mu.Unlock()
+	mgr.busMu.Lock()
+	_, hasA := mgr.subscribers["ses-a"]
+	_, hasB := mgr.subscribers["ses-b"]
+	mgr.busMu.Unlock()
+	require.False(t, hasA)
+	require.True(t, hasB, "sibling wrapper subscription must remain active")
+	require.Nil(t, ctxB.Err(), "sibling wrapper SSE context must remain active")
+	require.Same(t, connB, workerB.Conn())
+
+	require.NoError(t, workerB.Terminate(context.Background()))
+}
+
 func TestWorker_StopCurrentTurn_NoActiveConn(t *testing.T) {
 	t.Parallel()
 

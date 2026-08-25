@@ -22,6 +22,7 @@ import (
 	"github.com/hrygo/hotplex/internal/worker/codexcli"
 	"github.com/hrygo/hotplex/internal/worker/noop"
 	"github.com/hrygo/hotplex/internal/worker/opencodeserver"
+	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -103,6 +104,18 @@ type WorkerProbe struct {
 	holdTerminal  []*events.Envelope
 
 	failNextStop atomic.Bool // arming the next StopCurrentTurn to fail (failed-abort contract)
+
+	terminateCalls atomic.Int32
+	killCalls      atomic.Int32
+	failTerminate  atomic.Bool
+	failKill       atomic.Bool
+	blockStop      atomic.Bool
+	blockWait      atomic.Bool
+	lateOnDispose  atomic.Bool
+	stopEntered    chan struct{}
+	allowStop      chan struct{}
+	waitEntered    chan struct{}
+	allowWait      chan struct{}
 }
 
 // FailNextStop arms the NEXT StopCurrentTurn to return an error, simulating a
@@ -120,6 +133,10 @@ func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *Worker
 		conn:          newProbeConn(sessionID, "contract-user"),
 		enteredTurn:   make(chan struct{}, 1),
 		allowTerminal: make(chan struct{}, 1),
+		stopEntered:   make(chan struct{}, 1),
+		allowStop:     make(chan struct{}, 1),
+		waitEntered:   make(chan struct{}, 1),
+		allowWait:     make(chan struct{}, 1),
 	}
 }
 
@@ -185,15 +202,70 @@ func (p *WorkerProbe) ResetContext(_ context.Context) (worker.ResetResult, error
 	return worker.ResetResult{}, nil
 }
 
+// BlockStopCurrentTurn holds StopCurrentTurn after it marks the current turn
+// stopped. ReleaseStopCurrentTurn resumes it. The buffered signals make the
+// control deterministic regardless of which goroutine reaches the phase first.
+func (p *WorkerProbe) BlockStopCurrentTurn() { p.blockStop.Store(true) }
+
+func (p *WorkerProbe) StopEntered() <-chan struct{} { return p.stopEntered }
+
+func (p *WorkerProbe) ReleaseStopCurrentTurn() {
+	select {
+	case p.allowStop <- struct{}{}:
+	default:
+	}
+}
+
+// BlockWait holds Worker.Wait so tests can prove that stopped_by_user is sent
+// only after the old forwarder has completed handleWorkerExit.
+func (p *WorkerProbe) BlockWait() { p.blockWait.Store(true) }
+
+func (p *WorkerProbe) WaitEntered() <-chan struct{} { return p.waitEntered }
+
+func (p *WorkerProbe) ReleaseWait() {
+	select {
+	case p.allowWait <- struct{}{}:
+	default:
+	}
+}
+
+// EmitLateEventsOnDispose makes Terminate enqueue representative events from
+// the stopped run immediately before it closes the frozen connection.
+func (p *WorkerProbe) EmitLateEventsOnDispose() { p.lateOnDispose.Store(true) }
+
+// EmitLateEventsNow writes the same late-run fixture immediately. It lets a
+// contract test reproduce the pre-fix window after the early synthetic done.
+func (p *WorkerProbe) EmitLateEventsNow() {
+	p.lateOnDispose.Store(true)
+	p.emitLateEvents()
+}
+
+// FailNextTerminate and FailNextKill arm teardown fallback paths.
+func (p *WorkerProbe) FailNextTerminate() { p.failTerminate.Store(true) }
+func (p *WorkerProbe) FailNextKill()      { p.failKill.Store(true) }
+
 // StopCurrentTurn records the invocation and marks the current turn stopped.
 // The single-effective-stop guarantee is owned by the gateway's turn fence
 // (internal/gateway/stop_fence.go), not by this probe: a duplicate stop never
 // reaches the Worker call at all, so stopCalls stays 1 under the fence.
-func (p *WorkerProbe) StopCurrentTurn(_ context.Context) error {
+func (p *WorkerProbe) StopCurrentTurn(ctx context.Context) error {
 	p.stopCalls.Add(1)
 	p.stopped.Store(true)
 	p.stoppedTurn.Store(p.turnN.Load())
+	if p.blockStop.Load() {
+		select {
+		case p.stopEntered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-p.allowStop:
+		case <-ctx.Done():
+			p.stopped.Store(false)
+			return ctx.Err()
+		}
+	}
 	if p.failNextStop.Swap(false) {
+		p.stopped.Store(false)
 		return errors.New("contracttest: injected stop failure")
 	}
 	return nil
@@ -201,11 +273,74 @@ func (p *WorkerProbe) StopCurrentTurn(_ context.Context) error {
 
 func (p *WorkerProbe) IsStopped() bool { return p.stopped.Load() }
 
+func (p *WorkerProbe) Terminate(_ context.Context) error {
+	p.terminateCalls.Add(1)
+	if p.failTerminate.Swap(false) {
+		return errors.New("contracttest: injected terminate failure")
+	}
+	p.emitLateEvents()
+	return p.conn.Close()
+}
+
+func (p *WorkerProbe) Kill() error {
+	p.killCalls.Add(1)
+	if p.failKill.Swap(false) {
+		return errors.New("contracttest: injected kill failure")
+	}
+	p.emitLateEvents()
+	return p.conn.Close()
+}
+
+func (p *WorkerProbe) Wait() (int, error) {
+	if p.blockWait.Load() {
+		select {
+		case p.waitEntered <- struct{}{}:
+		default:
+		}
+		<-p.allowWait
+	}
+	return 0, nil
+}
+
+func (p *WorkerProbe) emitLateEvents() {
+	if !p.lateOnDispose.Swap(false) {
+		return
+	}
+	late := []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.MessageDelta,
+			events.MessageDeltaData{MessageID: "late_run_message", Content: "late_run_delta"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Message,
+			events.MessageData{ID: "late_run_message", Role: "assistant", Content: "late_run_message"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Reasoning,
+			events.ReasoningData{ID: "late_run_reasoning", Content: "late_run_reasoning"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.ToolCall,
+			events.ToolCallData{ID: "late_run_tool", Name: "late_run_tool", Input: map[string]any{"marker": "late_run_tool"}}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.PermissionRequest,
+			events.PermissionRequestData{ID: "late_run_permission", ToolName: "late_run_permission"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.State,
+			events.StateData{State: events.StateRunning, Message: "late_run_state"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Done,
+			events.DoneData{Success: true, Reason: "late_run_done"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Error,
+			events.ErrorData{Code: events.ErrCodeInternalError, Message: "late_run_error"}),
+	}
+	for _, env := range late {
+		p.conn.write(env)
+	}
+}
+
 // InputCalls returns how many times Input was invoked.
 func (p *WorkerProbe) InputCalls() int { return int(p.inputCalls.Load()) }
 
 // StopCalls returns how many times StopCurrentTurn was invoked.
 func (p *WorkerProbe) StopCalls() int { return int(p.stopCalls.Load()) }
+
+func (p *WorkerProbe) TerminateCalls() int { return int(p.terminateCalls.Load()) }
+func (p *WorkerProbe) KillCalls() int      { return int(p.killCalls.Load()) }
+
+// Events returns every envelope the probe attempted to emit, including writes
+// rejected from the live Recv stream after the connection closed.
+func (p *WorkerProbe) Events() []*events.Envelope { return p.conn.Events() }
 
 // EmitBasicTurn drives the probe's worker-type fixture through the real
 // parser/mapper and writes every mapper-produced envelope verbatim into the
@@ -374,8 +509,8 @@ func newProbeConn(sessionID, userID string) *probeConn {
 // without blocking (a dropped mirror is fine — Events is the source of truth).
 func (c *probeConn) write(env *events.Envelope) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.events = append(c.events, env)
-	c.mu.Unlock()
 	if c.closed.Load() {
 		return
 	}
@@ -399,6 +534,8 @@ func (c *probeConn) Send(_ context.Context, _ *events.Envelope) error { return n
 func (c *probeConn) Recv() <-chan *events.Envelope { return c.recvCh }
 
 func (c *probeConn) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed.CompareAndSwap(false, true) {
 		close(c.recvCh)
 	}

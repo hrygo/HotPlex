@@ -103,7 +103,7 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 		}
 		return nil, err
 	}
-	b.bindWorkerRun(sid, w, params.forwardOpts.workerRunID)
+	runBinding := b.bindWorkerRun(sid, w, params.forwardOpts.workerRunID)
 
 	// A new Worker (or a resumed/replaced one) is now the session's command
 	// authority: drop the session's cached catalog so the next assembly picks
@@ -132,8 +132,9 @@ func (b *Bridge) createAndLaunchWorker(params workerLaunchParams, startFn worker
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
-		defer b.clearWorkerRun(sid, w, params.forwardOpts.workerRunID)
-		b.launchForwarderLocked(w, sid, *params.forwardOpts)
+		defer close(runBinding.lifecycle.done)
+		defer b.clearWorkerRun(sid, w, runBinding.id)
+		b.launchForwarderLocked(runBinding, sid, *params.forwardOpts)
 	}()
 
 	return w, nil
@@ -179,9 +180,10 @@ func (b *Bridge) capturePermissionCeiling(ctx context.Context, sessionID string,
 // after /reset and splitting the event stream with the new forwarder
 // (Turn-Integrity spec RC-1 / Fix A, invariant I-1/I-2).
 type forwarderBinding struct {
-	worker   worker.Worker
-	conn     worker.SessionConn // frozen event source; forwardEvents reads ONLY this
-	resetGen int64              // frozen reset generation for stale-exit detection
+	worker    worker.Worker
+	conn      worker.SessionConn // frozen event source; forwardEvents reads ONLY this
+	lifecycle *workerRunLifecycle
+	resetGen  int64 // frozen reset generation for stale-exit detection
 }
 
 // launchForwarderLocked is the single entry point for spawning a forwardEvents
@@ -189,22 +191,32 @@ type forwarderBinding struct {
 // the Conn is captured before any concurrent ResetContext can replace it.
 // All four launch paths — fresh Start, Resume, /reset ConnReplaced, and crash
 // recovery — route through here (Fix A).
-func (b *Bridge) launchForwarderLocked(w worker.Worker, sessionID string, opts forwardOpts) {
-	conn := w.Conn()
+func (b *Bridge) launchForwarderLocked(binding workerRunBinding, sessionID string, opts forwardOpts) {
+	w := binding.worker
 	var resetGen int64
 	if rg, ok := w.(worker.ResetGenerationer); ok {
 		resetGen = rg.LoadResetGeneration()
 	}
-	fb := forwarderBinding{worker: w, conn: conn, resetGen: resetGen}
+	fb := forwarderBinding{
+		worker:    w,
+		conn:      binding.lifecycle.conn,
+		lifecycle: binding.lifecycle,
+		resetGen:  resetGen,
+	}
 	b.forwardEvents(fb, sessionID, opts)
 }
 
-func (b *Bridge) bindWorkerRun(sessionID string, w worker.Worker, runID string) string {
+func (b *Bridge) bindWorkerRun(sessionID string, w worker.Worker, runID string) workerRunBinding {
 	if runID == "" {
 		runID = "run_" + uuid.NewString()
 	}
-	b.workerRuns.Store(sessionID, workerRunBinding{worker: w, id: runID})
-	return runID
+	binding := workerRunBinding{
+		worker:    w,
+		id:        runID,
+		lifecycle: newWorkerRunLifecycle(w.Conn()),
+	}
+	b.workerRuns.Store(sessionID, binding)
+	return binding
 }
 
 // RecordTurnStart stamps the current turn's start time on the session

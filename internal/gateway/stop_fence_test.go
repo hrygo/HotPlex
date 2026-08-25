@@ -46,6 +46,7 @@ func TestTurnStopFence_Sequential(t *testing.T) {
 	t.Run("duplicate claim rejected", func(t *testing.T) {
 		f := turnStopFence{}
 		require.True(t, f.Claim("s", "r", "e"), "first claim admitted")
+		require.True(t, f.IsClaimed("s"), "held claim remains observable after its run detaches")
 		require.False(t, f.Claim("s", "r", "e"), "duplicate claim rejected")
 	})
 
