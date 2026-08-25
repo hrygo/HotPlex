@@ -174,6 +174,16 @@ func (l *workerRunLifecycle) beginEvent() (func(), bool) {
 	return l.eventMu.RUnlock, true
 }
 
+func (l *workerRunLifecycle) withEvent(run func()) bool {
+	releaseEvent, admitted := l.beginEvent()
+	if !admitted {
+		return false
+	}
+	defer releaseEvent()
+	run()
+	return true
+}
+
 // lockEventBarrier prevents new event admissions, then waits for already
 // admitted side effects to drain. Holding the admission token makes TryLock
 // starvation-free without spawning an orphan goroutine when ctx expires.

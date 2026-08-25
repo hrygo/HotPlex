@@ -267,8 +267,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 	// connection. In the defensive nil-frozen-Conn path this also preserves the
 	// input from the live fallback that actually supplied the event stream.
 	lastReplay := snapshotInputReplay(recvSource)
-	releaseExitEvent, admitted := fc.lifecycle.beginEvent()
-	if admitted {
+	fc.lifecycle.withEvent(func() {
 		if !fc.doneReceived {
 			b.finishTurnTTFT(sessionID, "worker_exit")
 		}
@@ -293,8 +292,7 @@ func (b *Bridge) forwardEvents(fb forwarderBinding, sessionID string, opts forwa
 			}
 			fc.pendingError = nil
 		}
-		releaseExitEvent()
-	}
+	})
 	fc.pendingError = nil
 
 	b.handleWorkerExit(w, workerExitParams{

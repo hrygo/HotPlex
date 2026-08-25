@@ -52,26 +52,25 @@ func (b *Bridge) StopAndDisposeCurrentRun(ctx context.Context, sessionID, expect
 		b.logStopPhase(sessionID, binding.id, "stop_failed", started, "run_changed", workerType)
 		return errWorkerRunChanged
 	}
-	if err := binding.worker.StopCurrentTurn(stopCtx); err != nil {
-		lifecycle.unlockEventBarrier()
+	if err := stopCurrentTurnUnderEventBarrier(lifecycle, func() error {
+		return binding.worker.StopCurrentTurn(stopCtx)
+	}); err != nil {
 		b.logStopPhase(sessionID, binding.id, "stop_failed", started, "provider_cancel", workerType)
-		return errWorkerStopNotApplied
+		return err
 	}
-	lifecycle.stopping.Store(true)
-	lifecycle.unlockEventBarrier()
 	b.logStopPhase(sessionID, binding.id, "provider_cancelled", started, "", workerType)
 
 	b.logStopPhase(sessionID, binding.id, "worker_terminating", started, "", workerType)
 	teardownFailed := false
-	if err := binding.worker.Terminate(stopCtx); err != nil {
+	if err := invokeWorkerTeardown(func() error { return binding.worker.Terminate(stopCtx) }); err != nil {
 		b.logStopPhase(sessionID, binding.id, "worker_kill_fallback", started, "terminate", workerType)
-		if killErr := binding.worker.Kill(); killErr != nil {
+		if killErr := invokeWorkerTeardown(binding.worker.Kill); killErr != nil {
 			teardownFailed = true
 			b.logStopPhase(sessionID, binding.id, "stop_failed", started, "kill", workerType)
 		}
 	}
 	if lifecycle.conn != nil {
-		if err := lifecycle.conn.Close(); err != nil {
+		if err := invokeWorkerTeardown(lifecycle.conn.Close); err != nil {
 			b.logStopPhase(sessionID, binding.id, "stop_failed", started, "conn_close", workerType)
 		}
 	}
@@ -93,6 +92,29 @@ func (b *Bridge) StopAndDisposeCurrentRun(ctx context.Context, sessionID, expect
 	}
 	b.logStopPhase(sessionID, binding.id, "stop_completed", started, "", workerType)
 	return nil
+}
+
+func stopCurrentTurnUnderEventBarrier(lifecycle *workerRunLifecycle, stop func() error) (err error) {
+	defer lifecycle.unlockEventBarrier()
+	defer func() {
+		if recover() != nil {
+			err = errWorkerStopNotApplied
+		}
+	}()
+	if err := stop(); err != nil {
+		return errWorkerStopNotApplied
+	}
+	lifecycle.stopping.Store(true)
+	return nil
+}
+
+func invokeWorkerTeardown(teardown func() error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errWorkerRunTeardown
+		}
+	}()
+	return teardown()
 }
 
 func (b *Bridge) currentWorkerRunBinding(sessionID, expectedRunID string) (workerRunBinding, bool) {

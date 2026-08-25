@@ -37,14 +37,13 @@ func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID strin
 
 	// Notify user if enabled.
 	if b.retryCtrl.ShouldNotify() {
-		releaseEvent, admitted := lifecycle.beginEvent()
-		if !admitted {
+		if !lifecycle.withEvent(func() {
+			msg := b.retryCtrl.NotifyMessage(attempt)
+			notifyEnv := buildNotifyEnvelope(sessionID, msg, 0)
+			_ = b.hub.SendToSession(ctx, notifyEnv)
+		}) {
 			return
 		}
-		msg := b.retryCtrl.NotifyMessage(attempt)
-		notifyEnv := buildNotifyEnvelope(sessionID, msg, 0)
-		_ = b.hub.SendToSession(ctx, notifyEnv)
-		releaseEvent()
 	}
 
 	// Wait with backoff, respecting cancellation.

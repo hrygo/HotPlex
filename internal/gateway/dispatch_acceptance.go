@@ -1,6 +1,11 @@
 package gateway
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
+
+var errWorkerDispatchPanic = errors.New("worker dispatch panicked")
 
 // runAcceptedDispatch releases an orchestration admission as soon as the
 // provider has accepted a turn, while still returning the adapter's eventual
@@ -15,7 +20,7 @@ func runAcceptedDispatch(dispatch func(accepted func()) error, release func()) (
 	}
 
 	go func() {
-		resultCh <- dispatch(accepted)
+		resultCh <- invokeAcceptedDispatch(dispatch, accepted)
 	}()
 
 	select {
@@ -35,4 +40,13 @@ func runAcceptedDispatch(dispatch func(accepted func()) error, release func()) (
 		release()
 		return wasAccepted, err
 	}
+}
+
+func invokeAcceptedDispatch(dispatch func(accepted func()) error, accepted func()) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errWorkerDispatchPanic
+		}
+	}()
+	return dispatch(accepted)
 }
