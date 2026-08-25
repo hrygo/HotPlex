@@ -200,6 +200,65 @@ func TestReadGlobalSSE_DispatchesSessionStatus(t *testing.T) {
 	s.Unsubscribe("ses_1")
 }
 
+func TestDispatchOCSEvent_RetryIdleFallbackDoesNotEmitPrematureDone(t *testing.T) {
+	t.Parallel()
+
+	s, _ := newSingletonWithSSE(t, func(http.ResponseWriter, *http.Request) {})
+	ch := s.Subscribe("ses_retry")
+	t.Cleanup(func() { s.Unsubscribe("ses_retry") })
+
+	dispatch := func(eventType string, props map[string]any) {
+		t.Helper()
+		data := strings.TrimSpace(strings.TrimPrefix(ocsEvent(t, eventType, props), "data: "))
+		s.dispatchOCSEvent([]byte(data))
+	}
+
+	dispatch(ocsSessionStatus, map[string]any{
+		"sessionID": "ses_retry",
+		"status": map[string]any{
+			"type":    "retry",
+			"attempt": 1,
+			"message": "Monthly usage limit reached",
+		},
+	})
+	retryState := collectN(t, ch, 1)
+	require.Equal(t, events.State, retryState[0].Event.Type)
+
+	dispatch(ocsSessionStatus, map[string]any{
+		"sessionID": "ses_retry",
+		"status":    map[string]any{"type": "idle"},
+	})
+	select {
+	case env := <-ch:
+		require.NotEqual(t, events.Done, env.Event.Type,
+			"retry followed by transient idle must not terminate the turn before fallback")
+	default:
+	}
+
+	dispatch(ocsSessionStatus, map[string]any{
+		"sessionID": "ses_retry",
+		"status":    map[string]any{"type": "busy"},
+	})
+	dispatch(ocsPartDelta, map[string]any{
+		"sessionID": "ses_retry",
+		"messageID": "msg_fallback",
+		"partID":    "part_fallback",
+		"field":     "text",
+		"delta":     "fallback succeeded",
+	})
+	dispatch(ocsSessionStatus, map[string]any{
+		"sessionID": "ses_retry",
+		"status":    map[string]any{"type": "idle"},
+	})
+
+	got := collectN(t, ch, 3)
+	require.Equal(t, events.State, got[0].Event.Type)
+	require.Equal(t, events.MessageDelta, got[1].Event.Type)
+	require.Equal(t, events.Done, got[2].Event.Type)
+	done := got[2].Event.Data.(events.DoneData)
+	require.True(t, done.Success)
+}
+
 func TestReadGlobalSSE_DispatchesPartDelta(t *testing.T) {
 	t.Parallel()
 

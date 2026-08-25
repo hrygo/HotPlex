@@ -32,10 +32,9 @@ const (
 // It handles both V2 events (session.next.* prefix) and legacy V1 events
 // (session.status, session.error, permission.asked, question.asked).
 //
-// Thread safety: Convert and Reset are NOT safe for concurrent use. They must
-// only be called from the readGlobalSSE goroutine (which also calls
-// dispatchToAllSubscribers). If future callers need concurrent access, add a
-// mutex to Converter.
+// Thread safety: Convert and Reset are NOT safe for concurrent use. The
+// SingletonProcessManager serializes SSE dispatch and deferred retry expiry
+// through eventMu. If future callers bypass the manager, add a mutex here.
 type Converter struct {
 	states map[string]*turnState // sessionID → state
 }
@@ -466,6 +465,45 @@ func (c *Converter) handleSessionIdle(sessionID string) []*events.Envelope {
 		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
 			events.DoneData{Success: true, Stats: stats}),
 	}
+}
+
+func (c *Converter) handleRetryExhausted(sessionID, message string) []*events.Envelope {
+	if message == "" {
+		message = "opencode retry did not resume"
+	}
+	stats, first := c.consumeDone(sessionID)
+	if !first {
+		return nil
+	}
+	return []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error, events.ErrorData{
+			Code:    retryErrorCode(message),
+			Message: message,
+		}),
+		events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
+			events.DoneData{Success: false, Stats: stats}),
+	}
+}
+
+func retryErrorCode(message string) events.ErrorCode {
+	normalized := strings.ToLower(message)
+	for _, marker := range []string{
+		"rate limit",
+		"rate-limit",
+		"usage limit",
+		"quota",
+		"too many requests",
+	} {
+		if strings.Contains(normalized, marker) {
+			return events.ErrCodeRateLimited
+		}
+	}
+	for _, field := range strings.Fields(normalized) {
+		if strings.Trim(field, "()[]{}:;,") == "429" {
+			return events.ErrCodeRateLimited
+		}
+	}
+	return events.ErrCodeInternalError
 }
 
 func (c *Converter) handleSessionError(sessionID string, props json.RawMessage) []*events.Envelope {

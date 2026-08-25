@@ -35,7 +35,10 @@ import (
 
 // LevelTrace is one step below slog.LevelDebug, for high-volume protocol
 // chatter (ping/pong) that should not appear even at debug level.
-const LevelTrace = slog.Level(-8)
+const (
+	LevelTrace                 = slog.Level(-8)
+	stopRuntimeFinalizeTimeout = 500 * time.Millisecond
+)
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
 
@@ -53,6 +56,7 @@ type Handler struct {
 	repairer        *execution.Repairer
 	ownerInstanceID string
 	stopFence       turnStopFence
+	dispatchGate    sessionDispatchGate
 
 	// catalogStore is the session-scoped merged command catalog (spec §5.2).
 	// catalogGen tracks the per-session generation bumped on /reset, /cd, and
@@ -1214,6 +1218,14 @@ func (h *Handler) deliverSkillToWorker(ctx context.Context, env *events.Envelope
 }
 
 func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *events.Envelope, content string, invocation *worker.NativeCommandInvocation, handleBusy bool) error {
+	unlockDispatch := h.dispatchGate.Lock(env.SessionID)
+	dispatchLocked := true
+	defer func() {
+		if dispatchLocked {
+			unlockDispatch()
+		}
+	}()
+
 	inputReceivedAt := time.Now()
 	si, err := h.sm.Get(ctx, env.SessionID)
 	if err != nil {
@@ -1236,6 +1248,11 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			if !handleBusy {
 				return execution.ErrSessionBusy
 			}
+			// Supplement handling can re-enter normal primary delivery after
+			// re-checking the active execution. Release this non-reentrant gate
+			// before that path to avoid self-deadlock.
+			unlockDispatch()
+			dispatchLocked = false
 			return h.handleSupplementOnBusy(ctx, env, content, invocation)
 		}
 		h.log.Error("gateway: persist input acceptance failed", "err", err, "session_id", env.SessionID)
@@ -1345,9 +1362,11 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 
 	var w worker.Worker
 	workerRunID := ""
+	workerRunBound := false
 	if h.bridge != nil {
 		var ok bool
 		w, workerRunID, ok = h.bridge.CurrentWorkerBinding(env.SessionID)
+		workerRunBound = ok
 		if !ok && si.State.IsActive() && h.bridge.sm != nil {
 			h.log.Info("gateway: auto-resuming active session lacking worker binding", "session_id", env.SessionID, "state", si.State)
 			resumeCtx, resumeCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -1368,6 +1387,7 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 				return h.sendErrorf(ctx, env, events.ErrCodeSessionNotFound, "session not found after resume")
 			}
 			w, workerRunID, ok = h.bridge.CurrentWorkerBinding(env.SessionID)
+			workerRunBound = ok
 		}
 		if !ok {
 			if h.executionStore != nil {
@@ -1421,6 +1441,13 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		}
 		h.log.Debug("gateway: delivering input to worker", "session_id", env.SessionID, "content_len", len(content), "preview", preview)
 	}
+	if h.bridge != nil && workerRunBound {
+		if err := h.bridge.beginWorkerRunTurn(ctx, env.SessionID, workerRunID); err != nil {
+			h.finishRuntimeWithoutDispatch(ctx, execRecord, workerRunID, events.ErrCodeInternalError)
+			finishOutcome(execution.StatusFailed, events.ErrCodeInternalError)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker turn admission failed")
+		}
+	}
 
 	// Stamp the turn start immediately before delivery so the Done-bound timer
 	// measures only this turn's processing, excluding inter-turn idle
@@ -1444,7 +1471,39 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	}
 	h.stopFence.BeginTurn(env.SessionID, workerRunID, execID)
 
-	var inputErr error
+	var (
+		dispatchAccepted bool
+		inputErr         error
+	)
+	releaseDispatch := func() {
+		if dispatchLocked {
+			unlockDispatch()
+			dispatchLocked = false
+		}
+	}
+	var acceptanceErr error
+	finalizeAcceptance := func() {
+		captureInbound()
+		if h.bridge != nil && execRecord != nil {
+			h.bridge.markTurnWorkerAccepted(env.SessionID, execRecord.ExecutionID)
+		}
+		if err := h.finishInputExecution(ctx, execRecord, execution.StatusDelivered, ""); err != nil {
+			h.log.Error("gateway: persist delivered input status failed", "err", err,
+				"session_id", env.SessionID, observability.KeyExecutionID, execRecord.ExecutionID)
+			// The worker accepted the input but the durable status write failed —
+			// treat the outcome as ambiguous for the client.
+			execRecord.Status = execution.StatusUnknown
+			execRecord.ErrorCode = string(events.ErrCodeInternalError)
+			finalized = true
+			h.sendInputAck(ctx, env, execRecord, false)
+			acceptanceErr = h.sendErrorf(ctx, env, events.ErrCodeInternalError, "input delivery status is unknown")
+			return
+		}
+		finalized = true
+		h.sendInputAck(ctx, env, execRecord, false)
+		h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
+		h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, content)
+	}
 	if invocation != nil {
 		resolvedInvocation := *invocation
 		if resolvedInvocation.Mode == "" {
@@ -1510,9 +1569,44 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
 				"worker %s does not support native Skill invocation", w.Type())
 		}
-		inputErr = invoker.InvokeNativeCommand(ctx, *invocation)
+		dispatchAccepted, inputErr = runAcceptedDispatch(func(accepted func()) error {
+			return worker.DispatchNativeCommand(ctx, w, invoker, *invocation, accepted)
+		}, finalizeAcceptance, releaseDispatch)
 	} else {
-		inputErr = w.Input(ctx, content, nil)
+		dispatchAccepted, inputErr = runAcceptedDispatch(func(accepted func()) error {
+			return worker.DispatchInput(ctx, w, content, nil, accepted)
+		}, finalizeAcceptance, releaseDispatch)
+	}
+	if acceptanceErr != nil {
+		return acceptanceErr
+	}
+	if inputErr != nil && dispatchAccepted {
+		// A stop may make a blocking adapter's already-accepted RPC return a
+		// cancellation error. Re-enter the session gate so an in-flight stop
+		// reaches a stable success/failure decision before classifying it. A
+		// successful stop keeps the old Worker's marker set; a failed stop clears
+		// it and the real input error remains visible.
+		unlockStopDecision := h.dispatchGate.Lock(env.SessionID)
+		stopped := w.IsStopped()
+		unlockStopDecision()
+		if stopped {
+			h.log.Debug("gateway: accepted input ended by successful stop", "session_id", env.SessionID)
+			return nil
+		}
+		var we *worker.WorkerError
+		if errors.As(inputErr, &we) && we.Kind == worker.ErrKindTimeout {
+			h.log.Info("gateway: accepted worker input timed out (worker still processing)", "session_id", env.SessionID)
+			return nil
+		}
+		h.log.Warn("gateway: accepted worker input failed", "err", inputErr, "session_id", env.SessionID)
+		code := classifyWorkerError(inputErr)
+		if code == events.ErrCodeSessionTerminated && h.bridge != nil {
+			h.bridge.cleanupCrashedWorker(env.SessionID, w)
+		}
+		// Provider acceptance already committed and audited the delivery as
+		// successful. Surface the later turn error without emitting a conflicting
+		// second audit outcome for the same input action.
+		return h.sendErrorf(ctx, env, code, "worker input failed: %v", inputErr)
 	}
 	if inputErr != nil {
 		var we *worker.WorkerError
@@ -1542,29 +1636,6 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 		h.emitAudit(audit.OutcomeFailure, env.OwnerID, si.Platform, env.SessionID, content)
 		return h.sendErrorf(ctx, env, code, "worker input failed: %v", inputErr)
 	}
-	// Worker.Input returned successfully, so this is the first point at which
-	// the accepted input is known to have reached the worker. Capture exactly
-	// once here; timeout paths call the same guard above, while hard failures do
-	// not create an unmatched user turn.
-	captureInbound()
-	if h.bridge != nil && execRecord != nil {
-		h.bridge.markTurnWorkerAccepted(env.SessionID, execRecord.ExecutionID)
-	}
-	if err := h.finishInputExecution(ctx, execRecord, execution.StatusDelivered, ""); err != nil {
-		h.log.Error("gateway: persist delivered input status failed", "err", err,
-			"session_id", env.SessionID, observability.KeyExecutionID, execRecord.ExecutionID)
-		// The worker accepted the input but the durable status write failed —
-		// treat the outcome as ambiguous for the client.
-		execRecord.Status = execution.StatusUnknown
-		execRecord.ErrorCode = string(events.ErrCodeInternalError)
-		finalized = true
-		h.sendInputAck(ctx, env, execRecord, false)
-		return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "input delivery status is unknown")
-	}
-	finalized = true
-	h.sendInputAck(ctx, env, execRecord, false)
-	h.log.Debug("gateway: input delivered to worker", "session_id", env.SessionID)
-	h.emitAudit(audit.OutcomeSuccess, env.OwnerID, si.Platform, env.SessionID, content)
 	return nil
 }
 
@@ -1748,7 +1819,9 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 	if h.executionStore == nil {
 		return
 	}
-	rec, err := h.executionStore.OpenBySession(ctx, sessionID)
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), stopRuntimeFinalizeTimeout)
+	defer finishCancel()
+	rec, err := h.executionStore.OpenBySession(finishCtx, sessionID)
 	if err != nil {
 		return
 	}
@@ -1758,7 +1831,7 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 	errorCode := string(events.ErrCodeSessionTerminated)
 
 	err = h.executionStore.FinishRuntime(
-		context.WithoutCancel(ctx), rec.ExecutionID, workerRunID, rtStatus, errorCode,
+		finishCtx, rec.ExecutionID, workerRunID, rtStatus, errorCode,
 	)
 	if err != nil {
 		h.log.Warn("gateway: finish runtime on stop failed, enqueuing repair", "err", err, "session_id", sessionID, observability.KeyExecutionID, rec.ExecutionID)
@@ -1779,7 +1852,7 @@ func (h *Handler) finishRuntimeOnStop(ctx context.Context, sessionID, workerRunI
 		ErrorCode:   events.ErrorCode(errorCode),
 	})
 	rtEnv.OwnerID = ownerID
-	_ = h.hub.SendToSession(ctx, rtEnv)
+	_ = h.hub.SendToSession(finishCtx, rtEnv)
 }
 
 func (h *Handler) sendInputAck(ctx context.Context, source *events.Envelope, record *execution.Record, duplicate bool) {

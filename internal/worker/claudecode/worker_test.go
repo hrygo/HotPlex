@@ -87,6 +87,26 @@ func TestClaudeCodeWorker_KillWithoutStart(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestClaudeCodeWorker_StopThenTerminateAllowsFreshRun(t *testing.T) {
+	t.Parallel()
+
+	stopped := NewWithMocks()
+	stopped.sessionID = "session-1"
+	stopped.testConn = newMockConn("user-1", "session-1")
+
+	require.NoError(t, stopped.StopCurrentTurn(context.Background()))
+	require.True(t, stopped.IsStopped())
+	require.NoError(t, stopped.Terminate(context.Background()))
+	require.NoError(t, stopped.Terminate(context.Background()), "teardown must be idempotent after stop")
+
+	resumed := NewWithMocks()
+	resumed.sessionID = stopped.sessionID
+	resumed.testConn = newMockConn("user-1", "session-1")
+	require.NotSame(t, stopped, resumed)
+	require.Equal(t, stopped.sessionID, resumed.sessionID, "fresh run must preserve HotPlex session identity")
+	require.False(t, resumed.IsStopped(), "stopped state must not leak into a fresh run")
+}
+
 func TestClaudeCodeWorker_WaitWithoutStart(t *testing.T) {
 	t.Parallel()
 

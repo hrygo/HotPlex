@@ -22,6 +22,7 @@ import (
 	"github.com/hrygo/hotplex/internal/worker/codexcli"
 	"github.com/hrygo/hotplex/internal/worker/noop"
 	"github.com/hrygo/hotplex/internal/worker/opencodeserver"
+	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
 
@@ -98,11 +99,26 @@ type WorkerProbe struct {
 	// non-blocking: the platform matrix flows emit the full turn synchronously
 	// with Input, exactly as before.
 	blocking      atomic.Bool
+	blockInputEnd atomic.Bool
+	failInputEnd  atomic.Bool
 	enteredTurn   chan struct{} // buffered(1): probe signals the pre-terminal content was emitted
 	allowTerminal chan struct{} // buffered(1): test releases the held terminal
+	allowInputEnd chan struct{} // buffered(1): test releases a production-style blocking Input call
 	holdTerminal  []*events.Envelope
 
 	failNextStop atomic.Bool // arming the next StopCurrentTurn to fail (failed-abort contract)
+
+	terminateCalls atomic.Int32
+	killCalls      atomic.Int32
+	failTerminate  atomic.Bool
+	failKill       atomic.Bool
+	blockStop      atomic.Bool
+	blockWait      atomic.Bool
+	lateOnDispose  atomic.Bool
+	stopEntered    chan struct{}
+	allowStop      chan struct{}
+	waitEntered    chan struct{}
+	allowWait      chan struct{}
 }
 
 // FailNextStop arms the NEXT StopCurrentTurn to return an error, simulating a
@@ -120,6 +136,11 @@ func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *Worker
 		conn:          newProbeConn(sessionID, "contract-user"),
 		enteredTurn:   make(chan struct{}, 1),
 		allowTerminal: make(chan struct{}, 1),
+		allowInputEnd: make(chan struct{}, 1),
+		stopEntered:   make(chan struct{}, 1),
+		allowStop:     make(chan struct{}, 1),
+		waitEntered:   make(chan struct{}, 1),
+		allowWait:     make(chan struct{}, 1),
 	}
 }
 
@@ -128,6 +149,24 @@ func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *Worker
 // was emitted. Only the lifecycle contract tests enable it; the platform
 // matrix flows keep the synchronous full-turn emission.
 func (p *WorkerProbe) EnableBlocking() { p.blocking.Store(true) }
+
+// BlockInputCompletion makes Input remain blocked after the worker has
+// accepted the prompt. ACP and the legacy OpenCode /message endpoint have
+// this shape: delivery is committed before the adapter returns from Input.
+func (p *WorkerProbe) BlockInputCompletion() { p.blockInputEnd.Store(true) }
+
+// FailInputAfterAccepted makes the blocking Input return an adapter error once
+// released. It models ACP/OCS RPC completion after a successful concurrent
+// provider stop; Gateway must not surface that cancellation as input failure.
+func (p *WorkerProbe) FailInputAfterAccepted() { p.failInputEnd.Store(true) }
+
+// ReleaseInputCompletion lets a production-style blocking Input return.
+func (p *WorkerProbe) ReleaseInputCompletion() {
+	select {
+	case p.allowInputEnd <- struct{}{}:
+	default:
+	}
+}
 
 // MarkExitIntentional flags the probe's upcoming conn close as an intentional
 // scenario teardown rather than a crash. The bridge's handleWorkerExit then
@@ -172,11 +211,42 @@ func (p *WorkerProbe) Resume(_ context.Context, _ worker.SessionInfo) error {
 // semantics: BaseWorker.BeginTurn clears the user-stop marker before each
 // primary turn), then emits one fixture-driven turn through the real
 // parser/mapper of the probe's worker type.
-func (p *WorkerProbe) Input(_ context.Context, _ string, _ map[string]any) error {
+func (p *WorkerProbe) Input(ctx context.Context, content string, metadata map[string]any) error {
+	return p.input(ctx, content, metadata, nil)
+}
+
+// InputWithDispatchAccepted exposes the optional two-phase dispatch contract
+// used by production adapters whose Input call outlives request acceptance.
+func (p *WorkerProbe) InputWithDispatchAccepted(
+	ctx context.Context,
+	content string,
+	metadata map[string]any,
+	accepted func(),
+) error {
+	return p.input(ctx, content, metadata, accepted)
+}
+
+func (p *WorkerProbe) input(ctx context.Context, _ string, _ map[string]any, accepted func()) error {
 	p.inputCalls.Add(1)
 	p.turnN.Add(1)
 	p.stopped.Store(false)
-	return p.EmitBasicTurn(context.Background())
+	if err := p.EmitBasicTurn(ctx); err != nil {
+		return err
+	}
+	if accepted != nil {
+		accepted()
+	}
+	if p.blockInputEnd.Load() {
+		select {
+		case <-p.allowInputEnd:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if p.failInputEnd.Load() {
+		return errors.New("contracttest: accepted input interrupted by stop")
+	}
+	return nil
 }
 
 func (p *WorkerProbe) Conn() worker.SessionConn { return p.conn }
@@ -185,15 +255,70 @@ func (p *WorkerProbe) ResetContext(_ context.Context) (worker.ResetResult, error
 	return worker.ResetResult{}, nil
 }
 
+// BlockStopCurrentTurn holds StopCurrentTurn after it marks the current turn
+// stopped. ReleaseStopCurrentTurn resumes it. The buffered signals make the
+// control deterministic regardless of which goroutine reaches the phase first.
+func (p *WorkerProbe) BlockStopCurrentTurn() { p.blockStop.Store(true) }
+
+func (p *WorkerProbe) StopEntered() <-chan struct{} { return p.stopEntered }
+
+func (p *WorkerProbe) ReleaseStopCurrentTurn() {
+	select {
+	case p.allowStop <- struct{}{}:
+	default:
+	}
+}
+
+// BlockWait holds Worker.Wait so tests can prove that stopped_by_user is sent
+// only after the old forwarder has completed handleWorkerExit.
+func (p *WorkerProbe) BlockWait() { p.blockWait.Store(true) }
+
+func (p *WorkerProbe) WaitEntered() <-chan struct{} { return p.waitEntered }
+
+func (p *WorkerProbe) ReleaseWait() {
+	select {
+	case p.allowWait <- struct{}{}:
+	default:
+	}
+}
+
+// EmitLateEventsOnDispose makes Terminate enqueue representative events from
+// the stopped run immediately before it closes the frozen connection.
+func (p *WorkerProbe) EmitLateEventsOnDispose() { p.lateOnDispose.Store(true) }
+
+// EmitLateEventsNow writes the same late-run fixture immediately. It lets a
+// contract test reproduce the pre-fix window after the early synthetic done.
+func (p *WorkerProbe) EmitLateEventsNow() {
+	p.lateOnDispose.Store(true)
+	p.emitLateEvents()
+}
+
+// FailNextTerminate and FailNextKill arm teardown fallback paths.
+func (p *WorkerProbe) FailNextTerminate() { p.failTerminate.Store(true) }
+func (p *WorkerProbe) FailNextKill()      { p.failKill.Store(true) }
+
 // StopCurrentTurn records the invocation and marks the current turn stopped.
 // The single-effective-stop guarantee is owned by the gateway's turn fence
 // (internal/gateway/stop_fence.go), not by this probe: a duplicate stop never
 // reaches the Worker call at all, so stopCalls stays 1 under the fence.
-func (p *WorkerProbe) StopCurrentTurn(_ context.Context) error {
+func (p *WorkerProbe) StopCurrentTurn(ctx context.Context) error {
 	p.stopCalls.Add(1)
 	p.stopped.Store(true)
 	p.stoppedTurn.Store(p.turnN.Load())
+	if p.blockStop.Load() {
+		select {
+		case p.stopEntered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-p.allowStop:
+		case <-ctx.Done():
+			p.stopped.Store(false)
+			return ctx.Err()
+		}
+	}
 	if p.failNextStop.Swap(false) {
+		p.stopped.Store(false)
 		return errors.New("contracttest: injected stop failure")
 	}
 	return nil
@@ -201,23 +326,84 @@ func (p *WorkerProbe) StopCurrentTurn(_ context.Context) error {
 
 func (p *WorkerProbe) IsStopped() bool { return p.stopped.Load() }
 
+func (p *WorkerProbe) Terminate(_ context.Context) error {
+	p.terminateCalls.Add(1)
+	if p.failTerminate.Swap(false) {
+		return errors.New("contracttest: injected terminate failure")
+	}
+	p.emitLateEvents()
+	return p.conn.Close()
+}
+
+func (p *WorkerProbe) Kill() error {
+	p.killCalls.Add(1)
+	if p.failKill.Swap(false) {
+		return errors.New("contracttest: injected kill failure")
+	}
+	p.emitLateEvents()
+	return p.conn.Close()
+}
+
+func (p *WorkerProbe) Wait() (int, error) {
+	if p.blockWait.Load() {
+		select {
+		case p.waitEntered <- struct{}{}:
+		default:
+		}
+		<-p.allowWait
+	}
+	return 0, nil
+}
+
+func (p *WorkerProbe) emitLateEvents() {
+	if !p.lateOnDispose.Swap(false) {
+		return
+	}
+	late := []*events.Envelope{
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.MessageDelta,
+			events.MessageDeltaData{MessageID: "late_run_message", Content: "late_run_delta"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Message,
+			events.MessageData{ID: "late_run_message", Role: "assistant", Content: "late_run_message"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Reasoning,
+			events.ReasoningData{ID: "late_run_reasoning", Content: "late_run_reasoning"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.ToolCall,
+			events.ToolCallData{ID: "late_run_tool", Name: "late_run_tool", Input: map[string]any{"marker": "late_run_tool"}}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.PermissionRequest,
+			events.PermissionRequestData{ID: "late_run_permission", ToolName: "late_run_permission"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.State,
+			events.StateData{State: events.StateRunning, Message: "late_run_state"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Done,
+			events.DoneData{Success: true, Reason: "late_run_done"}),
+		events.NewEnvelope(aep.NewID(), p.conn.sessionID, 0, events.Error,
+			events.ErrorData{Code: events.ErrCodeInternalError, Message: "late_run_error"}),
+	}
+	for _, env := range late {
+		p.conn.write(env)
+	}
+}
+
 // InputCalls returns how many times Input was invoked.
 func (p *WorkerProbe) InputCalls() int { return int(p.inputCalls.Load()) }
 
 // StopCalls returns how many times StopCurrentTurn was invoked.
 func (p *WorkerProbe) StopCalls() int { return int(p.stopCalls.Load()) }
 
+func (p *WorkerProbe) TerminateCalls() int { return int(p.terminateCalls.Load()) }
+func (p *WorkerProbe) KillCalls() int      { return int(p.killCalls.Load()) }
+
+// Events returns every envelope the probe attempted to emit, including writes
+// rejected from the live Recv stream after the connection closed.
+func (p *WorkerProbe) Events() []*events.Envelope { return p.conn.Events() }
+
 // EmitBasicTurn drives the probe's worker-type fixture through the real
 // parser/mapper and writes every mapper-produced envelope verbatim into the
 // probe connection. When the turn gate is armed (EnableBlocking), the terminal
-// envelopes are held off the wire and Input returns right after the
-// pre-terminal content — exactly like a production worker whose Input is a
-// delivery while the turn keeps running. The held terminal is released by
-// ReleaseTerminal: a turn stopped in the meantime (StopCurrentTurn before the
-// release) has its terminal suppressed, so the interrupted turn never
-// completes on the wire. Platform queues (feishu chatQueue, slack event
-// goroutines, webchat async dispatch) therefore stay free to process the stop
-// while the fixture turn is still live.
+// envelopes are held off the wire. By default Input returns after this
+// pre-terminal delivery point, modeling adapters with acknowledgement-style
+// Input. BlockInputCompletion instead keeps Input waiting while
+// InputWithDispatchAccepted reports the same acceptance point, modeling ACP's
+// blocking prompt RPC. ReleaseTerminal emits the held terminal unless that
+// turn was stopped in the meantime.
 func (p *WorkerProbe) EmitBasicTurn(_ context.Context) error {
 	switch p.profile.Type {
 	case worker.TypeClaudeCode:
@@ -374,8 +560,8 @@ func newProbeConn(sessionID, userID string) *probeConn {
 // without blocking (a dropped mirror is fine — Events is the source of truth).
 func (c *probeConn) write(env *events.Envelope) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.events = append(c.events, env)
-	c.mu.Unlock()
 	if c.closed.Load() {
 		return
 	}
@@ -399,6 +585,8 @@ func (c *probeConn) Send(_ context.Context, _ *events.Envelope) error { return n
 func (c *probeConn) Recv() <-chan *events.Envelope { return c.recvCh }
 
 func (c *probeConn) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed.CompareAndSwap(false, true) {
 		close(c.recvCh)
 	}

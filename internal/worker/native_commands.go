@@ -74,6 +74,41 @@ type NativeCommandInvoker interface {
 	InvokeNativeCommand(ctx context.Context, invocation NativeCommandInvocation) error
 }
 
+// NativeCommandDispatchAcknowledger is the native-command counterpart of
+// InputDispatchAcknowledger. It is optional because some Worker protocols have
+// no distinct provider-acceptance signal for native commands. Its callback
+// ordering contract is identical to InputDispatchAcknowledger.
+type NativeCommandDispatchAcknowledger interface {
+	InvokeNativeCommandWithDispatchAccepted(
+		ctx context.Context,
+		invocation NativeCommandInvocation,
+		accepted func(),
+	) error
+}
+
+// DispatchNativeCommand invokes a native command and reports its provider
+// acceptance point when the Worker exposes one. The already-resolved invoker
+// remains the fallback so legacy SkillInvoker compatibility is preserved.
+func DispatchNativeCommand(
+	ctx context.Context,
+	w Worker,
+	invoker NativeCommandInvoker,
+	invocation NativeCommandInvocation,
+	accepted func(),
+) error {
+	if accepted == nil {
+		accepted = func() {}
+	}
+	if acknowledger, ok := w.(NativeCommandDispatchAcknowledger); ok {
+		return acknowledger.InvokeNativeCommandWithDispatchAccepted(ctx, invocation, accepted)
+	}
+	if err := invoker.InvokeNativeCommand(ctx, invocation); err != nil {
+		return err
+	}
+	accepted()
+	return nil
+}
+
 // NativeModeForType maps a WorkerType to the native SkillInvocationMode it
 // uses for an explicitly resolved command.
 func NativeModeForType(t WorkerType) SkillInvocationMode {

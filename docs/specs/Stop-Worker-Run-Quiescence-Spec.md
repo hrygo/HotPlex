@@ -9,7 +9,7 @@ issue: 971
 
 **Issue**: [#971](https://github.com/hrygo/hotplex/issues/971)
 **Severity**: P2（停止反馈失真，旧任务输出可污染下一轮会话）
-**Scope**: `internal/gateway/{commands,handler,bridge,bridge_worker,bridge_forward}.go`、停止契约测试与四类 Worker 生命周期回归测试
+**Scope**: `internal/gateway/{commands,handler,bridge,bridge_worker,bridge_forward,dispatch_acceptance}.go`、`internal/worker/{worker,native_commands}.go`、ACP/OCS/Codex 适配器、停止契约测试与四类 Worker 生命周期回归测试
 **Related**: `docs/specs/Stop-Current-Turn-Spec.md`、Issue #880
 
 本 Spec 是 Issue #880 和 `Stop-Current-Turn-Spec.md` 的可靠性补强。旧 Spec 已建立 `control.stop`、`StopCurrentTurn` 和 `done(reason="stopped_by_user")` 的基础语义；本 Spec 取代其中“`StopCurrentTurn` 返回后立即发送 done”的停止确认时序。其余 `control.stop` wire contract 和前端确认协议保持不变。
@@ -82,7 +82,7 @@ control.stop
 
 ### I2：每轮只有一个停止终态
 
-同一 `(session_id, worker_run_id, execution_id)` 最多执行一次有效停止、一次 runtime finish 和一次 synthetic done。重复 stop 静默返回，不调用第二次 Worker stop，也不发送第二个 terminal。
+同一 `(session_id, worker_run_id, execution_id)` 最多执行一次有效停止、一次 runtime finish 和一次 synthetic done。重复 stop 静默返回，不调用第二次 Worker stop，也不发送第二个 terminal。若自然 `Done/Error` 在 stop 等待事件屏障期间先提交，stop 同样静默返回：不再调用 provider stop、teardown 或发送 `stopped_by_user`。
 
 ### I3：停止失败不伪装成功
 
@@ -161,10 +161,20 @@ func (g *sessionDispatchGate) Lock(sessionID string) func()
 
 锁定范围：
 
-- `deliverToWorkerWithBusyHandling`：从读取 Session、`acceptInputExecutionWithRetry` 开始，覆盖 binding 选择、`MarkRunning`、`stopFence.BeginTurn` 和 `Worker.Input` / native invocation 返回。
+- `deliverToWorkerWithBusyHandling`：从读取 Session、`acceptInputExecutionWithRetry` 开始，覆盖 binding 选择、`MarkRunning`、`stopFence.BeginTurn`，直到 Worker 明确确认请求已被 provider 接受。
 - `control.stop`：从解析当前 binding/execution 开始，覆盖 stop、teardown、forwarder 等待、runtime finish 和 synthetic done。
 
-不持锁等待整个模型 turn；`Worker.Input` 完成投递后立即释放。不同 stripe 上的 session 不互相影响；哈希碰撞只会造成短暂串行，不改变语义。
+不持锁等待整个模型 turn。对于返回即代表投递完成的 Worker，成功的 `Worker.Input` 返回是 acceptance point；对于 ACP 等 `Input` 会阻塞至整轮结束的适配器，新增可选 `InputDispatchAcknowledger`，在请求不可再被 stop 超越时回调确认。Gateway 在释放 gate 前同步完成 inbound event/turn 捕获、worker-accepted 标记、delivery 状态、最终 `input.ack` 和 delivery audit，随后才允许 stop 进入，并继续在锁外等待 `Input` 的整轮结果。这样客户端收到 `stopped_by_user` 后不会再看到旧输入的 ACK，event store 也不会在该 terminal 之后才接受旧输入。OpenCode 普通输入改用 `POST /session/{id}/prompt_async`，以 204/2xx acknowledgement 作为 acceptance point，后续输出仍由 SSE 提供。不同 stripe 上的 session 不互相影响；哈希碰撞只会造成短暂串行，不改变语义。
+
+该能力是可选接口，不修改 `worker.Worker` 主接口：
+
+```go
+type InputDispatchAcknowledger interface {
+    InputWithDispatchAccepted(ctx context.Context, content string, metadata map[string]any, accepted func()) error
+}
+```
+
+ACP 在完整 `session/prompt` JSON-RPC frame 写入并释放 stdin write lock 后确认，确保随后发出的 `session/cancel` 不会越过 prompt。OCS 原生 `/command` 没有异步端点，因此在该请求仍等待响应时，以同 session SSE 的 `session.status(busy)` / `state(running)` 作为 provider acceptance signal；session gate 保证前一轮 terminal 已处理且同一 Worker 只有一个待确认 command，callback 又在发出 HTTP 请求前即时注册。LLM auto-retry 复用相同协议：run event read admission 只持有到 acceptance point，避免 retry 已投递后仍以整轮阻塞 stop 的 event write barrier。
 
 `reset`、`terminate` 和 `delete` 本期保持现状。后续若需要统一所有 lifecycle command，可复用同一 gate，但不得在本 Issue 顺手扩大范围。
 
@@ -174,10 +184,11 @@ func (g *sessionDispatchGate) Lock(sessionID string) func()
 
 ```go
 type workerRunLifecycle struct {
-	eventMu  sync.RWMutex
-	stopping atomic.Bool
-	done     chan struct{}
-	conn     worker.SessionConn
+	eventMu          sync.RWMutex
+	stopping         atomic.Bool
+	terminalCommitted atomic.Bool
+	done             chan struct{}
+	conn             worker.SessionConn
 }
 
 type workerRunBinding struct {
@@ -191,6 +202,7 @@ type workerRunBinding struct {
 
 - lifecycle 在 `createAndLaunchWorker` 成功启动 Worker、冻结 Conn 时创建；binding 与 forwarder 共享同一个指针。
 - `conn` 必须是 forwarder 启动时冻结的 Conn，停止路径不得重新读取可能已被 reset 替换的 `Worker.Conn()`。
+- `terminalCommitted` 与 forwarder 的 per-turn terminal fence 同步；自然 `Done/Error`、timeout 或 crash terminal 一旦取得 terminal claim 即置位。新 primary turn 在 dispatch 前取得 event write barrier，排空前一轮事件后清零；retry 或明确的 Worker 新轮次边界也同步清零。
 - forwarder goroutine 最外层注册 `defer close(lifecycle.done)`，并通过 defer 注册顺序保证 run binding 清理先执行；close 发生在 `handleWorkerExit` 返回和 `clearWorkerRun` 完成之后。
 - `done` 只关闭一次；生命周期对象不复用于 replacement run。
 
@@ -210,6 +222,10 @@ stop 路径执行：
 
 ```go
 lifecycle.eventMu.Lock()
+if lifecycle.terminalCommitted.Load() {
+	lifecycle.eventMu.Unlock()
+	return errWorkerRunTerminal
+}
 err := w.StopCurrentTurn(ctx)
 if err != nil {
 	lifecycle.eventMu.Unlock()
@@ -222,6 +238,7 @@ lifecycle.eventMu.Unlock()
 该顺序提供两个性质：
 
 - stop 失败时，没有事件被永久丢弃；等待 event write lock 的事件会在解锁后继续处理。
+- 自然 terminal 先完成时，stop 在 write barrier 内重新检查并返回内部 already-terminal 结果；Handler 回滚 stop claim 且不生成第二个 terminal。
 - stop 成功时，所有已经进入 `processForwardedEvent` 的事件先完成；`stopping=true` 建立后，新旧缓冲事件全部被拒绝，因此屏障后不存在并发转发。
 
 下列不经过 `processForwardedEvent` 的出口也必须检查 `lifecycle.stopping`：
@@ -325,7 +342,7 @@ func (b *Bridge) StopAndDisposeCurrentRun(
 
 stop 和 input accept/dispatch 使用同一个 session dispatch gate：
 
-- input 先取得 gate：输入完成 Worker 投递并绑定 execution 后，stop 才解析并停止该轮；
+- input 先取得 gate：输入完成 execution 绑定并到达 provider acceptance point 后释放 gate，stop 随后解析并停止该轮；adapter 可继续在 gate 外等待整轮 RPC 结果；
 - stop 先取得 gate：旧 run 静默并 detach 后，input 才能 accept/resolve binding，因而只能 resume 新 run。
 
 不存在“新 execution 已 accept，但 stop 仍按旧 binding finish 新 execution”的中间状态。
@@ -376,6 +393,9 @@ session gate 使两个 stop 串行，`stopFence` 保持每轮 single-effect。�
 - **C08 stop-input race**：并发 stop 和 input，新 input 的 execution/run ID 只能指向 replacement Worker。
 - **C09 teardown fallback**：Terminate 失败触发 Kill 和 frozen Conn close；成功静默后仍只发一个 done。
 - **C10 quiescence timeout**：旧 run 被隔离并 CAS detach，但客户端收到 error 而非假 done。
+- **C11 blocking-input stop**：Worker 已接受输入但 `Input` 仍等待整轮结果时，stop 必须进入 `StopCurrentTurn`，不得被 dispatch gate 阻塞；接受后的 event-store 捕获和 delivered ACK 必须先于 `stopped_by_user`，terminal 后不得再出现旧输入 ACK；adapter 随后返回的 cancellation error 必须等待 stop 决策，成功 stop 不得把它误报为 input failure。
+- **C12 stale-stop-claim**：旧 turn 的 retained claim 不得让新 execution 在 binding 丢失后静默返回成功；已配置 execution ledger 时仅精确 `(session, run, execution)` 匹配可判定重复 stop，ledger-disabled 模式才允许 session-only fallback。
+- **C13 accepted-input stop failure**：已接受 RPC 的 adapter error 必须等待并发 stop 决策；stop 成功时吸收取消错误，stop 失败并 rollback 时保留真实 input error。
 
 ### 8.2 Stop 失败回归
 
@@ -424,6 +444,9 @@ cd webchat && pnpm test
 - **AC8**：现有 `terminate`、`reset`、`delete`、GC、crash fallback、execution owner lease 和输入幂等合同不变。
 - **AC9**：AEP 和 WebChat wire contract 无变化，现有前端 stop suite 全部通过。
 - **AC10**：目标 Gateway/Worker 测试在 `-race -count=1 -shuffle=on` 下通过，单模块不超过 5 秒；显式超时测试使用缩短的可注入 duration。
+- **AC11**：ACP/OCS 普通输入、ACP/OCS 原生命令及 LLM retry 在 provider acceptance 后不再持有 stop 所需的 dispatch/event admission；Codex interrupt 与 unsubscribe 使用调用方 teardown context。
+- **AC12**：detached-run 重复 stop 只在已知 run/execution 精确命中 retained claim 时幂等成功；旧 claim 不掩盖新 turn 的 binding 丢失。
+- **AC13**：自然 `Done/Error` 与 stop 竞态时只保留自然 terminal；provider stop/teardown 不执行，stop claim 回滚，下一轮仍可正常开始。
 
 ---
 
@@ -431,14 +454,15 @@ cd webchat && pnpm test
 
 | 文件 | 责任 |
 |---|---|
-| `internal/gateway/handler.go` | session dispatch gate；input accept/dispatch 临界区 |
+| `internal/gateway/handler.go`、`dispatch_acceptance.go` | session dispatch gate；两阶段 input accept/dispatch 临界区 |
 | `internal/gateway/commands.go` | stop 编排、重复 stop、错误与 done 时序 |
 | `internal/gateway/bridge.go` | run lifecycle 类型、完整 binding 查询、stop/dispose API |
 | `internal/gateway/bridge_worker.go` | lifecycle 创建、frozen Conn、forwarder done 屏障 |
 | `internal/gateway/bridge_forward.go` | 全事件隔离和非主事件出口收敛 |
-| `internal/gateway/stop_contract_test.go` | C06-C10 Gateway 契约 |
+| `internal/gateway/stop_contract_test.go` | C06-C13 Gateway 契约 |
 | `internal/gateway/contracttest/worker_probe.go` | 晚到事件、teardown 和 forwarder 可控探针 |
-| 四类 Worker 测试 | stop + teardown + resume 与共享单例隔离回归 |
+| `internal/worker/{worker,native_commands}.go` | 可选 dispatch-acceptance 能力；`Worker` 主接口保持不变 |
+| ACP / OCS / Codex Worker 与测试 | ACP 精确写入确认、OCS async prompt、Codex deadline 传播与共享单例隔离回归 |
 
 除上述文件及必要的同目录测试辅助代码外，不修改前端、AEP、SDK、数据库 migration、配置、版本或 changelog。
 

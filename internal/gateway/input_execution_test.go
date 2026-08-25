@@ -36,6 +36,7 @@ type fakeExecutionStore struct {
 	finishRunID   string
 	finishStatus  execution.RuntimeStatus
 	finishErr     error
+	latestErr     error
 }
 
 func (s *fakeExecutionStore) Accept(_ context.Context, req execution.AcceptRequest) (*execution.Record, bool, error) {
@@ -105,6 +106,9 @@ func (s *fakeExecutionStore) OpenBySession(context.Context, string) (*execution.
 func (s *fakeExecutionStore) LatestBySession(context.Context, string) (*execution.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.latestErr != nil {
+		return nil, s.latestErr
+	}
 	if s.openRecord != nil {
 		return s.openRecord, nil
 	}
@@ -211,7 +215,11 @@ func TestInputExecution_HardWorkerFailureDoesNotCaptureUserTurn(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	sm.On("Get", "s-exec").Return(&session.SessionInfo{State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
 	sm.On("GetWorker", "s-exec").Return(w).Maybe()
-	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	bridge.workerRuns.Store("s-exec", workerRunBinding{
+		worker:    w,
+		id:        "run-worker",
+		lifecycle: newWorkerRunLifecycle(nil),
+	})
 	w.On("Input", mock.Anything, "hello", mock.Anything).Return(errors.New("worker rejected input"))
 
 	h := &Handler{
@@ -249,7 +257,11 @@ func TestInputExecution_SuccessCapturesUserTurnOnce(t *testing.T) {
 	w := new(mockWorkerForHandler)
 	sm.On("Get", "s-exec").Return(&session.SessionInfo{State: events.StateRunning, Platform: "webchat"}, nil).Maybe()
 	sm.On("GetWorker", "s-exec").Return(w).Maybe()
-	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	bridge.workerRuns.Store("s-exec", workerRunBinding{
+		worker:    w,
+		id:        "run-worker",
+		lifecycle: newWorkerRunLifecycle(nil),
+	})
 	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
 
 	h := &Handler{
@@ -299,7 +311,11 @@ func TestInputExecution_DispatchUsesAtomicBridgeBinding(t *testing.T) {
 	bridgeSM.On("GetWorker", "s-exec").Return(boundWorker)
 	boundWorker.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
 	b := &Bridge{sm: bridgeSM, log: testLogger(t)}
-	b.workerRuns.Store("s-exec", workerRunBinding{worker: boundWorker, id: "run-bound"})
+	b.workerRuns.Store("s-exec", workerRunBinding{
+		worker:    boundWorker,
+		id:        "run-bound",
+		lifecycle: newWorkerRunLifecycle(nil),
+	})
 
 	hub := newTestHub(t)
 	conn := &mockPlatformConn{}
@@ -331,7 +347,11 @@ func TestInputExecution_RefreshesSessionStateAfterAcceptance(t *testing.T) {
 	sm.On("GetWorker", "s-exec").Return(w)
 	w.On("Input", mock.Anything, "hello", mock.Anything).Return(nil)
 	b := &Bridge{sm: sm, log: testLogger(t)}
-	b.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-fresh"})
+	b.workerRuns.Store("s-exec", workerRunBinding{
+		worker:    w,
+		id:        "run-fresh",
+		lifecycle: newWorkerRunLifecycle(nil),
+	})
 
 	hub := newTestHub(t)
 	conn := &mockPlatformConn{}
@@ -477,7 +497,11 @@ func TestInputExecution_TimeoutStillCapturesInboundTurn(t *testing.T) {
 	}, nil).Maybe()
 	sm.On("GetWorker", "s-exec").Return(w).Maybe()
 	bridge.sm = sm
-	bridge.workerRuns.Store("s-exec", workerRunBinding{worker: w, id: "run-worker"})
+	bridge.workerRuns.Store("s-exec", workerRunBinding{
+		worker:    w,
+		id:        "run-worker",
+		lifecycle: newWorkerRunLifecycle(nil),
+	})
 
 	allowAssistant := make(chan struct{})
 	assistantDone := make(chan struct{})

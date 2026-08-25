@@ -55,12 +55,16 @@ type SingletonProcessManager struct {
 	crashCh  chan struct{} // closed when process exits unexpectedly
 
 	// EventBus dispatches events from the global SSE stream to individual sessions.
+	// eventMu serializes converter access with deferred retry expiry. Lock order:
+	// mu (when held) → eventMu → retryTerminal.mu → busMu.
+	eventMu     sync.Mutex
 	busMu       sync.RWMutex
 	subscribers map[string]chan *events.Envelope
 	sseCancel   context.CancelFunc
 
 	// Converter maps OCS BusEvents to AEP envelopes.
-	converter *Converter
+	converter     *Converter
+	retryTerminal *retryTerminalArbiter
 
 	idleTimer *time.Timer
 
@@ -96,7 +100,7 @@ func NewSingletonProcessManager(log *slog.Logger, cfg config.OpenCodeServerConfi
 		MaxIdleConnsPerHost: 100,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	return &SingletonProcessManager{
+	manager := &SingletonProcessManager{
 		log:         log.With("component", "opencode-server-singleton"),
 		client:      &http.Client{Timeout: cfg.HTTPTimeout, Transport: transport},
 		sseClient:   &http.Client{Transport: transport}, // no Timeout for SSE
@@ -106,6 +110,9 @@ func NewSingletonProcessManager(log *slog.Logger, cfg config.OpenCodeServerConfi
 		converter:   NewConverter(),
 		stderrRing:  newRingBuffer(stderrRingCapacity),
 	}
+	manager.retryTerminal = newRetryTerminalArbiter(
+		func(delay time.Duration, fn func()) retryTimer { return time.AfterFunc(delay, fn) })
+	return manager
 }
 
 // Acquire increments the reference count and starts the process if needed.
@@ -185,6 +192,12 @@ func (s *SingletonProcessManager) Subscribe(sessionID string) chan *events.Envel
 // Failure to do so may leave a goroutine that sends to the removed channel
 // (handled gracefully by trySendEnvelope's recover, but still a leak).
 func (s *SingletonProcessManager) Unsubscribe(sessionID string) {
+	s.eventMu.Lock()
+	if s.retryTerminal != nil {
+		s.retryTerminal.cancel(sessionID)
+	}
+	s.eventMu.Unlock()
+
 	s.busMu.Lock()
 	defer s.busMu.Unlock()
 
@@ -316,7 +329,12 @@ func (s *SingletonProcessManager) startupFailureError(phase string, err error) e
 // startProcessLocked starts the opencode serve process. Caller must hold s.mu.
 func (s *SingletonProcessManager) startProcessLocked(ctx context.Context) error {
 	s.state = stateStarting
+	s.eventMu.Lock()
 	s.converter.Reset()
+	if s.retryTerminal != nil {
+		s.retryTerminal.cancelAll()
+	}
+	s.eventMu.Unlock()
 	s.stderrRing.Reset() // clear previous lifecycle's tail (pointer stays stable → no race with readStderr)
 	s.lastExitCode = 0   // clear stale exit code from a previous lifecycle
 	s.hasExitCode = false
@@ -749,17 +767,44 @@ func (s *SingletonProcessManager) dispatchOCSEvent(data []byte) {
 		return
 	}
 	sessionID := props.SessionID
+
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.retryTerminal == nil {
+		s.retryTerminal = newRetryTerminalArbiter(
+			func(delay time.Duration, fn func()) retryTimer { return time.AfterFunc(delay, fn) })
+	}
+
 	if sessionID == "" {
 		// session.error can have optional sessionID — dispatch to all subscribers.
 		if evt.Payload.Type == ocsSessionError {
+			s.retryTerminal.cancelAll()
 			s.dispatchToAllSubscribers(evt.Payload.Properties)
 		}
+		return
+	}
+
+	if s.retryTerminal.deferEvent(sessionID, evt.Payload.Type, evt.Payload.Properties,
+		func(token *pendingRetryTerminal) { s.flushRetryTerminal(sessionID, token) }) {
 		return
 	}
 
 	// Delegate to converter.
 	envs := s.converter.Convert(sessionID, evt.Payload.Type, evt.Payload.Properties)
 	for _, env := range envs {
+		s.sendToSubscriber(sessionID, env)
+	}
+}
+
+func (s *SingletonProcessManager) flushRetryTerminal(sessionID string, token *pendingRetryTerminal) {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+
+	message, ok := s.retryTerminal.consumeExpired(sessionID, token)
+	if !ok {
+		return
+	}
+	for _, env := range s.converter.handleRetryExhausted(sessionID, message) {
 		s.sendToSubscriber(sessionID, env)
 	}
 }
@@ -905,6 +950,12 @@ func isDroppable(kind events.Kind) bool {
 // Invariant: after the process transitions to stopped, no new subscribers can be
 // added because Acquire rejects stateStopped. This guarantees the map only shrinks.
 func (s *SingletonProcessManager) closeAllSubscribers() {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.retryTerminal != nil {
+		s.retryTerminal.cancelAll()
+	}
+
 	s.busMu.Lock()
 	n := len(s.subscribers)
 	for id, ch := range s.subscribers {

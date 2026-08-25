@@ -54,6 +54,27 @@ func (f *turnStopFence) Claim(sessionID, workerRunID, execID string) bool {
 	return true
 }
 
+// Matches reports whether the retained claim belongs to the exact run and
+// execution. Detached-run idempotence must use this whenever either identity
+// is known; a stale claim from an older turn is not evidence that the latest
+// turn was stopped.
+func (f *turnStopFence) Matches(sessionID, workerRunID, execID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	claim, ok := f.claimed[sessionID]
+	return ok && claim == stopClaimKey(workerRunID, execID)
+}
+
+// HasAny is the identity-free fallback for ledger-disabled operation after a
+// detached run leaves no live run ID. Configured-ledger lookup failures must
+// fail closed rather than call this method.
+func (f *turnStopFence) HasAny(sessionID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.claimed[sessionID]
+	return ok
+}
+
 // Rollback releases the claim after a FAILED StopCurrentTurn so a manual retry
 // can stop again. It only clears when the claim still belongs to the given
 // run/execution — an old run's rollback must not clear a newer claim.

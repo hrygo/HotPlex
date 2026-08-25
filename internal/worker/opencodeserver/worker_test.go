@@ -1043,6 +1043,56 @@ func TestWorker_StopCurrentTurn_AbortsWithoutReleasingSession(t *testing.T) {
 	assertStopTurnRetention(t, w, mgr, live, sseCtx, true)
 }
 
+func TestWorker_StopThenTerminatePreservesSiblingWrapper(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/session/ses-a/abort", r.URL.Path)
+		_, _ = rw.Write([]byte("true"))
+	}))
+	t.Cleanup(server.Close)
+
+	mgr := newRunningSingleton(t)
+	mgr.mu.Lock()
+	mgr.refs = 2
+	mgr.mu.Unlock()
+	workerA, connA := stopTurnTestWorker(t, server, mgr, "ses-a", "/tmp/a")
+	workerB, connB := stopTurnTestWorker(t, server, mgr, "ses-b", "/tmp/b")
+	mgr.Subscribe("ses-a")
+	mgr.Subscribe("ses-b")
+	ctxA, cancelA := context.WithCancel(context.Background())
+	ctxB, cancelB := context.WithCancel(context.Background())
+	workerA.Mu.Lock()
+	workerA.sseCancel = cancelA
+	workerA.Mu.Unlock()
+	workerB.Mu.Lock()
+	workerB.sseCancel = cancelB
+	workerB.Mu.Unlock()
+
+	require.NoError(t, workerA.StopCurrentTurn(context.Background()))
+	require.NoError(t, workerA.Terminate(context.Background()))
+	require.NoError(t, workerA.Kill(), "wrapper release must be idempotent")
+	require.Error(t, ctxA.Err(), "stopped wrapper SSE context must be cancelled")
+	_, open := <-connA.Recv()
+	require.False(t, open, "terminated wrapper connection must close")
+
+	mgr.mu.Lock()
+	require.Equal(t, 1, mgr.refs, "only the stopped wrapper reference must be released")
+	require.Equal(t, stateRunning, mgr.state, "terminating one wrapper must not stop the shared server")
+	mgr.mu.Unlock()
+	mgr.busMu.Lock()
+	_, hasA := mgr.subscribers["ses-a"]
+	_, hasB := mgr.subscribers["ses-b"]
+	mgr.busMu.Unlock()
+	require.False(t, hasA)
+	require.True(t, hasB, "sibling wrapper subscription must remain active")
+	require.Nil(t, ctxB.Err(), "sibling wrapper SSE context must remain active")
+	require.Same(t, connB, workerB.Conn())
+
+	require.NoError(t, workerB.Terminate(context.Background()))
+}
+
 func TestWorker_StopCurrentTurn_NoActiveConn(t *testing.T) {
 	t.Parallel()
 
@@ -1218,7 +1268,7 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 		var receivedPath string
 		w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
 			receivedPath = r.URL.Path
-			rw.WriteHeader(http.StatusOK)
+			rw.WriteHeader(http.StatusNoContent)
 		})
 		w.MarkStopped()
 
@@ -1226,9 +1276,67 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 		require.NoError(t, err)
 
 		require.False(t, w.IsStopped(), "a new primary turn must clear the stopped marker")
-		// The protocol fake observed the primary send (message POST).
-		require.Equal(t, "/session/test-session/message", receivedPath)
+		// The async endpoint acknowledges delivery without holding Input for the
+		// entire model turn; output continues over SSE.
+		require.Equal(t, "/session/test-session/prompt_async", receivedPath)
 	})
+}
+
+func TestWorker_NativeDispatchAcceptedOnRunningStateBeforeCommandResponse(t *testing.T) {
+	requestSeen := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	w, srv := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/session/test-session/command", r.URL.Path)
+		close(requestSeen)
+		<-releaseResponse
+		rw.WriteHeader(http.StatusOK)
+	})
+	w.cmd = &ServerCommander{
+		client:    srv.Client(),
+		baseURL:   srv.URL,
+		sessionID: "test-session",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	busCh := make(chan *events.Envelope, 1)
+	go w.forwardBusEvents(ctx, "test-session", busCh)
+
+	accepted := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- w.InvokeNativeCommandWithDispatchAccepted(ctx, worker.NativeCommandInvocation{
+			Name: "review",
+			Args: "current diff",
+		}, func() { close(accepted) })
+	}()
+
+	select {
+	case <-requestSeen:
+	case <-time.After(time.Second):
+		t.Fatal("native command request was not sent")
+	}
+	select {
+	case <-accepted:
+		require.FailNow(t, "native dispatch was accepted before the Worker entered running state")
+	default:
+	}
+
+	busCh <- events.NewEnvelope(aep.NewID(), "test-session", 0, events.State,
+		events.StateData{State: events.StateRunning})
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("running state did not acknowledge native dispatch")
+	}
+	select {
+	case err := <-done:
+		require.FailNow(t, "native command returned before its HTTP response", "error: %v", err)
+	default:
+	}
+
+	close(releaseResponse)
+	require.NoError(t, <-done)
 }
 
 // TestForwardBusEvents_SuppressesTerminalWhileStopped is the regression test

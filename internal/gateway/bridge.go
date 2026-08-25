@@ -27,6 +27,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+const (
+	defaultStopTeardownTimeout  = 8 * time.Second
+	defaultStopForwarderTimeout = time.Second
+)
+
 // bridgeSM is the narrow subset of SessionManager that Bridge needs.
 // Composed from canonical sub-interfaces defined in handler.go to avoid
 // duplicate method declarations.
@@ -62,6 +67,8 @@ type Bridge struct {
 
 	agentConfigDir        string                   // agent config directory path; "" = disabled
 	turnTimeout           time.Duration            // per-turn timeout; 0 = disabled
+	stopTeardownTimeout   time.Duration            // provider stop + teardown server-side budget
+	stopForwarderTimeout  time.Duration            // extra local forwarder settle budget
 	workerEnv             []string                 // extra env vars from worker.environment config
 	workerEnvBlocklist    []string                 // extra blocklist entries from worker.env_blocklist config
 	cronEnv               []string                 // env vars injected only into cron platform sessions
@@ -121,8 +128,91 @@ type Bridge struct {
 }
 
 type workerRunBinding struct {
-	worker worker.Worker
-	id     string
+	worker    worker.Worker
+	id        string
+	lifecycle *workerRunLifecycle
+}
+
+// workerRunLifecycle is private to one local Worker wrapper/process run. It
+// never survives reset or replacement, even when the provider session identity
+// is resumed by the next Worker.
+type workerRunLifecycle struct {
+	eventMu           sync.RWMutex
+	eventAdmission    chan struct{}
+	stopping          atomic.Bool
+	terminalCommitted atomic.Bool
+	done              chan struct{}
+	conn              worker.SessionConn
+}
+
+func newWorkerRunLifecycle(conn worker.SessionConn) *workerRunLifecycle {
+	lifecycle := &workerRunLifecycle{
+		eventAdmission: make(chan struct{}, 1),
+		done:           make(chan struct{}),
+		conn:           conn,
+	}
+	lifecycle.eventAdmission <- struct{}{}
+	return lifecycle
+}
+
+// beginEvent admits one complete event-side-effect operation. A successful
+// stop takes the write side, waits for admitted work to finish, then makes the
+// rejection irreversible before releasing it.
+func (l *workerRunLifecycle) beginEvent() (func(), bool) {
+	if l == nil {
+		return func() {}, true
+	}
+	if l.stopping.Load() {
+		return nil, false
+	}
+	<-l.eventAdmission
+	l.eventMu.RLock()
+	l.eventAdmission <- struct{}{}
+	if l.stopping.Load() {
+		l.eventMu.RUnlock()
+		return nil, false
+	}
+	return l.eventMu.RUnlock, true
+}
+
+func (l *workerRunLifecycle) withEvent(run func()) bool {
+	releaseEvent, admitted := l.beginEvent()
+	if !admitted {
+		return false
+	}
+	defer releaseEvent()
+	run()
+	return true
+}
+
+// lockEventBarrier prevents new event admissions, then waits for already
+// admitted side effects to drain. Holding the admission token makes TryLock
+// starvation-free without spawning an orphan goroutine when ctx expires.
+func (l *workerRunLifecycle) lockEventBarrier(ctx context.Context) bool {
+	select {
+	case <-l.eventAdmission:
+	case <-ctx.Done():
+		return false
+	}
+
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if l.eventMu.TryLock() {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			l.eventAdmission <- struct{}{}
+			return false
+		case <-ticker.C:
+		}
+	}
+}
+
+func (l *workerRunLifecycle) unlockEventBarrier() {
+	l.eventMu.Unlock()
+	l.eventAdmission <- struct{}{}
 }
 
 type crashHistory struct {
@@ -139,29 +229,39 @@ const (
 // NewBridge creates a new bridge.
 func NewBridge(deps BridgeDeps) *Bridge {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	stopTeardownTimeout := deps.StopTeardownTimeout
+	if stopTeardownTimeout <= 0 {
+		stopTeardownTimeout = defaultStopTeardownTimeout
+	}
+	stopForwarderTimeout := deps.StopForwarderTimeout
+	if stopForwarderTimeout <= 0 {
+		stopForwarderTimeout = defaultStopForwarderTimeout
+	}
 	b := &Bridge{
-		log:                deps.Log.With("component", "bridge"),
-		hub:                deps.Hub,
-		sm:                 deps.SM,
-		wf:                 defaultWorkerFactory{},
-		collector:          deps.EventCollector,
-		turnsQuerier:       deps.TurnsQuerier,
-		retryCtrl:          deps.RetryCtrl,
-		agentConfigDir:     deps.AgentConfigDir,
-		turnTimeout:        deps.TurnTimeout,
-		workerEnv:          deps.WorkerEnv,
-		workerEnvBlocklist: deps.WorkerEnvBlocklist,
-		cronEnv:            deps.CronEnv,
-		wsStore:            deps.WSStore,
-		retryCancel:        make(map[string]chan struct{}),
-		accum:              make(map[string]*sessionAccumulator),
-		crashTracker:       make(map[string]*crashHistory),
-		shutdownCtx:        shutdownCtx,
-		shutdownCancel:     shutdownCancel,
-		executionStore:     deps.ExecutionStore,
-		repairer:           deps.Repairer,
-		turnTTFT:           newTurnTTFTTracker(),
-		pending:            NewPendingBuffer(),
+		log:                  deps.Log.With("component", "bridge"),
+		hub:                  deps.Hub,
+		sm:                   deps.SM,
+		wf:                   defaultWorkerFactory{},
+		collector:            deps.EventCollector,
+		turnsQuerier:         deps.TurnsQuerier,
+		retryCtrl:            deps.RetryCtrl,
+		agentConfigDir:       deps.AgentConfigDir,
+		turnTimeout:          deps.TurnTimeout,
+		stopTeardownTimeout:  stopTeardownTimeout,
+		stopForwarderTimeout: stopForwarderTimeout,
+		workerEnv:            deps.WorkerEnv,
+		workerEnvBlocklist:   deps.WorkerEnvBlocklist,
+		cronEnv:              deps.CronEnv,
+		wsStore:              deps.WSStore,
+		retryCancel:          make(map[string]chan struct{}),
+		accum:                make(map[string]*sessionAccumulator),
+		crashTracker:         make(map[string]*crashHistory),
+		shutdownCtx:          shutdownCtx,
+		shutdownCancel:       shutdownCancel,
+		executionStore:       deps.ExecutionStore,
+		repairer:             deps.Repairer,
+		turnTTFT:             newTurnTTFTTracker(),
+		pending:              NewPendingBuffer(),
 	}
 	b.mcpConfigJSON.Store(deps.MCPConfigJSON)
 	b.defaultPermissionMode.Store(worker.NormalizePermissionMode(deps.DefaultPermissionMode))
@@ -950,11 +1050,13 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 		b.pending.Clear(sessionID)
 	}
 	workerRunID := ""
+	var replacementBinding workerRunBinding
 	if result.ConnReplaced {
 		if b.sm.GetWorker(sessionID) != w {
 			return fmt.Errorf("bridge: reset worker changed before run binding")
 		}
-		workerRunID = b.bindWorkerRun(sessionID, w, "")
+		replacementBinding = b.bindWorkerRun(sessionID, w, "")
+		workerRunID = replacementBinding.id
 	} else if bindingSuspended {
 		b.restoreWorkerRun(sessionID, suspendedBinding)
 	}
@@ -998,8 +1100,9 @@ func (b *Bridge) ResetSession(ctx context.Context, sessionID string) error {
 	b.fwdWg.Add(1)
 	go func() {
 		defer b.fwdWg.Done()
+		defer close(replacementBinding.lifecycle.done)
 		defer b.clearWorkerRun(sessionID, w, workerRunID)
-		b.launchForwarderLocked(w, sessionID, forwardOpts{ctx: context.Background(), workerRunID: workerRunID})
+		b.launchForwarderLocked(replacementBinding, sessionID, forwardOpts{ctx: context.Background(), workerRunID: workerRunID})
 	}()
 
 	return nil

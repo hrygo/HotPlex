@@ -512,6 +512,132 @@ func TestManagerShutdown(t *testing.T) {
 
 // ─── AppServerWorker Tests ──────────────────────────────────────────────
 
+type blockingFrameWriter struct {
+	entered     chan struct{}
+	release     chan struct{}
+	enteredOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func newBlockingFrameWriter() *blockingFrameWriter {
+	return &blockingFrameWriter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (w *blockingFrameWriter) Write(p []byte) (int, error) {
+	w.enteredOnce.Do(func() { close(w.entered) })
+	<-w.release
+	return len(p), nil
+}
+
+func (w *blockingFrameWriter) Close() error { return nil }
+
+func (w *blockingFrameWriter) Release() {
+	w.releaseOnce.Do(func() { close(w.release) })
+}
+
+func TestAppServerWorkerStopCurrentTurnPropagatesContext(t *testing.T) {
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Minute})
+	writer := newBlockingFrameWriter()
+	mgr.stdin = writer
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-stop-context",
+		turnID:     "turn-stop-context",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.StopCurrentTurn(ctx) }()
+	select {
+	case <-writer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("turn interrupt notification was not written")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		writer.Release()
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		writer.Release()
+		<-done
+		t.Fatal("turn interrupt ignored the caller context")
+	}
+}
+
+func TestAppServerWorkerStopCurrentTurnDoesNotExtendCallerDeadline(t *testing.T) {
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Minute})
+	writer := newBlockingFrameWriter()
+	mgr.stdin = writer
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-stop-deadline",
+		turnID:     "turn-stop-deadline",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- w.StopCurrentTurn(ctx) }()
+	select {
+	case <-writer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("turn interrupt notification was not written")
+	}
+
+	select {
+	case err := <-done:
+		writer.Release()
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(500 * time.Millisecond):
+		writer.Release()
+		<-done
+		t.Fatal("turn interrupt extended the caller deadline with fallback grace")
+	}
+}
+
+func TestAppServerWorkerTerminatePropagatesContextToUnsubscribe(t *testing.T) {
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Minute})
+	writer := newBlockingFrameWriter()
+	mgr.stdin = writer
+	mgr.mu.Lock()
+	mgr.refs = 1
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	w := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-unsubscribe-context",
+		doneCh:     make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Terminate(ctx) }()
+	select {
+	case <-writer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("thread unsubscribe notification was not written")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		writer.Release()
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		writer.Release()
+		<-done
+		t.Fatal("thread unsubscribe ignored the caller context")
+	}
+}
+
 func TestAppServerWorkerCapabilities(t *testing.T) {
 	t.Parallel()
 
@@ -562,6 +688,70 @@ func TestAppServerWorkerTerminate(t *testing.T) {
 	w := newTestAppServerWorker(t)
 	err := w.Terminate(context.Background())
 	require.NoError(t, err)
+}
+
+func TestAppServerWorker_StopThenTerminatePreservesSiblingWrapper(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewCodexAppServerManager(slog.Default(), config.CodexCLIConfig{IdleDrainPeriod: time.Hour})
+	var output strings.Builder
+	mgr.stdin = struct {
+		io.Writer
+		io.Closer
+	}{
+		Writer: &output,
+		Closer: io.NopCloser(nil),
+	}
+	mgr.mu.Lock()
+	mgr.refs = 2
+	mgr.state = stateRunning
+	mgr.mu.Unlock()
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	recvA := mgr.Subscribe("thread-a", "session-a")
+	recvB := mgr.Subscribe("thread-b", "session-b")
+	connA := &appConn{userID: "user-1", sessionID: "session-a", recvCh: recvA, manager: mgr}
+	connB := &appConn{userID: "user-1", sessionID: "session-b", recvCh: recvB, manager: mgr}
+	workerA := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-a",
+		turnID:     "turn-a",
+		doneCh:     make(chan struct{}),
+		conn:       connA,
+	}
+	workerB := &AppServerWorker{
+		BaseWorker: base.NewBaseWorker(slog.Default(), nil),
+		manager:    mgr,
+		threadID:   "thread-b",
+		turnID:     "turn-b",
+		doneCh:     make(chan struct{}),
+		conn:       connB,
+	}
+
+	require.NoError(t, workerA.StopCurrentTurn(context.Background()))
+	require.NoError(t, workerA.Terminate(context.Background()))
+	require.NoError(t, workerA.Terminate(context.Background()), "wrapper release must be idempotent")
+	_, open := <-connA.Recv()
+	require.False(t, open, "terminated wrapper connection must close")
+
+	mgr.mu.Lock()
+	require.Equal(t, 1, mgr.refs, "only the stopped wrapper reference must be released")
+	require.Equal(t, stateRunning, mgr.state, "terminating one wrapper must not stop the shared app-server")
+	mgr.mu.Unlock()
+	mgr.subMu.Lock()
+	_, hasA := mgr.subscribers["thread-a"]
+	_, hasB := mgr.subscribers["thread-b"]
+	mgr.subMu.Unlock()
+	require.False(t, hasA)
+	require.True(t, hasB, "sibling wrapper subscription must remain active")
+
+	want := &events.Envelope{SessionID: "session-b", Event: events.Event{Type: events.State}}
+	require.True(t, connB.TrySend(want), "sibling wrapper connection must remain usable")
+	require.Same(t, want, <-connB.Recv())
+	require.Contains(t, output.String(), `"method":"turn/interrupt"`)
+
+	require.NoError(t, workerB.Terminate(context.Background()))
 }
 
 func TestAppServerWorkerKill(t *testing.T) {
@@ -2129,7 +2319,7 @@ func TestWaitAfterReleaseReturnsImmediately(t *testing.T) {
 	}
 
 	// Simulate the zombie GC path: Terminate -> shutdown -> release().
-	w.release()
+	require.NoError(t, w.release(context.Background()))
 
 	// Wait() must return immediately, not block on nil channel.
 	code, err := w.Wait()
@@ -2163,7 +2353,7 @@ func TestWaitBlocksUntilRelease(t *testing.T) {
 	}, 50*time.Millisecond, 5*time.Millisecond, "Wait should block before release")
 
 	// Release unblocks Wait.
-	w.release()
+	require.NoError(t, w.release(context.Background()))
 
 	select {
 	case code := <-waitDone:
@@ -2688,7 +2878,7 @@ func TestInjectHistoryPrefixCleanupOldThreadReset(t *testing.T) {
 		historyInjected: false,
 	}
 
-	w.cleanupOldThread()
+	w.cleanupOldThread(context.Background())
 
 	require.Nil(t, w.pendingHistory)
 	require.False(t, w.historyInjected)

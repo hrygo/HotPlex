@@ -26,6 +26,7 @@ import (
 	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/dbutil"
 	"github.com/hrygo/hotplex/internal/e2econtract"
+	"github.com/hrygo/hotplex/internal/eventstore"
 	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/gateway"
 	"github.com/hrygo/hotplex/internal/session"
@@ -53,6 +54,7 @@ type Harness struct {
 	Hub     *gateway.Hub
 	Bridge  *gateway.Bridge
 	Handler *gateway.Handler
+	manager *session.Manager
 
 	profile   e2econtract.WorkerProfile
 	sessionID string
@@ -64,6 +66,36 @@ type Harness struct {
 	probes  []*WorkerProbe // every probe created for this harness (teardown closes all)
 
 	nextProbeBlocking atomic.Bool // arm the NEXT probe for the turn-gate mode (matrix C04)
+
+	eventCollector *eventstore.Collector
+	eventStore     eventstore.EventStore
+}
+
+type harnessOptions struct {
+	eventCollector       bool
+	stopTeardownTimeout  time.Duration
+	stopForwarderTimeout time.Duration
+}
+
+// HarnessOption enables an isolated contract-harness capability without
+// changing the default platform/worker matrix behavior.
+type HarnessOption func(*harnessOptions)
+
+// WithEventCollector enables durable forwarded-event assertions for tests
+// such as the stopped-run quarantine contract.
+func WithEventCollector() HarnessOption {
+	return func(opts *harnessOptions) {
+		opts.eventCollector = true
+	}
+}
+
+// WithStopTimeouts overrides the server-side stop budgets for deterministic
+// timeout contract tests. Production callers use Bridge defaults.
+func WithStopTimeouts(teardown, forwarder time.Duration) HarnessOption {
+	return func(opts *harnessOptions) {
+		opts.stopTeardownTimeout = teardown
+		opts.stopForwarderTimeout = forwarder
+	}
 }
 
 // NewHarness builds a full gateway stack against a temp SQLite store and
@@ -73,8 +105,13 @@ type Harness struct {
 // Bridge.MarkClosed → close every probe conn (so all forwarders exit; the
 // closed flag makes handleWorkerExit skip crash recovery) → Bridge.Shutdown →
 // Hub.Shutdown → Manager.Close → store.Close, each bounded by a 2s context.
-func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract.WorkerProfile) *Harness {
+func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract.WorkerProfile, options ...HarnessOption) *Harness {
 	t.Helper()
+
+	opts := harnessOptions{}
+	for _, option := range options {
+		option(&opts)
+	}
 
 	log := discardLogger
 	cfg := config.Default()
@@ -93,16 +130,25 @@ func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract
 	// resources of its own to close: store.Close() releases the shared DB.
 	execStore, err := execution.NewSQLStore(context.Background(), store.DB(), dbutil.DialectSQLite, writeMu, log)
 	require.NoError(t, err, "contracttest: open execution store")
+	var eventCollector *eventstore.Collector
+	var durableEventStore eventstore.EventStore
+	if opts.eventCollector {
+		durableEventStore = eventstore.NewSQLiteStore(store.DB(), writeMu)
+		eventCollector = eventstore.NewCollector(durableEventStore, log)
+	}
 	cfgStore := config.NewConfigStore(cfg, nil)
 	mgr, err := session.NewManager(context.Background(), log, cfg, cfgStore, store)
 	require.NoError(t, err, "contracttest: create session manager")
 
 	hub := gateway.NewHub(log, cfgStore)
 	bridge := gateway.NewBridge(gateway.BridgeDeps{
-		Log:            log,
-		Hub:            hub,
-		SM:             mgr,
-		ExecutionStore: execStore,
+		Log:                  log,
+		Hub:                  hub,
+		SM:                   mgr,
+		EventCollector:       eventCollector,
+		ExecutionStore:       execStore,
+		StopTeardownTimeout:  opts.stopTeardownTimeout,
+		StopForwarderTimeout: opts.stopForwarderTimeout,
 	})
 	handler := gateway.NewHandler(gateway.HandlerDeps{
 		Log:             log,
@@ -118,13 +164,16 @@ func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract
 	hub.JoinPlatformSession(sessionID, observer)
 
 	h := &Harness{
-		Hub:       hub,
-		Bridge:    bridge,
-		Handler:   handler,
-		profile:   profile,
-		sessionID: sessionID,
-		dbPath:    dbPath,
-		observer:  observer,
+		Hub:            hub,
+		Bridge:         bridge,
+		Handler:        handler,
+		manager:        mgr,
+		profile:        profile,
+		sessionID:      sessionID,
+		dbPath:         dbPath,
+		observer:       observer,
+		eventCollector: eventCollector,
+		eventStore:     durableEventStore,
 	}
 	bridge.SetWorkerFactory(&probeFactory{h: h, profile: profile, sessionID: sessionID})
 
@@ -150,6 +199,9 @@ func NewHarness(t testing.TB, platform e2econtract.Platform, profile e2econtract
 		}
 		h.Bridge.Shutdown(cleanupCtx)
 		_ = h.Hub.Shutdown(cleanupCtx)
+		if h.eventCollector != nil {
+			_ = h.eventCollector.Close()
+		}
 		_ = mgr.Close()
 		_ = store.Close()
 	})
@@ -180,6 +232,14 @@ func (h *Harness) Worker() *WorkerProbe {
 	return h.probe
 }
 
+// DetachWorkerForTest removes the SessionManager attachment while leaving the
+// bridge's historical run metadata intact. It models a crash/detach window in
+// which control.stop must rely on persisted execution identity rather than a
+// live Worker binding.
+func (h *Harness) DetachWorkerForTest() {
+	h.manager.DetachWorker(h.sessionID)
+}
+
 func (h *Harness) setProbe(p *WorkerProbe) {
 	h.probeMu.Lock()
 	defer h.probeMu.Unlock()
@@ -208,6 +268,31 @@ func (h *Harness) Probes() []*WorkerProbe {
 	out := make([]*WorkerProbe, len(h.probes))
 	copy(out, h.probes)
 	return out
+}
+
+// StoredEvents flushes and returns every durable event for the harness
+// session. The harness must have been created with WithEventCollector.
+func (h *Harness) StoredEvents(t testing.TB) []*eventstore.StoredEvent {
+	t.Helper()
+	require.NotNil(t, h.eventCollector, "contracttest: event collector is not enabled")
+	require.NotNil(t, h.eventStore, "contracttest: event store is not enabled")
+	require.NoError(t, h.eventCollector.FlushSession(h.sessionID), "contracttest: flush stored events")
+	page, err := h.eventStore.QueryBySession(
+		context.Background(), h.sessionID, 0, eventstore.CursorLatest, 1000,
+	)
+	require.NoError(t, err, "contracttest: query stored events")
+	return page.Events
+}
+
+// Events returns a snapshot of every envelope observed by the platform side.
+func (h *Harness) Events() []*events.Envelope { return h.observer.Events() }
+
+// SessionState returns the current persisted/in-memory session state.
+func (h *Harness) SessionState(t testing.TB) events.SessionState {
+	t.Helper()
+	si, err := h.manager.Get(context.Background(), h.sessionID)
+	require.NoError(t, err, "contracttest: get session state")
+	return si.State
 }
 
 // WaitForKinds blocks until every event kind in kinds has been observed on the

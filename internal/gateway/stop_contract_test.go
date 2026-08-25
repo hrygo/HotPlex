@@ -12,17 +12,19 @@ package gateway_test
 // The probe blocks its fixture terminal behind a channel gate so the stops
 // deterministically arrive while the turn is live (no time.Sleep).
 //
-// C05-next-turn: after a stopped turn, the next input on the SAME session must
-// clear the per-turn stopped state (probe Input reset + gateway fence
-// BeginTurn) and complete normally — two inputs total, the second terminal's
-// reason is NOT stopped_by_user, session ID unchanged.
+// C05-next-turn: after a stopped turn, the next input on the SAME logical
+// session must create a replacement Worker/run and complete normally — two
+// inputs total, the second terminal's reason is NOT stopped_by_user, session
+// ID unchanged.
 //
 // C04-stop-failure-retry: a real StopCurrentTurn failure (worker abort error)
 // must roll the fence back and send NO stopped done; a manual retry then
 // claims again and converges to exactly one stopped_by_user terminal.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 
 	"github.com/hrygo/hotplex/internal/e2econtract"
 	"github.com/hrygo/hotplex/internal/gateway/contracttest"
+	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
 )
@@ -52,6 +55,401 @@ func TestWorkerLifecycleContract(t *testing.T) {
 			runC04StopFailureRetry(t, profile)
 		})
 	}
+}
+
+func TestWorkerRunQuiescenceContract(t *testing.T) {
+	profile := lifecycleGatewayProfile(t)
+
+	t.Run("C06-late-event-quarantine", func(t *testing.T) {
+		runC06LateEventQuarantine(t, profile)
+	})
+	t.Run("C07-done-after-quiescence", func(t *testing.T) {
+		runC07DoneAfterQuiescence(t, profile)
+	})
+	t.Run("C08-stop-input-race", func(t *testing.T) {
+		runC08StopInputRace(t, profile)
+	})
+	t.Run("C09-teardown-fallback", func(t *testing.T) {
+		runC09TeardownFallback(t, profile)
+	})
+	t.Run("C10-quiescence-timeout", func(t *testing.T) {
+		runC10QuiescenceTimeout(t, profile)
+	})
+	t.Run("C11-blocking-input-stop", func(t *testing.T) {
+		runC11BlockingInputStop(t, profile)
+	})
+	t.Run("C12-stale-stop-claim", func(t *testing.T) {
+		runC12StaleStopClaim(t, profile)
+	})
+	t.Run("C13-accepted-input-stop-failure", func(t *testing.T) {
+		runC13AcceptedInputStopFailure(t, profile)
+	})
+}
+
+func lifecycleGatewayProfile(t *testing.T) e2econtract.WorkerProfile {
+	t.Helper()
+	for _, profile := range e2econtract.WorkerProfiles() {
+		if profile.Type == worker.TypeClaudeCode {
+			return profile
+		}
+	}
+	t.Fatal("gateway lifecycle profile for claudecode not found")
+	return e2econtract.WorkerProfile{}
+}
+
+func runC06LateEventQuarantine(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile, contracttest.WithEventCollector())
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.EmitLateEventsOnDispose()
+	defer probe.ReleaseTerminal()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c06 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C06")
+	require.NoError(t, <-inputDone, "C06: input must be delivered before stop")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	require.NoError(t, h.Handler.Handle(context.Background(), stop), "C06: stop must quiesce the old run")
+
+	// Reproduce the pre-fix post-done window as well. After the fix the frozen
+	// connection and forwarder are already closed, so these writes remain only
+	// in the probe's private attempted-emission log.
+	probe.EmitLateEventsNow()
+	require.True(t, envelopesContainLateRun(probe.Events()), "C06: probe must attempt late-run events")
+	require.Never(t, func() bool {
+		return envelopesContainLateRun(h.Events())
+	}, 250*time.Millisecond, 5*time.Millisecond, "C06: late-run events must not reach the client")
+
+	for _, stored := range h.StoredEvents(t) {
+		require.NotContains(t, string(stored.Data), "late_run_", "C06: late-run event must not be persisted")
+	}
+	h.AssertSingleTerminal(t, "stopped_by_user")
+}
+
+func runC07DoneAfterQuiescence(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.BlockWait()
+	defer probe.ReleaseTerminal()
+	defer probe.ReleaseWait()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c07 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C07")
+	require.NoError(t, <-inputDone, "C07: input must be delivered before stop")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Handler.Handle(context.Background(), stop) }()
+
+	select {
+	case <-probe.WaitEntered():
+	case <-time.After(lifecycleWaitTimeout):
+		t.Fatal("C07: forwarder never reached Worker.Wait")
+	}
+	require.Never(t, func() bool {
+		return stoppedDoneCount(h.Events()) != 0
+	}, 100*time.Millisecond, 5*time.Millisecond, "C07: stopped done must wait for forwarder exit")
+
+	probe.ReleaseWait()
+	require.NoError(t, <-stopDone, "C07: stop must complete after forwarder exit")
+	waitTerminalCount(t, h, 1, "C07: stopped done must arrive after quiescence")
+	require.Equal(t, 1, stoppedDoneCount(h.Events()), "C07: exactly one stopped done")
+}
+
+func runC08StopInputRace(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	oldProbe := h.Worker()
+	oldProbe.EnableBlocking()
+	oldProbe.BlockStopCurrentTurn()
+	defer oldProbe.ReleaseTerminal()
+	defer oldProbe.ReleaseStopCurrentTurn()
+
+	sessionID := h.SessionID()
+	input1 := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c08 first"})
+	input1.OwnerID = "contract-user"
+	input1Done := make(chan error, 1)
+	go func() { input1Done <- h.Handler.Handle(context.Background(), input1) }()
+	waitEnteredTurn(t, oldProbe, "C08")
+	require.NoError(t, <-input1Done, "C08: first input must be delivered")
+	_, oldRunID, ok := h.Bridge.CurrentWorkerBinding(sessionID)
+	require.True(t, ok, "C08: old run binding must exist")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Handler.Handle(context.Background(), stop) }()
+	select {
+	case <-oldProbe.StopEntered():
+	case <-time.After(lifecycleWaitTimeout):
+		t.Fatal("C08: stop never reached the old Worker")
+	}
+
+	input2 := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c08 second"})
+	input2.OwnerID = "contract-user"
+	input2Done := make(chan error, 1)
+	go func() { input2Done <- h.Handler.Handle(context.Background(), input2) }()
+	select {
+	case err := <-input2Done:
+		require.FailNow(t, "C08: next input bypassed the stop dispatch gate", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	oldProbe.ReleaseStopCurrentTurn()
+	require.NoError(t, <-stopDone, "C08: stop must complete")
+	require.NoError(t, <-input2Done, "C08: next input must dispatch after stop")
+
+	require.Eventually(t, func() bool {
+		return h.Worker() != oldProbe
+	}, lifecycleWaitTimeout, lifecycleWaitPoll, "C08: next input must create a replacement Worker")
+	newProbe := h.Worker()
+	boundWorker, newRunID, ok := h.Bridge.CurrentWorkerBinding(sessionID)
+	require.True(t, ok, "C08: replacement run binding must exist")
+	require.Same(t, newProbe, boundWorker, "C08: replacement binding must own the next input")
+	require.NotEqual(t, oldRunID, newRunID, "C08: replacement run ID must change")
+	require.Equal(t, 1, oldProbe.InputCalls(), "C08: old Worker must receive only the first input")
+	require.Equal(t, 1, newProbe.InputCalls(), "C08: replacement Worker must receive the second input once")
+}
+
+func runC09TeardownFallback(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.FailNextTerminate()
+	defer probe.ReleaseTerminal()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c09 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C09")
+	require.NoError(t, <-inputDone, "C09: input must be delivered before stop")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	require.NoError(t, h.Handler.Handle(context.Background(), stop), "C09: Kill fallback must quiesce the run")
+	require.Equal(t, 1, probe.TerminateCalls(), "C09: Terminate must be attempted once")
+	require.Equal(t, 1, probe.KillCalls(), "C09: failed Terminate must trigger one Kill")
+	h.AssertSingleTerminal(t, "stopped_by_user")
+}
+
+func runC10QuiescenceTimeout(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(
+		t, e2econtract.PlatformWebChat, profile,
+		contracttest.WithStopTimeouts(50*time.Millisecond, 50*time.Millisecond),
+	)
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.BlockWait()
+	probe.EmitLateEventsOnDispose()
+	defer probe.ReleaseTerminal()
+	defer probe.ReleaseWait()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c10 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C10")
+	require.NoError(t, <-inputDone, "C10: input must be delivered before stop")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	err := h.Handler.Handle(context.Background(), stop)
+	require.Error(t, err, "C10: quiescence timeout must surface an error")
+	require.Zero(t, stoppedDoneCount(h.Events()), "C10: timeout must not send a fake stopped done")
+	_, _, bound := h.Bridge.CurrentWorkerBinding(sessionID)
+	require.False(t, bound, "C10: timed-out old run must be fail-closed and detached")
+	require.Equal(t, events.StateIdle, h.SessionState(t), "C10: logical session must remain resumable")
+	require.Never(t, func() bool {
+		return envelopesContainLateRun(h.Events())
+	}, 100*time.Millisecond, 5*time.Millisecond, "C10: isolated late events must remain invisible")
+}
+
+func runC11BlockingInputStop(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile, contracttest.WithEventCollector())
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.BlockInputCompletion()
+	probe.FailInputAfterAccepted()
+	probe.BlockStopCurrentTurn()
+	defer probe.ReleaseTerminal()
+	defer probe.ReleaseInputCompletion()
+	defer probe.ReleaseStopCurrentTurn()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c11 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C11")
+
+	select {
+	case err := <-inputDone:
+		require.FailNow(t, "C11: blocking Input returned before its completion gate", "error: %v", err)
+	default:
+	}
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Handler.Handle(context.Background(), stop) }()
+
+	select {
+	case <-probe.StopEntered():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("C11: stop was blocked behind the adapter's full-turn Input call")
+	}
+
+	probe.ReleaseInputCompletion()
+	select {
+	case err := <-inputDone:
+		require.FailNow(t, "C11: accepted-input cancellation bypassed the in-flight stop", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	probe.ReleaseStopCurrentTurn()
+	require.NoError(t, <-stopDone, "C11: stop must complete after dispatch acceptance")
+	require.NoError(t, <-inputDone, "C11: successful stop must absorb the accepted input's cancellation result")
+	var log []*events.Envelope
+	require.Eventually(t, func() bool {
+		log = h.Events()
+		for _, env := range log {
+			if env.Event.Type != events.InputAck {
+				continue
+			}
+			ack, ok := env.Event.Data.(events.InputAckData)
+			if ok && ack.Status == events.ExecutionStatusDelivered {
+				return true
+			}
+		}
+		return false
+	}, lifecycleWaitTimeout, lifecycleWaitPoll,
+		"C11: provider acceptance must eventually emit delivered input.ack")
+	require.Zero(t, lifecycleCount(log, events.Error), "C11: accepted-input cancellation must not emit an error after stop")
+	stoppedIndex := -1
+	deliveredIndex := -1
+	for i, env := range log {
+		if env.Event.Type == events.Done && lifecycleDoneReason(env) == "stopped_by_user" {
+			stoppedIndex = i
+		}
+		if env.Event.Type == events.InputAck {
+			ack, ok := env.Event.Data.(events.InputAckData)
+			if ok && ack.Status == events.ExecutionStatusDelivered {
+				deliveredIndex = i
+			}
+		}
+	}
+	require.NotEqual(t, -1, stoppedIndex, "C11: stop must emit stopped_by_user done")
+	require.NotEqual(t, -1, deliveredIndex, "C11: provider acceptance must emit delivered input.ack")
+	require.Less(t, deliveredIndex, stoppedIndex,
+		"C11: accepted-input delivery side effects must commit before the stop terminal")
+	for _, env := range log[stoppedIndex+1:] {
+		require.NotEqual(t, events.InputAck, env.Event.Type,
+			"C11: an accepted input must not emit input.ack after stopped_by_user done")
+	}
+}
+
+func runC12StaleStopClaim(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	firstProbe := h.Worker()
+	firstProbe.EnableBlocking()
+	defer firstProbe.ReleaseTerminal()
+
+	sessionID := h.SessionID()
+	firstInput := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c12 first"})
+	firstInput.OwnerID = "contract-user"
+	firstInputDone := make(chan error, 1)
+	go func() { firstInputDone <- h.Handler.Handle(context.Background(), firstInput) }()
+	waitEnteredTurn(t, firstProbe, "C12")
+	require.NoError(t, <-firstInputDone)
+
+	firstStop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	firstStop.OwnerID = "contract-user"
+	require.NoError(t, h.Handler.Handle(context.Background(), firstStop), "C12: first turn must establish a retained stop claim")
+
+	secondInput := events.NewEnvelope(aep.NewID(), sessionID, 2, events.Input, map[string]any{"content": "c12 second"})
+	secondInput.OwnerID = "contract-user"
+	require.NoError(t, h.Handler.Handle(context.Background(), secondInput), "C12: next turn must create a new execution")
+	require.NotSame(t, firstProbe, h.Worker(), "C12: next turn must use a replacement Worker")
+
+	// Lose the live binding after the new execution exists. The first turn's
+	// retained claim is stale and must not make this stop look successful.
+	h.DetachWorkerForTest()
+	secondStop := events.NewEnvelope(aep.NewID(), sessionID, 2, events.Control, events.ControlData{Action: events.ControlActionStop})
+	secondStop.OwnerID = "contract-user"
+	err := h.Handler.Handle(context.Background(), secondStop)
+	require.ErrorContains(t, err, "stop: no active worker run")
+}
+
+func runC13AcceptedInputStopFailure(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.BlockInputCompletion()
+	probe.FailInputAfterAccepted()
+	probe.BlockStopCurrentTurn()
+	probe.FailNextStop()
+	defer probe.ReleaseTerminal()
+	defer probe.ReleaseInputCompletion()
+	defer probe.ReleaseStopCurrentTurn()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c13 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C13")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Handler.Handle(context.Background(), stop) }()
+	select {
+	case <-probe.StopEntered():
+	case <-time.After(lifecycleWaitTimeout):
+		t.Fatal("C13: stop never reached the Worker")
+	}
+
+	probe.ReleaseInputCompletion()
+	select {
+	case err := <-inputDone:
+		require.FailNow(t, "C13: input classified before the in-flight stop failed", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	probe.ReleaseStopCurrentTurn()
+	require.Error(t, <-stopDone, "C13: injected provider stop failure must surface")
+	require.ErrorContains(t, <-inputDone, "worker input failed", "C13: failed stop must preserve the accepted input error")
+}
+
+func envelopesContainLateRun(envelopes []*events.Envelope) bool {
+	for _, env := range envelopes {
+		data, err := json.Marshal(env.Event.Data)
+		if err == nil && bytes.Contains(data, []byte("late_run_")) {
+			return true
+		}
+	}
+	return false
+}
+
+func stoppedDoneCount(envelopes []*events.Envelope) int {
+	count := 0
+	for _, env := range envelopes {
+		if env.Event.Type == events.Done && lifecycleDoneReason(env) == "stopped_by_user" {
+			count++
+		}
+	}
+	return count
 }
 
 // runC04DoubleStop implements the C04 contract: one effective stop, one
@@ -115,6 +513,8 @@ func runC05NextTurn(t *testing.T, profile e2econtract.WorkerProfile) {
 	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
 	probe := h.Worker()
 	probe.EnableBlocking()
+	h.EnableProbeBlocking()
+	defer h.DisableProbeBlocking()
 	defer probe.ReleaseTerminal()
 
 	sessionID := h.SessionID()
@@ -126,6 +526,8 @@ func runC05NextTurn(t *testing.T, profile e2econtract.WorkerProfile) {
 	input1Done := make(chan error, 1)
 	go func() { input1Done <- h.Handler.Handle(context.Background(), input1) }()
 	waitEnteredTurn(t, probe, "C05")
+	_, firstRunID, ok := h.Bridge.CurrentWorkerBinding(sessionID)
+	require.True(t, ok, "C05: first run binding must exist")
 
 	stopEnv := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
 	stopEnv.OwnerID = "contract-user"
@@ -135,21 +537,31 @@ func runC05NextTurn(t *testing.T, profile e2econtract.WorkerProfile) {
 	require.NoError(t, <-input1Done, "C05: first input must settle")
 	waitTerminalCount(t, h, 1, "C05: the stopped turn must produce exactly one terminal")
 
-	// Turn 2: a NEW input ID on the same session; no stop this turn — the
-	// probe's per-turn stopped state was cleared by the new primary turn, so
-	// the fixture turn completes normally.
+	// Turn 2: a NEW input ID on the same logical session; no stop this turn.
+	// The stopped local wrapper was disposed, so auto-resume must attach a fresh
+	// Worker/run while preserving the provider conversation identity.
 	input2 := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c05 second"})
 	input2.OwnerID = "contract-user"
 	input2Done := make(chan error, 1)
 	go func() { input2Done <- h.Handler.Handle(context.Background(), input2) }()
-	waitEnteredTurn(t, probe, "C05")
-	probe.ReleaseTerminal()
+	require.Eventually(t, func() bool {
+		return h.Worker() != probe
+	}, lifecycleWaitTimeout, lifecycleWaitPoll, "C05: next turn must attach a replacement Worker")
+	replacement := h.Worker()
+	defer replacement.ReleaseTerminal()
+	waitEnteredTurn(t, replacement, "C05")
+	_, secondRunID, ok := h.Bridge.CurrentWorkerBinding(sessionID)
+	require.True(t, ok, "C05: replacement run binding must exist")
+	require.NotEqual(t, firstRunID, secondRunID, "C05: stopped and resumed runs must have different IDs")
+	replacement.ReleaseTerminal()
 	require.NoError(t, <-input2Done, "C05: second input must deliver")
 
 	log := waitTerminalCount(t, h, 2, "C05: two turns must produce exactly two terminals")
 
-	// Worker input total 2 across the two turns.
-	require.Equal(t, 2, probe.InputCalls(), "C05: Worker input total must be 2")
+	// Each local Worker receives exactly one turn; the stopped wrapper is never
+	// reused for the next input.
+	require.Equal(t, 1, probe.InputCalls(), "C05: stopped Worker must receive only turn 1")
+	require.Equal(t, 1, replacement.InputCalls(), "C05: replacement Worker must receive only turn 2")
 
 	// Session identity is stable across both turns.
 	for _, env := range log {

@@ -74,6 +74,18 @@ func (w *Worker) ListInvokableSkills(_ context.Context, _ string) ([]worker.Skil
 // advertised that command. Unknown commands deliberately never fall through
 // to the LLM as ordinary user text.
 func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	return w.invokeSkill(ctx, invocation, nil)
+}
+
+func (w *Worker) InvokeNativeCommandWithDispatchAccepted(
+	ctx context.Context,
+	invocation worker.NativeCommandInvocation,
+	accepted func(),
+) error {
+	return w.invokeSkill(ctx, worker.SkillInvocation(invocation), accepted)
+}
+
+func (w *Worker) invokeSkill(ctx context.Context, invocation worker.SkillInvocation, accepted func()) error {
 	w.skillMu.RLock()
 	_, advertised := w.availableCommands[invocation.Name]
 	w.skillMu.RUnlock()
@@ -87,5 +99,5 @@ func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocat
 	// Keep explicit invocation payloads intact. ACP's compatibility rules are
 	// only sent with ordinary user text because a prefix could prevent an agent
 	// from recognizing the advertised slash command.
-	return w.input(ctx, command, nil, false)
+	return w.input(ctx, command, nil, false, accepted)
 }

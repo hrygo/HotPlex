@@ -34,6 +34,8 @@ const (
 
 const (
 	defaultCallTimeout       = 30 * time.Second
+	codexWriteFallbackGrace  = time.Second
+	codexDeadlineWriteGrace  = time.Nanosecond
 	criticalEventSendTimeout = 5 * time.Second
 	scannerInitSize          = 64 * 1024        // 64 KB
 	scannerMaxSize           = 10 * 1024 * 1024 // 10 MB
@@ -488,19 +490,33 @@ func (m *CodexAppServerManager) handshake(ctx context.Context) error {
 // is especially important for Notify, which has no response-wait timeout
 // unlike Call.
 func (m *CodexAppServerManager) writeFrame(ctx context.Context, v any) error {
+	_, callerHasDeadline := ctx.Deadline()
 	// The mutex MUST be acquired inside the closure, not at the call site:
-	// if ctx cancels and WriteWithCtxBounded bails out, an orphaned goroutine
+	// if ctx cancels and WriteWithCtx bails out, an orphaned goroutine
 	// may still be blocked inside Encode → syscall.Write. By locking/unlocking
 	// inside the closure (which runs in the helper's goroutine), the orphan
 	// holds writeMu until the write completes (child exits → EPIPE),
 	// preventing the next writer from racing on the shared stdin fd. This is
 	// especially critical for codexcli: the manager is a singleton, so an
 	// interleaved write would corrupt the protocol stream for ALL sessions.
-	err := base.WriteWithCtxBounded(ctx, func() error {
+	writeCtx := ctx
+	if _, ok := writeCtx.Deadline(); !ok && writeCtx.Err() == nil {
+		var cancel context.CancelFunc
+		writeCtx, cancel = context.WithTimeout(writeCtx, base.DefaultWriteTimeout)
+		defer cancel()
+	}
+	fallbackGrace := codexWriteFallbackGrace
+	if callerHasDeadline {
+		// The caller already budgeted the operation. Do not extend that
+		// deadline: Bridge reserves its following one-second window for local
+		// forwarder quiescence, not for a blocked singleton stdin write.
+		fallbackGrace = codexDeadlineWriteGrace
+	}
+	err := base.WriteWithCtx(writeCtx, func() error {
 		m.writeMu.Lock()
 		defer m.writeMu.Unlock()
 		return json.NewEncoder(m.stdin).Encode(v)
-	})
+	}, fallbackGrace)
 	// An orphaned write (ctx cancelled while syscall.Write is blocked) leaves
 	// the goroutine holding writeMu until the child exits. Because the manager
 	// is a singleton shared across all codex sessions, this wedges EVERY
@@ -1106,8 +1122,8 @@ func (m *CodexAppServerManager) SteerTurn(threadID, expectedTurnID, text string)
 
 // InterruptTurn interrupts the running turn in the specified thread.
 // Upstream TurnInterruptParams (turn.rs:188) requires both threadId and turnId.
-func (m *CodexAppServerManager) InterruptTurn(threadID, turnID string) error {
-	err := m.Notify(context.Background(), "turn/interrupt", map[string]any{
+func (m *CodexAppServerManager) InterruptTurn(ctx context.Context, threadID, turnID string) error {
+	err := m.Notify(ctx, "turn/interrupt", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
 	})

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/hrygo/hotplex/internal/config"
+	"github.com/hrygo/hotplex/internal/execution"
 	"github.com/hrygo/hotplex/internal/session"
 	"github.com/hrygo/hotplex/pkg/aep"
 	"github.com/hrygo/hotplex/pkg/events"
@@ -78,14 +79,15 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 			}
 			return h.sendErrorf(ctx, env, events.ErrCodeUnauthorized, "ownership required")
 		}
-		w := h.sm.GetWorker(env.SessionID)
-		if w == nil {
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop: no active worker")
-		}
+		unlockDispatch := h.dispatchGate.Lock(env.SessionID)
+		defer unlockDispatch()
 
-		var workerRunID string
+		var (
+			workerRunID string
+			bindingOK   bool
+		)
 		if h.bridge != nil {
-			_, workerRunID, _ = h.bridge.CurrentWorkerBinding(env.SessionID)
+			_, workerRunID, bindingOK = h.bridge.CurrentWorkerBinding(env.SessionID)
 		}
 
 		// The claim is keyed by the turn's execution ID (when the execution
@@ -96,10 +98,38 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		// the first stop's finishRuntimeOnStop closes the runtime BEFORE a
 		// duplicate stop arrives, so the open-runtime query would resolve to a
 		// different (or no) record and admit the duplicate.
-		var execID string
+		var execID, persistedRunID string
 		if h.executionStore != nil {
-			if rec, err := h.executionStore.LatestBySession(ctx, env.SessionID); err == nil {
-				execID = rec.ExecutionID
+			rec, lookupErr := h.executionStore.LatestBySession(ctx, env.SessionID)
+			if lookupErr != nil || rec == nil {
+				errorKind := "lookup_failed"
+				if errors.Is(lookupErr, execution.ErrNotFound) {
+					errorKind = "not_found"
+				}
+				h.log.Warn("gateway: stop execution identity unavailable",
+					"session_id", env.SessionID, "error_kind", errorKind)
+				return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop execution identity unavailable")
+			}
+			execID = rec.ExecutionID
+			persistedRunID = rec.WorkerRunID
+		}
+		if workerRunID == "" {
+			workerRunID = persistedRunID
+		}
+		if !bindingOK {
+			claimMatches := false
+			if workerRunID != "" || execID != "" {
+				claimMatches = h.stopFence.Matches(env.SessionID, workerRunID, execID)
+			} else if h.executionStore == nil {
+				// Only the ledger-disabled mode may use a session-only fallback.
+				// A configured ledger lookup failure is ambiguous and must fail
+				// closed instead of inheriting an older turn's stop claim.
+				claimMatches = h.stopFence.HasAny(env.SessionID)
+			}
+			if claimMatches {
+				h.log.Debug("gateway: stop already completed for detached run",
+					"session_id", env.SessionID, "worker_run_id", workerRunID, "execution_id", execID)
+				return nil
 			}
 		}
 
@@ -112,17 +142,47 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 				"session_id", env.SessionID, "worker_run_id", workerRunID, "execution_id", execID)
 			return nil
 		}
+		if h.bridge == nil || !bindingOK {
+			h.stopFence.Rollback(env.SessionID, workerRunID, execID)
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop: no active worker run")
+		}
 
 		// A stop supersedes any pending LLM auto-retry: the retried input must
 		// not fire after the stop and start a new turn under the fresh claim.
 		h.cancelRetryIfNeeded(env.SessionID)
 
-		if err := w.StopCurrentTurn(ctx); err != nil {
-			// The stop never took effect: roll the claim back so a manual retry
-			// can stop again (failed-abort convergence, session retained).
-			h.stopFence.Rollback(env.SessionID, workerRunID, execID)
-			h.log.Warn("gateway: stop current turn failed", "session_id", env.SessionID, "err", err)
-			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "stop failed: %v", err)
+		if err := h.bridge.StopAndDisposeCurrentRun(ctx, env.SessionID, workerRunID); err != nil {
+			if errors.Is(err, errWorkerRunTerminal) {
+				// A natural Done/Error committed while this stop waited for the
+				// event barrier. It already settled the turn, so neither provider
+				// cancellation nor a second synthetic terminal is appropriate.
+				h.stopFence.Rollback(env.SessionID, workerRunID, execID)
+				h.log.Debug("gateway: stop lost race to natural terminal",
+					"session_id", env.SessionID,
+					"worker_run_id", workerRunID,
+					"execution_id", execID)
+				return nil
+			}
+			if stopFailureAllowsRollback(err) {
+				// Provider cancellation never committed: reopen event flow and let
+				// a manual stop retry claim this same turn.
+				h.stopFence.Rollback(env.SessionID, workerRunID, execID)
+			} else {
+				// Provider cancellation committed, so the run stays isolated even
+				// when teardown/quiescence reports failure. Close its durable runtime
+				// without sending the success-only stopped done.
+				h.finishRuntimeOnStop(ctx, env.SessionID, workerRunID, env.OwnerID)
+			}
+			h.log.Warn("gateway: stop worker run failed",
+				"session_id", env.SessionID,
+				"worker_run_id", workerRunID,
+				"execution_id", execID,
+				"stop_phase", "stop_failed",
+				"error_kind", stopErrorKind(err))
+			if errors.Is(err, errWorkerRunChanged) {
+				return h.sendErrorf(ctx, env, events.ErrCodeSessionBusy, "worker run changed during stop")
+			}
+			return h.sendErrorf(ctx, env, events.ErrCodeInternalError, "worker run did not stop cleanly")
 		}
 
 		// Finish the pending execution runtime immediately when stopped.
