@@ -25,8 +25,9 @@ func SetConfigPath(path string) {
 // getConfigPath returns the configured config file path ("" when unset).
 // The value is stored atomically: production writes it once at doctor/onboard
 // entry, while tests may swap it between serial tests. Atomic access keeps
-// concurrent checker reads race-free under -race when a parallel test body
-// overlaps a non-parallel test (Go 1.26 scheduling).
+// concurrent reads race-free even when multiple parallel tests exercise
+// checkers at once. Writers must still stay serial: a mid-check swap would
+// only produce a logically inconsistent diagnostic, which no lock can fix.
 func getConfigPath() string {
 	v := configPath.Load()
 	if s, ok := v.(string); ok {
