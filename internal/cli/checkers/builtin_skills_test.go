@@ -3,6 +3,7 @@ package checkers
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,6 +63,21 @@ func TestBuiltinSkillsCheckerMapsStatusErrorToStableFailure(t *testing.T) {
 	require.Contains(t, diagnostic.Message, "status_unavailable")
 	require.NotContains(t, diagnostic.Message, "/Users/private")
 	require.NotContains(t, diagnostic.Detail, "/Users/private")
+}
+
+func TestBuiltinSkillsPathsMatchesReconcileDefaultContract(t *testing.T) {
+	t.Parallel()
+	const (
+		userHome    = "/home/user"
+		hotplexHome = "/home/user/.hotplex"
+	)
+	paths := builtinSkillsPaths(userHome, hotplexHome)
+	require.Equal(t, reconcile.DefaultPaths(userHome, hotplexHome), paths)
+	// The .agents root is canonical; Claude receives per-package links under
+	// .claude. Pointing Claude's native root at .claude/skills made normalizePaths
+	// reject the layout and doctor fail with ErrRootOutsideHome after a clean sync.
+	require.Equal(t, filepath.Join(userHome, ".agents", "skills"), paths.NativeRoots[reconcile.WorkerClaude])
+	require.Equal(t, filepath.Join(userHome, ".claude", "skills"), paths.AliasRoots[reconcile.WorkerClaude])
 }
 
 func TestBuiltinSkillsCheckerIsRegisteredUnderSkills(t *testing.T) {
