@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -144,21 +143,21 @@ func defaultBuiltinSkillsStatus(ctx context.Context) (reconcile.Report, error) {
 	if err != nil {
 		return reconcile.Report{}, err
 	}
-	runner, err := reconcile.New(registry, reconcile.Paths{
-		UserHome:     userHome,
-		HotplexHome:  hotplexHome,
-		InventoryDir: filepath.Join(hotplexHome, "skills", "builtin"),
-		StateDir:     filepath.Join(hotplexHome, "state", "skills"),
-		NativeRoots: map[reconcile.WorkerType]string{
-			reconcile.WorkerClaude:   filepath.Join(userHome, ".claude", "skills"),
-			reconcile.WorkerCodex:    filepath.Join(userHome, ".agents", "skills"),
-			reconcile.WorkerOpenCode: filepath.Join(userHome, ".agents", "skills"),
-		},
-	}, reconcile.NewOSFileSystem())
+	runner, err := reconcile.New(registry, builtinSkillsPaths(userHome, hotplexHome), reconcile.NewOSFileSystem())
 	if err != nil {
 		return reconcile.Report{}, err
 	}
 	return runner.Status(ctx, reconcile.Options{Profile: builtin.ProfileRuntime, WorkerTypes: workerTypes})
+}
+
+// builtinSkillsPaths keeps the doctor checker on the same root contract as
+// skills status/sync and onboard: the .agents root is canonical and Claude
+// receives per-package links under .claude. A hand-rolled Paths literal here
+// once set Claude's native root to .claude/skills, which normalizePaths
+// rejects, so doctor kept failing with ErrRootOutsideHome even after a clean
+// sync.
+func builtinSkillsPaths(userHome, hotplexHome string) reconcile.Paths {
+	return reconcile.DefaultPaths(userHome, hotplexHome)
 }
 
 func parseConfiguredWorkerTypes(values []string) ([]reconcile.WorkerType, error) {

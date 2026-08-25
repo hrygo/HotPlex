@@ -14,7 +14,8 @@ import (
 )
 
 func TestSlackCreds_NoTokens(t *testing.T) {
-	t.Parallel()
+	// Reads the package-level configPath; must remain serial (see
+	// withConfigPath in config_test.go).
 
 	c := slackCredsChecker{}
 	d := c.Check(context.Background())
@@ -48,7 +49,15 @@ func TestSlackCreds_InvalidPrefix(t *testing.T) {
 }
 
 func TestFeishuCreds_NoCreds(t *testing.T) {
-	t.Parallel()
+	// Reads the package-level configPath and falls back to process env;
+	// must remain serial and pin the env to stay hermetic (a half-set
+	// FEISHU_APP_SECRET in the developer shell would otherwise flip
+	// enabled=true and fail the check).
+
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_ID", "")
+	t.Setenv("HOTPLEX_MESSAGING_FEISHU_APP_SECRET", "")
+	t.Setenv("FEISHU_APP_ID", "")
+	t.Setenv("FEISHU_APP_SECRET", "")
 
 	c := feishuCredsChecker{}
 	d := c.Check(context.Background())
@@ -128,7 +137,8 @@ func TestFeishuCreds_WhitespaceOnly(t *testing.T) {
 }
 
 func TestMultiBotConfig_NoConfigPath(t *testing.T) {
-	t.Parallel()
+	// Writes the package-level configPath; must remain serial (see
+	// withConfigPath in config_test.go).
 
 	orig := configPath
 	configPath = ""
