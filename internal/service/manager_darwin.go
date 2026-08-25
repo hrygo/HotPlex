@@ -183,10 +183,21 @@ func (m *darwinManager) stopAndUnload(plistPath, name string, level Level) error
 }
 
 func (m *darwinManager) Restart(name string, level Level) error {
-	if err := m.Stop(name, level); err != nil {
-		return fmt.Errorf("stop: %w", err)
+	plistPath, err := m.plistPath(name, level)
+	if err != nil {
+		return err
 	}
-	return m.Start(name, level)
+	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
+		return ErrNotInstalled
+	}
+	target := "system/" + launchdLabel(name, level)
+	if level == LevelUser {
+		target = fmt.Sprintf("gui/%d/%s", os.Getuid(), launchdLabel(name, level))
+	}
+	if err := m.run.Run("launchctl", "kickstart", "-k", target); err != nil {
+		return fmt.Errorf("launchctl kickstart: %w", err)
+	}
+	return nil
 }
 
 func (m *darwinManager) Logs(name string, level Level, follow bool, lines int) error {

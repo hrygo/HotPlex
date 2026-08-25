@@ -115,6 +115,70 @@ func TestDiffConfigs_Precision(t *testing.T) {
 	require.True(t, foundAddr, "should have found gateway.addr change")
 }
 
+func TestDiffConfigs_FeishuGatewayRestartAllowFromIsHot(t *testing.T) {
+	t.Parallel()
+
+	prev := Default()
+	next := Default()
+	next.Messaging.Feishu.GatewayRestartAllowFrom = []string{"ou_operator"}
+
+	changes := diffConfigs(prev, next)
+	var found bool
+	for _, change := range changes {
+		if change.Field == "messaging.feishu.gateway_restart_allow_from" {
+			found = true
+			require.True(t, change.Hot)
+		}
+	}
+	require.True(t, found)
+}
+
+func TestDiffConfigs_FeishuBotGatewayRestartAllowFromIsHot(t *testing.T) {
+	t.Parallel()
+
+	prev := Default()
+	next := Default()
+	next.Messaging.Feishu.Bots = []FeishuBotConfig{
+		{Name: "ops", GatewayRestartAllowFrom: []string{"ou_operator"}},
+	}
+
+	changes := diffConfigs(prev, next)
+	var found bool
+	for _, change := range changes {
+		if change.Field == "messaging.feishu.gateway_restart_allow_from" {
+			found = true
+			require.True(t, change.Hot)
+		}
+	}
+	require.True(t, found)
+}
+
+func TestFeishuGatewayRestartAllowFromValue_IsCanonicalAndRedacted(t *testing.T) {
+	t.Parallel()
+
+	first := Default()
+	first.Messaging.Feishu.GatewayRestartAllowFrom = []string{"ou_platform_b", "ou_platform_a"}
+	first.Messaging.Feishu.Bots = []FeishuBotConfig{
+		{Name: "support", GatewayRestartAllowFrom: []string{"ou_support"}},
+		{Name: "ops", GatewayRestartAllowFrom: []string{"ou_ops_b", "ou_ops_a"}},
+	}
+	second := Default()
+	second.Messaging.Feishu.GatewayRestartAllowFrom = []string{"ou_platform_a", "ou_platform_b"}
+	second.Messaging.Feishu.Bots = []FeishuBotConfig{
+		{Name: "ops", GatewayRestartAllowFrom: []string{"ou_ops_a", "ou_ops_b"}},
+		{Name: "support", GatewayRestartAllowFrom: []string{"ou_support"}},
+	}
+
+	firstValue := feishuGatewayRestartAllowFromValue(first)
+	secondValue := feishuGatewayRestartAllowFromValue(second)
+
+	require.Equal(t, firstValue, secondValue)
+	require.Contains(t, firstValue, "sha256:")
+	for _, openID := range []string{"ou_platform_a", "ou_platform_b", "ou_ops_a", "ou_ops_b", "ou_support"} {
+		require.NotContains(t, firstValue, openID)
+	}
+}
+
 func TestDiffConfigs_FullContentRetentionRequiresRestart(t *testing.T) {
 	t.Parallel()
 	prev := Default()

@@ -419,6 +419,8 @@ func (a *AdminAPI) HandleDebugSession(w http.ResponseWriter, r *http.Request) {
 // @Security     AdminBearerAuth
 // @Success      200  {object}  RestartResponse
 // @Failure      403  {object}  ErrorResponse  "Insufficient scope: need admin:write"
+// @Failure      409  {object}  ErrorResponse  "Gateway restart already in progress"
+// @Failure      500  {object}  ErrorResponse  "Gateway restart preparation failed"
 // @Failure      503  {object}  ErrorResponse  "Restart not configured"
 // @Router       /admin/restart [post]
 func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
@@ -426,13 +428,45 @@ func (a *AdminAPI) HandleRestart(w http.ResponseWriter, r *http.Request) {
 		web.WriteAppError(w, http.StatusForbidden, "INSUFFICIENT_SCOPE", "insufficient scope: need admin:write")
 		return
 	}
-	if a.restart == nil {
+	if a.restartPrepare == nil && a.restart == nil {
 		web.WriteAppError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "restart is not configured")
 		return
 	}
 
+	if a.restartPrepare != nil {
+		commit, abort, err := a.restartPrepare(r.Context())
+		if err != nil {
+			if errors.Is(err, ErrRestartConflict) {
+				web.WriteAppError(w, http.StatusConflict, "RESTART_REJECTED", "gateway restart could not be scheduled")
+				return
+			}
+			a.log.Error("admin: restart prepare failed", "error_kind", "prepare_failed")
+			web.WriteAppError(w, http.StatusInternalServerError, "INTERNAL", "gateway restart could not be scheduled")
+			return
+		}
+		if err := respondJSONAndFlush(w, map[string]any{"status": "restarting"}); err != nil {
+			a.log.Warn("admin: restart acceptance response failed", "error_kind", "response_failed")
+			if abort != nil {
+				if abortErr := abort(); abortErr != nil {
+					a.log.Error("admin: restart abort failed", "error_kind", "abort_failed")
+				}
+			}
+			return
+		}
+		go func() {
+			if commitErr := commit(); commitErr != nil {
+				a.log.Error("admin: restart commit failed", "error_kind", "commit_failed")
+				if abort != nil {
+					if abortErr := abort(); abortErr != nil {
+						a.log.Error("admin: restart abort failed", "error_kind", "abort_failed")
+					}
+				}
+			}
+		}()
+		return
+	}
+
 	go func() {
-		time.Sleep(500 * time.Millisecond)
 		a.log.Info("admin: initiating gateway restart via helper")
 		if err := a.restart(); err != nil {
 			a.log.Error("admin: restart failed", "err", err)

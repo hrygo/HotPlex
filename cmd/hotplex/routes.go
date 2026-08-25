@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -95,11 +97,32 @@ func setupRoutes(
 		NewSessionID:     newSessionID,
 		AllowedOriginsFn: corsOriginsFn,
 		Restart: func() error {
-			inst, err := findRunningGateway()
+			coordinator := deps.RestartCoordinator
+			if coordinator == nil {
+				coordinator = newGatewayRestartCoordinator(log, deps.ConfigStore, deps.ConfigPath, deps.DevMode)
+			}
+			ticket, err := coordinator.Prepare(context.Background(), gatewayRestartRequest{
+				Platform: "admin",
+				Daemon:   true,
+			})
 			if err != nil {
 				return err
 			}
-			return forkRestartHelper(inst, deps.ConfigPath, deps.DevMode, true)
+			return coordinator.Commit(ticket)
+		},
+		RestartPrepare: func(ctx context.Context) (func() error, func() error, error) {
+			coordinator := deps.RestartCoordinator
+			if coordinator == nil {
+				coordinator = newGatewayRestartCoordinator(log, deps.ConfigStore, deps.ConfigPath, deps.DevMode)
+			}
+			ticket, err := coordinator.Prepare(ctx, gatewayRestartRequest{
+				Platform: "admin",
+				Daemon:   true,
+			})
+			if err != nil {
+				return nil, nil, adminRestartPrepareError(err)
+			}
+			return func() error { return coordinator.Commit(ticket) }, func() error { return coordinator.Abort(ticket) }, nil
 		},
 		DB:           deps.DB,
 		DBResolver:   deps.DBResolver,
@@ -433,4 +456,14 @@ func setupRoutes(
 			return r.Method + " " + r.URL.Path
 		}),
 	)
+}
+
+func adminRestartPrepareError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, conflict := restartConflictRequestID(err); conflict {
+		return fmt.Errorf("%w: %w", admin.ErrRestartConflict, err)
+	}
+	return err
 }

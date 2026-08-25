@@ -171,10 +171,42 @@ func (m *windowsManager) Stop(name string, level Level) error {
 }
 
 func (m *windowsManager) Restart(name string, level Level) error {
-	if err := m.Stop(name, level); err != nil {
-		return fmt.Errorf("stop: %w", err)
+	mgrConn, err := connectSCM()
+	if err != nil {
+		return fmt.Errorf("connect to service control manager: %w", err)
 	}
-	return m.Start(name, level)
+	defer mgrConn.Disconnect()
+
+	s, err := mgrConn.OpenService(name)
+	if err != nil {
+		return ErrNotInstalled
+	}
+	defer s.Close()
+
+	status, err := s.Query()
+	if err != nil {
+		return fmt.Errorf("query service before restart: %w", err)
+	}
+	if status.State != svc.Stopped {
+		if _, err := s.Control(svc.Stop); err != nil {
+			return fmt.Errorf("stop service: %w", err)
+		}
+		deadline := time.Now().Add(30 * time.Second)
+		for status.State != svc.Stopped {
+			if time.Now().After(deadline) {
+				return fmt.Errorf("stop service: timed out waiting for stopped state")
+			}
+			time.Sleep(100 * time.Millisecond)
+			status, err = s.Query()
+			if err != nil {
+				return fmt.Errorf("query service while stopping: %w", err)
+			}
+		}
+	}
+	if err := s.Start(); err != nil {
+		return fmt.Errorf("start service: %w", err)
+	}
+	return nil
 }
 
 func (m *windowsManager) Logs(name string, level Level, follow bool, lines int) error {

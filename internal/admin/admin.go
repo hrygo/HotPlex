@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -39,6 +40,10 @@ const (
 	ScopeRuntimeRead  = "runtime:read"
 	ScopeRuntimeWrite = "runtime:write"
 )
+
+// ErrRestartConflict classifies a restart preparation failure caused by an
+// already active global restart transaction.
+var ErrRestartConflict = errors.New("gateway restart already in progress")
 
 // DBExecutor covers the sql.DB methods used by apiKeyUserStore.
 type DBExecutor interface {
@@ -135,6 +140,12 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
+// Unwrap lets http.ResponseController reach optional capabilities such as
+// Flusher on the underlying server ResponseWriter.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 type AdminAPI struct {
 	log              *slog.Logger
 	cfg              ConfigProvider
@@ -156,6 +167,7 @@ type AdminAPI struct {
 	version          func() string
 	newSessionID     func() string
 	restart          func() error
+	restartPrepare   func(context.Context) (func() error, func() error, error)
 	cookieAuth       *security.CookieAuth           // Optional: enables cookie-session fallback (issue #788 A2)
 	idp              *security.LocalAccountProvider // Optional: paired with cookieAuth
 	startedAt        time.Time
@@ -183,6 +195,7 @@ type Deps struct {
 	Version          func() string
 	NewSessionID     func() string
 	Restart          func() error
+	RestartPrepare   func(context.Context) (func() error, func() error, error)
 	AllowedOriginsFn func() []string  // Optional: returns allowed CORS origins; defaults to ["*"] when nil
 	DB               DBExecutor       // Optional: enables API key user CRUD + DB resolver
 	DBResolver       cacheInvalidator // Optional: invalidates DBResolver cache after CUD
@@ -216,10 +229,11 @@ func New(deps Deps) *AdminAPI {
 			}
 			return newAPIKeyUserStoreWithInvalidator(deps.DB, deps.DBResolver, deps.WriteMu)
 		}(),
-		version:      deps.Version,
-		newSessionID: deps.NewSessionID,
-		restart:      deps.Restart,
-		startedAt:    time.Now(),
+		version:        deps.Version,
+		newSessionID:   deps.NewSessionID,
+		restart:        deps.Restart,
+		restartPrepare: deps.RestartPrepare,
+		startedAt:      time.Now(),
 		allowedOriginsFn: func() []string {
 			if deps.AllowedOriginsFn != nil {
 				return deps.AllowedOriginsFn()

@@ -599,6 +599,7 @@ webhook:
 |------|------|--------|----------|------|
 | `app_id` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_ID` | 飞书 App ID（`cli_xxxx`）（单 bot 模式） |
 | `app_secret` | string | `""` | `HOTPLEX_MESSAGING_FEISHU_APP_SECRET` | 飞书 App Secret（单 bot 模式） |
+| `gateway_restart_allow_from` | []string | `[]` | `HOTPLEX_MESSAGING_FEISHU_GATEWAY_RESTART_ALLOW_FROM` | Gateway 运维操作者 OpenID 白名单：授权 `/gateway restart`，并接收受控停止及启动就绪私聊；默认无人可重启且不发送运维私聊 |
 | `bots` | []FeishuBotConfig | `[]` | — | 多 bot 配置（见 §3.11.8） |
 
 #### 3.11.7 Yuanxin 专有配置
@@ -643,13 +644,14 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 | `worker_type` | string | 覆盖 Worker 类型 |
 | `sandbox` | string | 覆盖 CodexCLI sandbox 模式（bot 级） |
 | `acp_command` | string | 覆盖 ACP Agent 启动命令（bot 级，仅 `worker_type: acp` 时生效） |
+| `gateway_restart_allow_from` | []string | 继承平台级 | — | Gateway 运维操作者 OpenID；显式 `[]` 禁止该 Bot 重启并停用其生命周期私聊 |
 | `inject_exclude` | []string | 覆盖 agent config 排除列表（bot 级，覆盖平台级和全局级） |
 | `stt_*` | — | 覆盖 STT 配置 |
 | `tts_*` | — | 覆盖 TTS 配置 |
 
-**向后兼容**：`normalizeSlackBots()`/`normalizeFeishuBots()` 自动将单 bot 顶层凭证归一化为 `bots: [{name: ""}]`（空名称，表示单 Bot 模式）。`bots[]` 非空时忽略顶层凭证。
+**向后兼容**：`normalizeSlackBots()`/`normalizeFeishuBots()` 自动将单 bot 顶层凭证归一化为一个以平台名命名的 Bot（分别为 `slack` / `feishu`），并保留单 Bot 模式语义。`bots[]` 非空时忽略顶层凭证。
 
-**限制**：每平台最多 10 个 bot。配置变更需重启生效。
+**限制**：每平台最多 10 个 bot。Bot 凭证、Worker 类型等结构变更需重启；`gateway_restart_allow_from` 平台级与 bot 级白名单支持热更新。受控关闭（例如服务或开发环境停止）会在退出前私聊每个有效 OpenID；Gateway 启动并监听 HTTP 后会再次私聊就绪消息，即使没有可恢复的聊天 Session。由飞书 `/gateway restart` 发起时，原请求会话使用重启回执链路，不再额外向白名单 OpenID 发送同一轮私聊，避免重复通知。
 
 **启动校验**：`hotplex doctor` 的 `messaging.multi_bot_config` checker 检测重复 name、缺失凭证、超限。
 
@@ -1014,6 +1016,7 @@ HOTPLEX_SECURITY_API_KEY_1, HOTPLEX_SECURITY_API_KEY_2, ...
 | `HOTPLEX_MESSAGING_FEISHU_ALLOW_FROM` | `messaging.feishu.allow_from` |
 | `HOTPLEX_MESSAGING_FEISHU_ALLOW_DM_FROM` | `messaging.feishu.allow_dm_from` |
 | `HOTPLEX_MESSAGING_FEISHU_ALLOW_GROUP_FROM` | `messaging.feishu.allow_group_from` |
+| `HOTPLEX_MESSAGING_FEISHU_GATEWAY_RESTART_ALLOW_FROM` | `messaging.feishu.gateway_restart_allow_from` |
 | `HOTPLEX_MESSAGING_FEISHU_STT_PROVIDER` | `messaging.feishu.stt_provider` |
 | `HOTPLEX_MESSAGING_FEISHU_STT_LOCAL_CMD` | `messaging.feishu.stt_local_cmd` |
 | `HOTPLEX_MESSAGING_FEISHU_STT_LOCAL_IDLE_TTL` | `messaging.feishu.stt_local_idle_ttl` |

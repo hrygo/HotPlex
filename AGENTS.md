@@ -20,7 +20,8 @@
 - **关闭顺序**: signal → cancel ctx → tracing → hub → bridge → sessionMgr → HTTP
 - **服务重启**: 必须使用 `hotplex service restart` 原子指令，禁止手动拆分 `stop && sleep && start`（仅二进制替换场景需手动 stop 等待）
 - **非 main 分支 push**: 非 main 分支本地验证通过后直接 commit + push，无需询问用户确认
-- **Git Hooks**: clone 后必须执行 `make hooks` 安装 hooks（pre-commit 跑 gofmt + golangci-lint，pre-push 跑完整质量门禁），禁止跳过
+- **Git Hooks**: clone 后必须安装 hooks（底层目标为 `make hooks`；pre-commit 跑 gofmt + golangci-lint，pre-push 跑完整质量门禁），禁止跳过；`rtk` 可用时执行 `rtk proxy make hooks`，不可用时执行原生 `make hooks` 并说明回退原因
+- **RTK 未过滤执行例外**：以下规则仅适用于执行环境中可用 `rtk`（可用 `command -v rtk` 或 `rtk --version` 确认）。`make docs-lint`、`make quality`、`make build`、`make hooks` 存在输出解析失败记录；`rtk` 可用时必须分别通过 `rtk proxy make docs-lint`、`rtk proxy make quality`、`rtk proxy make build`、`rtk proxy make hooks` 执行，以保留原始诊断输出。`rtk` 不可用时，允许执行对应的原生 `make` 命令，但必须说明未经过 RTK 过滤与统计；不得因本规则擅自安装 RTK。
 
 ### 反模式（禁止）
 

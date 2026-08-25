@@ -93,7 +93,19 @@ Cron 创建后始终独立验证：`hotplex cron get <id|name> --json`；不要�
 
 ---
 
-## 4. 交互响应（回复 AI 请求）
+## 4. 飞书宿主运维命令
+
+| 命令 | 权限 | 说明 |
+|:-----|:-----|:-----|
+| `/gateway restart` | 普通 Gate + `gateway_restart_allow_from` 专用 OpenID 白名单 | Gateway 直接拦截并通过独立 helper 重启宿主；不会进入 Worker |
+
+只接受精确命令。所有以 `/gateway` 开头的未知或畸形输入均属于保留命名空间，只返回帮助；未授权请求默认拒绝，并发冲突会返回当前 request ID。
+
+`gateway_restart_allow_from` 中的 OpenID 也会收到 Gateway 受控停止和启动就绪私聊；直接执行 `/gateway restart` 时，原会话使用带 request ID 的回执链路，并抑制本轮白名单额外私聊。
+
+---
+
+## 5. 交互响应（回复 AI 请求）
 
 当 AI 发起权限确认、提问或输入请求时，直接回复以下内容即可。
 

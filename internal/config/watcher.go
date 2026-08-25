@@ -2,9 +2,12 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,23 +19,24 @@ import (
 // without requiring a restart. All other fields are treated as static.
 // Format: "TopLevel.NestedField" (matches mapstructure tags).
 var hotReloadableFields = map[string]bool{
-	"log.level":                 true,
-	"session.gc_scan_interval":  true,
-	"pool.max_size":             true,
-	"pool.max_idle_per_user":    true,
-	"pool.max_memory_per_user":  true, // spec ⑤
-	"pool.max_per_workspace":    true, // spec ⑤
-	"security.api_keys":         true,
-	"security.allowed_origins":  true,
-	"security.security_contact": true,
-	"worker.max_lifetime":       true,
-	"worker.idle_timeout":       true,
-	"worker.execution_timeout":  true,
-	"worker.auto_retry":         true,
-	"admin.requests_per_sec":    true,
-	"admin.burst":               true,
-	"admin.tokens":              true,
-	"admin.allowed_cidrs":       true,
+	"log.level":                                   true,
+	"session.gc_scan_interval":                    true,
+	"pool.max_size":                               true,
+	"pool.max_idle_per_user":                      true,
+	"pool.max_memory_per_user":                    true, // spec ⑤
+	"pool.max_per_workspace":                      true, // spec ⑤
+	"security.api_keys":                           true,
+	"security.allowed_origins":                    true,
+	"security.security_contact":                   true,
+	"worker.max_lifetime":                         true,
+	"worker.idle_timeout":                         true,
+	"worker.execution_timeout":                    true,
+	"worker.auto_retry":                           true,
+	"admin.requests_per_sec":                      true,
+	"admin.burst":                                 true,
+	"admin.tokens":                                true,
+	"admin.allowed_cidrs":                         true,
+	"messaging.feishu.gateway_restart_allow_from": true,
 	// Audit fields (spec §8): retention and collector tuning are safe to hot-reload.
 	"audit.retention":                true,
 	"audit.collector.batch_interval": true,
@@ -362,6 +366,9 @@ var sensitiveFields = map[string]bool{
 // Returns the value as a string for comparison and audit logging.
 // Sensitive fields are redacted to prevent credential leakage.
 func resolveField(cfg *Config, path string) string {
+	if path == "messaging.feishu.gateway_restart_allow_from" {
+		return feishuGatewayRestartAllowFromValue(cfg)
+	}
 	if sensitiveFields[path] {
 		return "[REDACTED]"
 	}
@@ -394,6 +401,52 @@ func resolveField(cfg *Config, path string) string {
 	}
 
 	return fmt.Sprintf("%v", v.Interface())
+}
+
+// feishuGatewayRestartAllowFromValue fingerprints only the dedicated Feishu
+// restart allowlists. It lets a bot-level allowlist change trigger a hot
+// reload without making the unrelated Feishu bot configuration hot.
+func feishuGatewayRestartAllowFromValue(cfg *Config) string {
+	if cfg == nil {
+		return "<nil>"
+	}
+	type botAllowlist struct {
+		Name      string   `json:"name"`
+		AllowFrom []string `json:"allow_from"`
+	}
+	type allowlistSnapshot struct {
+		Platform []string       `json:"platform"`
+		Bots     []botAllowlist `json:"bots"`
+	}
+
+	platform := append([]string(nil), cfg.Messaging.Feishu.GatewayRestartAllowFrom...)
+	sort.Strings(platform)
+	bots := make([]botAllowlist, 0, len(cfg.Messaging.Feishu.Bots))
+	principalCount := len(platform)
+	for _, bot := range cfg.Messaging.Feishu.Bots {
+		allowFrom := append([]string(nil), bot.GatewayRestartAllowFrom...)
+		sort.Strings(allowFrom)
+		bots = append(bots, botAllowlist{Name: bot.Name, AllowFrom: allowFrom})
+		principalCount += len(allowFrom)
+	}
+	sort.Slice(bots, func(i, j int) bool {
+		if bots[i].Name != bots[j].Name {
+			return bots[i].Name < bots[j].Name
+		}
+		return strings.Join(bots[i].AllowFrom, "\x00") < strings.Join(bots[j].AllowFrom, "\x00")
+	})
+	payload, err := json.Marshal(allowlistSnapshot{Platform: platform, Bots: bots})
+	if err != nil {
+		return "sha256:invalid"
+	}
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf(
+		"sha256:%x;platform_count=%d;bot_count=%d;principal_count=%d",
+		digest,
+		len(platform),
+		len(bots),
+		principalCount,
+	)
 }
 
 // AuditLog returns a copy of the change audit log.

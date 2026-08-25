@@ -120,6 +120,33 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 	}
 
 	err := a.chatQueue.Enqueue(chatID, func(qtx context.Context) error {
+		gatewayCommand, reserved := messaging.ParseGatewayCommand(text)
+		if reserved {
+			handler, ok := a.Extras["gateway_command_handler"].(messaging.GatewayCommandHandler)
+			if !ok || handler == nil {
+				_ = a.replyMessage(qtx, messageID, "Gateway 重启命令当前不可用。", false)
+				return nil
+			}
+			platformKey := map[string]string{
+				"chat_id":    chatID,
+				"thread_ts":  threadKey,
+				"message_id": messageID,
+			}
+			return handler.HandleGatewayCommand(qtx, gatewayCommand, messaging.GatewayRestartRequest{
+				ActorID:        userID,
+				BotName:        a.botName,
+				ChatType:       chatType,
+				ChatID:         chatID,
+				ThreadKey:      threadKey,
+				MessageID:      messageID,
+				ReplyToMessage: replyToMsgID,
+				PlatformKey:    platformKey,
+				Reply: func(replyCtx context.Context, response string) error {
+					return a.replyOrSend(replyCtx, messageID, chatID, response)
+				},
+			})
+		}
+
 		cmd := messaging.DetectCommand(text)
 		switch cmd.Action {
 		case messaging.CmdHelp:

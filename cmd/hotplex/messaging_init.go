@@ -228,6 +228,9 @@ func startMessagingAdapters(ctx context.Context, deps *GatewayDeps) ([]messaging
 			case messaging.PlatformFeishu:
 				botCfg := resolveFeishuBot(appCfg, entry.Name)
 				fillFeishuExtras(&acfg, appCfg, botCfg, log)
+				if deps.RestartCoordinator != nil {
+					acfg.Extras["gateway_command_handler"] = deps.RestartCoordinator
+				}
 			case messaging.PlatformYuanxin:
 				fillYuanxinExtras(&acfg, appCfg)
 			}

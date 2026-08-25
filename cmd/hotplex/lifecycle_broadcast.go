@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,13 +17,14 @@ import (
 )
 
 const (
-	lifecycleTargetSeparator      = "\x00"
-	lifecycleStoppingMessage      = "⚠️ HotPlex 服务即将停止。"
-	lifecycleStartedMessage       = "✅ HotPlex 服务已启动。"
-	lifecyclePhaseStopping        = "stopping"
-	lifecyclePhaseStarted         = "started"
-	lifecycleBroadcastTimeout     = 5 * time.Second
-	lifecycleBroadcastConcurrency = 8
+	lifecycleTargetSeparator           = "\x00"
+	lifecycleStoppingMessage           = "⚠️ HotPlex Gateway 即将停止。"
+	lifecycleStartedMessage            = "✅ HotPlex Gateway 已启动并就绪。"
+	lifecyclePhaseStopping             = "stopping"
+	lifecyclePhaseStarted              = "started"
+	lifecycleBroadcastTimeout          = 5 * time.Second
+	lifecycleBroadcastConcurrency      = 8
+	lifecycleRestartReceiptMaxAttempts = 3
 )
 
 type lifecycleBotRegistry interface {
@@ -56,10 +59,14 @@ type lifecycleSendResult struct {
 
 type lifecycleBroadcaster struct {
 	log         *slog.Logger
+	config      *config.Config
+	configStore *config.ConfigStore
 	sessions    lifecycleSessionSource
 	connections lifecycleConnectionChecker
 	bots        lifecycleBotRegistry
 	snapshots   *lifecycleSnapshotStore
+	receipts    *restartReceiptStore
+	buildInfo   BuildInfo
 	timeout     time.Duration
 	concurrency int
 }
@@ -74,6 +81,8 @@ func newLifecycleBroadcaster(deps *GatewayDeps) *lifecycleBroadcaster {
 		log:         slog.Default(),
 		bots:        messaging.DefaultBotRegistry(),
 		snapshots:   newLifecycleSnapshotStore(filepath.Join(home, ".pids", lifecycleSnapshotFilename), maxTargets, time.Now),
+		receipts:    newRestartReceiptStore(gatewayRestartReceiptPath()),
+		buildInfo:   newBuildInfo(),
 		timeout:     lifecycleBroadcastTimeout,
 		concurrency: lifecycleBroadcastConcurrency,
 	}
@@ -83,6 +92,8 @@ func newLifecycleBroadcaster(deps *GatewayDeps) *lifecycleBroadcaster {
 		}
 		b.sessions = deps.SessionMgr
 		b.connections = deps.Hub
+		b.config = deps.Config
+		b.configStore = deps.ConfigStore
 	}
 	return b
 }
@@ -101,58 +112,392 @@ func runGatewayControlledShutdown(notifier lifecycleStopNotifier, cancel, shutdo
 
 func (b *lifecycleBroadcaster) BroadcastStopping() lifecycleBroadcastSummary {
 	summary := lifecycleBroadcastSummary{Phase: lifecyclePhaseStopping}
-	if b == nil || b.sessions == nil || b.connections == nil || b.snapshots == nil {
+	if b == nil {
 		return summary
 	}
-	targets := collectLifecycleTargets(b.sessions.ListActive(), b.connections.HasActiveConn)
+	receipt := b.readRestartReceipt()
+	if receipt != nil {
+		b.logger().Info("lifecycle broadcast: restart stopping", "request_id", receipt.RequestID)
+	}
+	var targets []*session.SessionInfo
+	if b.sessions != nil && b.connections != nil {
+		targets = collectLifecycleTargets(b.sessions.ListActive(), b.connections.HasActiveConn)
+		if b.snapshots != nil {
+			ids := make([]string, 0, len(targets))
+			for _, target := range targets {
+				ids = append(ids, target.ID)
+			}
+			if err := b.snapshots.Save(ids); err != nil {
+				b.logger().Warn("lifecycle broadcast: snapshot save failed", "phase", lifecyclePhaseStopping, "err", err)
+			}
+		}
+	}
+	if explicit := lifecycleTargetFromRestartReceipt(receipt); explicit != nil {
+		targets = mergeLifecycleTargets([]*session.SessionInfo{explicit}, targets)
+	} else {
+		targets = mergeLifecycleTargets(b.configuredFeishuTargets(), targets)
+	}
 	summary.TargetCount = len(targets)
-	ids := make([]string, 0, len(targets))
-	for _, target := range targets {
-		ids = append(ids, target.ID)
-	}
-	if err := b.snapshots.Save(ids); err != nil {
-		b.logger().Warn("lifecycle broadcast: snapshot save failed", "phase", lifecyclePhaseStopping, "err", err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), b.effectiveTimeout())
 	defer cancel()
-	return b.broadcast(ctx, lifecycleStoppingMessage, targets, summary)
+	return b.broadcast(ctx, lifecycleStoppingMessageFor(b.buildInfo, receipt), targets, summary)
 }
 
 func (b *lifecycleBroadcaster) BroadcastStarted() lifecycleBroadcastSummary {
 	summary := lifecycleBroadcastSummary{Phase: lifecyclePhaseStarted}
-	if b == nil || b.sessions == nil || b.snapshots == nil {
+	if b == nil {
 		return summary
 	}
-	snapshot, claimedPath, err := b.snapshots.Claim()
-	if err != nil {
-		b.logger().Warn("lifecycle broadcast: snapshot claim failed", "phase", lifecyclePhaseStarted, "err", err)
-		return summary
+	receipt := b.readRestartReceipt()
+	if receipt != nil {
+		b.logger().Info("lifecycle broadcast: restart started", "request_id", receipt.RequestID)
 	}
-	if snapshot == nil {
+	var configuredTargets []*session.SessionInfo
+	if receipt == nil {
+		configuredTargets = b.configuredFeishuTargets()
+	}
+	var snapshot *lifecycleSnapshot
+	var claimedPath string
+	if b.snapshots != nil {
+		var err error
+		snapshot, claimedPath, err = b.snapshots.Claim()
+		if err != nil {
+			b.logger().Warn("lifecycle broadcast: snapshot claim failed", "phase", lifecyclePhaseStarted, "err", err)
+			if receipt == nil && len(configuredTargets) == 0 {
+				return summary
+			}
+			snapshot = nil
+			claimedPath = ""
+		}
+	}
+	if snapshot == nil && receipt == nil && len(configuredTargets) == 0 {
 		return summary
 	}
 	defer func() {
-		if removeErr := b.snapshots.CompleteClaim(claimedPath); removeErr != nil {
-			b.logger().Warn("lifecycle broadcast: snapshot cleanup failed", "phase", lifecyclePhaseStarted, "err", removeErr)
+		if b.snapshots != nil {
+			if removeErr := b.snapshots.CompleteClaim(claimedPath); removeErr != nil {
+				b.logger().Warn("lifecycle broadcast: snapshot cleanup failed", "phase", lifecyclePhaseStarted, "err", removeErr)
+			}
 		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), b.effectiveTimeout())
 	defer cancel()
-	restored := make([]*session.SessionInfo, 0, len(snapshot.SessionIDs))
-	summary.TargetCount = len(snapshot.SessionIDs)
-	for _, id := range snapshot.SessionIDs {
-		si, getErr := b.sessions.Get(ctx, id)
-		if getErr != nil {
-			summary.FailedCount++
-			b.logger().Warn("lifecycle broadcast: session restore failed", "phase", lifecyclePhaseStarted, "session_id", id)
-			continue
+	var restored []*session.SessionInfo
+	if snapshot != nil && b.sessions != nil {
+		restored = make([]*session.SessionInfo, 0, len(snapshot.SessionIDs))
+		for _, id := range snapshot.SessionIDs {
+			si, getErr := b.sessions.Get(ctx, id)
+			if getErr != nil {
+				summary.FailedCount++
+				b.logger().Warn("lifecycle broadcast: session restore failed", "phase", lifecyclePhaseStarted, "session_id", id)
+				continue
+			}
+			restored = append(restored, si)
 		}
-		restored = append(restored, si)
 	}
 	targets := collectLifecycleTargets(restored, func(string) bool { return true })
+	targets = mergeLifecycleTargets(configuredTargets, targets)
+	explicit := lifecycleTargetFromRestartReceipt(receipt)
+	explicitKey, explicitValid := lifecycleTargetKey(explicit)
+	if explicitValid {
+		targets = mergeLifecycleTargets([]*session.SessionInfo{explicit}, targets)
+	}
 	summary.TargetCount = summary.FailedCount + len(targets)
-	return b.broadcast(ctx, lifecycleStartedMessage, targets, summary)
+	if receipt != nil && !explicitValid {
+		summary.TargetCount++
+		summary.FailedCount++
+	}
+
+	message := lifecycleStartedMessageFor(b.buildInfo, receipt)
+	receiptDelivered := false
+	if explicitValid {
+		remaining := make([]*session.SessionInfo, 0, len(targets)-1)
+		for _, target := range targets {
+			key, ok := lifecycleTargetKey(target)
+			if ok && key == explicitKey {
+				continue
+			}
+			remaining = append(remaining, target)
+		}
+		if err := sendRestartStartedReceipt(ctx, b.bots, b.buildInfo, receipt); err != nil {
+			summary.FailedCount++
+			b.logger().Warn("lifecycle broadcast: target send failed",
+				"phase", lifecyclePhaseStarted,
+				"platform", explicit.Platform,
+				"bot_name", explicit.BotName,
+				"session_id", explicit.ID,
+				"error_kind", "send_failed")
+			logGatewayRestartAudit(b.logger(), gatewayRestartAuditRecord{
+				RequestID:  receipt.RequestID,
+				Source:     receipt.Platform,
+				Actor:      receipt.Actor,
+				BotName:    receipt.BotName,
+				ChatID:     receipt.PlatformKey["chat_id"],
+				Result:     "failed",
+				OldPID:     receipt.OldPID,
+				NewPID:     os.Getpid(),
+				OldVersion: receipt.OldVersion,
+				NewVersion: b.buildInfo.Version,
+			})
+		} else {
+			summary.SentCount++
+			receiptDelivered = true
+			logGatewayRestartAudit(b.logger(), gatewayRestartAuditRecord{
+				RequestID:  receipt.RequestID,
+				Source:     receipt.Platform,
+				Actor:      receipt.Actor,
+				BotName:    receipt.BotName,
+				ChatID:     receipt.PlatformKey["chat_id"],
+				Result:     "started",
+				OldPID:     receipt.OldPID,
+				NewPID:     os.Getpid(),
+				OldVersion: receipt.OldVersion,
+				NewVersion: b.buildInfo.Version,
+			})
+		}
+		targets = remaining
+	}
+	summary = b.broadcast(ctx, message, targets, summary)
+	if receiptDelivered && b.receipts != nil {
+		if err := b.receipts.Complete(receipt.RequestID); err != nil {
+			b.logger().Warn("lifecycle broadcast: restart receipt completion failed", "phase", lifecyclePhaseStarted, "error_kind", "receipt_complete_failed")
+		}
+	}
+	return summary
+}
+
+func (b *lifecycleBroadcaster) readRestartReceipt() *gatewayRestartReceipt {
+	if b == nil || b.receipts == nil {
+		return nil
+	}
+	receipt, err := b.receipts.Read()
+	if err == nil {
+		return receipt
+	}
+	quarantinedPath, quarantineErr := b.receipts.Quarantine()
+	if quarantineErr != nil {
+		b.logger().Warn("lifecycle broadcast: invalid restart receipt",
+			"phase", "restart",
+			"error_kind", "receipt_invalid",
+			"quarantined", false,
+			"quarantine_error_kind", "quarantine_failed",
+		)
+		return nil
+	}
+	b.logger().Warn("lifecycle broadcast: invalid restart receipt",
+		"phase", "restart",
+		"error_kind", "receipt_invalid",
+		"quarantined", quarantinedPath != "",
+	)
+	return nil
+}
+
+func lifecycleTargetFromRestartReceipt(receipt *gatewayRestartReceipt) *session.SessionInfo {
+	if receipt == nil || receipt.Platform == "" {
+		return nil
+	}
+	return &session.SessionInfo{
+		ID:          "restart:" + receipt.RequestID,
+		Platform:    receipt.Platform,
+		BotName:     receipt.BotName,
+		PlatformKey: maps.Clone(receipt.PlatformKey),
+	}
+}
+
+func (b *lifecycleBroadcaster) configuredFeishuTargets() []*session.SessionInfo {
+	if b == nil {
+		return nil
+	}
+	cfg := b.config
+	if b.configStore != nil {
+		if current := b.configStore.Load(); current != nil {
+			cfg = current
+		}
+	}
+	if cfg == nil || !cfg.Messaging.Feishu.Enabled {
+		return nil
+	}
+
+	platformAllowlist := cfg.Messaging.Feishu.GatewayRestartAllowFrom
+	targets := make([]*session.SessionInfo, 0)
+	seen := make(map[string]struct{})
+	for _, bot := range cfg.Messaging.Feishu.Bots {
+		botName := strings.TrimSpace(bot.Name)
+		if botName == "" {
+			continue
+		}
+		for _, rawOpenID := range config.ResolveGatewayRestartAllowFrom(platformAllowlist, bot.GatewayRestartAllowFrom) {
+			openID := strings.TrimSpace(rawOpenID)
+			if openID == "" {
+				continue
+			}
+			routeKey := botName + lifecycleTargetSeparator + openID
+			if _, duplicate := seen[routeKey]; duplicate {
+				continue
+			}
+			seen[routeKey] = struct{}{}
+			targetHash := sha256.Sum256([]byte(routeKey))
+			targets = append(targets, &session.SessionInfo{
+				ID:       fmt.Sprintf("lifecycle:feishu:%x", targetHash),
+				Platform: string(messaging.PlatformFeishu),
+				BotName:  botName,
+				PlatformKey: map[string]string{
+					"open_id": openID,
+				},
+			})
+		}
+	}
+	return targets
+}
+
+func mergeLifecycleTargets(groups ...[]*session.SessionInfo) []*session.SessionInfo {
+	var merged []*session.SessionInfo
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for _, si := range group {
+			if si == nil {
+				continue
+			}
+			key, ok := lifecycleTargetKey(si)
+			if !ok && strings.HasPrefix(si.ID, "restart:") {
+				key = "restart" + lifecycleTargetSeparator + si.ID
+				ok = true
+			}
+			if !ok {
+				continue
+			}
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			copyInfo := *si
+			copyInfo.PlatformKey = maps.Clone(si.PlatformKey)
+			merged = append(merged, &copyInfo)
+		}
+	}
+	return merged
+}
+
+func lifecycleStoppingMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
+	if receipt == nil {
+		return fmt.Sprintf("%s\n状态: stopping\n触发方式: 受控生命周期\n版本: %s\nBuild: %s\n当前 PID: %d\n系统: %s\n原因: graceful shutdown\n时间: %s\n下一步: 进程将退出。",
+			lifecycleStoppingMessage,
+			lifecycleInfoValue(info.Version),
+			lifecycleInfoValue(info.BuildTime),
+			os.Getpid(),
+			lifecycleSystemValue(info),
+			time.Now().UTC().Format(time.RFC3339),
+		)
+	}
+	return fmt.Sprintf("⚠️ HotPlex Gateway 即将重启。\n状态: stopping\n触发方式: %s\n版本: %s\nBuild: %s\n当前 PID: %d\n系统: %s\n请求 ID: %s\n请求时间: %s\n下一步: 等待新 Gateway 就绪。",
+		lifecycleRestartSource(receipt),
+		lifecycleInfoValueOr(receipt.OldVersion, info.Version),
+		lifecycleInfoValue(info.BuildTime),
+		receipt.OldPID,
+		lifecycleSystemValue(info),
+		receipt.RequestID,
+		lifecycleTimestamp(receipt.RequestedAt),
+	)
+}
+
+func lifecycleStartedMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
+	if receipt == nil {
+		return fmt.Sprintf("%s\n状态: ready\n触发方式: 受控生命周期\n版本: %s\nBuild: %s\n当前 PID: %d\n系统: %s\n健康检查: HTTP 服务已监听\n启动时间: %s",
+			lifecycleStartedMessage,
+			lifecycleInfoValue(info.Version),
+			lifecycleInfoValue(info.BuildTime),
+			os.Getpid(),
+			lifecycleSystemValue(info),
+			time.Now().UTC().Format(time.RFC3339),
+		)
+	}
+	return fmt.Sprintf("%s\n状态: ready\n触发方式: %s\n版本: %s\nBuild: %s\n当前 PID: %d\n上一版本: %s\n上一 PID: %d\n系统: %s\n请求 ID: %s\n请求时间: %s\n重启耗时: %s\n健康检查: HTTP 服务已监听",
+		lifecycleStartedMessage,
+		lifecycleRestartSource(receipt),
+		lifecycleInfoValue(info.Version),
+		lifecycleInfoValue(info.BuildTime),
+		os.Getpid(),
+		lifecycleInfoValue(receipt.OldVersion),
+		receipt.OldPID,
+		lifecycleSystemValue(info),
+		receipt.RequestID,
+		lifecycleTimestamp(receipt.RequestedAt),
+		lifecycleRestartDuration(receipt.RequestedAt),
+	)
+}
+
+func lifecycleInfoValue(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "unknown"
+}
+
+func lifecycleInfoValueOr(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return lifecycleInfoValue(fallback)
+}
+
+func lifecycleSystemValue(info BuildInfo) string {
+	return lifecycleInfoValue(info.OS) + "/" + lifecycleInfoValue(info.Arch)
+}
+
+func lifecycleTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return "unknown"
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func lifecycleRestartSource(receipt *gatewayRestartReceipt) string {
+	if receipt == nil || strings.TrimSpace(receipt.Platform) == "" {
+		return "受控生命周期"
+	}
+	if strings.EqualFold(receipt.Platform, string(messaging.PlatformFeishu)) {
+		return "Feishu /gateway restart"
+	}
+	return receipt.Platform + " restart"
+}
+
+func lifecycleRestartDuration(requestedAt time.Time) string {
+	if requestedAt.IsZero() {
+		return "unknown"
+	}
+	now := time.Now().UTC()
+	if now.Before(requestedAt) {
+		return "unknown"
+	}
+	return now.Sub(requestedAt).Round(time.Millisecond).String()
+}
+
+func sendRestartStartedReceipt(
+	ctx context.Context,
+	registry lifecycleBotRegistry,
+	info BuildInfo,
+	receipt *gatewayRestartReceipt,
+) error {
+	target := lifecycleTargetFromRestartReceipt(receipt)
+	if _, ok := lifecycleTargetKey(target); !ok {
+		return fmt.Errorf("lifecycle broadcast: invalid restart receipt target")
+	}
+	sender, err := resolveLifecycleSender(registry, target)
+	if err != nil {
+		return err
+	}
+	message := lifecycleStartedMessageFor(info, receipt)
+	var sendErr error
+	for range lifecycleRestartReceiptMaxAttempts {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if sendErr = sender.SendProactiveMessage(ctx, message, target.PlatformKey); sendErr == nil {
+			return nil
+		}
+	}
+	return sendErr
 }
 
 func (b *lifecycleBroadcaster) broadcast(
@@ -321,10 +666,15 @@ func lifecycleTargetKey(si *session.SessionInfo) (string, bool) {
 		fields = append(fields, si.PlatformKey["team_id"], channelID, si.PlatformKey["thread_ts"])
 	case messaging.PlatformFeishu:
 		chatID := si.PlatformKey["chat_id"]
-		if chatID == "" {
+		if chatID != "" {
+			fields = append(fields, "chat_id", chatID, si.PlatformKey["thread_ts"])
+			break
+		}
+		openID := si.PlatformKey["open_id"]
+		if openID == "" {
 			return "", false
 		}
-		fields = append(fields, chatID, si.PlatformKey["thread_ts"])
+		fields = append(fields, "open_id", openID)
 	case messaging.PlatformYuanxin:
 		messageID := si.PlatformKey["message_id"]
 		if messageID == "" {

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,48 +104,23 @@ func newGatewayRestartCmd() *cobra.Command {
 		Long: `Restart the gateway server by stopping the current instance and starting a new one.
 Preserves the same configuration file and mode.
 Use -d to restart as a background daemon.
-Use --detached to spawn a helper process that survives worker shutdown.`,
+	The restart is handed to a detached helper so it survives the caller.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if detached {
-				inst, err := findRunningGateway()
-				if err != nil {
-					return fmt.Errorf("gateway: %w", err)
-				}
-				return forkRestartHelper(inst, configPath, devMode, daemon)
-			}
-
-			inst, err := findRunningGateway()
+			coordinator := newGatewayRestartCoordinator(slog.Default(), nil, configPath, devMode)
+			ticket, err := coordinator.Prepare(cmd.Context(), gatewayRestartRequest{
+				Platform:      "cli",
+				ConfigPath:    configPath,
+				ConfigChanged: cmd.Flags().Changed("config"),
+				DevMode:       devMode,
+				Daemon:        daemon,
+			})
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %s %s\n", output.StatusSymbol("warn"), err)
-			} else {
-				if stopErr := stopGateway(inst); stopErr != nil {
-					fmt.Fprintf(os.Stderr, "  %s stop failed: %s\n", output.Red("✗"), stopErr)
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s gateway stopped (PID %d, %s)\n", output.Green("✓"), inst.PID, inst.Source)
-				}
-
-				if inst.Source == sourcePID {
-					waitForProcessExit(inst.PID, 5*time.Second)
-				} else {
-					time.Sleep(2 * time.Second)
-				}
-
-				configPath = resolveRestartConfig(configPath, cmd.Flags().Changed("config"), inst.ConfigPath)
-				if !devMode && inst.DevMode {
-					devMode = true
-				}
+				return fmt.Errorf("gateway restart: %w", err)
 			}
-
-			if daemon {
-				return startDaemon(configPath, devMode)
-			}
-			if err := writeGatewayState(configPath, devMode); err != nil {
-				fmt.Fprintf(os.Stderr, "  %s could not write PID file: %s\n", output.StatusSymbol("warn"), err)
-			}
-			if err := runGateway(configPath, devMode, nil); err != nil {
-				removeGatewayState()
+			if err := coordinator.Commit(ticket); err != nil {
 				return err
 			}
+			fmt.Fprintf(os.Stderr, "  %s gateway restart accepted (request ID %s)\n", output.Green("✓"), ticket.RequestID)
 			return nil
 		},
 	}

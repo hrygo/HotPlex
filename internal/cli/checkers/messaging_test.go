@@ -144,12 +144,8 @@ func TestFeishuCreds_WhitespaceOnly(t *testing.T) {
 }
 
 func TestMultiBotConfig_NoConfigPath(t *testing.T) {
-	// Writes the package-level configPath; must remain serial (see
-	// withConfigPath in config_test.go).
-
-	orig := getConfigPath()
-	SetConfigPath("")
-	defer func() { SetConfigPath(orig) }()
+	// Uses the package-level configPath; keep serial with the other config tests.
+	withConfigPath(t, "")
 
 	c := multiBotConfigChecker{}
 	d := c.Check(context.Background())
