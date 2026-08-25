@@ -45,7 +45,7 @@ func TestRateLimiter_UpdateRate(t *testing.T) {
 }
 
 func TestRateLimiter_Concurrent(t *testing.T) {
-	rl := NewRateLimiter(1000, 100)
+	rl := NewRateLimiter(0, 100)
 
 	allowed := make(chan bool, 200)
 	for i := 0; i < 200; i++ {
@@ -61,7 +61,6 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 		}
 	}
 
-	// Should allow at most burst (100) plus some refill
-	require.LessOrEqual(t, allowedCount, 120, "concurrent allows should be bounded")
-	require.Greater(t, allowedCount, 50, "should allow at least burst")
+	// Refill behavior is covered separately; this test isolates concurrent burst accounting.
+	require.Equal(t, 100, allowedCount, "concurrent allows should consume each burst token once")
 }
