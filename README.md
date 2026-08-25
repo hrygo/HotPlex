@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/hrygo/hotplex/actions/workflows/ci.yml"><img src="https://github.com/hrygo/hotplex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Version-v1.43.0-10B981?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Version-v1.50.0-10B981?style=flat-square" alt="Version">
   <a href="https://github.com/hrygo/hotplex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-3B82F6?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Protocol-AEP%20v1-7C3AED?style=flat-square" alt="AEP v1">
@@ -133,11 +133,11 @@ HotPlex separates the place where a user talks from the agent that performs the 
 
 Worker choice can be set per bot or platform, with shared defaults for the rest of the deployment.
 
-## ✨ Latest release: v1.43.0
+## ✨ Latest release: v1.50.0
 
-- **Reliable turns and reconnects.** Durable turn identity, ordered event publication, bounded WebSocket initialization retries, and sequence hydration make reconnects and uncertain delivery outcomes safer.
-- **Self-aware agent sessions.** Runtime facts and native skill catalogs expose the selected worker, available tools, and callable skills consistently across the gateway, CLI, admin API, and WebChat.
-- **Managed built-in skills.** Canonical built-in packages now ship with generated references and lifecycle commands for inspection, synchronization, safe reconciliation, receipts, and rollback.
+- **真实停止语义。** Gateway 现在等待 Worker run、连接和事件转发器完全静默后，才确认 `stopped_by_user`，避免旧输出污染下一轮会话。
+- **跨 Worker 生命周期隔离。** ACP、Claude Code、Codex CLI 和 OpenCode Server 的停止、重试与共享单例清理统一经过 run 级屏障和 dispatch gate。
+- **可操作的失败反馈。** OpenCode 配额/限流失败会返回明确错误码，WebChat 显示可执行的重试与凭据检查建议。
 
 See the [changelog](CHANGELOG.md) for the complete release history.
 

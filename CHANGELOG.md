@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.50.0] - 2026-08-25
+
+### Summary
+
+v1.50.0 是一次 minor 版本更新，核心主题是 **Worker Run 停止静默与跨通道失败反馈**。本版本让 Gateway 只有在旧 Worker run、连接和事件转发器全部完成静默后才确认停止，并收紧 OpenCode 重试、配额失败与 WebChat 错误展示，避免“已停止”或“成功完成”掩盖真实运行状态。
+
+### Added
+
+- **Gateway Lifecycle**: 新增 session dispatch gate、run 级事件写屏障和 provider acceptance 边界；`control.stop` 仅在旧 run 完成 teardown、forwarder 退出且事件链静默后发送 `done(reason="stopped_by_user")`。
+- **Worker Reliability**: ACP、Claude Code、Codex CLI 和 OpenCode Server 适配器补充停止、释放、共享单例隔离与跨 Worker 契约回归测试，下一轮输入不会复用旧本地 run。
+
+### Changed
+
+- **OpenCode Retry**: 区分重试期间的短暂 `idle` 与真正终止，重试耗尽会发出明确的错误终态；配额、限流和 HTTP 429 统一映射为 rate-limit 错误。
+- **WebChat UX**: 统一错误码映射，向用户展示可执行的重试、配额和凭据检查建议，而不是把上游原始错误当作成功或空响应。
+- **Release Validation**: 发布说明校验增加目标版本标题和非空约束，避免自动生成空 Release body。
+
+### Fixed
+
+- **Stop Correctness**: 修复停止与输入投递、旧连接替换、forwarder 退出及 runtime 终态之间的竞态；旧 run 的晚到事件不再污染 Hub、event store 或下一轮会话。
+- **Lifecycle Safety**: 限制停止 admission 等待并隔离 Worker 生命周期 panic，避免停止操作卡住 UI 或触发错误的 crash fallback。
+- **Error Truthfulness**: 修复 OpenCode 重试后 `idle` 被误判为成功完成，以及配额失败只显示“本轮未收到可展示的 Agent 回复”的问题。
+
 ## [1.43.0] - 2026-08-25
 
 ### Summary
