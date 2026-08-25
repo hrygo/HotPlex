@@ -64,10 +64,11 @@ func (b *Bridge) autoRetry(ctx context.Context, w worker.Worker, sessionID strin
 	if !admitted {
 		return
 	}
-	defer releaseEvent()
 	b.log.Info("bridge: auto-retry sending input", "session_id", sessionID, "attempt", attempt)
 	observability.RetryAttempts().Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "llm_error")))
-	if err := w.Input(ctx, b.retryCtrl.RetryInput(), nil); err != nil {
+	if _, err := runAcceptedDispatch(func(accepted func()) error {
+		return worker.DispatchInput(ctx, w, b.retryCtrl.RetryInput(), nil, accepted)
+	}, releaseEvent); err != nil {
 		b.log.Warn("bridge: auto-retry input failed", "session_id", sessionID, "err", err)
 	}
 }

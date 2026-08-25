@@ -185,6 +185,47 @@ type MidTurnInjector interface {
 	InjectMidTurn(ctx context.Context, content string, metadata map[string]any) error
 }
 
+// InputDispatchAcknowledger is an optional two-phase input capability for
+// adapters whose Input call can remain blocked after the provider has accepted
+// the request. accepted MUST be called exactly when a successful stop can no
+// longer overtake this input at the provider boundary. The callback must run
+// at most once and before the method returns. The method may continue waiting
+// for the turn result after that callback.
+//
+// Workers that do not implement this capability retain the Worker.Input
+// contract: a successful return is treated as the acceptance point.
+type InputDispatchAcknowledger interface {
+	InputWithDispatchAccepted(
+		ctx context.Context,
+		content string,
+		metadata map[string]any,
+		accepted func(),
+	) error
+}
+
+// DispatchInput invokes the strongest input-delivery contract exposed by w.
+// The callback is never synthesized for an error: in that case the caller
+// learns the outcome from the returned error instead.
+func DispatchInput(
+	ctx context.Context,
+	w Worker,
+	content string,
+	metadata map[string]any,
+	accepted func(),
+) error {
+	if accepted == nil {
+		accepted = func() {}
+	}
+	if acknowledger, ok := w.(InputDispatchAcknowledger); ok {
+		return acknowledger.InputWithDispatchAccepted(ctx, content, metadata, accepted)
+	}
+	if err := w.Input(ctx, content, metadata); err != nil {
+		return err
+	}
+	accepted()
+	return nil
+}
+
 // ResetResult describes the outcome of a ResetContext call.
 // Gateway reads this to decide orchestration without knowing Worker internals.
 type ResetResult struct {

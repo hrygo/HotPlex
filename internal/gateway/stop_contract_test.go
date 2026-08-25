@@ -75,6 +75,15 @@ func TestWorkerRunQuiescenceContract(t *testing.T) {
 	t.Run("C10-quiescence-timeout", func(t *testing.T) {
 		runC10QuiescenceTimeout(t, profile)
 	})
+	t.Run("C11-blocking-input-stop", func(t *testing.T) {
+		runC11BlockingInputStop(t, profile)
+	})
+	t.Run("C12-stale-stop-claim", func(t *testing.T) {
+		runC12StaleStopClaim(t, profile)
+	})
+	t.Run("C13-accepted-input-stop-failure", func(t *testing.T) {
+		runC13AcceptedInputStopFailure(t, profile)
+	})
 }
 
 func lifecycleGatewayProfile(t *testing.T) e2econtract.WorkerProfile {
@@ -266,6 +275,125 @@ func runC10QuiescenceTimeout(t *testing.T, profile e2econtract.WorkerProfile) {
 	require.Never(t, func() bool {
 		return envelopesContainLateRun(h.Events())
 	}, 100*time.Millisecond, 5*time.Millisecond, "C10: isolated late events must remain invisible")
+}
+
+func runC11BlockingInputStop(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.BlockInputCompletion()
+	probe.FailInputAfterAccepted()
+	probe.BlockStopCurrentTurn()
+	defer probe.ReleaseTerminal()
+	defer probe.ReleaseInputCompletion()
+	defer probe.ReleaseStopCurrentTurn()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c11 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C11")
+
+	select {
+	case err := <-inputDone:
+		require.FailNow(t, "C11: blocking Input returned before its completion gate", "error: %v", err)
+	default:
+	}
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Handler.Handle(context.Background(), stop) }()
+
+	select {
+	case <-probe.StopEntered():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("C11: stop was blocked behind the adapter's full-turn Input call")
+	}
+
+	probe.ReleaseInputCompletion()
+	select {
+	case err := <-inputDone:
+		require.FailNow(t, "C11: accepted-input cancellation bypassed the in-flight stop", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	probe.ReleaseStopCurrentTurn()
+	require.NoError(t, <-stopDone, "C11: stop must complete after dispatch acceptance")
+	require.NoError(t, <-inputDone, "C11: successful stop must absorb the accepted input's cancellation result")
+	require.Zero(t, lifecycleCount(h.Events(), events.Error), "C11: accepted-input cancellation must not emit an error after stop")
+}
+
+func runC12StaleStopClaim(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	firstProbe := h.Worker()
+	firstProbe.EnableBlocking()
+	defer firstProbe.ReleaseTerminal()
+
+	sessionID := h.SessionID()
+	firstInput := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c12 first"})
+	firstInput.OwnerID = "contract-user"
+	firstInputDone := make(chan error, 1)
+	go func() { firstInputDone <- h.Handler.Handle(context.Background(), firstInput) }()
+	waitEnteredTurn(t, firstProbe, "C12")
+	require.NoError(t, <-firstInputDone)
+
+	firstStop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	firstStop.OwnerID = "contract-user"
+	require.NoError(t, h.Handler.Handle(context.Background(), firstStop), "C12: first turn must establish a retained stop claim")
+
+	secondInput := events.NewEnvelope(aep.NewID(), sessionID, 2, events.Input, map[string]any{"content": "c12 second"})
+	secondInput.OwnerID = "contract-user"
+	require.NoError(t, h.Handler.Handle(context.Background(), secondInput), "C12: next turn must create a new execution")
+	require.NotSame(t, firstProbe, h.Worker(), "C12: next turn must use a replacement Worker")
+
+	// Lose the live binding after the new execution exists. The first turn's
+	// retained claim is stale and must not make this stop look successful.
+	h.DetachWorkerForTest()
+	secondStop := events.NewEnvelope(aep.NewID(), sessionID, 2, events.Control, events.ControlData{Action: events.ControlActionStop})
+	secondStop.OwnerID = "contract-user"
+	err := h.Handler.Handle(context.Background(), secondStop)
+	require.ErrorContains(t, err, "stop: no active worker run")
+}
+
+func runC13AcceptedInputStopFailure(t *testing.T, profile e2econtract.WorkerProfile) {
+	h := contracttest.NewHarness(t, e2econtract.PlatformWebChat, profile)
+	probe := h.Worker()
+	probe.EnableBlocking()
+	probe.BlockInputCompletion()
+	probe.FailInputAfterAccepted()
+	probe.BlockStopCurrentTurn()
+	probe.FailNextStop()
+	defer probe.ReleaseTerminal()
+	defer probe.ReleaseInputCompletion()
+	defer probe.ReleaseStopCurrentTurn()
+
+	sessionID := h.SessionID()
+	input := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Input, map[string]any{"content": "c13 content"})
+	input.OwnerID = "contract-user"
+	inputDone := make(chan error, 1)
+	go func() { inputDone <- h.Handler.Handle(context.Background(), input) }()
+	waitEnteredTurn(t, probe, "C13")
+
+	stop := events.NewEnvelope(aep.NewID(), sessionID, 1, events.Control, events.ControlData{Action: events.ControlActionStop})
+	stop.OwnerID = "contract-user"
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- h.Handler.Handle(context.Background(), stop) }()
+	select {
+	case <-probe.StopEntered():
+	case <-time.After(lifecycleWaitTimeout):
+		t.Fatal("C13: stop never reached the Worker")
+	}
+
+	probe.ReleaseInputCompletion()
+	select {
+	case err := <-inputDone:
+		require.FailNow(t, "C13: input classified before the in-flight stop failed", "error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	probe.ReleaseStopCurrentTurn()
+	require.Error(t, <-stopDone, "C13: injected provider stop failure must surface")
+	require.ErrorContains(t, <-inputDone, "worker input failed", "C13: failed stop must preserve the accepted input error")
 }
 
 func envelopesContainLateRun(envelopes []*events.Envelope) bool {

@@ -539,12 +539,27 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 // ─── Input ───────────────────────────────────────────────────────────────────
 
 func (w *Worker) Input(ctx context.Context, content string, metadata map[string]any) error {
-	return w.input(ctx, content, metadata, true)
+	return w.input(ctx, content, metadata, true, nil)
+}
+
+func (w *Worker) InputWithDispatchAccepted(
+	ctx context.Context,
+	content string,
+	metadata map[string]any,
+	accepted func(),
+) error {
+	return w.input(ctx, content, metadata, true, accepted)
 }
 
 // input is the shared send path for ordinary user turns and explicit skill
 // invocations. Only ordinary text receives the ACP compatibility prefix.
-func (w *Worker) input(ctx context.Context, content string, metadata map[string]any, includeCompatibility bool) error {
+func (w *Worker) input(
+	ctx context.Context,
+	content string,
+	metadata map[string]any,
+	includeCompatibility bool,
+	accepted func(),
+) error {
 	// Check for control responses (permission/question/elicitation).
 	handled, err := base.DispatchMetadata(ctx, metadata, w)
 	if handled {
@@ -598,7 +613,7 @@ func (w *Worker) input(ctx context.Context, content string, metadata map[string]
 	if tw := w.trace.Load(); tw != nil {
 		tw.Log("→", map[string]any{"method": "session/prompt", "sessionId": w.GetWorkerSessionID(), "contentLen": len(content)})
 	}
-	result, promptErr := w.client.Prompt(pctx, w.GetWorkerSessionID(), content)
+	result, promptErr := w.client.PromptWithDispatchAccepted(pctx, w.GetWorkerSessionID(), content, accepted)
 	if promptErr != nil {
 		// The prompt failed — the new turn never started. If the worker had a
 		// pending user-stop, restore the marker so the previous stop is not

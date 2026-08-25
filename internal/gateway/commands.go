@@ -107,13 +107,21 @@ func (h *Handler) handleControl(ctx context.Context, env *events.Envelope) error
 		if workerRunID == "" {
 			workerRunID = persistedRunID
 		}
-		if !bindingOK && h.stopFence.IsClaimed(env.SessionID) {
-			// The first successful stop detaches the run before a duplicate
-			// arrives. When the execution ledger is disabled (or temporarily
-			// unavailable), the original composite key cannot be reconstructed;
-			// the retained session claim still proves the stop was already applied.
-			h.log.Debug("gateway: stop already completed for detached run", "session_id", env.SessionID)
-			return nil
+		if !bindingOK {
+			claimMatches := false
+			if workerRunID != "" || execID != "" {
+				claimMatches = h.stopFence.Matches(env.SessionID, workerRunID, execID)
+			} else if h.executionStore == nil {
+				// Only the ledger-disabled mode may use a session-only fallback.
+				// A configured ledger lookup failure is ambiguous and must fail
+				// closed instead of inheriting an older turn's stop claim.
+				claimMatches = h.stopFence.HasAny(env.SessionID)
+			}
+			if claimMatches {
+				h.log.Debug("gateway: stop already completed for detached run",
+					"session_id", env.SessionID, "worker_run_id", workerRunID, "execution_id", execID)
+				return nil
+			}
 		}
 
 		// Per-turn stop fence: admit exactly one effective stop per (session,

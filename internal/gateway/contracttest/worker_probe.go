@@ -99,8 +99,11 @@ type WorkerProbe struct {
 	// non-blocking: the platform matrix flows emit the full turn synchronously
 	// with Input, exactly as before.
 	blocking      atomic.Bool
+	blockInputEnd atomic.Bool
+	failInputEnd  atomic.Bool
 	enteredTurn   chan struct{} // buffered(1): probe signals the pre-terminal content was emitted
 	allowTerminal chan struct{} // buffered(1): test releases the held terminal
+	allowInputEnd chan struct{} // buffered(1): test releases a production-style blocking Input call
 	holdTerminal  []*events.Envelope
 
 	failNextStop atomic.Bool // arming the next StopCurrentTurn to fail (failed-abort contract)
@@ -133,6 +136,7 @@ func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *Worker
 		conn:          newProbeConn(sessionID, "contract-user"),
 		enteredTurn:   make(chan struct{}, 1),
 		allowTerminal: make(chan struct{}, 1),
+		allowInputEnd: make(chan struct{}, 1),
 		stopEntered:   make(chan struct{}, 1),
 		allowStop:     make(chan struct{}, 1),
 		waitEntered:   make(chan struct{}, 1),
@@ -145,6 +149,24 @@ func NewWorkerProbe(profile e2econtract.WorkerProfile, sessionID string) *Worker
 // was emitted. Only the lifecycle contract tests enable it; the platform
 // matrix flows keep the synchronous full-turn emission.
 func (p *WorkerProbe) EnableBlocking() { p.blocking.Store(true) }
+
+// BlockInputCompletion makes Input remain blocked after the worker has
+// accepted the prompt. ACP and the legacy OpenCode /message endpoint have
+// this shape: delivery is committed before the adapter returns from Input.
+func (p *WorkerProbe) BlockInputCompletion() { p.blockInputEnd.Store(true) }
+
+// FailInputAfterAccepted makes the blocking Input return an adapter error once
+// released. It models ACP/OCS RPC completion after a successful concurrent
+// provider stop; Gateway must not surface that cancellation as input failure.
+func (p *WorkerProbe) FailInputAfterAccepted() { p.failInputEnd.Store(true) }
+
+// ReleaseInputCompletion lets a production-style blocking Input return.
+func (p *WorkerProbe) ReleaseInputCompletion() {
+	select {
+	case p.allowInputEnd <- struct{}{}:
+	default:
+	}
+}
 
 // MarkExitIntentional flags the probe's upcoming conn close as an intentional
 // scenario teardown rather than a crash. The bridge's handleWorkerExit then
@@ -189,11 +211,42 @@ func (p *WorkerProbe) Resume(_ context.Context, _ worker.SessionInfo) error {
 // semantics: BaseWorker.BeginTurn clears the user-stop marker before each
 // primary turn), then emits one fixture-driven turn through the real
 // parser/mapper of the probe's worker type.
-func (p *WorkerProbe) Input(_ context.Context, _ string, _ map[string]any) error {
+func (p *WorkerProbe) Input(ctx context.Context, content string, metadata map[string]any) error {
+	return p.input(ctx, content, metadata, nil)
+}
+
+// InputWithDispatchAccepted exposes the optional two-phase dispatch contract
+// used by production adapters whose Input call outlives request acceptance.
+func (p *WorkerProbe) InputWithDispatchAccepted(
+	ctx context.Context,
+	content string,
+	metadata map[string]any,
+	accepted func(),
+) error {
+	return p.input(ctx, content, metadata, accepted)
+}
+
+func (p *WorkerProbe) input(ctx context.Context, _ string, _ map[string]any, accepted func()) error {
 	p.inputCalls.Add(1)
 	p.turnN.Add(1)
 	p.stopped.Store(false)
-	return p.EmitBasicTurn(context.Background())
+	if err := p.EmitBasicTurn(ctx); err != nil {
+		return err
+	}
+	if accepted != nil {
+		accepted()
+	}
+	if p.blockInputEnd.Load() {
+		select {
+		case <-p.allowInputEnd:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if p.failInputEnd.Load() {
+		return errors.New("contracttest: accepted input interrupted by stop")
+	}
+	return nil
 }
 
 func (p *WorkerProbe) Conn() worker.SessionConn { return p.conn }
@@ -345,14 +398,12 @@ func (p *WorkerProbe) Events() []*events.Envelope { return p.conn.Events() }
 // EmitBasicTurn drives the probe's worker-type fixture through the real
 // parser/mapper and writes every mapper-produced envelope verbatim into the
 // probe connection. When the turn gate is armed (EnableBlocking), the terminal
-// envelopes are held off the wire and Input returns right after the
-// pre-terminal content — exactly like a production worker whose Input is a
-// delivery while the turn keeps running. The held terminal is released by
-// ReleaseTerminal: a turn stopped in the meantime (StopCurrentTurn before the
-// release) has its terminal suppressed, so the interrupted turn never
-// completes on the wire. Platform queues (feishu chatQueue, slack event
-// goroutines, webchat async dispatch) therefore stay free to process the stop
-// while the fixture turn is still live.
+// envelopes are held off the wire. By default Input returns after this
+// pre-terminal delivery point, modeling adapters with acknowledgement-style
+// Input. BlockInputCompletion instead keeps Input waiting while
+// InputWithDispatchAccepted reports the same acceptance point, modeling ACP's
+// blocking prompt RPC. ReleaseTerminal emits the held terminal unless that
+// turn was stopped in the meantime.
 func (p *WorkerProbe) EmitBasicTurn(_ context.Context) error {
 	switch p.profile.Type {
 	case worker.TypeClaudeCode:

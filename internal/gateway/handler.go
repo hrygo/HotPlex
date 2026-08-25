@@ -1461,7 +1461,16 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 	}
 	h.stopFence.BeginTurn(env.SessionID, workerRunID, execID)
 
-	var inputErr error
+	var (
+		dispatchAccepted bool
+		inputErr         error
+	)
+	releaseDispatch := func() {
+		if dispatchLocked {
+			unlockDispatch()
+			dispatchLocked = false
+		}
+	}
 	if invocation != nil {
 		resolvedInvocation := *invocation
 		if resolvedInvocation.Mode == "" {
@@ -1527,9 +1536,27 @@ func (h *Handler) deliverToWorkerWithBusyHandling(ctx context.Context, env *even
 			return h.sendErrorf(ctx, env, events.ErrCodeNotSupported,
 				"worker %s does not support native Skill invocation", w.Type())
 		}
-		inputErr = invoker.InvokeNativeCommand(ctx, *invocation)
+		dispatchAccepted, inputErr = runAcceptedDispatch(func(accepted func()) error {
+			return worker.DispatchNativeCommand(ctx, w, invoker, *invocation, accepted)
+		}, releaseDispatch)
 	} else {
-		inputErr = w.Input(ctx, content, nil)
+		dispatchAccepted, inputErr = runAcceptedDispatch(func(accepted func()) error {
+			return worker.DispatchInput(ctx, w, content, nil, accepted)
+		}, releaseDispatch)
+	}
+	if inputErr != nil && dispatchAccepted {
+		// A stop may make a blocking adapter's already-accepted RPC return a
+		// cancellation error. Re-enter the session gate so an in-flight stop
+		// reaches a stable success/failure decision before classifying it. A
+		// successful stop keeps the old Worker's marker set; a failed stop clears
+		// it and the real input error remains visible.
+		unlockStopDecision := h.dispatchGate.Lock(env.SessionID)
+		stopped := w.IsStopped()
+		unlockStopDecision()
+		if stopped {
+			h.log.Debug("gateway: accepted input ended by successful stop", "session_id", env.SessionID)
+			inputErr = nil
+		}
 	}
 	if inputErr != nil {
 		var we *worker.WorkerError

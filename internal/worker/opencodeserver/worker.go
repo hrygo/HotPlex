@@ -85,10 +85,9 @@ const (
 	// httpClientTimeout is the timeout for general HTTP client operations.
 	httpClientTimeout = 30 * time.Second
 
-	// sendTimeout is the timeout for sending user input to the OCS server.
-	// The OCS POST /session/{id}/message blocks until the turn completes,
-	// so this must be long enough for the longest expected turn.
-	sendTimeout = 5 * time.Minute
+	// sendTimeout bounds acknowledgement of an asynchronous OCS prompt. The
+	// model turn itself continues over SSE and is not covered by this timeout.
+	sendTimeout = httpClientTimeout
 )
 
 // Worker implements the OpenCode Server worker adapter.
@@ -133,13 +132,20 @@ type Worker struct {
 	// permissionCeiling is immutable for this Worker session and survives
 	// in-place reset/clear operations.
 	permissionCeiling worker.PermissionCeiling
+
+	// nativeDispatchAccepted bridges the blocking /command response with the
+	// earlier session.status(busy) acceptance signal from the SSE event stream.
+	nativeDispatchMu       sync.Mutex
+	nativeDispatchGen      uint64
+	nativeDispatchAccepted func()
 }
 
 var (
-	_ worker.WorkerSessionIDHandler           = (*Worker)(nil)
-	_ worker.PermissionCeilingReporter        = (*Worker)(nil)
-	_ base.MetadataHandler                    = (*Worker)(nil)
-	_ base.MultiAnswerQuestionResponseHandler = (*Worker)(nil)
+	_ worker.WorkerSessionIDHandler            = (*Worker)(nil)
+	_ worker.PermissionCeilingReporter         = (*Worker)(nil)
+	_ worker.NativeCommandDispatchAcknowledger = (*Worker)(nil)
+	_ base.MetadataHandler                     = (*Worker)(nil)
+	_ base.MultiAnswerQuestionResponseHandler  = (*Worker)(nil)
 )
 
 func (w *Worker) GetWorkerSessionID() string {
@@ -192,9 +198,8 @@ func newHTTPClient() *http.Client {
 	}
 }
 
-// newSendClient creates an HTTP client with a longer timeout for sending
-// user input. The OCS POST /session/{id}/message blocks until the turn
-// completes, so the default 30s timeout causes false "server unreachable" errors.
+// newSendClient creates the HTTP client used for asynchronous prompt delivery.
+// The response is only an acceptance acknowledgement; turn output uses SSE.
 func newSendClient() *http.Client {
 	return &http.Client{
 		Timeout: sendTimeout,
@@ -283,13 +288,9 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 		return nil
 	}
 
-	// A new primary turn begins here. OCS's conn.Send blocks until the turn
-	// completes, so the marker cannot be cleared after the send returns — the
-	// next turn's Done (emitted by the converter when the server reaches idle)
-	// would race the clear and get suppressed. Instead capture the current
-	// stopped state, clear it before the send, and restore it if the send
-	// fails: a failed send means the new turn never started, so the previous
-	// turn's stopped marker must be preserved.
+	// A new primary turn begins here. Clear the stopped marker before dispatch;
+	// prompt_async returns once the server accepts the turn while output and the
+	// terminal continue over SSE. Restore the previous marker if delivery fails.
 	wasStopped := w.IsStopped()
 	w.BeginTurn()
 
@@ -317,8 +318,20 @@ func (w *Worker) Input(ctx context.Context, content string, metadata map[string]
 
 // InvokeSkill sends a resolved Skill through OpenCode's native command API.
 // It intentionally does not route through conn.Send, whose contract is the
-// ordinary /message input path.
+// ordinary /prompt_async input path.
 func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocation) error {
+	return w.invokeSkill(ctx, invocation, nil)
+}
+
+func (w *Worker) InvokeNativeCommandWithDispatchAccepted(
+	ctx context.Context,
+	invocation worker.NativeCommandInvocation,
+	accepted func(),
+) error {
+	return w.invokeSkill(ctx, worker.SkillInvocation(invocation), accepted)
+}
+
+func (w *Worker) invokeSkill(ctx context.Context, invocation worker.SkillInvocation, accepted func()) error {
 	w.Mu.Lock()
 	commander := w.cmd
 	conn := w.httpConn
@@ -332,6 +345,14 @@ func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocat
 	if conn != nil {
 		conn.setSkillReplay(worker.NativeInvocationFromSkill(invocation))
 	}
+	dispatchGen, err := w.armNativeDispatchAccepted(accepted)
+	if err != nil {
+		if wasStopped {
+			w.MarkStopped()
+		}
+		return err
+	}
+	defer w.disarmNativeDispatchAccepted(dispatchGen)
 	if err := commander.InvokeSkill(ctx, invocation); err != nil {
 		if wasStopped {
 			w.MarkStopped()
@@ -340,6 +361,41 @@ func (w *Worker) InvokeSkill(ctx context.Context, invocation worker.SkillInvocat
 	}
 	w.SetLastIO(time.Now())
 	return nil
+}
+
+func (w *Worker) armNativeDispatchAccepted(accepted func()) (uint64, error) {
+	if accepted == nil {
+		return 0, nil
+	}
+	w.nativeDispatchMu.Lock()
+	defer w.nativeDispatchMu.Unlock()
+	if w.nativeDispatchAccepted != nil {
+		return 0, fmt.Errorf("opencodeserver: native command dispatch already pending")
+	}
+	w.nativeDispatchGen++
+	w.nativeDispatchAccepted = accepted
+	return w.nativeDispatchGen, nil
+}
+
+func (w *Worker) disarmNativeDispatchAccepted(generation uint64) {
+	if generation == 0 {
+		return
+	}
+	w.nativeDispatchMu.Lock()
+	defer w.nativeDispatchMu.Unlock()
+	if w.nativeDispatchGen == generation {
+		w.nativeDispatchAccepted = nil
+	}
+}
+
+func (w *Worker) acceptNativeDispatch() {
+	w.nativeDispatchMu.Lock()
+	accepted := w.nativeDispatchAccepted
+	w.nativeDispatchAccepted = nil
+	w.nativeDispatchMu.Unlock()
+	if accepted != nil {
+		accepted()
+	}
 }
 
 // ListInvokableSkills delegates the OpenCode command catalog query to the
@@ -1019,6 +1075,9 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 			}
 
 			w.SetLastIO(time.Now())
+			if isRunningStateEnvelope(env) {
+				w.acceptNativeDispatch()
+			}
 
 			w.Mu.Lock()
 			ch := w.httpConn
@@ -1072,6 +1131,21 @@ func (w *Worker) forwardBusEvents(ctx context.Context, sessionID string, busCh c
 				return
 			}
 		}
+	}
+}
+
+func isRunningStateEnvelope(env *events.Envelope) bool {
+	if env == nil || env.Event.Type != events.State {
+		return false
+	}
+	switch data := env.Event.Data.(type) {
+	case events.StateData:
+		return data.State == events.StateRunning
+	case map[string]any:
+		state, _ := data["state"].(string)
+		return state == string(events.StateRunning)
+	default:
+		return false
 	}
 }
 
@@ -1282,7 +1356,7 @@ type conn struct {
 	sessionID    string
 	httpAddr     string
 	client       *http.Client
-	sendClient   *http.Client // longer timeout for input delivery (OCS blocks until turn completes)
+	sendClient   *http.Client // bounded client for prompt acceptance
 	recvCh       chan *events.Envelope
 	log          *slog.Logger
 	systemPrompt string
@@ -1400,14 +1474,14 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 		return fmt.Errorf("opencodeserver: marshal input: %w", err)
 	}
 
-	msgURL := fmt.Sprintf("%s/session/%s/message", c.httpAddr, url.PathEscape(sessionID))
+	msgURL := fmt.Sprintf("%s/session/%s/prompt_async", c.httpAddr, url.PathEscape(sessionID))
 	req, err := http.NewRequestWithContext(ctx, "POST", msgURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return fmt.Errorf("opencodeserver: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use sendClient (long timeout) for input delivery; fall back to client for tests.
+	// Use the prompt-delivery client; fall back to the general client for tests.
 	sendCl := c.sendClient
 	if sendCl == nil {
 		sendCl = c.client
@@ -1430,7 +1504,7 @@ func (c *conn) Send(ctx context.Context, msg *events.Envelope) error {
 		return &worker.WorkerError{Kind: worker.ErrKindUnavailable, Message: fmt.Sprintf("opencodeserver: input failed: status %d, body: %s", resp.StatusCode, string(respBody))}
 	}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("opencodeserver: input failed: status %d, body: %s",
 			resp.StatusCode, string(respBody))

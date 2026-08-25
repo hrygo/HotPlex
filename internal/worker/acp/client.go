@@ -121,6 +121,21 @@ func (c *ACPClient) ResumeSession(ctx context.Context, sessionID, cwd string, mc
 // Prompt sends a user message to the active session and waits for the response.
 // Notifications received during the prompt are dispatched to NotificationCh.
 func (c *ACPClient) Prompt(ctx context.Context, sessionID, content string) (*PromptResult, error) {
+	return c.prompt(ctx, sessionID, content, nil)
+}
+
+// PromptWithDispatchAccepted is Prompt with an exact JSON-RPC write boundary.
+// The callback runs after the complete session/prompt frame is serialized to
+// the agent stdin, before waiting for the turn's response.
+func (c *ACPClient) PromptWithDispatchAccepted(
+	ctx context.Context,
+	sessionID, content string,
+	accepted func(),
+) (*PromptResult, error) {
+	return c.prompt(ctx, sessionID, content, accepted)
+}
+
+func (c *ACPClient) prompt(ctx context.Context, sessionID, content string, accepted func()) (*PromptResult, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("acp prompt: empty sessionId")
 	}
@@ -130,7 +145,7 @@ func (c *ACPClient) Prompt(ctx context.Context, sessionID, content string) (*Pro
 			{"type": "text", "text": content},
 		},
 	}
-	resp, err := c.call(ctx, "session/prompt", params)
+	resp, err := c.callWithDispatchAccepted(ctx, "session/prompt", params, accepted)
 	if err != nil {
 		return nil, fmt.Errorf("acp prompt: %w", err)
 	}
@@ -299,6 +314,15 @@ func (c *ACPClient) Done() <-chan struct{} { return c.done }
 
 // call sends a JSON-RPC request and blocks until the response arrives or ctx expires.
 func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONRPCResponse, error) {
+	return c.callWithDispatchAccepted(ctx, method, params, nil)
+}
+
+func (c *ACPClient) callWithDispatchAccepted(
+	ctx context.Context,
+	method string,
+	params any,
+	accepted func(),
+) (*JSONRPCResponse, error) {
 	id := c.nextID.Add(1)
 	idRaw := mustMarshal(id)
 
@@ -331,6 +355,9 @@ func (c *ACPClient) call(ctx context.Context, method string, params any) (*JSONR
 	})
 	if err != nil {
 		return nil, err
+	}
+	if accepted != nil {
+		accepted()
 	}
 
 	select {

@@ -431,7 +431,7 @@ func (w *AppServerWorker) closeAndMarkDone() {
 
 // cleanupOldThread closes the old connection and unsubscribes from the
 // old thread. Shared by Resume and ResetContext.
-func (w *AppServerWorker) cleanupOldThread() {
+func (w *AppServerWorker) cleanupOldThread(ctx context.Context) {
 	w.mu.Lock()
 	oldConn := w.conn
 	oldThreadID := w.threadID
@@ -445,7 +445,7 @@ func (w *AppServerWorker) cleanupOldThread() {
 		_ = oldConn.Close()
 	}
 	if oldThreadID != "" && w.manager != nil {
-		_ = w.manager.Notify(context.Background(), "thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
+		_ = w.manager.Notify(ctx, "thread/unsubscribe", ThreadUnsubscribeParams{ThreadID: oldThreadID})
 		w.manager.Unsubscribe(oldThreadID)
 	}
 }
@@ -626,7 +626,7 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 	w.state = appStateStarting
 	w.mu.Unlock()
 
-	w.cleanupOldThread()
+	w.cleanupOldThread(ctx)
 	w.resetLifecycleState()
 	if err := w.startNewThread(session, "resume"); err != nil {
 		return err
@@ -638,11 +638,11 @@ func (w *AppServerWorker) Resume(ctx context.Context, session worker.SessionInfo
 }
 
 func (w *AppServerWorker) Terminate(ctx context.Context) error {
-	w.shutdown()
+	err := w.shutdown(ctx)
 	w.mu.Lock()
 	w.state = appStateTerminated
 	w.mu.Unlock()
-	return nil
+	return err
 }
 
 // StopCurrentTurn stops the current running turn on codex app-server using InterruptTurn.
@@ -655,7 +655,7 @@ func (w *AppServerWorker) StopCurrentTurn(ctx context.Context) error {
 		return nil
 	}
 	w.MarkStopped()
-	if err := w.manager.InterruptTurn(tid, turnID); err != nil {
+	if err := w.manager.InterruptTurn(ctx, tid, turnID); err != nil {
 		// The interrupt never took effect — the turn is still running and the
 		// gateway rolls back its stop fence. Unmark so the turn's completion
 		// is not misread as a user-stop (crash fallback preserved correctly).
@@ -690,11 +690,13 @@ func (w *AppServerWorker) InjectMidTurn(ctx context.Context, content string, met
 }
 
 func (w *AppServerWorker) Kill() error {
-	w.shutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), codexWriteFallbackGrace)
+	defer cancel()
+	err := w.shutdown(ctx)
 	w.mu.Lock()
 	w.state = appStateTerminated
 	w.mu.Unlock()
-	return nil
+	return err
 }
 
 // shutdown releases the worker's manager subscription and decrements the
@@ -702,8 +704,8 @@ func (w *AppServerWorker) Kill() error {
 // singleton process is NOT killed here — it stops via idle drain or
 // explicit ShutdownSingleton(). This prevents GC from killing a shared
 // process when reclaiming sessions.
-func (w *AppServerWorker) shutdown() {
-	w.release()
+func (w *AppServerWorker) shutdown(ctx context.Context) error {
+	return w.release(ctx)
 }
 
 func (w *AppServerWorker) Wait() (int, error) {
@@ -726,11 +728,11 @@ func (w *AppServerWorker) Wait() (int, error) {
 	}
 }
 
-func (w *AppServerWorker) release() {
+func (w *AppServerWorker) release(ctx context.Context) error {
 	w.mu.Lock()
 	if w.released || w.closed {
 		w.mu.Unlock()
-		return
+		return nil
 	}
 	w.released = true
 	w.closed = true
@@ -747,8 +749,9 @@ func (w *AppServerWorker) release() {
 		close(doneCh)
 	}
 
+	var unsubscribeErr error
 	if mgr != nil && tid != "" {
-		_ = mgr.Notify(context.Background(), "thread/unsubscribe", ThreadUnsubscribeParams{
+		unsubscribeErr = mgr.Notify(ctx, "thread/unsubscribe", ThreadUnsubscribeParams{
 			ThreadID: tid,
 		})
 		mgr.Unsubscribe(tid)
@@ -760,6 +763,7 @@ func (w *AppServerWorker) release() {
 		}
 		mgr.Release()
 	}
+	return unsubscribeErr
 }
 
 func (w *AppServerWorker) ResetContext(ctx context.Context) (worker.ResetResult, error) {
@@ -771,7 +775,7 @@ func (w *AppServerWorker) ResetContext(ctx context.Context) (worker.ResetResult,
 	origSess := w.origSession
 	w.mu.Unlock()
 
-	w.cleanupOldThread()
+	w.cleanupOldThread(ctx)
 	w.resetLifecycleState()
 
 	// If the process crashed between turns, bail out — bridge will Terminate+Start.
@@ -866,7 +870,7 @@ func (w *AppServerWorker) Clear(ctx context.Context) error {
 	}
 	// Only interrupt when a turn is in flight; turn/interrupt requires a turnId.
 	if turnID != "" {
-		_ = w.manager.InterruptTurn(tid, turnID)
+		_ = w.manager.InterruptTurn(ctx, tid, turnID)
 	}
 	// ConnReplaced is ignored: Clear is invoked over WorkerCommander (HTTP REST),
 	// bridge doesn't restart forwardEvents on Clear.

@@ -232,6 +232,14 @@ func (h *Harness) Worker() *WorkerProbe {
 	return h.probe
 }
 
+// DetachWorkerForTest removes the SessionManager attachment while leaving the
+// bridge's historical run metadata intact. It models a crash/detach window in
+// which control.stop must rely on persisted execution identity rather than a
+// live Worker binding.
+func (h *Harness) DetachWorkerForTest() {
+	h.manager.DetachWorker(h.sessionID)
+}
+
 func (h *Harness) setProbe(p *WorkerProbe) {
 	h.probeMu.Lock()
 	defer h.probeMu.Unlock()

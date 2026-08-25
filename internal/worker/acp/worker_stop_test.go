@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -92,6 +93,74 @@ func TestWorker_Input_ClearsStoppedOnlyForPrimaryTurn(t *testing.T) {
 		// the conn cached the prompt content for crash recovery.
 		require.Equal(t, acpCompatibilityRules+"\n\nhello again", w.conn.LastInput())
 	})
+}
+
+func TestWorker_InputDispatchAcceptedBeforePromptResponse(t *testing.T) {
+	t.Parallel()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	defer agentStdinW.Close()
+	defer agentStdoutW.Close()
+
+	client := NewACPClient(agentStdinW, agentStdoutR, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client.StartReadLoop(ctx)
+
+	requestSeen := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	go func() {
+		scanner := bufio.NewScanner(agentStdinR)
+		if !scanner.Scan() {
+			return
+		}
+		var req struct {
+			ID json.RawMessage `json:"id"`
+		}
+		_ = json.Unmarshal(scanner.Bytes(), &req)
+		close(requestSeen)
+		<-releaseResponse
+		_ = WriteMessage(agentStdoutW, &JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  mustMarshal(PromptResult{StopReason: "end_turn"}),
+		})
+	}()
+
+	w := &Worker{BaseWorker: base.NewBaseWorker(nil, nil)}
+	w.client = client
+	w.mapper = newTestMapper()
+	w.conn = newACPConn("user_1", "sess_dispatch", slog.Default())
+	w.SetWorkerSessionID("sess_dispatch")
+	w.drainCh = make(chan struct{}, 1)
+	w.drainDoneCh = make(chan struct{})
+	close(w.drainDoneCh)
+
+	accepted := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- w.InputWithDispatchAccepted(ctx, "hello", nil, func() { close(accepted) })
+	}()
+
+	select {
+	case <-requestSeen:
+	case <-time.After(time.Second):
+		t.Fatal("agent did not receive session/prompt")
+	}
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("dispatch acceptance was not reported after the prompt write")
+	}
+	select {
+	case err := <-done:
+		require.FailNow(t, "Input returned before the prompt response", "error: %v", err)
+	default:
+	}
+
+	close(releaseResponse)
+	require.NoError(t, <-done)
 }
 
 // TestWorker_StopCurrentTurn_CancelMethodNotFoundDegradesToKill verifies that a
