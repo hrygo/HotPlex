@@ -89,6 +89,8 @@ export const ErrorCode = {
   WorkerOutputLimit: 'WORKER_OUTPUT_LIMIT',
   TurnTimeout: 'TURN_TIMEOUT',
   ResumeRetry: 'RESUME_RETRY',
+  NotSupported: 'NOT_SUPPORTED',
+  OperatorAbandoned: 'OPERATOR_ABANDONED',
 } as const;
 
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];

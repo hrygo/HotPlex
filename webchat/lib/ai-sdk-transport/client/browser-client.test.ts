@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserHotPlexClient } from "./browser-client";
 import { AEP_VERSION, ErrorCode, EventKind, WorkerType } from "./constants";
 import type { Envelope } from "./types";
+import { logger } from "@/lib/logger";
 
 afterEach(() => {
     vi.useRealTimers();
@@ -160,6 +161,8 @@ describe("BrowserHotPlexClient connection handoff", () => {
 
     it("does not recursively reconnect when init reports a missing session", async () => {
         vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const error = vi.spyOn(logger, "error").mockImplementation(() => undefined);
         const client = new BrowserHotPlexClient({
             url: "ws://127.0.0.1:8888/ws",
             workerType: WorkerType.CodexCLI,
@@ -188,6 +191,12 @@ describe("BrowserHotPlexClient connection handoff", () => {
         expect(ControlledWebSocket.instances).toHaveLength(1);
         expect(client.connected).toBe(false);
         expect(client.connecting).toBe(false);
+        expect(warn).toHaveBeenCalledWith(
+            "BrowserClient",
+            "Handshake session unavailable",
+            { message: "session not found" },
+        );
+        expect(error).not.toHaveBeenCalled();
 
         client.disconnect();
         socket.finishClose();
@@ -216,6 +225,47 @@ describe("BrowserHotPlexClient connection handoff", () => {
         await Promise.resolve();
         expect(client.connected).toBe(false);
         expect(client.connecting).toBe(false);
+
+        client.disconnect();
+        socket.finishClose();
+    });
+
+    it("logs an authentication handshake rejection as a warning", async () => {
+        vi.stubGlobal("WebSocket", ControlledWebSocket);
+        const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const error = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+        const client = new BrowserHotPlexClient({
+            url: "ws://127.0.0.1:8888/ws",
+            workerType: WorkerType.CodexCLI,
+        });
+
+        const connect = client.connect("session-auth-required");
+        void connect.catch(() => undefined);
+        await Promise.resolve();
+        const socket = ControlledWebSocket.instances[0];
+        socket.open();
+        socket.message({
+            ...initAck("session-auth-required"),
+            event: {
+                type: EventKind.InitAck,
+                data: {
+                    state: "idle",
+                    error: "authentication required",
+                    code: ErrorCode.AuthRequired,
+                },
+            },
+        });
+
+        await Promise.resolve();
+        expect(warn).toHaveBeenCalledWith(
+            "BrowserClient",
+            "Handshake rejected",
+            {
+                code: ErrorCode.AuthRequired,
+                message: "authentication required",
+            },
+        );
+        expect(error).not.toHaveBeenCalled();
 
         client.disconnect();
         socket.finishClose();

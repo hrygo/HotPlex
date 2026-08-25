@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    mapErrorToNotice,
     isExpectedCommandRejection,
     mapErrorToMessage,
 } from "./error-mapping";
+import { ErrorCode } from "@/lib/ai-sdk-transport/client/constants";
 
 describe("mapErrorToMessage", () => {
     it.each([
@@ -19,19 +21,104 @@ describe("mapErrorToMessage", () => {
             "The coding agent crashed unexpectedly. Please try again or reset the session.",
         ],
         [
+            "WORKER_START_FAILED",
+            undefined,
+            "The coding agent could not start. Try again or choose a different worker.",
+        ],
+        [
+            "WORKER_TIMEOUT",
+            undefined,
+            "The coding agent stopped responding. Try again or start a new session.",
+        ],
+        [
+            "WORKER_OOM",
+            undefined,
+            "The coding agent ran out of memory. Try a smaller request or start a new session.",
+        ],
+        [
+            "PROCESS_SIGKILL",
+            undefined,
+            "The coding agent was force-stopped. Try again or start a new session.",
+        ],
+        [
+            "SESSION_NOT_FOUND",
+            "no worker attached to session",
+            "This session is no longer available. Start a new session and try again.",
+        ],
+        [
             "SESSION_EXPIRED",
             undefined,
             "This session has expired due to inactivity. Please start a new session.",
         ],
         [
+            "SESSION_TERMINATED",
+            undefined,
+            "This session has ended. Start a new session to continue.",
+        ],
+        [
+            "SESSION_INVALIDATED",
+            undefined,
+            "This session is no longer valid. Start a new session to continue.",
+        ],
+        [
+            "SESSION_BUSY",
+            undefined,
+            "This session is still processing another request. Wait for it to finish, then try again.",
+        ],
+        [
+            "SESSION_ALREADY_CONNECTED",
+            undefined,
+            "This session is open in another connection. Close the other connection or wait, then try again.",
+        ],
+        [
             "RATE_LIMITED",
             undefined,
-            "You've reached the rate limit. Please wait a moment before sending more messages.",
+            "Rate limit exceeded (429): The upstream AI provider is rate-limiting requests or quota is exhausted. Please try again later or check your API key/quota limits.",
         ],
         [
             "UNAUTHORIZED",
             undefined,
-            "Authentication failed: 401 — Check your API key configuration or consult the documentation.",
+            "You are signed out or do not have access to this session. Sign in again or choose another session.",
+        ],
+        [
+            "AUTH_REQUIRED",
+            undefined,
+            "Sign in to continue.",
+        ],
+        [
+            "INTERNAL_ERROR",
+            "database connection details",
+            "HotPlex encountered an internal error. Try again; if it continues, contact your administrator.",
+        ],
+        [
+            "PROTOCOL_VIOLATION",
+            "unknown control action foo",
+            "The client sent or received an invalid protocol message. Refresh the page and try again.",
+        ],
+        [
+            "VERSION_MISMATCH",
+            "version mismatch: expected 1, got 0",
+            "This WebChat version is incompatible with the Gateway. Refresh the page or update HotPlex.",
+        ],
+        [
+            "CONFIG_INVALID",
+            "invalid path: /private/internal/path",
+            "The requested configuration is invalid. Check the command or workspace settings and try again.",
+        ],
+        [
+            "GATEWAY_OVERLOAD",
+            undefined,
+            "HotPlex is temporarily overloaded. Wait a moment and try again.",
+        ],
+        [
+            "EXECUTION_TIMEOUT",
+            undefined,
+            "Delivery timed out and the result is unknown. Check the session before sending the request again.",
+        ],
+        [
+            "RECONNECT_REQUIRED",
+            undefined,
+            "The Gateway requires a new connection. Wait for WebChat to reconnect or refresh the page.",
         ],
         [
             "WORKER_OUTPUT_LIMIT",
@@ -41,7 +128,7 @@ describe("mapErrorToMessage", () => {
         [
             "RESUME_RETRY",
             "Recovering session...",
-            "🔄 Recovering session...",
+            "🔄 Recovering the session after an unexpected interruption...",
         ],
         [
             "NOT_SUPPORTED",
@@ -58,12 +145,39 @@ describe("mapErrorToMessage", () => {
             "invalid permission mode: permission mode required",
             "Permission mode is required. Use /perm <mode> to choose one.",
         ],
+        [
+            "OPERATOR_ABANDONED",
+            undefined,
+            "This pending execution was abandoned by an administrator. Check the session before trying again.",
+        ],
     ])(
         "maps known code %s to its friendly message",
         (code, message, expected) => {
             expect(mapErrorToMessage(code, message)).toBe(expected);
         },
     );
+
+    it("renders session recovery as a neutral notice instead of an error", () => {
+        expect(mapErrorToNotice("RESUME_RETRY", "Recovering session...")).toEqual({
+            text: "🔄 Recovering the session after an unexpected interruption...",
+            status: "complete",
+        });
+    });
+
+    it("renders terminal failures as warning-prefixed error notices", () => {
+        expect(mapErrorToNotice("SESSION_NOT_FOUND", "gone")).toEqual({
+            text: "⚠️ This session is no longer available. Start a new session and try again.",
+            status: "error",
+        });
+    });
+
+    it("does not expose raw Gateway details for canonical error codes", () => {
+        for (const code of Object.values(ErrorCode)) {
+            const message = mapErrorToMessage(code, "RAW_GATEWAY_DETAIL");
+            expect(message).not.toContain("RAW_GATEWAY_DETAIL");
+            expect(message).not.toBe(`Error: ${code}`);
+        }
+    });
 
     describe("CODEX_ERROR", () => {
         it.each([
@@ -130,6 +244,15 @@ describe("mapErrorToMessage", () => {
             expect(
                 mapErrorToMessage("INVALID_MESSAGE", "ambiguous Skill invocation"),
             ).toBe("That Skill command is ambiguous. Choose a specific command and try again.");
+        });
+
+        it("does not expose malformed protocol details", () => {
+            expect(
+                mapErrorToMessage(
+                    "INVALID_MESSAGE",
+                    "malformed input data: parse failed at private field",
+                ),
+            ).toBe("The command could not be processed. Check its format and try again.");
         });
     });
 

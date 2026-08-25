@@ -48,8 +48,9 @@ import { getSessionHistory, type ConversationRecord } from "@/lib/api/sessions";
 import { conversationTurnsToMessages } from "@/lib/utils/turn-replay";
 import {
     isExpectedCommandRejection,
-    mapErrorToMessage,
+    mapErrorToNotice,
 } from "@/lib/adapters/error-mapping";
+import { isExpectedClientError } from "@/lib/ai-sdk-transport/client/error-policy";
 import { logger } from "@/lib/logger";
 import i18n from "@/lib/i18n/config";
 import type {
@@ -1208,7 +1209,8 @@ export function useHotPlexRuntime({
                 data?.code,
                 data?.message,
             );
-            const isNotSupported = (data?.code as string) === "NOT_SUPPORTED";
+            const isExpectedClientErrorCode = isExpectedClientError(data?.code);
+            const errorNotice = mapErrorToNotice(data?.code, data?.message);
 
             // SESSION_BUSY is a transient state handled internally by auto-retry, so do not show it to the user and don't log as error.
             if (isBusy) {
@@ -1313,22 +1315,23 @@ export function useHotPlexRuntime({
                         details: data.details,
                         eventId: env?.id,
                     });
-                } else if (isExpectedCommandRejectionError) {
+                } else if (
+                    isExpectedCommandRejectionError ||
+                    isExpectedClientErrorCode
+                ) {
                     logger.warn(
                         "RuntimeAdapter",
-                        isNotSupported
-                            ? "Command not supported"
-                            : "Command rejected",
+                        errorNotice.text,
                         {
                             code: data.code,
-                            message: data.message,
+                            reason: data.message,
                             eventId: env?.id,
                         },
                     );
                 } else {
-                    logger.error("RuntimeAdapter", "Error received", {
+                    logger.error("RuntimeAdapter", errorNotice.text, {
                         code: data.code || "unknown",
-                        message: data.message || "none",
+                        reason: data.message || "none",
                         details: data.details,
                         eventId: env?.id,
                     });
@@ -1395,21 +1398,15 @@ export function useHotPlexRuntime({
                 queueMicrotask(() => scheduleQueueDrainRef.current());
             }
 
-            // User-friendly mapping for specific terminal errors
-            const errorMessage = mapErrorToMessage(
-                data?.code,
-                data?.message,
-            );
-
             // Add error message to thread
             setMessages((prev) => [
                 ...prev,
                 {
                     id: `error-${Date.now()}`,
                     role: "assistant",
-                    parts: [{ type: "text", text: `⚠️ ${errorMessage}` }],
+                    parts: [{ type: "text", text: errorNotice.text }],
                     createdAt: new Date(),
-                    status: "error",
+                    status: errorNotice.status,
                 },
             ]);
         };

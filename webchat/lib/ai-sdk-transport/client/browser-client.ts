@@ -57,6 +57,7 @@ import {
   isInitAck,
   newEventId,
 } from './envelope';
+import { isExpectedClientError } from './error-policy';
 
 // ============================================================================
 // Event Types
@@ -452,7 +453,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           this.shouldReconnect = false;
           this._stopHeartbeat();
           this._clearReconnectTimer();
-          logger.error('BrowserClient', 'Handshake session not found', { message: errorMsg });
+          logger.warn('BrowserClient', 'Handshake session unavailable', { message: errorMsg });
           this.emit('error', {
             code: ErrorCode.SessionNotFound,
             message: errorMsg,
@@ -520,7 +521,17 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
           return;
         }
 
-        logger.error('BrowserClient', 'Handshake error', { message: errorMsg });
+        if (isExpectedClientError(ackData.code)) {
+          logger.warn('BrowserClient', 'Handshake rejected', {
+            code: ackData.code,
+            message: errorMsg,
+          });
+        } else {
+          logger.error('BrowserClient', 'Handshake error', {
+            code: ackData.code,
+            message: errorMsg,
+          });
+        }
         this.emit('error', {
           code: ackData.code || ErrorCode.InternalError,
           message: errorMsg
@@ -538,7 +549,7 @@ export class BrowserHotPlexClient extends EventEmitter<BrowserClientEvents> {
         this.shouldReconnect = false;
         this._stopHeartbeat();
         this._clearReconnectTimer();
-        logger.error('BrowserClient', 'Handshake returned deleted session', { message: errorMsg });
+        logger.warn('BrowserClient', 'Handshake session unavailable', { message: errorMsg });
         this.emit('error', {
           code: ErrorCode.SessionNotFound,
           message: errorMsg,
