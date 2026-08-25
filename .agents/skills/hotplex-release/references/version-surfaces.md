@@ -60,13 +60,32 @@ Release body 必须直接使用 CHANGELOG.md 中目标版本的完整区块：�
 
 ~~~bash
 tag=v1.42.0
+set -euo pipefail
 notes_tmp=$(mktemp)
 git show "$tag:CHANGELOG.md" | awk -v target="${tag#v}" '
-  $0 == "## [" target "]" { in_section=1 }
-  in_section && /^## \[/ && $0 != "## [" target "]" { exit }
+  index($0, "## [" target "]") == 1 { in_section=1 }
+  in_section && /^## \[/ && index($0, "## [" target "]") != 1 { in_section=0 }
   in_section { print }
 ' > "$notes_tmp"
 test -s "$notes_tmp"
+grep -Fq "## [${tag#v}]" "$notes_tmp"
+test "$(wc -l < "$notes_tmp")" -ge 2
 ~~~
 
+不要使用 `$0 == "## [" target "]"` 作为起始条件：HotPlex 标题包含发布日期，实际
+格式是 `## [target] - YYYY-MM-DD`。`test -s`、标题断言和最小行数断言必须在
+`gh release edit` 之前执行；任一断言失败都不得调用远端写操作。
+
 如果 release workflow 设置了 `generate_release_notes: true`，自动生成的 body 只是临时产物；在 Release 创建后必须执行 `gh release edit "$tag" --notes-file "$notes_tmp"`，再抓取 `gh release view "$tag" --json body --jq .body | sed '$d'` 与 `$notes_tmp` 做逐字 diff。`sed '$d'` 只去除 CLI 输出附带的末尾换行，不改变 Release body。只有比较结果为空，才能报告 Release Notes 已完成；否则报告 blocked，并保留差异。
+
+发布后的校验必须先验证远端 body 非空，再执行 diff；例如：
+
+~~~bash
+remote_tmp=$(mktemp)
+gh release view "$tag" --json body --jq .body | sed '$d' > "$remote_tmp"
+test -s "$remote_tmp"
+diff -u "$notes_tmp" "$remote_tmp"
+~~~
+
+不能只依赖 `diff` 的零退出码：两个空文件也会比较相等，因此本地和远端的非空断言
+都是完成条件。
