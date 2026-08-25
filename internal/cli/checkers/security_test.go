@@ -11,7 +11,9 @@ import (
 
 // Tests using t.Setenv or modifying configPath cannot use t.Parallel because:
 //   - t.Setenv is incompatible with t.Parallel in Go's testing framework
-//   - configPath is a package-level mutable variable subject to data races
+//   - configPath is a package-level mutable variable: writes must stay serial
+//     so parallel checker reads never observe a mid-test swap (atomic access
+//     makes the reads race-free, but not logically consistent)
 
 func TestAdminToken_Empty(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "")
