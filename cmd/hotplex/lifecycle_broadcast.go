@@ -17,8 +17,8 @@ import (
 
 const (
 	lifecycleTargetSeparator           = "\x00"
-	lifecycleStoppingMessage           = "⚠️ HotPlex 服务即将停止。"
-	lifecycleStartedMessage            = "✅ HotPlex 服务已启动。"
+	lifecycleStoppingMessage           = "⚠️ HotPlex Gateway 即将停止。"
+	lifecycleStartedMessage            = "✅ HotPlex Gateway 已启动并就绪。"
 	lifecyclePhaseStopping             = "stopping"
 	lifecyclePhaseStarted              = "started"
 	lifecycleBroadcastTimeout          = 5 * time.Second
@@ -323,26 +323,96 @@ func mergeLifecycleTargets(groups ...[]*session.SessionInfo) []*session.SessionI
 
 func lifecycleStoppingMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
 	if receipt == nil {
-		return lifecycleStoppingMessage
+		return fmt.Sprintf("%s\n状态: stopping\n触发方式: 受控生命周期\n版本: %s\nBuild: %s\n当前 PID: %d\n系统: %s\n原因: graceful shutdown\n时间: %s\n下一步: 进程将退出。",
+			lifecycleStoppingMessage,
+			lifecycleInfoValue(info.Version),
+			lifecycleInfoValue(info.BuildTime),
+			os.Getpid(),
+			lifecycleSystemValue(info),
+			time.Now().UTC().Format(time.RFC3339),
+		)
 	}
-	version := info.Version
-	if version == "" {
-		version = receipt.OldVersion
-	}
-	return fmt.Sprintf("⚠️ HotPlex Gateway 即将重启。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n原因: Feishu /gateway restart\n请求 ID: %s\n请求时间: %s",
-		version, info.BuildTime, receipt.OldPID, info.OS, info.Arch, receipt.RequestID, receipt.RequestedAt.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("⚠️ HotPlex Gateway 即将重启。\n状态: stopping\n触发方式: %s\n版本: %s\nBuild: %s\n当前 PID: %d\n系统: %s\n请求 ID: %s\n请求时间: %s\n下一步: 等待新 Gateway 就绪。",
+		lifecycleRestartSource(receipt),
+		lifecycleInfoValueOr(receipt.OldVersion, info.Version),
+		lifecycleInfoValue(info.BuildTime),
+		receipt.OldPID,
+		lifecycleSystemValue(info),
+		receipt.RequestID,
+		lifecycleTimestamp(receipt.RequestedAt),
+	)
 }
 
 func lifecycleStartedMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
 	if receipt == nil {
-		return lifecycleStartedMessage
+		return fmt.Sprintf("%s\n状态: ready\n触发方式: 受控生命周期\n版本: %s\nBuild: %s\n当前 PID: %d\n系统: %s\n健康检查: HTTP 服务已监听\n启动时间: %s",
+			lifecycleStartedMessage,
+			lifecycleInfoValue(info.Version),
+			lifecycleInfoValue(info.BuildTime),
+			os.Getpid(),
+			lifecycleSystemValue(info),
+			time.Now().UTC().Format(time.RFC3339),
+		)
 	}
-	previousVersion := receipt.OldVersion
-	if previousVersion == "" {
-		previousVersion = "unknown"
+	return fmt.Sprintf("%s\n状态: ready\n触发方式: %s\n版本: %s\nBuild: %s\n当前 PID: %d\n上一版本: %s\n上一 PID: %d\n系统: %s\n请求 ID: %s\n请求时间: %s\n重启耗时: %s\n健康检查: HTTP 服务已监听",
+		lifecycleStartedMessage,
+		lifecycleRestartSource(receipt),
+		lifecycleInfoValue(info.Version),
+		lifecycleInfoValue(info.BuildTime),
+		os.Getpid(),
+		lifecycleInfoValue(receipt.OldVersion),
+		receipt.OldPID,
+		lifecycleSystemValue(info),
+		receipt.RequestID,
+		lifecycleTimestamp(receipt.RequestedAt),
+		lifecycleRestartDuration(receipt.RequestedAt),
+	)
+}
+
+func lifecycleInfoValue(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
 	}
-	return fmt.Sprintf("✅ HotPlex Gateway 已启动。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n上一版本: %s\n上一 PID: %d\n请求 ID: %s\n请求时间: %s",
-		info.Version, info.BuildTime, os.Getpid(), info.OS, info.Arch, previousVersion, receipt.OldPID, receipt.RequestID, receipt.RequestedAt.UTC().Format(time.RFC3339))
+	return "unknown"
+}
+
+func lifecycleInfoValueOr(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return lifecycleInfoValue(fallback)
+}
+
+func lifecycleSystemValue(info BuildInfo) string {
+	return lifecycleInfoValue(info.OS) + "/" + lifecycleInfoValue(info.Arch)
+}
+
+func lifecycleTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return "unknown"
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func lifecycleRestartSource(receipt *gatewayRestartReceipt) string {
+	if receipt == nil || strings.TrimSpace(receipt.Platform) == "" {
+		return "受控生命周期"
+	}
+	if strings.EqualFold(receipt.Platform, string(messaging.PlatformFeishu)) {
+		return "Feishu /gateway restart"
+	}
+	return receipt.Platform + " restart"
+}
+
+func lifecycleRestartDuration(requestedAt time.Time) string {
+	if requestedAt.IsZero() {
+		return "unknown"
+	}
+	now := time.Now().UTC()
+	if now.Before(requestedAt) {
+		return "unknown"
+	}
+	return now.Sub(requestedAt).Round(time.Millisecond).String()
 }
 
 func sendRestartStartedReceipt(

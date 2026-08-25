@@ -326,9 +326,44 @@ func TestLifecycleBroadcast_StoppingSnapshotsBeforeSend(t *testing.T) {
 	summary := b.BroadcastStopping()
 
 	require.True(t, <-snapshotSeen)
-	require.Equal(t, lifecycleStoppingMessage, <-sentText)
+	message := <-sentText
+	require.Contains(t, message, lifecycleStoppingMessage)
+	require.Contains(t, message, "状态: stopping")
 	require.Equal(t, lifecycleBroadcastSummary{Phase: lifecyclePhaseStopping, TargetCount: 1, SentCount: 1}, summary)
 	require.FileExists(t, path)
+}
+
+func TestLifecycleBroadcast_StoppingIncludesRuntimeMetadata(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "gateway.lifecycle-broadcast.json")
+	sentText := make(chan string, 1)
+	adapter := &lifecycleFakeAdapter{
+		platform: messaging.PlatformSlack,
+		botName:  "ops",
+		botID:    "bot-1",
+		send: func(_ context.Context, text string, _ map[string]string) error {
+			sentText <- text
+			return nil
+		},
+	}
+	b := newTestLifecycleBroadcaster(path, []*session.SessionInfo{lifecycleSlackSession("ops", "channel-1")}, adapter)
+	b.buildInfo = BuildInfo{Version: "v1.43.0", BuildTime: "2026-08-25T13:00:03+0800", OS: "darwin", Arch: "arm64"}
+
+	summary := b.BroadcastStopping()
+
+	require.Equal(t, lifecycleBroadcastSummary{Phase: lifecyclePhaseStopping, TargetCount: 1, SentCount: 1}, summary)
+	message := <-sentText
+	for _, expected := range []string{
+		"⚠️ HotPlex Gateway 即将停止。",
+		"状态: stopping",
+		"版本: v1.43.0",
+		"Build: 2026-08-25T13:00:03+0800",
+		"系统: darwin/arm64",
+		"原因: graceful shutdown",
+	} {
+		require.Contains(t, message, expected)
+	}
 }
 
 func TestLifecycleBroadcast_ConstructorUsesGatewayDependencies(t *testing.T) {
@@ -370,7 +405,9 @@ func TestLifecycleBroadcast_StartedClaimsOnceAndRestoresSession(t *testing.T) {
 	summary := b.BroadcastStarted()
 	second := b.BroadcastStarted()
 
-	require.Equal(t, lifecycleStartedMessage, <-sentText)
+	message := <-sentText
+	require.Contains(t, message, lifecycleStartedMessage)
+	require.Contains(t, message, "状态: ready")
 	require.Equal(t, lifecycleBroadcastSummary{Phase: lifecyclePhaseStarted, TargetCount: 1, SentCount: 1}, summary)
 	require.Equal(t, lifecycleBroadcastSummary{Phase: lifecyclePhaseStarted}, second)
 	require.NoFileExists(t, path)
@@ -379,6 +416,42 @@ func TestLifecycleBroadcast_StartedClaimsOnceAndRestoresSession(t *testing.T) {
 	case duplicate := <-sentText:
 		require.Failf(t, "duplicate startup message", "got %q", duplicate)
 	default:
+	}
+}
+
+func TestLifecycleBroadcast_StartedIncludesRuntimeMetadata(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "gateway.lifecycle-broadcast.json")
+	sentText := make(chan string, 1)
+	si := lifecycleSlackSession("ops", "channel-1")
+	adapter := &lifecycleFakeAdapter{
+		platform: messaging.PlatformSlack,
+		botName:  "ops",
+		botID:    "bot-1",
+		send: func(_ context.Context, text string, _ map[string]string) error {
+			sentText <- text
+			return nil
+		},
+	}
+	b := newTestLifecycleBroadcaster(path, nil, adapter)
+	b.buildInfo = BuildInfo{Version: "v1.43.0", BuildTime: "2026-08-25T13:00:03+0800", OS: "darwin", Arch: "arm64"}
+	b.sessions.(*lifecycleFakeSessions).byID[si.ID] = si
+	require.NoError(t, b.snapshots.Save([]string{si.ID}))
+
+	summary := b.BroadcastStarted()
+
+	require.Equal(t, lifecycleBroadcastSummary{Phase: lifecyclePhaseStarted, TargetCount: 1, SentCount: 1}, summary)
+	message := <-sentText
+	for _, expected := range []string{
+		"✅ HotPlex Gateway 已启动并就绪。",
+		"状态: ready",
+		"版本: v1.43.0",
+		"Build: 2026-08-25T13:00:03+0800",
+		"系统: darwin/arm64",
+		"健康检查: HTTP 服务已监听",
+	} {
+		require.Contains(t, message, expected)
 	}
 }
 
@@ -446,15 +519,31 @@ func TestLifecycleBroadcast_RestartReceiptCoversNoSessionTarget(t *testing.T) {
 	require.Equal(t, 1, stopping.TargetCount)
 	require.Equal(t, 1, stopping.SentCount)
 	stoppingText := <-sentText
-	require.Contains(t, stoppingText, "Gateway 即将重启")
-	require.Contains(t, stoppingText, receipt.RequestID)
+	for _, expected := range []string{
+		"Gateway 即将重启",
+		"状态: stopping",
+		"触发方式: Feishu /gateway restart",
+		"Build: 2026-08-25",
+		"下一步: 等待新 Gateway 就绪。",
+		receipt.RequestID,
+	} {
+		require.Contains(t, stoppingText, expected)
+	}
 
 	started := b.BroadcastStarted()
 	require.Equal(t, 1, started.TargetCount)
 	require.Equal(t, 1, started.SentCount)
 	startedText := <-sentText
-	require.Contains(t, startedText, "上一版本")
-	require.Contains(t, startedText, receipt.RequestID)
+	for _, expected := range []string{
+		"上一版本",
+		"上一 PID: 4321",
+		"状态: ready",
+		"重启耗时:",
+		"健康检查: HTTP 服务已监听",
+		receipt.RequestID,
+	} {
+		require.Contains(t, startedText, expected)
+	}
 	require.Contains(t, audit.String(), `"actor":"ou_actor"`)
 	_, err := os.Stat(b.receipts.path)
 	require.ErrorIs(t, err, os.ErrNotExist)
