@@ -119,7 +119,7 @@ hotplex gateway stop
 
 ### `hotplex gateway restart`
 
-重启 Gateway。停止当前实例后启动新实例，保留原配置和模式。
+重启 Gateway。所有入口都会先获取全局 fenced restart lease，再把停止和启动事务委托给独立 helper；命令返回后 helper 继续完成重启，并保留原配置和模式。
 
 受控停止或重启时，Gateway 会在停止前向当前已连接的 Slack、飞书和元信会话广播“服务即将停止”，并在新实例启动后向同一批去重后的会话广播“服务已启动”。通知为 best-effort，不覆盖 WebChat、进程崩溃、强制终止或无停止快照的冷启动。
 
@@ -128,7 +128,7 @@ hotplex gateway stop
 ```bash
 hotplex gateway restart       # 重启，保留原配置
 hotplex gateway restart -d    # 重启为后台守护进程
-hotplex gateway restart --detached  # Worker-initiated restart（独立进程安全隔离）
+hotplex gateway restart --detached  # 兼容旧调用；当前所有重启均使用独立 helper
 ```
 
 | 标志 | 短标志 | 类型 | 默认值 | 说明 |
@@ -136,9 +136,9 @@ hotplex gateway restart --detached  # Worker-initiated restart（独立进程安
 | `--config` | `-c` | `string` | `$HOTPLEX_HOME/config.yaml` | 配置文件路径 |
 | `--dev` | | `bool` | `false` | 开发模式 |
 | `--daemon` | `-d` | `bool` | `false` | 后台守护进程模式 |
-| `--detached` | | `bool` | `false` | 从 Worker 进程内部安全重启 Gateway。Fork 独立 PGID 的 helper 进程执行重启，与调用方 Worker 的生命周期完全隔离。内置 60s 冷却期防止循环重启 |
+| `--detached` | | `bool` | `false` | 向后兼容标志；当前所有重启都使用独立 helper，并由全局 restart lease 拒绝重叠事务 |
 
-> `--detached` 适用于 AI Agent（Cron 任务或聊天指令）触发的 Gateway 重启。普通运维场景使用 `gateway restart` 即可。
+> 普通运维直接使用 `gateway restart`。`--detached` 仍被接受以兼容既有脚本，但不再切换执行路径。
 
 ---
 

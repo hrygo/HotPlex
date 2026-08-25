@@ -22,9 +22,28 @@ const (
 	gatewayRestartScheduleFailed = "❌ Gateway 重启调度失败，请查看 Gateway 日志。"
 )
 
+var errRestartReceiptPending = errors.New("gateway restart receipt delivery is pending")
+
+type restartReceiptPendingError struct {
+	RequestID string
+}
+
+func (e *restartReceiptPendingError) Error() string {
+	if e.RequestID == "" {
+		return errRestartReceiptPending.Error()
+	}
+	return fmt.Sprintf("%s (request_id=%s)", errRestartReceiptPending, e.RequestID)
+}
+
+func (e *restartReceiptPendingError) Unwrap() error {
+	return errRestartReceiptPending
+}
+
 type gatewayRestartRequest struct {
 	Platform      string
+	Actor         string
 	BotName       string
+	ChatID        string
 	PlatformKey   map[string]string
 	RequestedAt   time.Time
 	ConfigPath    string
@@ -38,9 +57,28 @@ type gatewayRestartTicket struct {
 	Lease      *restartLease
 	Receipt    *gatewayRestartReceipt
 	Instance   *gatewayInstance
+	Source     string
+	Actor      string
+	BotName    string
+	ChatID     string
+	OldVersion string
 	ConfigPath string
 	DevMode    bool
 	Daemon     bool
+}
+
+type gatewayRestartAuditRecord struct {
+	RequestID  string
+	Source     string
+	Actor      string
+	BotName    string
+	ChatID     string
+	Result     string
+	OldPID     int
+	HelperPID  int
+	NewPID     int
+	OldVersion string
+	NewVersion string
 }
 
 type gatewayRestartCoordinator struct {
@@ -53,6 +91,7 @@ type gatewayRestartCoordinator struct {
 	findInstance func() (*gatewayInstance, error)
 	spawnHelper  func(*gatewayRestartTicket) (int, error)
 	allowFeishu  func(botName, actorID string) bool
+	retryReceipt func(context.Context, *gatewayRestartReceipt) error
 	now          func() time.Time
 }
 
@@ -72,6 +111,9 @@ func newGatewayRestartCoordinator(log *slog.Logger, configStore *config.ConfigSt
 	}
 	c.spawnHelper = c.spawnRestartHelper
 	c.allowFeishu = c.feishuRestartAllowed
+	c.retryReceipt = func(ctx context.Context, receipt *gatewayRestartReceipt) error {
+		return sendRestartStartedReceipt(ctx, messaging.DefaultBotRegistry(), newBuildInfo(), receipt)
+	}
 	return c
 }
 
@@ -102,6 +144,12 @@ func (c *gatewayRestartCoordinator) Prepare(ctx context.Context, request gateway
 	if err != nil {
 		return nil, err
 	}
+	if strings.EqualFold(request.Platform, string(messaging.PlatformFeishu)) {
+		if err := c.retryPendingReceipt(ctx); err != nil {
+			_ = c.leaseStore.Release(lease.RequestID)
+			return nil, err
+		}
+	}
 
 	configPath := request.ConfigPath
 	if configPath == "" {
@@ -113,6 +161,11 @@ func (c *gatewayRestartCoordinator) Prepare(ctx context.Context, request gateway
 		RequestID:  lease.RequestID,
 		Lease:      lease,
 		Instance:   instance,
+		Source:     request.Platform,
+		Actor:      request.Actor,
+		BotName:    request.BotName,
+		ChatID:     request.ChatID,
+		OldVersion: versionString(),
 		ConfigPath: configPath,
 		DevMode:    devMode,
 		Daemon:     request.Daemon,
@@ -127,10 +180,11 @@ func (c *gatewayRestartCoordinator) Prepare(ctx context.Context, request gateway
 			SchemaVersion: gatewayRestartReceiptSchemaVersion,
 			RequestID:     lease.RequestID,
 			Platform:      string(messaging.PlatformFeishu),
+			Actor:         request.Actor,
 			BotName:       request.BotName,
 			PlatformKey:   cloneStringMap(request.PlatformKey),
 			RequestedAt:   requestedAt.UTC(),
-			OldVersion:    versionString(),
+			OldVersion:    ticket.OldVersion,
 			OldPID:        instance.PID,
 		}
 		if c.receipts == nil {
@@ -143,12 +197,16 @@ func (c *gatewayRestartCoordinator) Prepare(ctx context.Context, request gateway
 		}
 	}
 
-	c.logger().Info("gateway restart prepared",
-		"request_id", lease.RequestID,
-		"platform", request.Platform,
-		"bot_name", request.BotName,
-		"old_pid", instance.PID,
-	)
+	c.logRestartAudit(gatewayRestartAuditRecord{
+		RequestID:  ticket.RequestID,
+		Source:     ticket.Source,
+		Actor:      ticket.Actor,
+		BotName:    ticket.BotName,
+		ChatID:     ticket.ChatID,
+		Result:     "prepared",
+		OldPID:     instance.PID,
+		OldVersion: ticket.OldVersion,
+	})
 	return ticket, nil
 }
 
@@ -162,10 +220,12 @@ func (c *gatewayRestartCoordinator) Commit(ticket *gatewayRestartTicket) error {
 	}
 	helperPID, err := spawn(ticket)
 	if err != nil {
+		c.logTicketAudit(ticket, "failed", 0)
 		_ = c.Abort(ticket)
 		return fmt.Errorf("gateway restart commit: %w", err)
 	}
 	if helperPID <= 0 {
+		c.logTicketAudit(ticket, "failed", 0)
 		_ = c.Abort(ticket)
 		return errors.New("gateway restart commit: helper returned invalid PID")
 	}
@@ -175,10 +235,11 @@ func (c *gatewayRestartCoordinator) Commit(ticket *gatewayRestartTicket) error {
 		return nil
 	}); err != nil {
 		terminateRestartHelper(helperPID)
+		c.logTicketAudit(ticket, "failed", 0)
 		_ = c.Abort(ticket)
 		return fmt.Errorf("gateway restart commit: record helper: %w", err)
 	}
-	c.logger().Info("gateway restart helper started", "request_id", ticket.RequestID, "helper_pid", helperPID)
+	c.logTicketAudit(ticket, "helper_started", helperPID)
 	return nil
 }
 
@@ -186,14 +247,21 @@ func (c *gatewayRestartCoordinator) Abort(ticket *gatewayRestartTicket) error {
 	if c == nil || ticket == nil || ticket.RequestID == "" {
 		return nil
 	}
+	return abortRestartArtifacts(c.leaseStore, c.receipts, ticket.RequestID)
+}
+
+func abortRestartArtifacts(leaseStore *restartLeaseStore, receipts *restartReceiptStore, requestID string) error {
+	if requestID == "" {
+		return nil
+	}
 	var errs []error
-	if c.receipts != nil {
-		if err := c.receipts.Complete(ticket.RequestID); err != nil && !errors.Is(err, errRestartReceiptTicketMismatch) {
+	if receipts != nil {
+		if err := receipts.Complete(requestID); err != nil && !errors.Is(err, errRestartReceiptTicketMismatch) {
 			errs = append(errs, err)
 		}
 	}
-	if c.leaseStore != nil {
-		if err := c.leaseStore.Release(ticket.RequestID); err != nil && !errors.Is(err, errRestartLeaseTicketMismatch) {
+	if leaseStore != nil {
+		if err := leaseStore.Release(requestID); err != nil && !errors.Is(err, errRestartLeaseTicketMismatch) {
 			errs = append(errs, err)
 		}
 	}
@@ -205,7 +273,8 @@ func (c *gatewayRestartCoordinator) Abort(ticket *gatewayRestartTicket) error {
 
 // CompleteReady releases the restart lease only after the new Gateway has
 // registered adapters and started its HTTP listeners. The lifecycle receipt is
-// intentionally kept until BroadcastStarted confirms all target sends.
+// intentionally kept until BroadcastStarted confirms delivery to its explicit
+// restart target.
 func (c *gatewayRestartCoordinator) CompleteReady() error {
 	if c == nil || c.leaseStore == nil {
 		return nil
@@ -240,26 +309,51 @@ func (c *gatewayRestartCoordinator) HandleGatewayCommand(ctx context.Context, co
 	}
 	allow := c.allowFeishu
 	if allow == nil || !allow(request.BotName, request.ActorID) {
-		c.logger().Info("gateway restart denied", "platform", "feishu", "bot_name", request.BotName, "reason", "allowlist")
+		c.logRestartAudit(gatewayRestartAuditRecord{
+			Source:  string(messaging.PlatformFeishu),
+			Actor:   request.ActorID,
+			BotName: request.BotName,
+			ChatID:  request.ChatID,
+			Result:  "denied",
+		})
 		_ = reply(ctx, gatewayRestartDeniedText)
 		return nil
 	}
 
 	ticket, err := c.Prepare(ctx, gatewayRestartRequest{
 		Platform:    string(messaging.PlatformFeishu),
+		Actor:       request.ActorID,
 		BotName:     request.BotName,
+		ChatID:      request.ChatID,
 		PlatformKey: request.PlatformKey,
 	})
 	if err != nil {
-		if errors.Is(err, errRestartLeaseInProgress) {
-			_ = reply(ctx, gatewayRestartConflictText)
+		requestID, conflict := restartConflictRequestID(err)
+		if conflict {
+			c.logRestartAudit(gatewayRestartAuditRecord{
+				RequestID: requestID,
+				Source:    string(messaging.PlatformFeishu),
+				Actor:     request.ActorID,
+				BotName:   request.BotName,
+				ChatID:    request.ChatID,
+				Result:    "conflict",
+			})
+			_ = reply(ctx, fmt.Sprintf("%s 请求 ID: %s", gatewayRestartConflictText, requestID))
 			return nil
 		}
+		c.logRestartAudit(gatewayRestartAuditRecord{
+			Source:  string(messaging.PlatformFeishu),
+			Actor:   request.ActorID,
+			BotName: request.BotName,
+			ChatID:  request.ChatID,
+			Result:  "failed",
+		})
 		c.logger().Warn("gateway restart prepare failed", "platform", "feishu", "bot_name", request.BotName, "error_kind", "prepare_failed")
 		_ = reply(ctx, gatewayRestartScheduleFailed)
 		return nil
 	}
 	if err := reply(ctx, gatewayRestartAcceptedText); err != nil {
+		c.logTicketAudit(ticket, "failed", 0)
 		_ = c.Abort(ticket)
 		return err
 	}
@@ -296,6 +390,59 @@ func (c *gatewayRestartCoordinator) feishuRestartAllowed(botName, actorID string
 	return false
 }
 
+func (c *gatewayRestartCoordinator) retryPendingReceipt(ctx context.Context) error {
+	if c == nil || c.receipts == nil {
+		return nil
+	}
+	receipt, err := c.receipts.Read()
+	if err != nil {
+		_, _ = c.receipts.Quarantine()
+		return fmt.Errorf("read pending gateway restart receipt: %w", err)
+	}
+	if receipt == nil {
+		return nil
+	}
+	retry := c.retryReceipt
+	if retry == nil {
+		return &restartReceiptPendingError{RequestID: receipt.RequestID}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := retry(ctx, receipt); err != nil {
+		return &restartReceiptPendingError{RequestID: receipt.RequestID}
+	}
+	if err := c.receipts.Complete(receipt.RequestID); err != nil {
+		return fmt.Errorf("complete pending gateway restart receipt: %w", err)
+	}
+	info := newBuildInfo()
+	logGatewayRestartAudit(c.logger(), gatewayRestartAuditRecord{
+		RequestID:  receipt.RequestID,
+		Source:     receipt.Platform,
+		Actor:      receipt.Actor,
+		BotName:    receipt.BotName,
+		ChatID:     receipt.PlatformKey["chat_id"],
+		Result:     "started",
+		OldPID:     receipt.OldPID,
+		NewPID:     os.Getpid(),
+		OldVersion: receipt.OldVersion,
+		NewVersion: info.Version,
+	})
+	return nil
+}
+
+func restartConflictRequestID(err error) (string, bool) {
+	var leaseConflict *restartLeaseConflictError
+	if errors.As(err, &leaseConflict) {
+		return leaseConflict.RequestID, true
+	}
+	var receiptPending *restartReceiptPendingError
+	if errors.As(err, &receiptPending) {
+		return receiptPending.RequestID, true
+	}
+	return "", false
+}
+
 func (c *gatewayRestartCoordinator) currentTime() time.Time {
 	if c != nil && c.now != nil {
 		return c.now()
@@ -308,6 +455,51 @@ func (c *gatewayRestartCoordinator) logger() *slog.Logger {
 		return c.log
 	}
 	return slog.Default()
+}
+
+func (c *gatewayRestartCoordinator) logTicketAudit(ticket *gatewayRestartTicket, result string, helperPID int) {
+	if ticket == nil {
+		return
+	}
+	oldPID := 0
+	if ticket.Instance != nil {
+		oldPID = ticket.Instance.PID
+	}
+	c.logRestartAudit(gatewayRestartAuditRecord{
+		RequestID:  ticket.RequestID,
+		Source:     ticket.Source,
+		Actor:      ticket.Actor,
+		BotName:    ticket.BotName,
+		ChatID:     ticket.ChatID,
+		Result:     result,
+		OldPID:     oldPID,
+		HelperPID:  helperPID,
+		OldVersion: ticket.OldVersion,
+	})
+}
+
+func (c *gatewayRestartCoordinator) logRestartAudit(record gatewayRestartAuditRecord) {
+	logGatewayRestartAudit(c.logger(), record)
+}
+
+func logGatewayRestartAudit(log *slog.Logger, record gatewayRestartAuditRecord) {
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Info("gateway restart audit",
+		"action", "gateway.restart",
+		"request_id", record.RequestID,
+		"source", record.Source,
+		"actor", record.Actor,
+		"bot_name", record.BotName,
+		"chat_id", record.ChatID,
+		"result", record.Result,
+		"old_pid", record.OldPID,
+		"helper_pid", record.HelperPID,
+		"new_pid", record.NewPID,
+		"old_version", record.OldVersion,
+		"new_version", record.NewVersion,
+	)
 }
 
 func cloneStringMap(values map[string]string) map[string]string {

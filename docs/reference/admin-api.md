@@ -284,7 +284,7 @@ Bot 列表与详情的 `agent_configs` 元数据只包含 `soul`、`agents`、`t
 |------|------|-------|------|
 | POST | `/admin/restart` | `admin:write` | 触发网关重启 |
 
-**POST /admin/restart** — 异步触发网关重启。Gateway 在 500ms 延迟后执行重启，立即返回 `{ "status": "restarting" }`。使用 `restart helper`（独立 PGID）确保安全隔离。未配置 restart handler 时返回 `503`。
+**POST /admin/restart** — 两阶段异步触发网关重启：先获取全局 restart lease，成功后立即返回 `{ "status": "restarting" }`，再提交独立 helper 完成重启。已有事务时返回 `409 RESTART_REJECTED`；未配置 restart handler 时返回 `503`。Admin、CLI 与飞书入口共享同一 lease，不能并发绕过。
 
 ### 用户行为审计
 
@@ -552,6 +552,7 @@ zip 格式、文件类型白名单与安全约束同上方「Skill 管理（admi
 | 404 | `WORKSPACE_NOT_FOUND` | workspace id 不存在 |
 | 404 | `FENCE_NOT_FOUND` | fence-action 目标 execution 不存在 |
 | 409 | `CONFLICT` | 资源状态冲突 |
+| 409 | `RESTART_REJECTED` | 已有 Gateway 重启事务 |
 | 409 | `FENCE_CONFLICT` | fence_version 条件更新失败；重新 inspect 后审慎重试，勿自动重试（#877） |
 | 409 | `WORKSPACE_VERSION_MISMATCH` | PATCH workspace 乐观并发冲突（`updated_at` CAS 失败，re-fetch 后重试） |
 | 409 | `WORKSPACE_NOT_EMPTY` | workspace 存在活跃会话，拒绝改 `work_dir` / 删除 |

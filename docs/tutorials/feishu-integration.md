@@ -223,6 +223,18 @@ hotplex service logs -f
 
 > 语音转写默认使用本地 STT 引擎。如未安装，参考 `docs/guides/developer/voice-features.md`。
 
+### 4.4 授权操作者重启 Gateway
+
+`/gateway restart` 是 Gateway 在 Worker 之前直接拦截的宿主运维命令，只允许同时通过普通聊天 Gate 和专用 OpenID 白名单的操作者执行。默认未配置白名单时拒绝所有用户：
+
+```bash
+HOTPLEX_MESSAGING_FEISHU_GATEWAY_RESTART_ALLOW_FROM=ou_xxxxxxxxxxxxxxxxx
+```
+
+白名单支持热更新。多 Bot 部署也可在 `messaging.feishu.bots[].gateway_restart_allow_from` 中覆盖平台值；显式 `[]` 表示该 Bot 禁止所有用户重启。
+
+授权用户发送精确命令 `/gateway restart` 后，Bot 先回复已受理，再由独立 helper 执行重启；停止和启动消息都携带同一 request ID。畸形或未知的 `/gateway...` 输入只返回帮助，不会交给 Worker；并发请求返回当前事务的 request ID。
+
 ---
 
 ## 5. 高级配置

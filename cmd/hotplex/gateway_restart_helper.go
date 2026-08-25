@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -108,9 +110,10 @@ func runRestartHelper(oldPID int, source, configPath, levelStr, requestID string
 	logDir := filepath.Join(config.HotplexHome(), "logs")
 	logPath := filepath.Join(logDir, "gateway-restart.log")
 	leaseStore := newRestartLeaseStore(restartMarkerPath(), time.Now, nil)
+	receiptStore := newRestartReceiptStore(gatewayRestartReceiptPath())
 	if err := waitForRestartHelperHandoff(leaseStore, requestID); err != nil {
 		appendRestartLog(logPath, "restart lease handoff failed: %s\n", err)
-		return fmt.Errorf("restart helper: lease handoff: %w", err)
+		return restartHelperFailure(leaseStore, receiptStore, requestID, oldPID, fmt.Errorf("restart helper: lease handoff: %w", err))
 	}
 	if err := leaseStore.Update(requestID, func(lease *restartLease) error {
 		lease.Phase = restartLeaseWaitingForReady
@@ -118,7 +121,7 @@ func runRestartHelper(oldPID int, source, configPath, levelStr, requestID string
 		return nil
 	}); err != nil {
 		appendRestartLog(logPath, "restart lease update failed: %s\n", err)
-		return fmt.Errorf("restart helper: update lease: %w", err)
+		return restartHelperFailure(leaseStore, receiptStore, requestID, oldPID, fmt.Errorf("restart helper: update lease: %w", err))
 	}
 
 	switch source {
@@ -132,7 +135,7 @@ func runRestartHelper(oldPID int, source, configPath, levelStr, requestID string
 		}
 		if err := service.NewManager().Restart("hotplex", lvl); err != nil {
 			appendRestartLog(logPath, "service restart failed: %s\n", err)
-			return fmt.Errorf("service restart: %w", err)
+			return restartHelperFailure(leaseStore, receiptStore, requestID, oldPID, fmt.Errorf("service restart: %w", err))
 		}
 		appendRestartLog(logPath, "service restart completed\n")
 
@@ -175,6 +178,40 @@ func runRestartHelper(oldPID int, source, configPath, levelStr, requestID string
 	}
 
 	return nil
+}
+
+func restartHelperFailure(
+	leaseStore *restartLeaseStore,
+	receiptStore *restartReceiptStore,
+	requestID string,
+	oldPID int,
+	cause error,
+) error {
+	if cause == nil {
+		return nil
+	}
+	record := gatewayRestartAuditRecord{
+		RequestID: requestID,
+		Result:    "failed",
+		OldPID:    oldPID,
+	}
+	if receiptStore != nil {
+		if receipt, err := receiptStore.Read(); err == nil && receipt != nil && receipt.RequestID == requestID {
+			record.Source = receipt.Platform
+			record.Actor = receipt.Actor
+			record.BotName = receipt.BotName
+			record.ChatID = receipt.PlatformKey["chat_id"]
+			record.OldVersion = receipt.OldVersion
+		}
+	}
+	logGatewayRestartAudit(slog.Default(), record)
+	if leaseStore == nil || leaseStore.processAlive == nil || !leaseStore.processAlive(oldPID) {
+		return cause
+	}
+	if err := abortRestartArtifacts(leaseStore, receiptStore, requestID); err != nil {
+		return errors.Join(cause, fmt.Errorf("cleanup restart artifacts: %w", err))
+	}
+	return cause
 }
 
 func waitForRestartHelperHandoff(store *restartLeaseStore, requestID string) error {

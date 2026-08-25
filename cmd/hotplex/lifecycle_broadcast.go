@@ -16,13 +16,14 @@ import (
 )
 
 const (
-	lifecycleTargetSeparator      = "\x00"
-	lifecycleStoppingMessage      = "⚠️ HotPlex 服务即将停止。"
-	lifecycleStartedMessage       = "✅ HotPlex 服务已启动。"
-	lifecyclePhaseStopping        = "stopping"
-	lifecyclePhaseStarted         = "started"
-	lifecycleBroadcastTimeout     = 5 * time.Second
-	lifecycleBroadcastConcurrency = 8
+	lifecycleTargetSeparator           = "\x00"
+	lifecycleStoppingMessage           = "⚠️ HotPlex 服务即将停止。"
+	lifecycleStartedMessage            = "✅ HotPlex 服务已启动。"
+	lifecyclePhaseStopping             = "stopping"
+	lifecyclePhaseStarted              = "started"
+	lifecycleBroadcastTimeout          = 5 * time.Second
+	lifecycleBroadcastConcurrency      = 8
+	lifecycleRestartReceiptMaxAttempts = 3
 )
 
 type lifecycleBotRegistry interface {
@@ -185,12 +186,68 @@ func (b *lifecycleBroadcaster) BroadcastStarted() lifecycleBroadcastSummary {
 		}
 	}
 	targets := collectLifecycleTargets(restored, func(string) bool { return true })
-	if explicit := lifecycleTargetFromRestartReceipt(receipt); explicit != nil {
+	explicit := lifecycleTargetFromRestartReceipt(receipt)
+	explicitKey, explicitValid := lifecycleTargetKey(explicit)
+	if explicitValid {
 		targets = mergeLifecycleTargets([]*session.SessionInfo{explicit}, targets)
 	}
 	summary.TargetCount = summary.FailedCount + len(targets)
-	summary = b.broadcast(ctx, lifecycleStartedMessageFor(b.buildInfo, receipt), targets, summary)
-	if receipt != nil && summary.FailedCount == 0 && summary.SentCount > 0 && b.receipts != nil {
+	if receipt != nil && !explicitValid {
+		summary.TargetCount++
+		summary.FailedCount++
+	}
+
+	message := lifecycleStartedMessageFor(b.buildInfo, receipt)
+	receiptDelivered := false
+	if explicitValid {
+		remaining := make([]*session.SessionInfo, 0, len(targets)-1)
+		for _, target := range targets {
+			key, ok := lifecycleTargetKey(target)
+			if ok && key == explicitKey {
+				continue
+			}
+			remaining = append(remaining, target)
+		}
+		if err := sendRestartStartedReceipt(ctx, b.bots, b.buildInfo, receipt); err != nil {
+			summary.FailedCount++
+			b.logger().Warn("lifecycle broadcast: target send failed",
+				"phase", lifecyclePhaseStarted,
+				"platform", explicit.Platform,
+				"bot_name", explicit.BotName,
+				"session_id", explicit.ID,
+				"error_kind", "send_failed")
+			logGatewayRestartAudit(b.logger(), gatewayRestartAuditRecord{
+				RequestID:  receipt.RequestID,
+				Source:     receipt.Platform,
+				Actor:      receipt.Actor,
+				BotName:    receipt.BotName,
+				ChatID:     receipt.PlatformKey["chat_id"],
+				Result:     "failed",
+				OldPID:     receipt.OldPID,
+				NewPID:     os.Getpid(),
+				OldVersion: receipt.OldVersion,
+				NewVersion: b.buildInfo.Version,
+			})
+		} else {
+			summary.SentCount++
+			receiptDelivered = true
+			logGatewayRestartAudit(b.logger(), gatewayRestartAuditRecord{
+				RequestID:  receipt.RequestID,
+				Source:     receipt.Platform,
+				Actor:      receipt.Actor,
+				BotName:    receipt.BotName,
+				ChatID:     receipt.PlatformKey["chat_id"],
+				Result:     "started",
+				OldPID:     receipt.OldPID,
+				NewPID:     os.Getpid(),
+				OldVersion: receipt.OldVersion,
+				NewVersion: b.buildInfo.Version,
+			})
+		}
+		targets = remaining
+	}
+	summary = b.broadcast(ctx, message, targets, summary)
+	if receiptDelivered && b.receipts != nil {
 		if err := b.receipts.Complete(receipt.RequestID); err != nil {
 			b.logger().Warn("lifecycle broadcast: restart receipt completion failed", "phase", lifecyclePhaseStarted, "error_kind", "receipt_complete_failed")
 		}
@@ -260,8 +317,8 @@ func lifecycleStoppingMessageFor(info BuildInfo, receipt *gatewayRestartReceipt)
 	if version == "" {
 		version = receipt.OldVersion
 	}
-	return fmt.Sprintf("⚠️ HotPlex Gateway 即将重启。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n原因: Feishu /gateway restart\n请求时间: %s",
-		version, info.BuildTime, receipt.OldPID, info.OS, info.Arch, receipt.RequestedAt.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("⚠️ HotPlex Gateway 即将重启。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n原因: Feishu /gateway restart\n请求 ID: %s\n请求时间: %s",
+		version, info.BuildTime, receipt.OldPID, info.OS, info.Arch, receipt.RequestID, receipt.RequestedAt.UTC().Format(time.RFC3339))
 }
 
 func lifecycleStartedMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) string {
@@ -274,6 +331,33 @@ func lifecycleStartedMessageFor(info BuildInfo, receipt *gatewayRestartReceipt) 
 	}
 	return fmt.Sprintf("✅ HotPlex Gateway 已启动。\n版本: %s\nBuild: %s\nPID: %d\n系统: %s/%s\n上一版本: %s\n上一 PID: %d\n请求 ID: %s\n请求时间: %s",
 		info.Version, info.BuildTime, os.Getpid(), info.OS, info.Arch, previousVersion, receipt.OldPID, receipt.RequestID, receipt.RequestedAt.UTC().Format(time.RFC3339))
+}
+
+func sendRestartStartedReceipt(
+	ctx context.Context,
+	registry lifecycleBotRegistry,
+	info BuildInfo,
+	receipt *gatewayRestartReceipt,
+) error {
+	target := lifecycleTargetFromRestartReceipt(receipt)
+	if _, ok := lifecycleTargetKey(target); !ok {
+		return fmt.Errorf("lifecycle broadcast: invalid restart receipt target")
+	}
+	sender, err := resolveLifecycleSender(registry, target)
+	if err != nil {
+		return err
+	}
+	message := lifecycleStartedMessageFor(info, receipt)
+	var sendErr error
+	for range lifecycleRestartReceiptMaxAttempts {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if sendErr = sender.SendProactiveMessage(ctx, message, target.PlatformKey); sendErr == nil {
+			return nil
+		}
+	}
+	return sendErr
 }
 
 func (b *lifecycleBroadcaster) broadcast(

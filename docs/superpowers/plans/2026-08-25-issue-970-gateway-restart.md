@@ -267,5 +267,5 @@ Expected: generated output is consistent; do not manually edit `internal/docs/ou
 - [ ] Run `make lint` and `make build`.
 - [ ] Run Linux, Darwin, and Windows compile checks; do not claim runtime support for a platform without a passing platform test.
 - [ ] Use `detect_changes` and `check_index_coverage` for the final diff, then inspect every changed file with the five-axis review checklist: correctness, readability, architecture, security, performance.
-- [ ] Check staged diff for secrets and unrelated files; preserve the pre-existing untracked `docs/specs/Stop-Worker-Run-Quiescence-Spec.md`.
+- [ ] Check staged diff for secrets and unrelated files; exclude the unrelated issue #971 draft `docs/specs/Stop-Worker-Run-Quiescence-Spec.md`.
 - [ ] Push the feature branch and create a PR linked to issue #970 with a concise summary, test matrix, known runtime-only acceptance items, and rollback instructions.

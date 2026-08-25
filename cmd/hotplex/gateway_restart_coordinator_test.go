@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +35,7 @@ func TestGatewayRestartCoordinator_PrepareFencesAndWritesFeishuReceipt(t *testin
 
 	ticket, err := coordinator.Prepare(context.Background(), gatewayRestartRequest{
 		Platform:      string(messaging.PlatformFeishu),
+		Actor:         "ou_actor",
 		BotName:       "ops",
 		PlatformKey:   map[string]string{"chat_id": "oc_chat", "message_id": "om_message"},
 		ConfigChanged: true,
@@ -48,6 +52,7 @@ func TestGatewayRestartCoordinator_PrepareFencesAndWritesFeishuReceipt(t *testin
 	receipt, err := receiptStore.Read()
 	require.NoError(t, err)
 	require.Equal(t, ticket.RequestID, receipt.RequestID)
+	require.Equal(t, "ou_actor", receipt.Actor)
 	require.Equal(t, "ops", receipt.BotName)
 	data, err := json.Marshal(receipt)
 	require.NoError(t, err)
@@ -137,4 +142,147 @@ func TestGatewayRestartCoordinator_FeishuAllowlistReadsHotConfig(t *testing.T) {
 	store.Swap(next)
 	require.False(t, coordinator.feishuRestartAllowed("other", "ou_platform"))
 	require.True(t, coordinator.feishuRestartAllowed("other", "ou_new"))
+}
+
+func TestGatewayRestartCoordinator_ConflictReplyIncludesRequestID(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	leaseStore := newRestartLeaseStore(filepath.Join(dir, "gateway.restart"), time.Now, func(int) bool { return true })
+	lease, err := leaseStore.Acquire(1234)
+	require.NoError(t, err)
+
+	coordinator := &gatewayRestartCoordinator{
+		leaseStore: leaseStore,
+		allowFeishu: func(string, string) bool {
+			return true
+		},
+		findInstance: func() (*gatewayInstance, error) {
+			return &gatewayInstance{PID: 4321, Source: sourcePID}, nil
+		},
+	}
+	var reply string
+	err = coordinator.HandleGatewayCommand(context.Background(), messaging.GatewayCommand{Kind: messaging.GatewayCommandRestart}, messaging.GatewayRestartRequest{
+		ActorID: "ou_operator",
+		BotName: "ops",
+		ChatID:  "oc_chat",
+		Reply: func(_ context.Context, text string) error {
+			reply = text
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, reply, lease.RequestID)
+}
+
+func TestGatewayRestartCoordinator_AuditCarriesFeishuActorAndState(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	dir := t.TempDir()
+	coordinator := &gatewayRestartCoordinator{
+		log:        logger,
+		leaseStore: newRestartLeaseStore(filepath.Join(dir, "gateway.restart"), time.Now, func(int) bool { return true }),
+		receipts:   newRestartReceiptStore(filepath.Join(dir, "receipt.json")),
+		findInstance: func() (*gatewayInstance, error) {
+			return &gatewayInstance{PID: 4321, Source: sourcePID}, nil
+		},
+		spawnHelper: func(*gatewayRestartTicket) (int, error) { return 9876, nil },
+	}
+
+	ticket, err := coordinator.Prepare(context.Background(), gatewayRestartRequest{
+		Platform:    string(messaging.PlatformFeishu),
+		Actor:       "ou_operator",
+		BotName:     "ops",
+		ChatID:      "oc_chat",
+		PlatformKey: map[string]string{"chat_id": "oc_chat"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, coordinator.Commit(ticket))
+
+	output := logs.String()
+	for _, expected := range []string{
+		`"action":"gateway.restart"`,
+		`"source":"feishu"`,
+		`"actor":"ou_operator"`,
+		`"bot_name":"ops"`,
+		`"chat_id":"oc_chat"`,
+		`"result":"prepared"`,
+		`"result":"helper_started"`,
+		`"helper_pid":9876`,
+		`"new_pid":0`,
+		`"request_id":"` + ticket.RequestID + `"`,
+	} {
+		require.Truef(t, strings.Contains(output, expected), "missing audit field %s in %s", expected, output)
+	}
+}
+
+func TestGatewayRestartCoordinator_RetriesPendingReceiptBeforeNewFeishuRestart(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	leaseStore := newRestartLeaseStore(filepath.Join(dir, "gateway.restart"), time.Now, func(int) bool { return true })
+	receiptStore := newRestartReceiptStore(filepath.Join(dir, "receipt.json"))
+	oldReceipt := testGatewayRestartReceipt("req_0123456789abcdef0123456789abcdef")
+	require.NoError(t, receiptStore.Write(oldReceipt))
+	var retried string
+	coordinator := &gatewayRestartCoordinator{
+		leaseStore: leaseStore,
+		receipts:   receiptStore,
+		findInstance: func() (*gatewayInstance, error) {
+			return &gatewayInstance{PID: 4321, Source: sourcePID}, nil
+		},
+		retryReceipt: func(_ context.Context, receipt *gatewayRestartReceipt) error {
+			retried = receipt.RequestID
+			return nil
+		},
+	}
+
+	ticket, err := coordinator.Prepare(context.Background(), gatewayRestartRequest{
+		Platform:    string(messaging.PlatformFeishu),
+		Actor:       "ou_operator",
+		BotName:     "ops",
+		ChatID:      "oc_new",
+		PlatformKey: map[string]string{"chat_id": "oc_new"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, oldReceipt.RequestID, retried)
+	require.NotEqual(t, oldReceipt.RequestID, ticket.RequestID)
+	current, err := receiptStore.Read()
+	require.NoError(t, err)
+	require.Equal(t, ticket.RequestID, current.RequestID)
+}
+
+func TestGatewayRestartCoordinator_PendingReceiptFailureReleasesNewLease(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	leaseStore := newRestartLeaseStore(filepath.Join(dir, "gateway.restart"), time.Now, func(int) bool { return true })
+	receiptStore := newRestartReceiptStore(filepath.Join(dir, "receipt.json"))
+	oldReceipt := testGatewayRestartReceipt("req_0123456789abcdef0123456789abcdef")
+	require.NoError(t, receiptStore.Write(oldReceipt))
+	coordinator := &gatewayRestartCoordinator{
+		leaseStore: leaseStore,
+		receipts:   receiptStore,
+		findInstance: func() (*gatewayInstance, error) {
+			return &gatewayInstance{PID: 4321, Source: sourcePID}, nil
+		},
+		retryReceipt: func(context.Context, *gatewayRestartReceipt) error {
+			return errors.New("feishu unavailable")
+		},
+	}
+
+	_, err := coordinator.Prepare(context.Background(), gatewayRestartRequest{
+		Platform:    string(messaging.PlatformFeishu),
+		PlatformKey: map[string]string{"chat_id": "oc_new"},
+	})
+	var pending *restartReceiptPendingError
+	require.ErrorAs(t, err, &pending)
+	require.Equal(t, oldReceipt.RequestID, pending.RequestID)
+	_, err = leaseStore.Read()
+	require.ErrorIs(t, err, os.ErrNotExist)
+	remaining, err := receiptStore.Read()
+	require.NoError(t, err)
+	require.Equal(t, oldReceipt.RequestID, remaining.RequestID)
 }

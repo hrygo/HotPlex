@@ -40,8 +40,9 @@ type GatewayCommandHandler interface {
 }
 
 // ParseGatewayCommand parses the reserved /gateway namespace. The boolean is
-// true for every user input whose first token is /gateway, including malformed
-// subcommands, so callers can never fall back to Worker processing.
+// true for every user input whose first token starts with /gateway, including
+// malformed namespace variants and subcommands, so callers can never fall back
+// to Worker processing.
 //
 // Markdown fenced blocks are not commands. They remain ordinary user text and
 // cannot trigger a host operation even when their contents look like a command.
@@ -52,10 +53,10 @@ func ParseGatewayCommand(text string) (GatewayCommand, bool) {
 	}
 
 	parts := strings.Fields(trimmed)
-	if len(parts) == 0 || !strings.EqualFold(parts[0], "/gateway") {
+	if len(parts) == 0 || !strings.HasPrefix(strings.ToLower(parts[0]), "/gateway") {
 		return GatewayCommand{}, false
 	}
-	if len(parts) == 2 && strings.EqualFold(parts[1], "restart") {
+	if strings.EqualFold(parts[0], "/gateway") && len(parts) == 2 && strings.EqualFold(parts[1], "restart") {
 		return GatewayCommand{Kind: GatewayCommandRestart}, true
 	}
 	return GatewayCommand{Kind: GatewayCommandHelp}, true

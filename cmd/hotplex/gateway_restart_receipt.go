@@ -28,6 +28,7 @@ type gatewayRestartReceipt struct {
 	SchemaVersion int               `json:"schema_version"`
 	RequestID     string            `json:"request_id"`
 	Platform      string            `json:"platform"`
+	Actor         string            `json:"actor,omitempty"`
 	BotName       string            `json:"bot_name,omitempty"`
 	PlatformKey   map[string]string `json:"platform_key,omitempty"`
 	RequestedAt   time.Time         `json:"requested_at"`

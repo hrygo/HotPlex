@@ -651,7 +651,7 @@ Yuanxin 是基于 Apache Pulsar 的企业消息平台适配器。
 
 **向后兼容**：`normalizeSlackBots()`/`normalizeFeishuBots()` 自动将单 bot 顶层凭证归一化为 `bots: [{name: ""}]`（空名称，表示单 Bot 模式）。`bots[]` 非空时忽略顶层凭证。
 
-**限制**：每平台最多 10 个 bot。配置变更需重启生效。
+**限制**：每平台最多 10 个 bot。Bot 凭证、Worker 类型等结构变更需重启；`gateway_restart_allow_from` 平台级与 bot 级白名单支持热更新。
 
 **启动校验**：`hotplex doctor` 的 `messaging.multi_bot_config` checker 检测重复 name、缺失凭证、超限。
 
