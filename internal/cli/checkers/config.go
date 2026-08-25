@@ -9,26 +9,40 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/hrygo/hotplex/internal/cli"
 	"github.com/hrygo/hotplex/internal/config"
 )
 
-var configPath string
+var configPath atomic.Value // string
 
 // SetConfigPath sets the config file path for all config checkers.
 func SetConfigPath(path string) {
-	configPath = path
+	configPath.Store(path)
+}
+
+// getConfigPath returns the configured config file path ("" when unset).
+// The value is stored atomically: production writes it once at doctor/onboard
+// entry, while tests may swap it between serial tests. Atomic access keeps
+// concurrent checker reads race-free under -race when a parallel test body
+// overlaps a non-parallel test (Go 1.26 scheduling).
+func getConfigPath() string {
+	v := configPath.Load()
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // loadConfig loads the config from the configured path. Returns (nil, nil) when
 // no path is set, so callers distinguish "not configured" from a load error
 // without repeating the empty-check + Load boilerplate at every call site.
 func loadConfig() (*config.Config, error) {
-	if configPath == "" {
+	if getConfigPath() == "" {
 		return nil, nil
 	}
-	return config.Load(configPath)
+	return config.Load(getConfigPath())
 }
 
 // ─── config.exists ────────────────────────────────────────────────────────────
@@ -38,7 +52,7 @@ type configExistsChecker struct{}
 func (c configExistsChecker) Name() string     { return "config.exists" }
 func (c configExistsChecker) Category() string { return "config" }
 func (c configExistsChecker) Check(ctx context.Context) cli.Diagnostic {
-	if configPath == "" {
+	if getConfigPath() == "" {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -48,14 +62,14 @@ func (c configExistsChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	_, err := os.Stat(configPath)
+	_, err := os.Stat(getConfigPath())
 	if err == nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
 			Status:   cli.StatusPass,
 			Message:  "Config file exists",
-			Detail:   configPath,
+			Detail:   getConfigPath(),
 		}
 	}
 
@@ -65,7 +79,7 @@ func (c configExistsChecker) Check(ctx context.Context) cli.Diagnostic {
 			Category: c.Category(),
 			Status:   cli.StatusFail,
 			Message:  "Config file missing",
-			Detail:   configPath,
+			Detail:   getConfigPath(),
 			FixHint:  "Create config file or run onboard",
 			FixFunc:  fixConfigExists,
 		}
@@ -87,7 +101,7 @@ func fixConfigExists() error {
 		if err != nil {
 			return fmt.Errorf("read template: %w", err)
 		}
-		return os.WriteFile(configPath, data, 0o600)
+		return os.WriteFile(getConfigPath(), data, 0o600)
 	}
 
 	minimal := `gateway:
@@ -101,7 +115,7 @@ worker:
 log:
   level: "info"
 `
-	return os.WriteFile(configPath, []byte(minimal), 0o600)
+	return os.WriteFile(getConfigPath(), []byte(minimal), 0o600)
 }
 
 func init() {
@@ -115,11 +129,11 @@ type configSourceChecker struct{}
 func (c configSourceChecker) Name() string     { return "config.source" }
 func (c configSourceChecker) Category() string { return "config" }
 func (c configSourceChecker) Check(ctx context.Context) cli.Diagnostic {
-	if configPath == "" {
+	if getConfigPath() == "" {
 		return cli.Diagnostic{Name: c.Name(), Category: c.Category(), Status: cli.StatusFail, Message: "Config path not set", FixHint: "Set the config path before running diagnostics"}
 	}
 
-	if _, err := config.Load(configPath); err != nil {
+	if _, err := config.Load(getConfigPath()); err != nil {
 		return cli.Diagnostic{
 			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
 			Message: "Cannot resolve effective config source", Detail: err.Error(),
@@ -127,13 +141,13 @@ func (c configSourceChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	envPath := filepath.Join(filepath.Dir(configPath), ".env")
+	envPath := filepath.Join(filepath.Dir(getConfigPath()), ".env")
 	_, err := os.Stat(envPath)
 	if os.IsNotExist(err) {
 		return cli.Diagnostic{
 			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
 			Message: "Effective config loaded; adjacent .env is missing",
-			Detail:  fmt.Sprintf("config=%s; env=%s", configPath, envPath),
+			Detail:  fmt.Sprintf("config=%s; env=%s", getConfigPath(), envPath),
 			FixHint: "Run onboard or create the adjacent .env file",
 		}
 	}
@@ -141,7 +155,7 @@ func (c configSourceChecker) Check(ctx context.Context) cli.Diagnostic {
 		return cli.Diagnostic{
 			Name: c.Name(), Category: c.Category(), Status: cli.StatusWarn,
 			Message: "Effective config loaded; cannot inspect adjacent .env",
-			Detail:  fmt.Sprintf("config=%s; env=%s; error=%v", configPath, envPath, err),
+			Detail:  fmt.Sprintf("config=%s; env=%s; error=%v", getConfigPath(), envPath, err),
 			FixHint: "Check permissions for the config directory and adjacent .env",
 		}
 	}
@@ -149,7 +163,7 @@ func (c configSourceChecker) Check(ctx context.Context) cli.Diagnostic {
 	return cli.Diagnostic{
 		Name: c.Name(), Category: c.Category(), Status: cli.StatusPass,
 		Message: "Effective config and adjacent .env loaded",
-		Detail:  fmt.Sprintf("config=%s; env=%s", configPath, envPath),
+		Detail:  fmt.Sprintf("config=%s; env=%s", getConfigPath(), envPath),
 	}
 }
 
@@ -164,7 +178,7 @@ type configSyntaxChecker struct{}
 func (c configSyntaxChecker) Name() string     { return "config.syntax" }
 func (c configSyntaxChecker) Category() string { return "config" }
 func (c configSyntaxChecker) Check(ctx context.Context) cli.Diagnostic {
-	if configPath == "" {
+	if getConfigPath() == "" {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -173,7 +187,7 @@ func (c configSyntaxChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	_, err := config.Load(configPath)
+	_, err := config.Load(getConfigPath())
 	if err == nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
@@ -203,7 +217,7 @@ type configRequiredChecker struct{}
 func (c configRequiredChecker) Name() string     { return "config.required" }
 func (c configRequiredChecker) Category() string { return "config" }
 func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
-	if configPath == "" {
+	if getConfigPath() == "" {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -212,7 +226,7 @@ func (c configRequiredChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(getConfigPath())
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
@@ -316,7 +330,7 @@ type configValuesChecker struct{}
 func (c configValuesChecker) Name() string     { return "config.values" }
 func (c configValuesChecker) Category() string { return "config" }
 func (c configValuesChecker) Check(ctx context.Context) cli.Diagnostic {
-	if configPath == "" {
+	if getConfigPath() == "" {
 		return cli.Diagnostic{
 			Name:     c.Name(),
 			Category: c.Category(),
@@ -325,7 +339,7 @@ func (c configValuesChecker) Check(ctx context.Context) cli.Diagnostic {
 		}
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(getConfigPath())
 	if err != nil {
 		return cli.Diagnostic{
 			Name:     c.Name(),
@@ -414,7 +428,7 @@ func fixConfigValues(cfg *config.Config) error {
 		return nil
 	}
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(getConfigPath())
 	if err != nil {
 		return fmt.Errorf("read config: %w", err)
 	}
@@ -430,7 +444,7 @@ func fixConfigValues(cfg *config.Config) error {
 		yaml = replaceYAMLValue(yaml, "db.path", cfg.DB.Path)
 	}
 
-	return os.WriteFile(configPath, []byte(yaml), 0o600)
+	return os.WriteFile(getConfigPath(), []byte(yaml), 0o600)
 }
 
 func extractPortAddr(yaml, key string) string {

@@ -14,8 +14,15 @@ import (
 )
 
 func TestSlackCreds_NoTokens(t *testing.T) {
-	// Reads the package-level configPath; must remain serial (see
-	// withConfigPath in config_test.go).
+	// Reads the package-level configPath and falls back to process env;
+	// must remain serial and pin the env to stay hermetic (a half-set
+	// SLACK_BOT_TOKEN in the developer shell would otherwise flip
+	// enabled=true and fail the check).
+
+	t.Setenv("HOTPLEX_MESSAGING_SLACK_BOT_TOKEN", "")
+	t.Setenv("HOTPLEX_MESSAGING_SLACK_APP_TOKEN", "")
+	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("SLACK_APP_TOKEN", "")
 
 	c := slackCredsChecker{}
 	d := c.Check(context.Background())
@@ -140,9 +147,9 @@ func TestMultiBotConfig_NoConfigPath(t *testing.T) {
 	// Writes the package-level configPath; must remain serial (see
 	// withConfigPath in config_test.go).
 
-	orig := configPath
-	configPath = ""
-	defer func() { configPath = orig }()
+	orig := getConfigPath()
+	SetConfigPath("")
+	defer func() { SetConfigPath(orig) }()
 
 	c := multiBotConfigChecker{}
 	d := c.Check(context.Background())
@@ -152,7 +159,7 @@ func TestMultiBotConfig_NoConfigPath(t *testing.T) {
 func TestMultiBotConfig_ValidSingleBot(t *testing.T) {
 	dir := t.TempDir()
 	withConfigPath(t, dir+"/config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`
+	require.NoError(t, os.WriteFile(getConfigPath(), []byte(`
 messaging:
   slack:
     enabled: true
@@ -171,7 +178,7 @@ messaging:
 func TestMultiBotConfig_DuplicateName(t *testing.T) {
 	dir := t.TempDir()
 	withConfigPath(t, dir+"/config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`
+	require.NoError(t, os.WriteFile(getConfigPath(), []byte(`
 messaging:
   slack:
     enabled: true
@@ -193,7 +200,7 @@ messaging:
 func TestMultiBotConfig_MissingCredentials(t *testing.T) {
 	dir := t.TempDir()
 	withConfigPath(t, dir+"/config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`
+	require.NoError(t, os.WriteFile(getConfigPath(), []byte(`
 messaging:
   feishu:
     enabled: true
@@ -217,7 +224,7 @@ func TestMultiBotConfig_ExceedsLimit(t *testing.T) {
 	for i := range 11 {
 		fmt.Fprintf(&botLines, "      - name: bot-%d\n        bot_token: xoxb-%d\n        app_token: xapp-%d\n", i, i, i)
 	}
-	require.NoError(t, os.WriteFile(configPath, []byte("messaging:\n  slack:\n    enabled: true\n    bots:\n"+botLines.String()), 0o644))
+	require.NoError(t, os.WriteFile(getConfigPath(), []byte("messaging:\n  slack:\n    enabled: true\n    bots:\n"+botLines.String()), 0o644))
 
 	c := multiBotConfigChecker{}
 	d := c.Check(context.Background())

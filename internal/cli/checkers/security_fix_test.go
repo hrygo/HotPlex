@@ -12,10 +12,10 @@ import (
 func setupTestConfigDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	origConfigPath := configPath
-	configPath = filepath.Join(dir, "config.yaml")
-	t.Cleanup(func() { configPath = origConfigPath })
-	require.NoError(t, os.WriteFile(configPath, []byte{}, 0o600))
+	origConfigPath := getConfigPath()
+	SetConfigPath(filepath.Join(dir, "config.yaml"))
+	t.Cleanup(func() { SetConfigPath(origConfigPath) })
+	require.NoError(t, os.WriteFile(getConfigPath(), []byte{}, 0o600))
 	return dir
 }
 
