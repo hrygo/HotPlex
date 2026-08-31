@@ -53,8 +53,11 @@ type forwardContext struct {
 	// terminalSent fences duplicate Done/Error events from a worker stream and
 	// lets the exit path suppress a second synthetic error. It is atomic because
 	// the turn-timeout callback and the forwarder goroutine can race.
-	terminalSent   atomic.Bool
-	turnText       strings.Builder
+	terminalSent atomic.Bool
+	turnText     strings.Builder
+	// hasRealText tracks worker-produced assistant text independently from
+	// synthetic fallback text appended to turnText for history.
+	hasRealText    bool
 	lastError      *events.ErrorData
 	pendingError   *events.Envelope
 	turnTimerFired atomic.Bool
@@ -520,16 +523,67 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	b.accumulateStats(env, w, opts, fc)
 
 	terminalStatus := ""
+	doneData, isDone := asDoneData(env.Event.Data)
+	shouldRetry := false
+	retryAttempt := 0
+	deferRuntimeFinish := env.Event.Type == events.Done && isDone && !doneData.Success && fc.pendingError != nil
 	// Done processing: mark received.
 	if env.Event.Type == events.Done {
 		fc.doneReceived = true
 		b.resetCrashLoop(sessionID)
 		b.maybeTransitionIdleAfterDone(sessionID, fc)
-		b.finishRuntimeOnDone(sessionID, fc, env)
+		if !deferRuntimeFinish {
+			b.finishRuntimeOnDone(sessionID, fc, env)
+		}
 		terminalStatus = "completed"
-		if done, ok := asDoneData(env.Event.Data); ok && !done.Success {
+		if isDone && !doneData.Success {
 			terminalStatus = "failed"
 		}
+		if isDone && !doneData.Success && b.retryCtrl != nil && (!opts.resumed || fc.hasRealText) {
+			shouldRetry, retryAttempt = b.retryCtrl.ShouldRetry(context.TODO(), sessionID, fc.lastError)
+		}
+	}
+
+	if shouldRetry {
+		if deferRuntimeFinish {
+			b.finishRuntimeOnDone(sessionID, fc, env)
+		}
+		fc.pendingError = nil
+		fc.reopenTerminal()
+		// Pre-register cancel channel before launching goroutine to close
+		// the race window where CancelRetry can't find the channel.
+		cancelCh := make(chan struct{})
+		b.retryCancelMu.Lock()
+		b.retryCancel[sessionID] = cancelCh
+		b.retryCancelMu.Unlock()
+		// Run autoRetry asynchronously so forwardEvents continues reading
+		// from recvCh. This prevents the goroutine from blocking during
+		// the backoff period — if the worker crashes, the for-range loop
+		// detects recvCh closure immediately instead of waiting for the
+		// backoff timer to expire. The goroutine uses shutdownCtx so it
+		// cancels promptly during bridge shutdown.
+		go b.autoRetry(b.shutdownCtx, w, sessionID, retryAttempt, cancelCh, fc.lifecycle)
+		fc.turnText.Reset()
+		fc.hasRealText = false
+		if b.collector != nil {
+			b.collector.ResetSession(sessionID)
+		}
+		fc.lastError = nil
+		return // continue — retry produces new events on recv
+	}
+
+	if env.Event.Type == events.Done && isDone && !doneData.Success && fc.pendingError != nil {
+		// A failed turn with a worker Error has one user-visible terminal: the
+		// Error. The Done already owns the bridge fence, so sending it first
+		// would otherwise make flushPendingError discard the real error.
+		b.sendPendingError(fc)
+		b.captureForwardedEvent(env, deltaContent, reasoningContent, fc)
+		b.finishRuntimeOnDone(sessionID, fc, env)
+		b.finishTurnTTFT(sessionID, terminalStatus)
+		fc.turnText.Reset()
+		fc.hasRealText = false
+		fc.lastError = nil
+		return
 	}
 
 	if err := b.hub.SendToSession(context.Background(), env); err != nil {
@@ -541,32 +595,8 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 	// Flush buffered error on non-Done events.
 	b.flushPendingError(fc, true)
 
-	// LLM retry: check after Done is forwarded.
-	if env.Event.Type == events.Done && b.retryCtrl != nil && (!opts.resumed || fc.turnText.Len() > 0) {
-		if shouldRetry, attempt := b.retryCtrl.ShouldRetry(context.TODO(), sessionID, fc.lastError); shouldRetry {
-			fc.pendingError = nil
-			fc.reopenTerminal()
-			// Pre-register cancel channel before launching goroutine to close
-			// the race window where CancelRetry can't find the channel.
-			cancelCh := make(chan struct{})
-			b.retryCancelMu.Lock()
-			b.retryCancel[sessionID] = cancelCh
-			b.retryCancelMu.Unlock()
-			// Run autoRetry asynchronously so forwardEvents continues reading
-			// from recvCh. This prevents the goroutine from blocking during
-			// the backoff period — if the worker crashes, the for-range loop
-			// detects recvCh closure immediately instead of waiting for the
-			// backoff timer to expire. The goroutine uses shutdownCtx so it
-			// cancels promptly during bridge shutdown.
-			go b.autoRetry(b.shutdownCtx, w, sessionID, attempt, cancelCh, fc.lifecycle)
-			fc.turnText.Reset()
-			if b.collector != nil {
-				b.collector.ResetSession(sessionID)
-			}
-			fc.lastError = nil
-			return // continue — retry produces new events on recv
-		}
-		b.flushPendingError(fc, false)
+	if env.Event.Type == events.Done && b.retryCtrl != nil && (!isDone || doneData.Success) {
+		fc.pendingError = nil
 		b.retryCtrl.RecordSuccess(sessionID)
 		fc.lastError = nil
 	}
@@ -576,6 +606,7 @@ func (b *Bridge) processForwardedEvent(env *events.Envelope, w worker.Worker, op
 		// the retry decision confirms this is the terminal worker attempt.
 		b.finishTurnTTFT(sessionID, terminalStatus)
 		fc.turnText.Reset()
+		fc.hasRealText = false
 		// Do NOT reset fc.turnStartTime here. The previous code did
 		// `fc.turnStartTime = time.Now()` at Done, which started the NEXT turn's
 		// clock at this Done — so inter-turn idle was billed to the next turn.
@@ -704,6 +735,7 @@ func (b *Bridge) extractTurnContent(env *events.Envelope, fc *forwardContext) (d
 	case events.MessageDelta, events.Message:
 		if content := extractMessageContent(env); content != "" {
 			fc.turnText.WriteString(content)
+			fc.hasRealText = true
 			if env.Event.Type == events.MessageDelta {
 				deltaContent = content
 			}
@@ -748,6 +780,7 @@ func (b *Bridge) handleInternalReset(env *events.Envelope, sessionID string, fc 
 	}
 	acc.TurnCount.Store(0)
 	fc.turnText.Reset()
+	fc.hasRealText = false
 }
 
 // accumulateStats tracks tool calls and per-turn stats on done events.
@@ -776,8 +809,10 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 			fc.turnTimer.Stop()
 		}
 		acc := b.getOrInitAccum(sessionID, opts.workDir, fc.startTime)
+		success := false
 		if dd, ok := asDoneData(env.Event.Data); ok {
 			acc.mergePerTurnStats(dd)
+			success = dd.Success
 		}
 		acc.TurnCount.Add(1)
 		// Turn duration: prefer the input-path start stamp so the timer covers
@@ -799,7 +834,7 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 		}
 
 		b.injectSessionStats(env, acc)
-		b.maybeSendDoneFallback(sessionID, acc, fc)
+		b.maybeSendDoneFallback(sessionID, acc, fc, success)
 		b.captureAssistantTurn(sessionID, env.Seq, acc, fc.turnText.String(),
 			fc.sessOwner, fc.sessPlatform, env.Timestamp)
 		acc.resetPerTurn()
@@ -829,7 +864,10 @@ func (b *Bridge) accumulateStats(env *events.Envelope, w worker.Worker, opts for
 // fallback text so the turns table records it (history/replay shows the
 // fallback instead of an empty assistant turn). Also persists to the events
 // table via captureEvent so WS event replay surfaces it too.
-func (b *Bridge) maybeSendDoneFallback(sessionID string, acc *sessionAccumulator, fc *forwardContext) {
+func (b *Bridge) maybeSendDoneFallback(sessionID string, acc *sessionAccumulator, fc *forwardContext, success bool) {
+	if !success {
+		return
+	}
 	if fc.turnText.Len() > 0 {
 		return // state 1: real assistant content
 	}
@@ -916,8 +954,9 @@ func (b *Bridge) captureForwardedEvent(env *events.Envelope, deltaContent, reaso
 }
 
 // flushPendingError sends the buffered error event to the client.
-// skipOnDone controls whether to suppress the flush when the current event is Done
-// (used in the main forwarding loop to defer error delivery past retry decision).
+// skipOnDone controls whether to suppress the flush when the current event is Done.
+// Failed Done events with a buffered error are resolved explicitly before the
+// Done can be sent, so this helper remains for non-terminal stream events.
 func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
 	if fc.pendingError == nil {
 		return
@@ -927,6 +966,16 @@ func (b *Bridge) flushPendingError(fc *forwardContext, skipOnDone bool) {
 	}
 	if !fc.claimTerminal() {
 		fc.pendingError = nil
+		return
+	}
+	b.sendPendingError(fc)
+}
+
+// sendPendingError delivers a buffered worker error without claiming the
+// terminal fence. Callers use it when another terminal event already claimed
+// the fence but must remain hidden from the client.
+func (b *Bridge) sendPendingError(fc *forwardContext) {
+	if fc.pendingError == nil {
 		return
 	}
 	if err := b.hub.SendToSession(context.Background(), fc.pendingError); err != nil {
@@ -1458,8 +1507,19 @@ func extractInputContent(data any) string {
 func extractMessageContent(env *events.Envelope) string {
 	switch env.Event.Type {
 	case events.Message, events.MessageDelta:
-		if d, ok := env.Event.Data.(events.MessageDeltaData); ok {
+		switch d := env.Event.Data.(type) {
+		case events.MessageData:
 			return d.Content
+		case *events.MessageData:
+			if d != nil {
+				return d.Content
+			}
+		case events.MessageDeltaData:
+			return d.Content
+		case *events.MessageDeltaData:
+			if d != nil {
+				return d.Content
+			}
 		}
 		if m, ok := env.Event.Data.(map[string]any); ok {
 			if content, ok := m["content"].(string); ok {
