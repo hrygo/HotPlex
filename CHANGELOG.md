@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.50.1] - 2026-08-31
+
+### Fixed
+
+- **Terminal Failure Feedback**: Gateway 现在会在判断失败 `Done`、真实 Worker 错误和自动重试结果后再发送用户可见终态；失败或停止的轮次不再被误报为“本轮未收到可展示的 Agent 回复”。完整 `MessageData` 也会正确计入真实回复，飞书流式卡片会分别呈现停止和失败状态（#982）。
+
 ## [1.50.0] - 2026-08-25
 
 ### Summary
