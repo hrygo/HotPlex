@@ -233,6 +233,50 @@ func TestAdapterFlow_WriteCtx_DoneEvent_WithStreamCtrl(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAdapterFlow_WriteCtx_StoppedDoneReplacesEmptyPlaceholder(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	conn := NewFeishuConn(a, "chat123", "", "")
+	ctrl := newTestStreamingCtrl()
+	require.True(t, ctrl.transition(PhaseCreating))
+	require.True(t, ctrl.transition(PhaseStreaming))
+	ctrl.mu.Lock()
+	ctrl.placeholder = "正在处理"
+	ctrl.lastFlushed = ctrl.placeholder
+	ctrl.cardKitOK = false
+	ctrl.streamingActive = false
+	ctrl.mu.Unlock()
+	conn.EnableStreaming(ctrl)
+
+	env := events.NewEnvelope("stopped-done", "sess-stopped", 0, events.Done,
+		events.DoneData{Reason: "stopped_by_user"})
+	require.NoError(t, conn.WriteCtx(context.Background(), env))
+	require.Equal(t, "⏹️ 本轮已停止。", ctrl.Content())
+	require.Equal(t, PhaseCompleted, ctrl.getPhase())
+}
+
+func TestAdapterFlow_WriteCtx_FailedDoneReplacesEmptyPlaceholder(t *testing.T) {
+	t.Parallel()
+	a := newTestAdapter(t)
+	conn := NewFeishuConn(a, "chat123", "", "")
+	ctrl := newTestStreamingCtrl()
+	require.True(t, ctrl.transition(PhaseCreating))
+	require.True(t, ctrl.transition(PhaseStreaming))
+	ctrl.mu.Lock()
+	ctrl.placeholder = "正在处理"
+	ctrl.lastFlushed = ctrl.placeholder
+	ctrl.cardKitOK = false
+	ctrl.streamingActive = false
+	ctrl.mu.Unlock()
+	conn.EnableStreaming(ctrl)
+
+	env := events.NewEnvelope("failed-done", "sess-failed", 0, events.Done,
+		events.DoneData{Success: false})
+	require.NoError(t, conn.WriteCtx(context.Background(), env))
+	require.Equal(t, "⚠️ 本轮执行失败，请重试。", ctrl.Content())
+	require.Equal(t, PhaseCompleted, ctrl.getPhase())
+}
+
 func TestAdapterFlow_WriteCtx_ErrorEvent_WithStreamCtrl(t *testing.T) {
 	t.Parallel()
 	a := newTestAdapter(t)

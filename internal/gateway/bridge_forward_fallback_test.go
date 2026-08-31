@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hrygo/hotplex/internal/config"
 	"github.com/hrygo/hotplex/internal/worker"
 	"github.com/hrygo/hotplex/pkg/aep"
 
@@ -205,6 +206,140 @@ func TestBridge_ProcessForwardedEventSendsExactlyOneTerminal(t *testing.T) {
 	require.Nil(t, tryReadEnvelope(t, server), "duplicate Done must be suppressed")
 }
 
+func TestBridge_FailedDoneForwardsWorkerErrorWithoutEmptySuccessFallback(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+	const sessionID = "failed-done-error"
+	h.JoinSession(sessionID, newConn(h, conn, sessionID, nil))
+	b := NewBridge(BridgeDeps{
+		Log:       slog.Default(),
+		Hub:       h,
+		RetryCtrl: NewLLMRetryController(config.AutoRetryConfig{Enabled: false}, slog.Default()),
+	})
+	fw := &mockBridgeWorker{workerType: worker.TypeCodexCLI}
+	fc := &forwardContext{sessionID: sessionID, workerType: worker.TypeCodexCLI, firstEvent: true}
+
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error,
+		events.ErrorData{Code: events.ErrCodeRateLimited, Message: "rate limit exceeded"}), fw, forwardOpts{}, fc)
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
+		events.DoneData{Success: false}), fw, forwardOpts{}, fc)
+
+	terminal := tryReadEnvelope(t, server)
+	require.NotNil(t, terminal)
+	require.Equal(t, events.Error, terminal.Event.Type)
+	data, ok := terminal.Event.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "rate limit exceeded", data["message"])
+	require.Nil(t, tryReadEnvelope(t, server), "failed turn must not emit a success fallback or a second terminal")
+}
+
+func TestBridge_RetryableFailedDoneDoesNotEmitTerminalBeforeRetry(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+	const sessionID = "retryable-failed-done"
+	h.JoinSession(sessionID, newConn(h, conn, sessionID, nil))
+	retryCtrl := NewLLMRetryController(config.AutoRetryConfig{
+		Enabled:    true,
+		MaxRetries: 1,
+		BaseDelay:  time.Hour,
+		MaxDelay:   time.Hour,
+		RetryInput: "continue",
+	}, slog.Default())
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h, RetryCtrl: retryCtrl})
+	b.shutdownCancel()
+	fw := &mockBridgeWorker{workerType: worker.TypeCodexCLI}
+	fc := &forwardContext{sessionID: sessionID, workerType: worker.TypeCodexCLI, firstEvent: true}
+
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Error,
+		events.ErrorData{Code: events.ErrCodeRateLimited, Message: "rate limit exceeded"}), fw, forwardOpts{}, fc)
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
+		events.DoneData{Success: false}), fw, forwardOpts{}, fc)
+
+	require.Nil(t, tryReadEnvelope(t, server), "retryable failure must not emit a terminal before retry output")
+}
+
+func TestBridge_FailedDoneWithoutErrorDoesNotEmitEmptySuccessFallback(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+	const sessionID = "failed-done-no-error"
+	h.JoinSession(sessionID, newConn(h, conn, sessionID, nil))
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
+	fw := &mockBridgeWorker{workerType: worker.TypeCodexCLI}
+	fc := &forwardContext{sessionID: sessionID, workerType: worker.TypeCodexCLI, firstEvent: true}
+
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
+		events.DoneData{Success: false}), fw, forwardOpts{}, fc)
+
+	terminal := tryReadEnvelope(t, server)
+	require.NotNil(t, terminal)
+	require.Equal(t, events.Done, terminal.Event.Type)
+	require.Nil(t, tryReadEnvelope(t, server), "failed turn must not emit an empty-success fallback")
+}
+
+func TestBridge_CompleteMessageDataCountsAsRealReply(t *testing.T) {
+	t.Parallel()
+	h := newTestHub(t)
+	conn, server := newTestWSConnPair(t)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+	const sessionID = "typed-complete-message"
+	h.JoinSession(sessionID, newConn(h, conn, sessionID, nil))
+	b := NewBridge(BridgeDeps{Log: slog.Default(), Hub: h})
+	fw := &mockBridgeWorker{workerType: worker.TypeCodexCLI}
+	fc := &forwardContext{sessionID: sessionID, workerType: worker.TypeCodexCLI, firstEvent: true}
+
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Message,
+		events.MessageData{Role: "assistant", Content: "complete answer"}), fw, forwardOpts{}, fc)
+	b.processForwardedEvent(events.NewEnvelope(aep.NewID(), sessionID, 0, events.Done,
+		events.DoneData{Success: true}), fw, forwardOpts{}, fc)
+
+	message := tryReadEnvelope(t, server)
+	require.NotNil(t, message)
+	require.Equal(t, events.Message, message.Event.Type)
+	done := tryReadEnvelope(t, server)
+	require.NotNil(t, done)
+	require.Equal(t, events.Done, done.Event.Type)
+	require.Nil(t, tryReadEnvelope(t, server), "complete typed messages must not trigger an empty-success fallback")
+}
+
+func TestExtractMessageContent_TypedPayloads(t *testing.T) {
+	t.Parallel()
+
+	message := &events.MessageData{Content: "complete message"}
+	delta := &events.MessageDeltaData{Content: "message delta"}
+	for _, tt := range []struct {
+		name string
+		env  *events.Envelope
+		want string
+	}{
+		{
+			name: "message_data_value",
+			env:  events.NewEnvelope(aep.NewID(), "s1", 0, events.Message, events.MessageData{Content: "complete value"}),
+			want: "complete value",
+		},
+		{
+			name: "message_data_pointer",
+			env:  events.NewEnvelope(aep.NewID(), "s1", 0, events.Message, message),
+			want: "complete message",
+		},
+		{
+			name: "message_delta_pointer",
+			env:  events.NewEnvelope(aep.NewID(), "s1", 0, events.MessageDelta, delta),
+			want: "message delta",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, extractMessageContent(tt.env))
+		})
+	}
+}
+
 func TestBridge_CompleteMessageStartsNextTurnAfterTerminal(t *testing.T) {
 	t.Parallel()
 	h := newTestHub(t)
@@ -295,7 +430,7 @@ func TestMaybeSendDoneFallback(t *testing.T) {
 		acc.ToolCallCount.Store(3)
 		acc.ToolNames = map[string]int{"Bash": 2, "Read": 1}
 
-		b.maybeSendDoneFallback("s1", acc, fc)
+		b.maybeSendDoneFallback("s1", acc, fc, true)
 
 		env := tryReadEnvelope(t, server)
 		require.NotNil(t, env, "expected a fallback Message envelope")
@@ -314,7 +449,7 @@ func TestMaybeSendDoneFallback(t *testing.T) {
 		acc.ToolCallCount.Store(3)
 		fc.turnText.WriteString("real reply text")
 
-		b.maybeSendDoneFallback("s1", acc, fc)
+		b.maybeSendDoneFallback("s1", acc, fc, true)
 
 		require.Nil(t, tryReadEnvelope(t, server), "no fallback expected when turn has text")
 	})
@@ -325,7 +460,7 @@ func TestMaybeSendDoneFallback(t *testing.T) {
 		// No text AND no tool calls → empty-success integrity failure. The turn
 		// must NOT end silently leaving a placeholder; emit a retryable terminal
 		// (Turn-Integrity Fix C, invariant I-5).
-		b.maybeSendDoneFallback("s1", acc, fc)
+		b.maybeSendDoneFallback("s1", acc, fc, true)
 
 		env := tryReadEnvelope(t, server)
 		require.NotNil(t, env, "empty-success must emit a terminal Message")
@@ -342,7 +477,7 @@ func TestMaybeSendDoneFallback(t *testing.T) {
 		b, acc, fc, server := setup(t, platformWebChat)
 		// WebChat is skipped for tool-only fallbacks, but empty-success still
 		// needs an explicit terminal so the assistant turn is not left blank.
-		b.maybeSendDoneFallback("s1", acc, fc)
+		b.maybeSendDoneFallback("s1", acc, fc, true)
 
 		env := tryReadEnvelope(t, server)
 		require.NotNil(t, env, "webchat empty-success must emit a terminal Message, not a blank assistant turn")
@@ -354,8 +489,17 @@ func TestMaybeSendDoneFallback(t *testing.T) {
 		b, acc, fc, server := setup(t, platformWebChat)
 		acc.ToolCallCount.Store(3)
 		// Tool-only turn on webchat: UI renders the tool list independently, no fallback.
-		b.maybeSendDoneFallback("s1", acc, fc)
+		b.maybeSendDoneFallback("s1", acc, fc, true)
 
 		require.Nil(t, tryReadEnvelope(t, server), "no tool-only fallback expected for webchat")
+	})
+
+	t.Run("skipped_for_failed_tool_only", func(t *testing.T) {
+		t.Parallel()
+		b, acc, fc, server := setup(t, "feishu")
+		acc.ToolCallCount.Store(3)
+		b.maybeSendDoneFallback("s1", acc, fc, false)
+
+		require.Nil(t, tryReadEnvelope(t, server), "failed tool-only turns must not emit a success summary")
 	})
 }

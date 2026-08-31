@@ -351,6 +351,14 @@ func (c *FeishuConn) handleDone(ctx context.Context, env *events.Envelope) error
 	var closeErr error
 	if streamCtrl != nil && streamCtrl.IsCreated() {
 		streamCtrl.SetCloseMeta(d)
+		if done, ok := events.DecodeAs[events.DoneData](env.Event.Data); ok {
+			switch {
+			case done.Reason == "stopped_by_user":
+				streamCtrl.SetTerminalContent("⏹️ 本轮已停止。")
+			case !done.Success:
+				streamCtrl.SetTerminalContent("⚠️ 本轮执行失败，请重试。")
+			}
+		}
 		closeErr = streamCtrl.Close(terminalCtx)
 		if closeErr != nil {
 			closeErr = c.handleTerminalDeliveryError(terminalCtx, closeErr)
