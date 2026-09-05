@@ -1439,8 +1439,10 @@ func injectSandbox(platformKey map[string]string, sandbox string) {
 func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *session.SessionInfo) worker.SessionInfo {
 	info := b.buildWorkerInfo(sessionID, userID, workDir, si)
 
-	// Populate conversation history from turns table for context recovery.
-	// Only CodexCLI worker needs this — other workers have native resume.
+	// Populate conversation history from the turns table for workers that may
+	// need text-level context recovery. CodexCLI always creates a new thread;
+	// ACP may need the same fallback when its agent cannot load the session.
+	// Claude Code and OpenCode Server retain their native session state.
 	// Fresh sessions (StateCreated) are intentionally NOT skipped: DeriveSessionKey
 	// deterministically reuses the same sessionID for a given chat, so after zombie
 	// reclamation (or gateway restart) re-creates the session record, the turns table
@@ -1448,7 +1450,7 @@ func (b *Bridge) prepareWorkerInfo(sessionID, userID, workDir string, si *sessio
 	// text-level context continuity (issue #815, L3/L4 fallback). QueryTurns returns
 	// empty for genuinely new sessions (different chat → different sessionID), so the
 	// len(turns) > 0 guard below is a no-op there.
-	if si.WorkerType == worker.TypeCodexCLI && b.turnsQuerier != nil {
+	if (si.WorkerType == worker.TypeCodexCLI || si.WorkerType == worker.TypeACP) && b.turnsQuerier != nil {
 		turns, err := b.turnsQuerier.QueryTurns(b.shutdownCtx, sessionID, 50, 0)
 		if err != nil {
 			b.log.Warn("bridge: query turns for history recovery failed", "session_id", sessionID, "err", err)
