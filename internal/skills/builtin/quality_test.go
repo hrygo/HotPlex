@@ -317,13 +317,23 @@ func TestCurrentDocsBFSExcludesHistoricalSpecEntrypoints(t *testing.T) {
 		}
 	}
 
-	require.Len(t, reachable, 58)
+	require.Len(t, reachable, 60)
+	for _, current := range []string{
+		"guides/developer/platform-worker-e2e-validation.md",
+		"assets/e2e/platform-worker-matrix-template.md",
+	} {
+		_, found := reachable[current]
+		require.True(t, found, current)
+	}
 	for _, historical := range []string{
 		"specs/ACP-Worker-Spec.md",
 		"specs/Admin-Workspace-PermissionMode-Management-Spec.md",
 		"specs/Skill-Management-Spec.md",
 		"specs/Workspace-Permission-Mode-Admin-Only-Revision-Spec.md",
 		"specs/Workspace-Permission-Mode-Spec.md",
+		"superpowers/specs/2026-09-05-platform-worker-parity-design.md",
+		"superpowers/plans/2026-09-05-platform-worker-recovery-parity.md",
+		"superpowers/plans/2026-09-05-platform-interaction-parity.md",
 	} {
 		_, found := reachable[historical]
 		require.False(t, found, historical)
