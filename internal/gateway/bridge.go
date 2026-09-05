@@ -32,6 +32,10 @@ const (
 	defaultStopForwarderTimeout = time.Second
 )
 
+// ErrResumeSequenceUnavailable indicates that a session sequence could not be
+// hydrated from durable history, so resuming the Worker would be unsafe.
+var ErrResumeSequenceUnavailable = errors.New("bridge: resume sequence unavailable")
+
 // bridgeSM is the narrow subset of SessionManager that Bridge needs.
 // Composed from canonical sub-interfaces defined in handler.go to avoid
 // duplicate method declarations.
@@ -784,6 +788,13 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 		return session.ErrSessionNotFound
 	}
 
+	// Hydrate the sequence before changing lifecycle state or touching the
+	// current Worker. A failed hydration must leave resume retryable and cannot
+	// risk allocating a sequence that collides with durable history.
+	if err := b.hub.EnsureSeqHydrated(id); err != nil {
+		return fmt.Errorf("%w: %w", ErrResumeSequenceUnavailable, err)
+	}
+
 	// Capture pending input before terminating so it can be re-delivered to the new worker.
 	// This prevents input loss when ResumeSession is called concurrently (e.g., a
 	// second user message arrives while attemptResumeFallback is starting a fresh worker).
@@ -803,21 +814,6 @@ func (b *Bridge) resumeWithOpts(ctx context.Context, id, workDir string, opts fo
 			return fmt.Errorf("bridge: pre-attach transition TERMINATED→RUNNING: %w", err)
 		}
 		si.State = events.StateRunning
-	}
-
-	// Hydrate SeqGen from persisted events before createAndLaunchWorker can
-	// allocate the first seq. Platform (messaging) sessions reach resume via
-	// StartPlatformSession → orphan resume, which never traverses the WebSocket
-	// performInit path that hydrates in conn.go. Without this, a session whose
-	// counter was released (RuntimeRelease → ReleaseSeq) restarts from 0 on
-	// resume and collides with durable history, causing recurring UNIQUE
-	// constraint failures on events(session_id, seq_guard_id, seq) (issue #879
-	// regression surviving #900 and 0231fc74, which only hardened the WS path).
-	// A DB error is logged but does not block resume: messaging has no retry
-	// semantics, and a stale counter is no worse than the pre-fix behavior.
-	if err := b.hub.EnsureSeqHydrated(id); err != nil {
-		b.log.Warn("bridge: seq hydration failed before resume; counter may collide with history",
-			"session_id", id, "err", err)
 	}
 
 	workerInfo := b.prepareWorkerInfo(si.ID, si.UserID, workDir, si)
@@ -959,6 +955,9 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.Session
 			b.log.Info("bridge: orphan platform session terminated, attempting resume", "session_id", sessionID)
 			injectSandbox(si.PlatformKey, sandbox)
 			if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
+				if errors.Is(err, ErrResumeSequenceUnavailable) {
+					return err
+				}
 				if errors.Is(err, worker.ErrResumeCheckFailed) {
 					return fmt.Errorf("bridge: resume verification failed for terminated session: %w", err)
 				}
@@ -978,6 +977,9 @@ func (b *Bridge) StartPlatformSession(ctx context.Context, params worker.Session
 		// the latest config, not a potentially stale persisted value.
 		injectSandbox(si.PlatformKey, sandbox)
 		if err := b.ResumeSession(ctx, sessionID, workDir); err != nil {
+			if errors.Is(err, ErrResumeSequenceUnavailable) {
+				return err
+			}
 			if errors.Is(err, worker.ErrResumeCheckFailed) {
 				return fmt.Errorf("bridge: resume verification failed: %w", err)
 			}

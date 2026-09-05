@@ -356,6 +356,11 @@ func (b *Bridge) attemptResumeFallback(p fallbackParams) bool {
 	// Step 1: Retry resume once for transient failures (e.g., file lock, timing).
 	if p.retryDepth == 0 {
 		if err := b.resumeWithOpts(context.Background(), p.sessionID, p.workDir, forwardOpts{resumed: true, workDir: p.workDir, retryDepth: p.retryDepth + 1, lastInput: p.lastInput, lastReplay: p.lastReplay}); err != nil {
+			if errors.Is(err, ErrResumeSequenceUnavailable) {
+				b.log.Warn("bridge: resume retry blocked because sequence hydration is unavailable; preserving session context",
+					"session_id", p.sessionID, "worker_type", p.workerType, "err", err)
+				return false
+			}
 			if errors.Is(err, worker.ErrResumeCheckFailed) {
 				b.log.Warn("bridge: resume verification failed during crash recovery; preserving session context",
 					"session_id", p.sessionID, "worker_type", p.workerType, "err", err)
