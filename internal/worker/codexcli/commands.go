@@ -19,7 +19,7 @@ func NewServerCommander(manager *CodexAppServerManager, threadID string) *Server
 func (sc *ServerCommander) SendControlRequest(ctx context.Context, subtype string, body map[string]any) (map[string]any, error) {
 	switch subtype {
 	case "set_model":
-		return nil, fmt.Errorf("codexcli: set_model not supported")
+		return nil, fmt.Errorf("codexcli: set_model not supported: %w", worker.ErrNotImplemented)
 	case "set_permission_mode":
 		return nil, worker.ErrNotImplemented
 	case "get_context_usage":

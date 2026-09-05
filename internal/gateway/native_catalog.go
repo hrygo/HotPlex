@@ -134,10 +134,16 @@ func (s *sessionCatalogStore) assemble(ctx context.Context, sessionID, workDir s
 		if fc.requires != nil && !fc.requires(w) {
 			continue
 		}
+		// A required fixed name remains reserved even when this Worker type
+		// cannot execute the command. This prevents a same-named Worker or
+		// filesystem entry from reappearing at a lower merge tier.
+		seen[fc.desc.Name] = struct{}{}
+		if !nativeFixedCommandVisible(w, fc.desc.Name) {
+			continue
+		}
 		descriptor := fc.desc
 		descriptor.CatalogOrigin = worker.CatalogOriginGateway
 		merged = append(merged, descriptor)
-		seen[fc.desc.Name] = struct{}{}
 	}
 
 	// Tier 2 — the Worker's authoritative catalog. Bounded query (spec §8.2);
@@ -236,6 +242,25 @@ func requiresControlRequester(w worker.Worker) bool {
 func requiresWorkerCommander(w worker.Worker) bool {
 	_, ok := w.(worker.WorkerCommander)
 	return ok
+}
+
+// nativeFixedCommandVisible captures adapter-specific gaps that cannot be
+// represented by the shared capability interfaces alone. The requires
+// predicate still owns whether a fixed name is reserved; this predicate only
+// decides whether that reserved name is advertised as callable.
+func nativeFixedCommandVisible(w worker.Worker, name string) bool {
+	switch w.Type() {
+	case worker.TypeCodexCLI:
+		return name != "model" && name != "perm"
+	case worker.TypeACP:
+		switch name {
+		case "compact", "rewind", "mcp":
+			return false
+		}
+	case worker.TypeClaudeCode:
+		return name != "clear"
+	}
+	return true
 }
 
 // requiresNativeEffort is the reserved capability predicate for /effort and

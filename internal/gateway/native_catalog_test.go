@@ -64,6 +64,33 @@ func (w *nativeCatalogCommanderWorker) Rewind(context.Context, string) error    
 
 var _ worker.WorkerCommander = (*nativeCatalogCommanderWorker)(nil)
 
+// nativeCatalogControlCommanderWorker exposes both capability surfaces so the
+// worker-type visibility matrix can exercise every fixed command family.
+type nativeCatalogControlCommanderWorker struct {
+	*nativeCatalogTestWorker
+}
+
+func (w *nativeCatalogControlCommanderWorker) SendControlRequest(context.Context, string, map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+func (w *nativeCatalogControlCommanderWorker) Compact(context.Context, map[string]any) error {
+	return nil
+}
+
+func (w *nativeCatalogControlCommanderWorker) Clear(context.Context) error {
+	return nil
+}
+
+func (w *nativeCatalogControlCommanderWorker) Rewind(context.Context, string) error {
+	return nil
+}
+
+var (
+	_ worker.ControlRequester = (*nativeCatalogControlCommanderWorker)(nil)
+	_ worker.WorkerCommander  = (*nativeCatalogControlCommanderWorker)(nil)
+)
+
 // nativeCatalogTestLocator is a scriptable SkillsLocator fake.
 type nativeCatalogTestLocator struct {
 	mu      sync.Mutex
@@ -255,6 +282,112 @@ func TestNativeCatalogCapabilityConditions(t *testing.T) {
 			}
 			require.Equal(t, worker.NativeCommandKindControl, byName["reset"].Kind)
 			require.False(t, byName["reset"].StartsTurn)
+		})
+	}
+}
+
+func TestNativeCatalogWorkerTypeVisibility(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		wType   worker.WorkerType
+		present []string
+		absent  []string
+	}{
+		{
+			name:  "codex hides unsupported controls",
+			wType: worker.TypeCodexCLI,
+			present: []string{
+				"context", "mcp", "compact", "clear", "rewind",
+			},
+			absent: []string{"model", "perm"},
+		},
+		{
+			name:  "acp hides unsupported controls",
+			wType: worker.TypeACP,
+			present: []string{
+				"context", "model", "perm", "clear",
+			},
+			absent: []string{"mcp", "compact", "rewind"},
+		},
+		{
+			name:  "claude hides clear",
+			wType: worker.TypeClaudeCode,
+			present: []string{
+				"context", "mcp", "model", "perm", "compact", "rewind",
+			},
+			absent: []string{"clear"},
+		},
+		{
+			name:  "opencode retains supported controls",
+			wType: worker.TypeOpenCodeSrv,
+			present: []string{
+				"context", "mcp", "model", "perm", "compact", "clear", "rewind",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			w := &nativeCatalogControlCommanderWorker{
+				nativeCatalogTestWorker: &nativeCatalogTestWorker{
+					fakeWorker: &fakeWorker{workerType: tt.wType},
+				},
+			}
+			store := newTestCatalogStore(t, &nativeCatalogTestLocator{})
+			merged, err := store.Lookup(context.Background(), "s1", "/work", w, 1)
+			require.NoError(t, err)
+			byName := descriptorsByName(merged)
+			for _, name := range tt.present {
+				require.Contains(t, byName, name, "expected %q in merged catalog", name)
+			}
+			for _, name := range tt.absent {
+				require.NotContains(t, byName, name, "expected %q absent from merged catalog", name)
+			}
+		})
+	}
+}
+
+func TestNativeCatalogHiddenFixedNamesRemainReserved(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		workerType worker.WorkerType
+		hiddenName string
+	}{
+		{name: "codex model", workerType: worker.TypeCodexCLI, hiddenName: "model"},
+		{name: "codex permission", workerType: worker.TypeCodexCLI, hiddenName: "perm"},
+		{name: "acp mcp", workerType: worker.TypeACP, hiddenName: "mcp"},
+		{name: "acp compact", workerType: worker.TypeACP, hiddenName: "compact"},
+		{name: "acp rewind", workerType: worker.TypeACP, hiddenName: "rewind"},
+		{name: "claude clear", workerType: worker.TypeClaudeCode, hiddenName: "clear"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			locator := &nativeCatalogTestLocator{skills: []skills.Skill{{
+				Name:     tt.hiddenName,
+				FilePath: "/fs/" + tt.hiddenName,
+			}}}
+			w := &nativeCatalogControlCommanderWorker{
+				nativeCatalogTestWorker: &nativeCatalogTestWorker{
+					fakeWorker: &fakeWorker{workerType: tt.workerType},
+					descriptors: []worker.NativeCommandDescriptor{{
+						Name: tt.hiddenName,
+					}},
+				},
+			}
+			store := newTestCatalogStore(t, locator)
+			merged, err := store.Lookup(context.Background(), "s1", "/work", w, 1)
+			require.NoError(t, err)
+			require.NotContains(t, descriptorsByName(merged), tt.hiddenName,
+				"a hidden fixed name must stay reserved across worker and filesystem tiers")
 		})
 	}
 }
