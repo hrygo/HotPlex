@@ -401,6 +401,7 @@ export function useHotPlexRuntime({
     const clientRef = useRef<BrowserHotPlexClient | null>(null);
     const pendingAssistantIdRef = useRef<string | null>(null);
     const activeAssistantIdRef = useRef<string | null>(null);
+    const cancelledAssistantIdRef = useRef<string | null>(null);
     const activeInputMessageIdRef = useRef<string | null>(null);
     // Text of the currently dispatched input. Used to (a) render the
     // command-executed confirmation for gateway-handled commands and (b) tell
@@ -631,10 +632,15 @@ export function useHotPlexRuntime({
 
         // Append delta content to the last text part of the last assistant message
         const appendDelta = (content: string) => {
+            // Capture the target before queueing the updater. React may run the
+            // updater after done has cleared the refs, so reading the ref there
+            // can miss the pending placeholder.
+            const pendingAssistantID = pendingAssistantIdRef.current;
+            pendingAssistantIdRef.current = null;
             setMessages((prev) => {
                 const pending = updatePendingAssistant(
                     prev,
-                    pendingAssistantIdRef.current,
+                    pendingAssistantID,
                     (message) => ({
                         ...message,
                         progress: undefined,
@@ -642,7 +648,6 @@ export function useHotPlexRuntime({
                     }),
                 );
                 if (pending !== prev) {
-                    pendingAssistantIdRef.current = null;
                     return pending;
                 }
                 const lastMessage = prev[prev.length - 1];
@@ -889,10 +894,11 @@ export function useHotPlexRuntime({
                 activeQueueDispatchRef.current = null;
             }
             const pendingAssistantID = pendingAssistantIdRef.current;
+            const activeAssistantID = activeAssistantIdRef.current;
             const reconciliationTargetID =
                 queuedDispatch?.assistantMessageId ??
                 pendingAssistantID ??
-                activeAssistantIdRef.current;
+                activeAssistantID;
             // Kept for the cmd- ack handler (command confirmation) and for the
             // reconcile input-match guard below; cleared by handleInputAck.
             const inputContent = activeTurnInputRef.current;
@@ -941,6 +947,39 @@ export function useHotPlexRuntime({
                     };
                     return next;
                 }
+                // A delta can be queued in the same browser task as done. The
+                // delta updater may clear pendingAssistantIdRef before React
+                // applies either updater, so removing by the ID captured above
+                // would discard the just-arrived text. Finalize the exact
+                // active turn message first whenever it already has content.
+                const activeIndex = prev.findIndex(
+                    (message) =>
+                        message.id === activeAssistantID &&
+                        message.role === "assistant" &&
+                        message.status === "streaming",
+                );
+                const activeMessage =
+                    activeIndex === -1 ? undefined : prev[activeIndex];
+                if (activeMessage && activeMessage.parts.length > 0) {
+                    const parts = activeMessage.parts.map((part) =>
+                        part.type === "tool-call" &&
+                        (!part.status || part.status.type === "running")
+                            ? {
+                                  ...part,
+                                  status: { type: "complete" as const },
+                              }
+                            : part,
+                    );
+                    const next = [...prev];
+                    next[activeIndex] = {
+                        ...activeMessage,
+                        status: "complete" as const,
+                        progress: undefined,
+                        parts,
+                    };
+                    return next;
+                }
+
                 const withoutPending = removePendingAssistant(
                     prev,
                     pendingAssistantID,
@@ -2548,6 +2587,7 @@ export function useHotPlexRuntime({
 
     const handleCancel = useCallback(async () => {
         if (stoppingRef.current) return;
+        cancelledAssistantIdRef.current = activeAssistantIdRef.current;
         stoppingRef.current = true;
         setIsStopping(true);
         const client = clientRef.current;
@@ -2840,7 +2880,26 @@ export function useHotPlexRuntime({
 
     // Stable setMessages callback to prevent adapter churn
     const handleSetMessages = useCallback((msgs: readonly HotPlexMessage[]) => {
-        setMessages([...msgs]);
+        setMessages((current) => {
+            const cancelledAssistantID = cancelledAssistantIdRef.current;
+            if (cancelledAssistantID) {
+                const incomingMessage = msgs.find(
+                    (message) => message.id === cancelledAssistantID,
+                );
+                // assistant-ui resynchronizes its pre-cancel repository on a
+                // timer. If done wins that race, the snapshot is older than
+                // the adapter state and would regress the stopped response to
+                // an empty streaming placeholder.
+                if (
+                    incomingMessage?.role === "assistant" &&
+                    incomingMessage.status === "streaming"
+                ) {
+                    cancelledAssistantIdRef.current = null;
+                    return current;
+                }
+            }
+            return [...msgs];
+        });
     }, []);
 
     // Stable capabilities reference

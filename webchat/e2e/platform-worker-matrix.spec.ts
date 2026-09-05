@@ -185,6 +185,13 @@ for (const combo of WEBCHAT_WORKERS) {
             page.getByText(`matrix-stop-${combo.id}`, { exact: true }),
         ).toHaveCount(1);
 
+        // Freeze the one-shot cancel resync timer so its stale snapshot can be
+        // released while the stopped turn is still streaming.
+        await page.clock.install({ time: Date.now() });
+        const cancelFreezeTime = await page.evaluate(
+            () => Date.now() + 60_000,
+        );
+        await page.clock.pauseAt(cancelFreezeTime);
         await emitGatewayEvent(page, "message.delta", {
             message_id: `stop-msg-${combo.id}`,
             content: "long response that will be stopped",
@@ -194,7 +201,6 @@ for (const combo of WEBCHAT_WORKERS) {
                 exact: true,
             }),
         ).toBeVisible();
-
         await page.getByRole("button", { name: "停止生成" }).click();
         await expect.poll(async () => (await controlStops(page)).length).toBe(1);
         expect((await controlStops(page))[0]?.event.data.action).toBe("stop");
@@ -228,10 +234,22 @@ for (const combo of WEBCHAT_WORKERS) {
             })
             .toBe(1);
 
-        // ── done(reason="stopped_by_user") ends the pending stop; repeating
-        //    the same done id must not produce a second terminal UI ──────────
+        // A later delta appends to the same text part, so the stale cancel
+        // snapshot has the same part count. Release it before done.
+        await emitGatewayEvent(page, "message.delta", {
+            message_id: `stop-msg-${combo.id}`,
+            content: " and a second delta",
+        });
+        await page.clock.runFor(1);
+        await expect(
+            page.getByText("long response that will be stopped and a second delta", {
+                exact: true,
+            }),
+        ).toHaveCount(1);
         await emitDone(page, `done-stop-${combo.id}`, "stopped_by_user");
 
+        // ── done(reason="stopped_by_user") ends the pending stop; repeating
+        //    the same done id must not produce a second terminal UI ──────────
         await expect(
             page.getByRole("button", { name: "正在停止…" }),
         ).toHaveCount(0);
@@ -243,7 +261,7 @@ for (const combo of WEBCHAT_WORKERS) {
         ).toBeVisible();
         await expect(page.locator(".streaming-cursor")).toHaveCount(0);
         await expect(
-            page.getByText("long response that will be stopped", {
+            page.getByText("long response that will be stopped and a second delta", {
                 exact: true,
             }),
         ).toHaveCount(1);
@@ -261,6 +279,7 @@ for (const combo of WEBCHAT_WORKERS) {
             })
             .toBe(1);
         await expect.poll(async () => (await sentInputs(page)).length).toBe(2);
+        await page.clock.resume();
 
         // ── Same session: the next input dispatches and completes normally;
         //    the input list grows by exactly one ─────────────────────────────
@@ -293,6 +312,73 @@ for (const combo of WEBCHAT_WORKERS) {
         ).toHaveCount(1);
         await expect(page.locator(".msg-user-bubble")).toHaveCount(
             userBubblesBefore + 1,
+        );
+        await expect(
+            page.getByRole("button", { name: "发送消息" }),
+        ).toBeVisible();
+
+        // A stop with no delta removes the pending placeholder. Keep its
+        // cancel snapshot frozen until the following input is already live;
+        // it must not resurrect an empty streaming assistant message.
+        const emptyStopFreezeTime = await page.evaluate(
+            () => Date.now() + 60_000,
+        );
+        await page.clock.pauseAt(emptyStopFreezeTime);
+        await input.fill(`matrix-empty-stop-${combo.id}`);
+        await input.press("Enter");
+        await expect.poll(async () => (await sentInputs(page)).length).toBe(4);
+        expect((await sentInputs(page))[3]?.event.data.content).toBe(
+            `matrix-empty-stop-${combo.id}`,
+        );
+        await expect(
+            page.getByText(`matrix-empty-stop-${combo.id}`, { exact: true }),
+        ).toHaveCount(1);
+
+        await page.getByRole("button", { name: "停止生成" }).click();
+        await expect.poll(async () => (await controlStops(page)).length).toBe(2);
+        await expect(
+            page.getByRole("button", { name: "正在停止…" }),
+        ).toBeVisible();
+        await emitDone(page, `done-empty-stop-${combo.id}`, "stopped_by_user");
+        await expect(
+            page.getByRole("button", { name: "正在停止…" }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole("button", { name: "发送消息" }),
+        ).toBeVisible();
+        await expect(page.locator(".streaming-cursor")).toHaveCount(0);
+
+        const userBubblesAfterEmptyStop = await page
+            .locator(".msg-user-bubble")
+            .count();
+        await input.fill(`matrix-empty-next-${combo.id}`);
+        await input.press("Enter");
+        await expect.poll(async () => (await sentInputs(page)).length).toBe(5);
+        expect((await sentInputs(page))[4]?.event.data.content).toBe(
+            `matrix-empty-next-${combo.id}`,
+        );
+        await expect(
+            page.getByText(`matrix-empty-next-${combo.id}`, { exact: true }),
+        ).toHaveCount(1);
+
+        await page.clock.runFor(1);
+        await expect(
+            page.getByText(`matrix-empty-next-${combo.id}`, { exact: true }),
+        ).toHaveCount(1);
+        await page.clock.resume();
+        await emitGatewayEvent(page, "message.delta", {
+            message_id: `empty-next-msg-${combo.id}`,
+            content: "next turn after empty stop",
+        });
+        await expect(
+            page.getByText("next turn after empty stop", { exact: true }),
+        ).toBeVisible();
+        await emitDone(page, `done-empty-next-${combo.id}`, "completed");
+        await expect(
+            page.getByText("next turn after empty stop", { exact: true }),
+        ).toHaveCount(1);
+        await expect(page.locator(".msg-user-bubble")).toHaveCount(
+            userBubblesAfterEmptyStop + 1,
         );
         await expect(
             page.getByRole("button", { name: "发送消息" }),
