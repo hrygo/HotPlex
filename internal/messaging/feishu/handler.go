@@ -76,15 +76,6 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 	}
 	text = messaging.SanitizeText(text)
 
-	var hasVoice bool
-	if len(medias) > 0 {
-		var paths, transcriptions []string
-		paths, transcriptions, hasVoice = a.processMediaAttachments(ctx, medias)
-		if len(paths) > 0 || len(transcriptions) > 0 {
-			text = BuildMediaPrompt(text, paths, medias, transcriptions)
-		}
-	}
-
 	// Step 6: @Mention resolution is done inside ConvertMessage for text/post types.
 
 	// Extract routing info.
@@ -108,6 +99,15 @@ func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageRece
 			a.Log.Debug("feishu: gate rejected", "reason", reason, "chat", chatID, "user", userID)
 			dedup.Rollback(dedupHandle)
 			return nil
+		}
+	}
+
+	var hasVoice bool
+	if len(medias) > 0 {
+		var paths, transcriptions []string
+		paths, transcriptions, hasVoice = a.processMediaAttachments(ctx, medias)
+		if len(paths) > 0 || len(transcriptions) > 0 {
+			text = BuildMediaPrompt(text, paths, medias, transcriptions)
 		}
 	}
 
