@@ -430,76 +430,9 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	mcpServers := parseMCPServers(session.MCPConfig)
 	w.mcpServers = mcpServers // cache for Clear()
-	// forceNewSession creates a fresh session, killing the process on failure.
-	forceNewSession := func() (string, error) {
-		sess, err := client.NewSession(sctx, session.ProjectDir, mcpServers)
-		if err != nil {
-			_ = w.Proc.Kill()
-			return "", fmt.Errorf("acp: new session: %w", err)
-		}
-		return sess.SessionID, nil
-	}
-
-	var acpSessID string
-	var historyLost bool
-	if session.WorkerSessionID != "" {
-		if session.ForkSession {
-			// Fork from existing session (AC-FR08-01).
-			forkResult, forkErr := client.ForkSession(sctx, session.WorkerSessionID)
-			if forkErr != nil {
-				w.Log.Warn("acp: session fork failed, falling back to new session",
-					"session_id", session.SessionID, "err", forkErr)
-				id, err := forceNewSession()
-				if err != nil {
-					return err
-				}
-				acpSessID = id
-				historyLost = true
-			} else {
-				acpSessID = forkResult.SessionID
-			}
-		} else if w.supportsCapability("loadSession") {
-			// Resume existing session (only if agent supports load).
-			sessResult, loadErr := client.LoadSession(sctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
-			if loadErr != nil {
-				w.Log.Error("acp: session load failed, falling back to new session (history lost)",
-					"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
-					"err", loadErr,
-					"hint", "check agent session storage and persistence")
-				id, err := forceNewSession()
-				if err != nil {
-					return err
-				}
-				acpSessID = id
-				historyLost = true
-			} else {
-				acpSessID = sessResult.SessionID
-			}
-		} else {
-			// Agent does not support loadSession; create fresh.
-			id, err := forceNewSession()
-			if err != nil {
-				return err
-			}
-			acpSessID = id
-		}
-	} else {
-		id, err := forceNewSession()
-		if err != nil {
-			return err
-		}
-		acpSessID = id
-	}
-	w.SetWorkerSessionID(acpSessID)
-
-	// B-acp (#816): when loadSession failed (historyLost), seed pendingHistory
-	// from SessionInfo.ConversationHistory so the first prompt carries text-level
-	// context continuity into the new ACP session.
-	if historyLost && len(session.ConversationHistory) > 0 {
-		w.Mu.Lock()
-		w.pendingHistory = session.ConversationHistory
-		w.historyInjected.Store(false)
-		w.Mu.Unlock()
+	historyLost, err := w.establishSession(sctx, client, session, mcpServers)
+	if err != nil {
+		return err
 	}
 
 	// Record handshake latency.
@@ -526,14 +459,114 @@ func (w *Worker) Start(ctx context.Context, session worker.SessionInfo) error {
 
 	// Notify client if conversation history was lost during resume.
 	if historyLost {
-		w.conn.TrySend(w.mapper.newEnvelope(events.Error, events.ErrorData{
-			Code:    "HISTORY_LOST",
-			Message: "Previous conversation history could not be restored; starting a new session.",
-		}))
+		w.conn.TrySend(newHistoryLostEnvelope(w.mapper, len(session.ConversationHistory) > 0))
 	}
 
 	cleanup = false
 	return nil
+}
+
+// establishSession creates, loads, or forks the ACP session. It is kept
+// separate from the process and connection setup so the session fallback can
+// be exercised with a protocol-only client in tests.
+func (w *Worker) establishSession(
+	ctx context.Context,
+	client *ACPClient,
+	session worker.SessionInfo,
+	mcpServers []any,
+) (historyLost bool, err error) {
+	// forceNewSession creates a fresh session, killing the process on failure.
+	forceNewSession := func() (string, error) {
+		sess, err := client.NewSession(ctx, session.ProjectDir, mcpServers)
+		if err != nil {
+			if w.Proc != nil {
+				_ = w.Proc.Kill()
+			}
+			return "", fmt.Errorf("acp: new session: %w", err)
+		}
+		return sess.SessionID, nil
+	}
+
+	var acpSessID string
+	if session.WorkerSessionID != "" {
+		if session.ForkSession {
+			// Fork from existing session (AC-FR08-01).
+			forkResult, forkErr := client.ForkSession(ctx, session.WorkerSessionID)
+			if forkErr != nil {
+				w.Log.Warn("acp: session fork failed, falling back to new session",
+					"session_id", session.SessionID, "err", forkErr)
+				id, err := forceNewSession()
+				if err != nil {
+					return false, err
+				}
+				acpSessID = id
+				historyLost = true
+			} else {
+				acpSessID = forkResult.SessionID
+			}
+		} else if w.supportsCapability("loadSession") {
+			// Resume existing session (only if agent supports load).
+			sessResult, loadErr := client.LoadSession(ctx, session.WorkerSessionID, session.ProjectDir, mcpServers)
+			if loadErr != nil {
+				w.Log.Error("acp: session load failed, falling back to new session (history lost)",
+					"session_id", session.SessionID, "acp_session_id", session.WorkerSessionID,
+					"err", loadErr,
+					"hint", "check agent session storage and persistence")
+				id, err := forceNewSession()
+				if err != nil {
+					return false, err
+				}
+				acpSessID = id
+				historyLost = true
+			} else {
+				acpSessID = sessResult.SessionID
+			}
+		} else {
+			// Agent does not support loadSession; create fresh and preserve any
+			// available conversation turns as text-level context.
+			id, err := forceNewSession()
+			if err != nil {
+				return false, err
+			}
+			acpSessID = id
+			historyLost = true
+		}
+	} else {
+		id, err := forceNewSession()
+		if err != nil {
+			return false, err
+		}
+		acpSessID = id
+		historyLost = len(session.ConversationHistory) > 0
+	}
+	w.SetWorkerSessionID(acpSessID)
+
+	// B-acp (#816): when a prior session cannot be restored, seed pendingHistory
+	// so the first prompt carries text-level context continuity into the new ACP
+	// session. Native loadSession and fresh sessions without stored history leave
+	// it empty.
+	if historyLost && len(session.ConversationHistory) > 0 {
+		w.Mu.Lock()
+		w.pendingHistory = session.ConversationHistory
+		w.historyInjected.Store(false)
+		w.Mu.Unlock()
+	}
+	return historyLost, nil
+}
+
+func historyLostMessage(hasHistory bool) string {
+	if hasHistory {
+		return "Previous conversation history could not be restored; starting a new session with prior messages supplied as text context."
+	}
+	return "Previous conversation history could not be restored; starting a new session without prior text context."
+}
+
+func newHistoryLostEnvelope(mapper *ACPMapper, hasHistory bool) *events.Envelope {
+	return mapper.newEnvelope(events.Message, events.MessageData{
+		Role:        "assistant",
+		Content:     historyLostMessage(hasHistory),
+		ContentType: "text",
+	})
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────
