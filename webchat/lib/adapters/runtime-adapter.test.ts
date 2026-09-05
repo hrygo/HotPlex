@@ -1,11 +1,48 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    completeAssistantParts,
     convertToThreadMessage,
     isGatewayCommandAck,
     reconcileMessagesByClientMessageId,
 } from "./hotplex-runtime-adapter";
+import type { TurnSummaryPart } from "@/lib/types/message-parts";
 import type { HotPlexMessage } from "@/lib/types/message";
+
+describe("completeAssistantParts", () => {
+    it("retains streamed content and appends the turn summary", () => {
+        const stats: TurnSummaryPart["data"] = {
+            turn_count: 1,
+            tool_call_count: 0,
+            duration: "1s",
+            duration_seconds: 1,
+            total_input_tok: 12,
+            total_output_tok: 4,
+            context_fill: 0,
+            context_window: 100,
+            context_pct: 0,
+            total_cost_usd: 0,
+            model_name: "test",
+            turn_duration_ms: 1000,
+            turn_input_tok: 12,
+            turn_output_tok: 4,
+            turn_cost_usd: 0,
+            tool_names: null,
+            work_dir: "/tmp",
+            git_branch: "main",
+        };
+
+        expect(
+            completeAssistantParts(
+                [{ type: "text", text: "answer" }],
+                stats,
+            ),
+        ).toEqual([
+            { type: "text", text: "answer" },
+            { type: "turn-summary", data: stats },
+        ]);
+    });
+});
 
 describe("convertToThreadMessage", () => {
     it("preserves local progress in assistant-ui custom metadata", () => {

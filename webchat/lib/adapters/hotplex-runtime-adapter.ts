@@ -339,6 +339,28 @@ export function reconcileMessagesByClientMessageId(
     return [...history, ...liveOnly];
 }
 
+export function completeAssistantParts(
+    parts: readonly MessagePart[],
+    sessionStats?: TurnSummaryPart["data"],
+): MessagePart[] {
+    const completed = parts.map((part): MessagePart => {
+        if (
+            part.type === "tool-call" &&
+            (!part.status || part.status.type === "running")
+        ) {
+            return {
+                ...part,
+                status: { type: "complete" as const },
+            };
+        }
+        return part;
+    });
+    if (sessionStats) {
+        completed.push({ type: "turn-summary", data: sessionStats });
+    }
+    return completed;
+}
+
 // ============================================================================
 // HotPlex Runtime Adapter Hook
 // ============================================================================
@@ -925,21 +947,10 @@ export function useHotPlexRuntime({
                     );
                     if (assistantIndex === -1) return prev;
                     const message = prev[assistantIndex];
-                    const parts = message.parts.map((part) =>
-                        part.type === "tool-call" &&
-                        (!part.status || part.status.type === "running")
-                            ? {
-                                  ...part,
-                                  status: { type: "complete" as const },
-                              }
-                            : part,
+                    const parts = completeAssistantParts(
+                        message.parts,
+                        data?.stats?._session,
                     );
-                    if (data?.stats?._session) {
-                        parts.push({
-                            type: "turn-summary" as const,
-                            data: data.stats._session,
-                        });
-                    }
                     const next = [...prev];
                     next[assistantIndex] = {
                         ...message,
@@ -963,14 +974,9 @@ export function useHotPlexRuntime({
                 const activeMessage =
                     activeIndex === -1 ? undefined : prev[activeIndex];
                 if (activeMessage && activeMessage.parts.length > 0) {
-                    const parts = activeMessage.parts.map((part) =>
-                        part.type === "tool-call" &&
-                        (!part.status || part.status.type === "running")
-                            ? {
-                                  ...part,
-                                  status: { type: "complete" as const },
-                              }
-                            : part,
+                    const parts = completeAssistantParts(
+                        activeMessage.parts,
+                        data?.stats?._session,
                     );
                     const next = [...prev];
                     next[activeIndex] = {
@@ -991,26 +997,10 @@ export function useHotPlexRuntime({
                 }
                 const lastMessage = prev[prev.length - 1];
                 if (lastMessage?.role === "assistant") {
-                    const parts = [...lastMessage.parts];
-                    for (let i = 0; i < parts.length; i += 1) {
-                        const part = parts[i];
-                        if (
-                            part.type === "tool-call" &&
-                            (!part.status || part.status.type === "running")
-                        ) {
-                            parts[i] = {
-                                ...part,
-                                status: { type: "complete" as const },
-                            };
-                        }
-                    }
-                    // Inject turn-summary part from _session data
-                    if (data?.stats?._session) {
-                        parts.push({
-                            type: "turn-summary" as const,
-                            data: data.stats._session,
-                        });
-                    }
+                    const parts = completeAssistantParts(
+                        lastMessage.parts,
+                        data?.stats?._session,
+                    );
                     return [
                         ...prev.slice(0, -1),
                         { ...lastMessage, status: "complete" as const, parts },
