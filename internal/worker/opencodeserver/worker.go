@@ -443,9 +443,12 @@ func (w *Worker) HandleElicitationResponse(ctx context.Context, reqID, action st
 	return w.httpPost(ctx, fmt.Sprintf("/elicitation/%s/reply", url.PathEscape(reqID)), payload)
 }
 
+const resumeFreshStartNotice = "⚠️ OpenCode 原会话不可用，历史上下文未恢复，已创建新会话。"
+
 // Resume reconnects to an existing session on the shared OpenCode server.
 // If a WorkerSessionID from a previous Start is available in session.WorkerSessionID,
-// it attempts to reuse that OCS session. Otherwise, it creates a fresh OCS session.
+// it attempts to reuse that OCS session. Otherwise, it creates a fresh OCS session
+// and reports the loss of native context to the Gateway.
 func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	if err := w.checkNotStarted(); err != nil {
 		return err
@@ -459,6 +462,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 
 	// Try to reuse the OCS-internal session if we have one from a previous Start.
 	ocsSessionID := session.WorkerSessionID
+	freshStart := ocsSessionID == ""
 	if ocsSessionID != "" {
 		w.Log.Debug("opencodeserver: resume step 3 - checking session existence", "ocs_session_id", ocsSessionID)
 		exists, err := w.ocsSessionExists(ctx, ocsSessionID)
@@ -480,6 +484,7 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 		}
 		w.Log.Info("opencodeserver: OCS session not found, creating fresh",
 			"stale_ocs_session_id", ocsSessionID, "hotplex_session_id", session.SessionID)
+		freshStart = true
 	}
 
 	// No valid OCS session - create a new one (conversation context is lost).
@@ -496,6 +501,14 @@ func (w *Worker) Resume(ctx context.Context, session worker.SessionInfo) error {
 	}
 	w.SetWorkerSessionID(newSessionID)
 	w.startSSE(newSessionID)
+	if freshStart {
+		noticeID := aep.NewID()
+		w.httpConn.Inject(events.NewEnvelope(noticeID, session.SessionID, 0, events.Message,
+			events.MessageData{ID: noticeID, Role: "system", Content: resumeFreshStartNotice}))
+		w.Log.Info("opencodeserver: resume fell back to fresh session",
+			"ocs_session_id", newSessionID, "hotplex_session_id", session.SessionID)
+		return worker.ErrFellBackToFreshStart
+	}
 	w.Log.Debug("opencodeserver: resume completed (fresh session)")
 	return nil
 }
