@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.50.2] - 2026-09-05
+
+### Summary
+
+v1.50.2 是一次 patch 版本更新，核心主题是 **跨平台交互与会话恢复对齐**。本版本修复恢复前序号水化失败仍可能继续创建 Worker 的风险，补齐 ACP 问答/表单交互到 AEP 的映射，并让 Slack、飞书、OpenCode、WebChat 在权限、媒体、问答、停止和失败场景下保持明确且可重试的用户语义。
+
+### Fixed
+
+- **Session Recovery**: 会话恢复现在必须先完成持久化事件序号水化；事件存储不可用时保留原会话生命周期，不终止旧 Worker，也不静默降级为新会话。ACP 和 OpenCode 在原生上下文不可恢复时会显式提示上下文丢失，并尽可能注入已有文本历史。
+- **Interactive Requests**: ACP 的 question/elicitation 请求现在归一化为 AEP 交互事件，校验非法参数并保留原始 JSON-RPC ID；Slack 文本响应保留完整问题文本、要求精确且无歧义的请求 ID，并拒绝过期或错误目标。
+- **Platform Boundaries**: 飞书在访问控制通过前不再下载媒体附件；OpenCode 多题回答保留缺失题目的位置；不支持的 Codex 模型控制返回明确的 `ErrNotImplemented` 语义。
+- **WebChat Terminal State**: 终态事件会关闭仍待处理的交互卡片，修复同一浏览器任务内 delta/done 竞态导致的回复丢失，并保留终态 turn summary；停止后的旧 assistant-ui 快照不会再覆盖已完成内容。
+
+### Changed
+
+- **Worker Capability Catalog**: 命令目录按 Worker 的真实能力隐藏不可执行的固定控制项，避免用户看到无法工作的命令或将同名 Skill 误判为 Gateway 控制命令。
+
 ## [1.50.1] - 2026-08-31
 
 ### Fixed
