@@ -1293,6 +1293,56 @@ func TestAnswersToOrderedArrays_PreservesQuestionOrder(t *testing.T) {
 	require.Equal(t, [][]string{{"A"}, {"B"}}, answersToOrderedArrays(answers, []string{"第一题", "第二题"}))
 }
 
+func TestAnswersToOrderedArrays_PreservesMissingQuestionPositions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input map[string]string
+		order []string
+		want  [][]string
+	}{
+		{
+			name:  "leading missing",
+			input: map[string]string{"second": "answer"},
+			order: []string{"first", "second"},
+			want:  [][]string{{}, {"answer"}},
+		},
+		{
+			name:  "middle missing",
+			input: map[string]string{"first": "one", "third": "three"},
+			order: []string{"first", "second", "third"},
+			want:  [][]string{{"one"}, {}, {"three"}},
+		},
+		{
+			name:  "trailing missing",
+			input: map[string]string{"first": "one"},
+			order: []string{"first", "second"},
+			want:  [][]string{{"one"}, {}},
+		},
+		{
+			name:  "all missing",
+			input: map[string]string{},
+			order: []string{"first", "second"},
+			want:  [][]string{{}, {}},
+		},
+		{
+			name:  "extra keys remain sorted",
+			input: map[string]string{"second": "two", "extra-z": "z", "extra-a": "a"},
+			order: []string{"first", "second"},
+			want:  [][]string{{}, {"two"}, {"a"}, {"z"}},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, answersToOrderedArrays(tt.input, tt.order))
+		})
+	}
+}
+
 func TestAnswerOptionsToOrderedArraysPreservesMultiSelect(t *testing.T) {
 	t.Parallel()
 	answers := map[string][]string{
@@ -1303,6 +1353,75 @@ func TestAnswerOptionsToOrderedArraysPreservesMultiSelect(t *testing.T) {
 		[][]string{{"Staging"}, {"Unit", "Race"}},
 		answerOptionsToOrderedArrays(answers, []string{"environment", "checks"}),
 	)
+}
+
+func TestAnswerOptionsToOrderedArrays_PreservesMissingQuestionPositions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input map[string][]string
+		order []string
+		want  [][]string
+	}{
+		{
+			name:  "leading missing",
+			input: map[string][]string{"second": {"answer"}},
+			order: []string{"first", "second"},
+			want:  [][]string{{}, {"answer"}},
+		},
+		{
+			name:  "middle missing",
+			input: map[string][]string{"first": {"one"}, "third": {"three"}},
+			order: []string{"first", "second", "third"},
+			want:  [][]string{{"one"}, {}, {"three"}},
+		},
+		{
+			name:  "trailing missing",
+			input: map[string][]string{"first": {"one"}},
+			order: []string{"first", "second"},
+			want:  [][]string{{"one"}, {}},
+		},
+		{
+			name:  "all missing",
+			input: map[string][]string{},
+			order: []string{"first", "second"},
+			want:  [][]string{{}, {}},
+		},
+		{
+			name:  "multi select and sorted extra",
+			input: map[string][]string{"first": {"one"}, "third": {"a", "b"}, "extra-z": {"z"}, "extra-a": {"a"}},
+			order: []string{"first", "second", "third"},
+			want:  [][]string{{"one"}, {}, {"a", "b"}, {"a"}, {"z"}},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, answerOptionsToOrderedArrays(tt.input, tt.order))
+		})
+	}
+}
+
+func TestHandleQuestionResponseOptions_PreservesMissingPositionsInHTTPBody(t *testing.T) {
+	t.Parallel()
+
+	var received map[string][][]string
+	w, _ := newWorkerWithMockServer(t, func(rw http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/question/q-gap/reply", r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &received))
+		rw.WriteHeader(http.StatusOK)
+	})
+
+	err := w.HandleQuestionResponseOptions(context.Background(), "q-gap",
+		map[string][]string{"second": {"answer"}}, []string{"first", "second"})
+	require.NoError(t, err)
+	require.Equal(t, map[string][][]string{"answers": {{}, {"answer"}}}, received)
 }
 
 // Consolidated: conn tests

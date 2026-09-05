@@ -1306,13 +1306,15 @@ func answersToArrays(m map[string]string) [][]string {
 }
 
 func answersToOrderedArrays(m map[string]string, questionOrder []string) [][]string {
-	result := make([][]string, 0, len(m))
+	result := make([][]string, 0, len(questionOrder)+len(m))
 	seen := make(map[string]struct{}, len(questionOrder))
 	for _, question := range questionOrder {
 		if answer, ok := m[question]; ok {
 			result = append(result, []string{answer})
-			seen[question] = struct{}{}
+		} else {
+			result = append(result, []string{})
 		}
+		seen[question] = struct{}{}
 	}
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -1328,13 +1330,15 @@ func answersToOrderedArrays(m map[string]string, questionOrder []string) [][]str
 }
 
 func answerOptionsToOrderedArrays(answers map[string][]string, questionOrder []string) [][]string {
-	result := make([][]string, 0, len(answers))
+	result := make([][]string, 0, len(questionOrder)+len(answers))
 	seen := make(map[string]struct{}, len(questionOrder))
 	for _, question := range questionOrder {
 		if values, ok := answers[question]; ok {
-			result = append(result, append([]string(nil), values...))
-			seen[question] = struct{}{}
+			result = append(result, append([]string{}, values...))
+		} else {
+			result = append(result, []string{})
 		}
+		seen[question] = struct{}{}
 	}
 	keys := make([]string, 0, len(answers))
 	for key := range answers {
