@@ -83,6 +83,7 @@ import {
     patchAuthoritativeAssistantContent,
     selectAuthoritativeAssistantContent,
 } from "@/lib/adapters/reconcile-turn";
+import { expireInteractions } from "@/lib/adapters/terminal-interactions";
 import {
     completeStreamingAssistant,
     createPendingAssistantMessage,
@@ -875,6 +876,7 @@ export function useHotPlexRuntime({
                 const oldest = processedDoneEventIds.values().next().value;
                 if (oldest) processedDoneEventIds.delete(oldest);
             }
+            expireActiveInteractions();
             streamingFallbackId = null;
             turnActiveRef.current = false;
             const queuedDispatch = activeQueueDispatchRef.current;
@@ -1164,8 +1166,21 @@ export function useHotPlexRuntime({
             );
         };
 
+        const expireActiveInteractions = () => {
+            const interactionIDs = new Set(interactionMapRef.current.keys());
+            for (const interactionID of interactionIDs) {
+                const timer = interactionAckTimersRef.current.get(interactionID);
+                if (timer !== undefined) {
+                    clearTimeout(timer);
+                    interactionAckTimersRef.current.delete(interactionID);
+                }
+            }
+            interactionMapRef.current.clear();
+            setMessages((prev) => expireInteractions(prev, interactionIDs));
+        };
+
         const handlePermissionResponse = (data: PermissionResponseData) => {
-            if (!data?.id) return;
+            if (!data?.id || !interactionMapRef.current.has(data.id)) return;
             updateInteractionState(
                 data.id,
                 data.allowed ? "resolved" : "rejected",
@@ -1175,13 +1190,13 @@ export function useHotPlexRuntime({
         };
 
         const handleQuestionResponse = (data: QuestionResponseData) => {
-            if (!data?.id) return;
+            if (!data?.id || !interactionMapRef.current.has(data.id)) return;
             updateInteractionState(data.id, "resolved", data);
             interactionMapRef.current.delete(data.id);
         };
 
         const handleElicitationResponse = (data: ElicitationResponseData) => {
-            if (!data?.id) return;
+            if (!data?.id || !interactionMapRef.current.has(data.id)) return;
             updateInteractionState(
                 data.id,
                 data.action === "accept" ? "resolved" : "rejected",
@@ -1259,6 +1274,7 @@ export function useHotPlexRuntime({
             // SESSION_TERMINATED is a normal lifecycle event (user cancelled or server stopped).
             // Don't pollute the chat with error messages; just mark the run as stopped.
             if (isTerminated) {
+                expireActiveInteractions();
                 turnActiveRef.current = false;
                 activeQueueDispatchRef.current = null;
                 setIsRunning(false);
@@ -1850,6 +1866,9 @@ export function useHotPlexRuntime({
         client.on("toolCall", handleToolCall);
         client.on("toolResult", handleToolResult);
         const handleState = (data: { state: string }) => {
+            if (data.state === "terminated" || data.state === "deleted") {
+                expireActiveInteractions();
+            }
             onSessionStateChangeRef.current?.(data.state);
         };
         client.on("state", handleState);
