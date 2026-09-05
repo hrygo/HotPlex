@@ -61,6 +61,7 @@ HotPlex 是一个 AI Coding Agent 统一管理平台。通过飞书、Slack 或 
 | [Cron 自动化](guides/developer/cron-automation.md)           | 三种调度模式、常见场景、Silent 模式   |
 | [安全模型](guides/developer/security-model.md)               | 7 层安全体系、权限控制、最佳实践      |
 | [语音功能](guides/developer/voice-features.md)               | STT 语音转文字 + TTS 语音回复配置     |
+| [三端与四 Worker 验收](guides/developer/platform-worker-e2e-validation.md) | 12 组合功能清单、自动测试与真实环境证据 |
 
 ### 企业
 
