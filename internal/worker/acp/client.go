@@ -191,6 +191,42 @@ func (c *ACPClient) RespondRequest(ctx context.Context, id json.RawMessage, outc
 	return nil
 }
 
+// respondRequestError rejects a malformed server-initiated request while
+// preserving its JSON-RPC ID. It intentionally shares RespondRequest's
+// bounded write and writeMu critical section so an invalid interaction cannot
+// wedge the agent connection.
+func (c *ACPClient) respondRequestError(
+	ctx context.Context,
+	id json.RawMessage,
+	code int,
+	message string,
+	data any,
+) error {
+	response := &JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error: &JSONRPCError{
+			Code:    code,
+			Message: message,
+		},
+	}
+	if data != nil {
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return fmt.Errorf("acp respond request error: marshal data: %w", err)
+		}
+		response.Error.Data = encoded
+	}
+	if err := base.WriteWithCtxBounded(ctx, func() error {
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
+		return WriteMessage(c.stdin, response)
+	}); err != nil {
+		return fmt.Errorf("acp respond request error: %w", err)
+	}
+	return nil
+}
+
 // RespondPermission is a compatibility alias for RespondRequest.
 func (c *ACPClient) RespondPermission(ctx context.Context, id json.RawMessage, outcome any) error {
 	return c.RespondRequest(ctx, id, outcome)

@@ -30,8 +30,8 @@ func TestHandleServerRequest_UnknownMethod_RawPassthrough(t *testing.T) {
 	req := &JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      mustMarshal(42),
-		Method:  "session/request_question",
-		Params:  mustMarshal(map[string]any{"question": "What is 2+2?"}),
+		Method:  "session/request_future_extension",
+		Params:  mustMarshal(map[string]any{"prompt": "What is 2+2?"}),
 	}
 
 	w.handleServerRequest(context.Background(), req, conn)
@@ -44,12 +44,12 @@ func TestHandleServerRequest_UnknownMethod_RawPassthrough(t *testing.T) {
 	require.NoError(t, err)
 	var raw events.RawData
 	require.NoError(t, json.Unmarshal(rawBytes, &raw))
-	require.Equal(t, "acp.server_request.session/request_question", raw.Kind)
+	require.Equal(t, "acp.server_request.session/request_future_extension", raw.Kind)
 
 	rm, ok := raw.Raw.(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "42", rm["id"])
-	require.Equal(t, "session/request_question", rm["method"])
+	require.Equal(t, "session/request_future_extension", rm["method"])
 
 	// Should be stored in pendingRequests.
 	_, ok = w.pendingRequests.Load("42")

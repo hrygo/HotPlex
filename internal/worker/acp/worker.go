@@ -1335,9 +1335,15 @@ func (w *Worker) handleServerRequest(ctx context.Context, req *JSONRPCRequest, c
 		w.pendingPerm.Store(string(req.ID), pm)
 		conn.TrySend(pm.Envelope)
 
+	case acpQuestionRequestMethod:
+		w.handleKnownInteractionRequest(ctx, req, conn, mapQuestionRequest)
+
+	case acpElicitationRequestMethod:
+		w.handleKnownInteractionRequest(ctx, req, conn, mapElicitationRequest)
+
 	default:
-		// Non-permission server-initiated request (e.g. question, elicitation).
-		// Forward as Raw event so the client can display and respond.
+		// Unknown server-initiated request: forward as Raw so clients can
+		// inspect and respond to an extension not yet understood by ACP.
 		w.Log.Debug("acp: forwarding unknown server request as raw event",
 			"method", req.Method, "id", string(req.ID))
 		w.pendingRequests.Store(string(req.ID), req)
