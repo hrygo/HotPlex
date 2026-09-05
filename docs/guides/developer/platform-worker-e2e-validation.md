@@ -26,11 +26,14 @@ go test ./internal/worker/... ./internal/gateway/... ./internal/messaging/... -c
 pnpm --dir webchat test
 pnpm --dir webchat exec tsc --noEmit
 pnpm --dir webchat test:e2e:matrix
+pnpm --dir webchat exec playwright test e2e/terminal-interactions.spec.ts --project=chromium
 ```
 
 契约矩阵包含固定的 12 组合 × 8 核心场景：接受与 ACK、去重冲突、投递失败、停止、下一轮、重置重连、终态发送失败、增量背压。交互和原生能力还有各包专项测试，不应把这 96 项称作全部功能覆盖。
 
 浏览器测试通过 `PLAYWRIGHT_PORT` 使用独立端口；如默认 Playwright 浏览器缺失，可按 `webchat/playwright.config.ts` 使用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 指向已安装的兼容浏览器。记录此环境差异，不降低断言。
+
+终态交互专项覆盖四 Worker 的 done、SESSION_TERMINATED、terminated/deleted 状态，检查未完成卡片过期、已完成结果保留和迟到回执不回写。该专项与停止后下一轮输入的核心矩阵一起运行。
 
 ## Live 前提
 
@@ -59,6 +62,23 @@ pnpm --dir webchat test:e2e:matrix
 | 失败与重试 | 测试环境注入平台投递失败/Worker 不可用 | 错误可见、状态收敛；未知投递结果不自动重放 |
 
 模型选择、权限模式调整、原生命令目录和文件读取能力不强制使用相同的原生机制。降级必须描述实际结果，例如“恢复了文本历史，未恢复原生工具状态”。
+
+## 当前明确的能力差异
+
+以下是 HotPlex adapter 的实现边界；实际 Worker 版本和 ACP agent 的协商结果仍须在 Live 中记录。
+
+| Worker | 会话内明确不支持的固定命令 | 恢复边界 |
+| --- | --- | --- |
+| Claude Code | `/clear`；需要全新上下文时使用 `/reset` | 原生会话文件存在时恢复；文件不可用可能新建 |
+| Codex | `/model`、`/perm` | 新线程回填有界文本历史，不等同原生工具状态恢复 |
+| OpenCode | 仍由实际服务端决定可用模型等动态能力 | 复用远端 session；确认不存在后新建并提示历史未恢复 |
+| ACP | `/compact`、`/rewind`、`/mcp` | 依 agent 的 loadSession；不可用时回填现有文本历史并提示 |
+
+上表中明确不支持的固定命令在目录中隐藏，但保留名称占用；同名技能不能把这些控制命令变成普通输入。ACP 问答与表单适配仅适用于发出已知扩展方法的 agent，不能据此宣称所有 ACP agent 都支持这些能力。
+
+Slack 的文本审批和表单动作需要明确请求 ID，ID 保持大小写；未知或过期 ID 不会回退到其他请求。多个待处理请求应使用对应卡片。自由文本问答保留完整回答，多问题中的未答项保持原题位置。
+
+WebChat 当前没有附件上传入口，只提供已声明的文本/代码输入。Slack 和飞书的媒体通过平台下载、可选转写及本地文件路径进入 Worker。附件、语音和 TTS 应分别验收，不将 Worker 的 image 能力声明当作三端上传闭环已经完成。
 
 ## 记录模板与结论
 

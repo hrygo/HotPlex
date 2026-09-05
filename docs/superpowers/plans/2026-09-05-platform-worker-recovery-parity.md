@@ -14,13 +14,17 @@ description: 使用 luna_worker 原子任务修复会话恢复链路中的功能
 
 **Spec:** `docs/superpowers/specs/2026-09-05-platform-worker-parity-design.md`。
 
+## 执行结果（2026-09-05）
+
+Task 1–4 已完成并分别集成为 `66ad556`、`2f28297`、`dc0324c`、`9895e67`。下方保留实施前检查清单作为设计记录，不将原计划的每条操作等同实际执行日志；测试与最终结论见设计复核的“已集成记录”和“最终验证”。ACP 恢复采用协议会话选择与首轮注入测试，覆盖无 loadSession、加载失败及原生成功路径。
+
 ## 约束
 
 执行者为当前环境提供的 `luna_worker`。子代理仅修改明确授权文件，不提交或推送，由主 Agent 完成独立审查与集成。每任务先 RED 后 GREEN；禁止使用 sleep 等待事件。`bridge.go` 的任务必须串行执行。测试不得启动真实 Worker CLI 或访问真实平台。
 
 ## Task 1：Seq hydration 失败时中止恢复（R1）
 
-Files：`internal/gateway/bridge.go`、新增 `internal/gateway/bridge_resume_hydration_test.go`。
+Files：`internal/gateway/bridge.go`、`internal/gateway/bridge_worker.go`、新增 `internal/gateway/bridge_resume_hydration_test.go`。
 
 Consumes：`Hub.EnsureSeqHydrated(sessionID string) error`、既有 `mockBridgeSM` 和 `mockSeqHydrator`。Produces：失败时会话、旧 Worker 和序号不变的 `ResumeSession`。
 
@@ -35,6 +39,7 @@ if err := b.hub.EnsureSeqHydrated(id); err != nil {
 ```
 
 - [ ] 覆盖 `StartPlatformSession` 的 IDLE / TERMINATED 恢复错误不创建替代会话，以及 hydration 修复后同会话可重试成功；运行 `go test ./internal/gateway -count=1 -race -shuffle=on`。
+- [ ] `attemptResumeFallback` 直接调用 resumeWithOpts 的分支也识别该哨兵，不能改走 createAndLaunchWorker；补不创建 fresh Worker、不重投输入的回归。
 - [ ] 主 Agent 审查仅包含该行为后独立提交。
 
 ## Task 2：Gateway 提供 ACP 恢复历史（R2）
@@ -71,3 +76,14 @@ Consumes：ACP 测试客户端、Start/Resume 握手、`ConversationHistory`。P
 ## 后续任务形成条件
 
 OpenCode 恢复提示、平台交互与 WebChat 光标问题必须先复核真实消费路径，再形成各自原子任务。不得把初步失败直接解释为已确定根因。最终统一复跑 `make test-contract-matrix`、涉及的 Go race 包、WebChat 单元测试与 Chromium 矩阵。
+
+## Task 4：OpenCode 恢复降级显式反馈（R4）
+
+Files：`internal/worker/opencodeserver/worker.go`、相关 Resume 测试或新增 `worker_resume_parity_test.go`。
+
+Consumes：已有远端存在检查、缓冲 Worker Conn、Gateway 对 ErrFellBackToFreshStart 的处理。Produces：原生恢复失败且成功新建时，准确标记 fresh 并给出非终态提示。
+
+- [ ] fake HTTP 覆盖远端存在、404、无旧 ID、5xx/网络错误。存在时不提示；404/无 ID 新建成功后 Conn 收到现有 MessageData 告知历史不可恢复，Resume 返回 ErrFellBackToFreshStart。
+- [ ] 错误探测仍返回 ErrResumeCheckFailed，不能新建或声称历史已恢复；新建失败不得发成功降级提示。
+- [ ] 通知写入已初始化 Conn 的缓冲队列，确保 Gateway 绑定转发后可见；不使用终态 Error 或直接提前广播。
+- [ ] 更新既有要求 fresh 分支 nil 的测试为准确哨兵语义，运行 OpenCode 包 race/shuffle 与 Gateway 恢复哨兵回归。主 Agent 复核后提交。
