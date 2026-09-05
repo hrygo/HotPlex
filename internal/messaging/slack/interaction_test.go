@@ -142,6 +142,16 @@ func newTestInteractionAdapter() *Adapter {
 	}
 }
 
+type recordingSlackAPI struct {
+	*slack.Client
+	postCount int
+}
+
+func (c *recordingSlackAPI) PostMessageContext(_ context.Context, _ string, _ ...slack.MsgOption) (string, string, error) {
+	c.postCount++
+	return "", "", nil
+}
+
 func TestCheckPendingInteraction_NoInteractions(t *testing.T) {
 	t.Parallel()
 	a := newTestInteractionAdapter()
@@ -304,6 +314,101 @@ func TestCheckPendingInteraction_QuestionRawText(t *testing.T) {
 	require.Equal(t, []string{"yes"}, answers["_"])
 }
 
+func TestCheckPendingInteraction_QuestionMultiWord(t *testing.T) {
+	t.Parallel()
+	a := newTestInteractionAdapter()
+	a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	var capturedMetadata map[string]any
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "req-question-multi-word",
+		SessionID: "sess-1",
+		OwnerID:   "U1",
+		Type:      events.QuestionRequest,
+		Timeout:   5 * time.Minute,
+		SendResponse: func(metadata map[string]any) {
+			capturedMetadata = metadata
+		},
+	})
+
+	answer := "use PostgreSQL for storage"
+	consumed := a.checkPendingInteraction(context.Background(), answer, "C1", "123.456", "U1")
+	require.True(t, consumed)
+	qr := capturedMetadata["question_response"].(map[string]any)
+	answers := qr["answers"].(map[string][]string)
+	require.Equal(t, []string{answer}, answers["_"])
+}
+
+func TestCheckPendingInteraction_ReservedWordQuestionAnswers(t *testing.T) {
+	t.Parallel()
+
+	for _, answer := range []string{"allow", "deny", "accept", "decline"} {
+		answer := answer
+		t.Run(answer, func(t *testing.T) {
+			t.Parallel()
+			a := newTestInteractionAdapter()
+			a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			a.client = &recordingSlackAPI{Client: slack.New("x-test-token")}
+
+			var capturedMetadata map[string]any
+			a.Interactions.Register(&messaging.PendingInteraction{
+				ID:        "req-question-" + answer,
+				SessionID: "sess-question",
+				OwnerID:   "U1",
+				Type:      events.QuestionRequest,
+				Timeout:   5 * time.Minute,
+				SendResponse: func(metadata map[string]any) {
+					capturedMetadata = metadata
+				},
+			})
+
+			consumed := a.checkPendingInteraction(context.Background(), answer, "C1", "123.456", "U1")
+			require.True(t, consumed)
+			require.NotNil(t, capturedMetadata)
+			qr := capturedMetadata["question_response"].(map[string]any)
+			answers := qr["answers"].(map[string][]string)
+			require.Equal(t, []string{answer}, answers["_"])
+		})
+	}
+}
+
+func TestCheckPendingInteraction_MixedCaseRequestID(t *testing.T) {
+	t.Parallel()
+	a := newTestInteractionAdapter()
+	a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	var targetCalls, otherCalls int
+	now := time.Now()
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "req-MixedCase",
+		SessionID: "sess-1",
+		OwnerID:   "U1",
+		Type:      events.PermissionRequest,
+		CreatedAt: now.Add(-time.Minute),
+		Timeout:   5 * time.Minute,
+		SendResponse: func(map[string]any) {
+			targetCalls++
+		},
+	})
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "req-other",
+		SessionID: "sess-2",
+		OwnerID:   "U1",
+		Type:      events.PermissionRequest,
+		CreatedAt: now,
+		Timeout:   5 * time.Minute,
+		SendResponse: func(map[string]any) {
+			otherCalls++
+		},
+	})
+
+	consumed := a.checkPendingInteraction(context.Background(), "ALLOW req-MixedCase", "C1", "123.456", "U1")
+	require.True(t, consumed)
+	require.Equal(t, 1, targetCalls)
+	require.Zero(t, otherCalls)
+	require.Equal(t, 1, a.Interactions.Len())
+}
+
 func TestSlackQuestionAnswers_MultiQuestionAndMultiSelect(t *testing.T) {
 	t.Parallel()
 
@@ -350,28 +455,97 @@ func TestCheckPendingInteraction_OwnerMismatch(t *testing.T) {
 	require.Equal(t, 1, a.Interactions.Len())
 }
 
-func TestCheckPendingInteraction_FallbackCandidateMatch(t *testing.T) {
+func TestCheckPendingInteraction_UnknownRequestIDDoesNotFallback(t *testing.T) {
 	t.Parallel()
 	a := newTestInteractionAdapter()
 	a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	api := &recordingSlackAPI{Client: slack.New("x-test-token")}
+	a.client = api
 
-	var capturedMetadata map[string]any
+	var firstCalls, secondCalls int
 	a.Interactions.Register(&messaging.PendingInteraction{
-		ID:        "req-fallback",
+		ID:        "req-fallback-old",
 		SessionID: "sess-1",
 		OwnerID:   "U1",
 		Type:      events.PermissionRequest,
+		CreatedAt: time.Now().Add(-time.Minute),
 		Timeout:   5 * time.Minute,
-		SendResponse: func(metadata map[string]any) {
-			capturedMetadata = metadata
+		SendResponse: func(map[string]any) {
+			firstCalls++
+		},
+	})
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "req-fallback-new",
+		SessionID: "sess-2",
+		OwnerID:   "U1",
+		Type:      events.PermissionRequest,
+		CreatedAt: time.Now(),
+		Timeout:   5 * time.Minute,
+		SendResponse: func(map[string]any) {
+			secondCalls++
 		},
 	})
 
-	// Use non-matching requestID to trigger fallback, then candidate type match.
 	consumed := a.checkPendingInteraction(context.Background(), "allow nonexistent-id", "C1", "123.456", "U1")
 	require.True(t, consumed)
-	pr := capturedMetadata["permission_response"].(map[string]any)
-	require.True(t, pr["allowed"].(bool))
+	require.Zero(t, firstCalls)
+	require.Zero(t, secondCalls)
+	require.Equal(t, 2, a.Interactions.Len(), "unknown explicit IDs must preserve every pending request")
+	require.Equal(t, 1, api.postCount, "unknown explicit IDs must be consumed with a warning")
+}
+
+func TestCheckPendingInteraction_ActionWithoutIDRejectsAmbiguousCandidates(t *testing.T) {
+	t.Parallel()
+	a := newTestInteractionAdapter()
+	a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	api := &recordingSlackAPI{Client: slack.New("x-test-token")}
+	a.client = api
+
+	var calls int
+	for _, id := range []string{"req-ambiguous-one", "req-ambiguous-two"} {
+		a.Interactions.Register(&messaging.PendingInteraction{
+			ID:        id,
+			SessionID: id,
+			OwnerID:   "U1",
+			Type:      events.PermissionRequest,
+			Timeout:   5 * time.Minute,
+			SendResponse: func(map[string]any) {
+				calls++
+			},
+		})
+	}
+
+	consumed := a.checkPendingInteraction(context.Background(), "allow", "C1", "123.456", "U1")
+	require.True(t, consumed)
+	require.Zero(t, calls)
+	require.Equal(t, 2, a.Interactions.Len())
+	require.Equal(t, 1, api.postCount, "ambiguous action must be consumed with a warning")
+}
+
+func TestCheckPendingInteraction_ActionWithoutIDDoesNotSelectOtherSession(t *testing.T) {
+	t.Parallel()
+	a := newTestInteractionAdapter()
+	a.Interactions = messaging.NewInteractionManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	api := &recordingSlackAPI{Client: slack.New("x-test-token")}
+	a.client = api
+
+	calls := 0
+	a.Interactions.Register(&messaging.PendingInteraction{
+		ID:        "req-other-session",
+		SessionID: "sess-other",
+		OwnerID:   "U1",
+		Type:      events.PermissionRequest,
+		Timeout:   5 * time.Minute,
+		SendResponse: func(map[string]any) {
+			calls++
+		},
+	})
+
+	consumed := a.checkPendingInteraction(context.Background(), "allow", "C-current", "123.456", "U1")
+	require.True(t, consumed)
+	require.Zero(t, calls, "an ID-less action must not select a request from another session")
+	require.Equal(t, 1, a.Interactions.Len())
+	require.Equal(t, 1, api.postCount, "an ID-less action must be consumed with a warning")
 }
 
 func TestCheckPendingInteraction_WrongActionForType(t *testing.T) {

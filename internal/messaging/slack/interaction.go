@@ -739,19 +739,19 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, channelID, 
 		return false
 	}
 
-	normalized := strings.ToLower(strings.TrimSpace(text))
-	words := strings.Fields(normalized)
-
-	// Try "<action> <requestID>" pattern first.
-	var action, requestID string
-	if len(words) >= 2 {
-		action = words[0]
-		requestID = words[1]
+	text = strings.TrimSpace(text)
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return false
 	}
-
+	action := strings.ToLower(words[0])
+	actionType := textInteractionType(action)
 	var matched *messaging.PendingInteraction
 
-	if requestID != "" {
+	// An explicit action plus request ID is authoritative. Preserve the ID's
+	// original case because request IDs are opaque, case-sensitive values.
+	if actionType != "" && len(words) >= 2 {
+		requestID := words[1]
 		if pi, ok := a.Interactions.Get(requestID); ok {
 			matched = pi
 		} else {
@@ -759,32 +759,41 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, channelID, 
 				"request_id", requestID,
 				"action", action,
 				"pending_count", a.Interactions.Len())
+			a.postInteractionNotice(ctx, channelID, threadTS,
+				fmt.Sprintf(":warning: Interaction request %q is unknown or expired. Please use the ID from the original prompt.", requestID))
+			return true
+		}
+	} else if actionType != "" {
+		// Permission and elicitation actions must carry an explicit request ID
+		// whenever the corresponding control request is pending. The pending
+		// manager has no channel/thread binding, so an ID-less action cannot
+		// safely select a global candidate.
+		if len(a.pendingInteractionCandidates(actionType)) > 0 {
+			a.postInteractionNotice(ctx, channelID, threadTS,
+				fmt.Sprintf(":warning: %s responses require the request ID. Reply with %s <requestID> from the corresponding card.",
+					textInteractionLabel(actionType), action))
+			return true
 		}
 	}
 
-	// Fallback: most recent pending interaction.
 	if matched == nil {
-		candidates := a.Interactions.GetAll()
-		if len(candidates) == 0 {
+		// Raw text is a question response. Keep the complete text, including
+		// internal spaces and original casing, and require an unambiguous target.
+		questionCandidates := a.pendingInteractionCandidates(events.QuestionRequest)
+		switch len(questionCandidates) {
+		case 0:
 			return false
+		case 1:
+			matched = questionCandidates[0]
+		default:
+			a.postInteractionNotice(ctx, channelID, threadTS,
+				":warning: Multiple pending questions are active. Answer from the corresponding card, or wait until the other request is resolved.")
+			return true
 		}
-		candidate := candidates[0]
-		// Action keyword + no requestID match: try to match action to interaction type.
-		if action != "" {
-			if (action == "allow" || action == "deny") && candidate.Type == events.PermissionRequest {
-				matched = candidate
-			} else if (action == "accept" || action == "decline") && candidate.Type == events.ElicitationRequest {
-				matched = candidate
-			} else {
-				return false
-			}
-		} else {
-			// Raw text (no action keyword) matches question requests only.
-			if candidate.Type != events.QuestionRequest {
-				return false
-			}
-			matched = candidate
-		}
+	}
+
+	if matched == nil {
+		return false
 	}
 
 	if matched.OwnerID != "" && matched.OwnerID != userID {
@@ -855,6 +864,45 @@ func (a *Adapter) checkPendingInteraction(ctx context.Context, text, channelID, 
 	_, _, _ = a.client.PostMessageContext(ctx, channelID, opts...)
 
 	return true
+}
+
+func textInteractionType(action string) events.Kind {
+	switch action {
+	case "allow", "deny":
+		return events.PermissionRequest
+	case "accept", "decline":
+		return events.ElicitationRequest
+	default:
+		return ""
+	}
+}
+
+func textInteractionLabel(kind events.Kind) string {
+	if kind == events.PermissionRequest {
+		return "Permission"
+	}
+	return "Elicitation"
+}
+
+func (a *Adapter) pendingInteractionCandidates(kind events.Kind) []*messaging.PendingInteraction {
+	candidates := make([]*messaging.PendingInteraction, 0)
+	for _, interaction := range a.Interactions.GetAll() {
+		if interaction.Type == kind {
+			candidates = append(candidates, interaction)
+		}
+	}
+	return candidates
+}
+
+func (a *Adapter) postInteractionNotice(ctx context.Context, channelID, threadTS, text string) {
+	if a.client == nil {
+		return
+	}
+	opts := []slack.MsgOption{slack.MsgOptionText(text, false)}
+	if threadTS != "" {
+		opts = append(opts, slack.MsgOptionTS(threadTS))
+	}
+	_, _, _ = a.client.PostMessageContext(ctx, channelID, opts...)
 }
 
 // getTimeNow returns the current time. Extracted for testability.
