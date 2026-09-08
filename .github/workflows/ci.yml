@@ -355,7 +355,7 @@ jobs:
     name: Coverage Check
     runs-on: ubuntu-latest
     if: always()
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -416,25 +416,11 @@ jobs:
             echo "|---------|----------|-----------|--------|"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          declare -A PKG_TOTAL
-          declare -A PKG_COVERED
-
-          while IFS= read -r line; do
-            [[ "$line" == mode:* ]] && continue
-            FILE="${line%%:*}"
-            PKG=$(dirname "$FILE")
-            NUM_STMTS=$(echo "$line" | awk '{print $(NF-1)}')
-            EXEC_COUNT=$(echo "$line" | awk '{print $NF}')
-            PKG_TOTAL[$PKG]=$((${PKG_TOTAL[$PKG]:-0} + NUM_STMTS))
-            if [ "$EXEC_COUNT" -gt 0 ] 2>/dev/null; then
-              PKG_COVERED[$PKG]=$((${PKG_COVERED[$PKG]:-0} + NUM_STMTS))
-            fi
-          done < "$COV_FILE"
-
-          for PKG in "${!PKG_TOTAL[@]}"; do
-            TOTAL=${PKG_TOTAL[$PKG]}
+          # Aggregate all coverage rows in one awk pass. Spawning dirname and
+          # awk for every row made this check exceed its timeout as coverage grew.
+          while IFS=$'\t' read -r PKG TOTAL COVERED; do
+            [ -z "$PKG" ] && continue
             [ "$TOTAL" -eq 0 ] && continue
-            COVERED=${PKG_COVERED[$PKG]:-0}
             COV=$(echo "scale=1; $COVERED * 100 / $TOTAL" | bc -l)
 
             MATCH=""
@@ -458,7 +444,29 @@ jobs:
               fi
               echo "| \`$PKG\` | ${COV}% | ${THRESH}% | $STATUS |" >> "$GITHUB_STEP_SUMMARY"
             fi
-          done
+          done < <(
+            awk '
+              NR == 1 { next }
+              {
+                file = $1
+                sub(/:.*/, "", file)
+                if (file ~ /\//) {
+                  sub(/\/[^\/]*$/, "", file)
+                } else {
+                  file = "."
+                }
+                total[file] += $(NF - 1)
+                if ($NF > 0) {
+                  covered[file] += $(NF - 1)
+                }
+              }
+              END {
+                for (package in total) {
+                  printf "%s\t%d\t%d\n", package, total[package], covered[package] + 0
+                }
+              }
+            ' "$COV_FILE" | sort
+          )
 
           TOTAL_LINE=$(go tool cover -func="$COV_FILE" 2>/dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+')
           {
