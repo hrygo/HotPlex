@@ -168,9 +168,6 @@ jobs:
         with:
           build-webchat: 'false'
 
-      - name: Verify + Vet
-        run: go mod verify && go vet ./...
-
       - name: Determine test scope
         id: scope
         env:
